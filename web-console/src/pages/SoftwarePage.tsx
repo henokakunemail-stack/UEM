@@ -28,6 +28,8 @@ import type {
   DeploymentTaskDTO,
 } from '../types/api'
 
+type PackageType = 'msi' | 'exe' | 'deb' | 'rpm' | 'pkg' | 'script'
+
 export type SoftwareTab = 'packages' | 'deployments'
 
 interface SoftwarePageProps {
@@ -53,10 +55,29 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
   const [uploadName, setUploadName] = useState('')
   const [uploadVersion, setUploadVersion] = useState('')
   const [uploadOS, setUploadOS] = useState<'windows' | 'linux' | 'macos'>('windows')
-  const [uploadType, setUploadType] = useState<'msi' | 'exe' | 'deb' | 'rpm' | 'pkg' | 'script'>('msi')
+  const [uploadType, setUploadType] = useState<PackageType>('msi')
   const [uploadInstallArgs, setUploadInstallArgs] = useState('')
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [uploading, setUploading] = useState(false)
+
+  // The format is derived from the chosen file rather than asked for, because
+  // the one field an operator can get wrong -- declaring an .exe as 'msi' --
+  // produces a task that fails on the endpoint with an exit code nobody can
+  // read. Deriving it removes the mismatch instead of explaining it after the
+  // fact.
+  const detectPackageType = (file: File | null): PackageType => {
+    const ext = file?.name.toLowerCase().match(/\.[^.]+$/)?.[0] ?? ''
+    if (ext === '.msi' || ext === '.msp') return 'msi'
+    if (ext === '.exe') return 'exe'
+    if (ext === '.deb') return 'deb'
+    if (ext === '.rpm') return 'rpm'
+    if (ext === '.pkg' || ext === '.mpkg') return 'pkg'
+    return 'script'
+  }
+
+  // An .exe with no silent flags opens a setup window on the endpoint and
+  // stalls there, so the form blocks the upload instead of dispatching it.
+  const needsSilentArgs = uploadType === 'exe' && uploadInstallArgs.trim() === ''
 
   // Deployment Wizard Modal State
   const [showDeployModal, setShowDeployModal] = useState(false)
@@ -102,6 +123,13 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
     e.preventDefault()
     if (!selectedFile) {
       setStatusMsg({ type: 'error', text: 'Please select an installer file' })
+      return
+    }
+    if (needsSilentArgs) {
+      setStatusMsg({
+        type: 'error',
+        text: 'This .exe package needs silent-install arguments. Without them the installer opens a window on the endpoint and blocks there.',
+      })
       return
     }
 
@@ -586,7 +614,12 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
             >
               Cancel
             </button>
-            <button type="submit" form="upload-package-form" className="btn btn-primary" disabled={uploading}>
+            <button
+              type="submit"
+              form="upload-package-form"
+              className="btn btn-primary"
+              disabled={uploading || needsSilentArgs}
+            >
               {uploading ? (
                 <>
                   <RefreshCw size={16} className="spinning" />
@@ -684,16 +717,33 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
           <div className="form-group">
             <label className="form-label" htmlFor="pkg-args">
               Silent Install Arguments
+              {uploadType === 'exe' && <span className="form-label-required">required for .exe</span>}
             </label>
             <input
               id="pkg-args"
               type="text"
               className="form-input font-mono"
-              placeholder={uploadType === 'msi' ? '/qn /norestart' : uploadType === 'exe' ? '/S' : ''}
+              required={uploadType === 'exe'}
+              placeholder={
+                uploadType === 'msi'
+                  ? '/qn /norestart'
+                  : uploadType === 'exe'
+                    ? '/S   (NSIS) · /VERYSILENT (Inno Setup) · /s (WinRAR SFX)'
+                    : ''
+              }
               value={uploadInstallArgs}
               onChange={(e) => setUploadInstallArgs(e.target.value)}
             />
-            <span className="form-hint">Leave blank for automatic default silent flags</span>
+            <span className="form-hint">
+              {uploadType === 'exe'
+                ? 'Required. An .exe with no arguments opens a setup window on the endpoint and blocks there, so there is no safe default — the flag depends on which installer built it.'
+                : 'Leave blank to use the default silent flags.'}
+            </span>
+            {needsSilentArgs && selectedFile && (
+              <span className="form-hint form-hint-error">
+                {selectedFile.name} has no silent-install arguments yet. Add them above before uploading.
+              </span>
+            )}
           </div>
 
           <div className="form-group">
@@ -705,8 +755,19 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
               type="file"
               className="form-input"
               required
-              onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
+              accept=".msi,.msp,.exe,.deb,.rpm,.pkg,.mpkg,.ps1,.sh,.bat,.cmd"
+              onChange={(e) => {
+                const file = e.target.files?.[0] || null
+                setSelectedFile(file)
+                if (file) setUploadType(detectPackageType(file))
+              }}
             />
+            {selectedFile && (
+              <span className="form-hint">
+                {selectedFile.name} · detected as <strong>{uploadType}</strong> ·{' '}
+                {formatBytes(selectedFile.size)}
+              </span>
+            )}
           </div>
         </form>
       </Modal>

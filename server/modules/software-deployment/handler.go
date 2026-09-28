@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -27,6 +28,49 @@ type HubDispatcher interface {
 	Online(deviceID string) bool
 	SendTo(deviceID string, payload []byte) bool
 }
+
+// validPackageTypes mirrors the type choices the console offers per OS. The
+// agent builds a different command for each (msiexec /i, dpkg -i, ...), so a
+// type from the wrong OS would produce an unrunnable command on the endpoint.
+var validPackageTypes = map[string]map[string]bool{
+	OSTargetWindows: {PkgTypeMSI: true, PkgTypeEXE: true, PkgTypeScript: true},
+	OSTargetLinux:   {"deb": true, "rpm": true, PkgTypeScript: true},
+	OSTargetMacOS:   {"pkg": true, PkgTypeScript: true},
+}
+
+// typeExtensions lists the file suffixes that legitimately carry each type.
+// An empty list means the type is chosen by content, not by name: a
+// PowerShell or shell script is routinely named .ps1/.sh but is just as often
+// uploaded with no usable suffix, so those are not policed on extension.
+var typeExtensions = map[string][]string{
+	PkgTypeMSI: {".msi", ".msp"},
+	PkgTypeEXE: {".exe"},
+	"deb":     {".deb"},
+	"rpm":     {".rpm"},
+	"pkg":     {".pkg", ".mpkg"},
+}
+
+// checkExtensionMatches verifies a declared package type against the uploaded
+// file name. It returns a human-readable reason so the operator can correct the
+// type in the form instead of guessing from a failed task.
+func checkExtensionMatches(osTarget, pkgType, fileName string) (string, bool) {
+	exts, policed := typeExtensions[pkgType]
+	if !policed {
+		return "", true
+	}
+	ext := strings.ToLower(filepath.Ext(fileName))
+	for _, ok := range exts {
+		if ext == ok {
+			return "", true
+		}
+	}
+	return fmt.Sprintf(
+		"package_type %q does not match the file name %q (expected one of %s). "+
+			"Uploading a %s as %q makes the agent run a command that cannot open it.",
+		pkgType, filepath.Base(fileName), strings.Join(exts, ", "),
+		filepath.Base(fileName), pkgType), false
+}
+
 
 type AuditLogger interface {
 	Log(ctx context.Context, actorType, actorID, action, targetID string, details map[string]string) error
@@ -100,6 +144,11 @@ func (h *Handler) uploadPackage(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "name, version, os_target, and package_type are required")
 		return
 	}
+	if !validPackageTypes[osTarget][pkgType] {
+		writeErr(w, http.StatusBadRequest,
+			fmt.Sprintf("package_type %q is not valid for os_target %q", pkgType, osTarget))
+		return
+	}
 
 	file, header, err := r.FormFile("file")
 	if err != nil {
@@ -107,6 +156,28 @@ func (h *Handler) uploadPackage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer file.Close()
+
+	// The declared type decides which installer command the agent builds, and a
+	// mismatch fails on the endpoint rather than here: a .exe SFX uploaded as
+	// 'msi' reached msiexec, which exits 1620 ("could not be opened") and
+	// leaves the operator with a failed task and no clue why. Catch it at
+	// upload, where the file name and the type are both still in hand.
+	if msg, ok := checkExtensionMatches(osTarget, pkgType, header.Filename); !ok {
+		writeErr(w, http.StatusBadRequest, msg)
+		return
+	}
+	// Silent-by-construction. An .exe has no universal silent switch -- NSIS
+	// wants /S, Inno Setup /VERYSILENT, a WinRAR SFX /s -- so a package that
+	// carries none will open a setup dialog on the endpoint's desktop and block
+	// on a human, stalling the task and interrupting the user at their desk.
+	// Reject it at upload while the operator can still fix it.
+	if pkgType == PkgTypeEXE && strings.TrimSpace(installArgs) == "" {
+		writeErr(w, http.StatusBadRequest,
+			"install_args is required for an .exe package: there is no universal silent flag "+
+				"(NSIS uses /S, Inno Setup uses /VERYSILENT /SUPPRESSMSGBOXES /NORESTART, "+
+				"a WinRAR SFX uses /s). Without them the installer opens a window on the endpoint.")
+		return
+	}
 
 	pkgID := NewID()
 	destName := fmt.Sprintf("%s_%s", pkgID, filepath.Base(header.Filename))

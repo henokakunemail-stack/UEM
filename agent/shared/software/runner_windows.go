@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"syscall"
 )
@@ -31,13 +32,22 @@ func (r *windowsRunner) Run(ctx context.Context, filePath, packageType, installA
 		cmd = exec.CommandContext(ctx, "msiexec.exe", args...)
 
 	case "exe":
-		if installArgs != "" {
-			args := append([]string{filePath}, strings.Fields(installArgs)...)
-			cmd = exec.CommandContext(ctx, filePath, strings.Fields(installArgs)...)
-			_ = args
-		} else {
-			cmd = exec.CommandContext(ctx, filePath)
+		// A bare .exe run with no switches is how a GUI installer escapes to the
+		// desktop: the WinRAR SFX, for one, shows a setup dialog that blocks on a
+		// human and never returns, so the task sits in 'installing' forever while
+		// the operator's machine is being interrupted. The console requires
+		// install_args for exe at upload, so an empty value here means the package
+		// predates that rule; refuse it rather than open a dialog on someone's
+		// desktop. There is no safe universal silent switch -- NSIS wants /S,
+		// Inno Setup wants /VERYSILENT, WinRAR's SFX module wants /s -- so the
+		// flags have to come from the package.
+		if installArgs == "" {
+			return -1, "", fmt.Errorf(
+				"no silent-install arguments for %s: an .exe package must supply them " +
+					"(for example /S, /VERYSILENT /SUPPRESSMSGBOXES /NORESTART, or /s for a WinRAR SFX), " +
+					"otherwise it opens an interactive window on the endpoint", filepath.Base(filePath))
 		}
+		cmd = exec.CommandContext(ctx, filePath, strings.Fields(installArgs)...)
 
 	case "script", "ps1":
 		args := []string{"-ExecutionPolicy", "Bypass", "-NoProfile", "-NonInteractive", "-File", filePath}
@@ -58,7 +68,7 @@ func (r *windowsRunner) Run(ctx context.Context, filePath, packageType, installA
 	}
 
 	outBytes, err := cmd.CombinedOutput()
-	outStr := string(outBytes)
+	outStr := decodeOutput(outBytes)
 
 	if err == nil {
 		return 0, outStr, nil

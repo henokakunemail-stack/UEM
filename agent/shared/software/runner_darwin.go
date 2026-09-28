@@ -40,7 +40,7 @@ func (r *darwinRunner) Run(ctx context.Context, filePath, packageType, installAr
 	}
 
 	outBytes, err := cmd.CombinedOutput()
-	outStr := string(outBytes)
+	outStr := decodeOutput(outBytes)
 
 	if err == nil {
 		return 0, outStr, nil
