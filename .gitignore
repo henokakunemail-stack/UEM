@@ -43,3 +43,6 @@ Thumbs.db
 
 # Claude Code local state: worktrees are full checkouts, settings are personal
 .claude/
+
+# Working screenshots from verification runs, not product assets
+pic/

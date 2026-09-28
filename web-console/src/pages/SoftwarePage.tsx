@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Package,
   UploadCloud,
@@ -86,6 +86,19 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
   const [deployTargetType, setDeployTargetType] = useState<'all' | 'group' | 'device'>('all')
   const [deployTargetId, setDeployTargetId] = useState('')
   const [deploying, setDeploying] = useState(false)
+  // 'install' is the default so the form behaves exactly as it did before
+  // uninstall existed. The choice is explicit rather than inferred from a
+  // checkbox, because the two verbs are not reversible: there is no undo on the
+  // endpoint, and a mis-set toggle would remove software rather than add it.
+  const [deployAction, setDeployAction] = useState<'install' | 'uninstall'>('install')
+
+  // The package the operator picked, so the form can say up front that a package
+  // with no uninstall arguments cannot be removed rather than letting the server
+  // reject it after a click.
+  const selectedDeployPkg = useMemo(
+    () => packages.find((p) => p.id === deployPackageId),
+    [packages, deployPackageId]
+  )
 
   // Task Details Modal State
   const [viewingDeployment, setViewingDeployment] = useState<SoftwareDeploymentDTO | null>(null)
@@ -190,6 +203,17 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
       return
     }
 
+    // The package being chosen is what the server checks, so the form checks it
+    // too and says why rather than letting the request come back with a message
+    // about a field the operator never saw.
+    const selected = packages.find((p) => p.id === deployPackageId)
+    if (deployAction === 'uninstall' && selected && !selected.uninstall_args?.trim()) {
+      const msg = `${selected.name} has no uninstall arguments. An uninstaller with no silent switches opens a window on the endpoint. Edit the package and set them first.`
+      setStatusMsg({ type: 'error', text: msg })
+      toast.error(msg, 'Cannot Uninstall')
+      return
+    }
+
     setDeploying(true)
     setStatusMsg(null)
     try {
@@ -198,17 +222,20 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
         package_id: deployPackageId,
         target_type: deployTargetType,
         target_id: deployTargetId,
+        action: deployAction,
       })
-      const successText = `Deployment initiated! ${res.tasks_total} target(s) queued, ${res.dispatched_live} dispatched live.`
+      const verb = deployAction === 'uninstall' ? 'Removal' : 'Deployment'
+      const successText = `${verb} initiated! ${res.tasks_total} target(s) queued, ${res.dispatched_live} dispatched live.`
       setStatusMsg({
         type: 'success',
         text: successText,
       })
-      toast.success(successText, 'Deployment Dispatched')
+      toast.success(successText, `${verb} Dispatched`)
       setShowDeployModal(false)
       setDeployName('')
       setDeployPackageId('')
       setDeployTargetId('')
+      setDeployAction('install')
       onTabChange('deployments')
       fetchData()
     } catch (err: unknown) {
@@ -513,6 +540,7 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
               <thead>
                 <tr>
                   <th>Deployment Name</th>
+                  <th>Operation</th>
                   <th>Package</th>
                   <th>Target Scope</th>
                   <th>Status</th>
@@ -538,6 +566,20 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
                             <Layers size={16} className="card-icon" />
                             <span className="font-semibold text-main">{dep.name}</span>
                           </div>
+                        </td>
+                        <td>
+                          {/* An install and a removal are opposite outcomes on the
+                              endpoint, so the list says which one this is rather
+                              than leaving an operator to infer it from the name. */}
+                          {dep.action === 'uninstall' ? (
+                            <span className="status-pill danger">
+                              <Trash2 size={12} /> Uninstall
+                            </span>
+                          ) : (
+                            <span className="status-pill online">
+                              <Play size={12} /> Install
+                            </span>
+                          )}
                         </td>
                         <td>
                           <div>{dep.package_name || dep.package_id}</div>
@@ -776,7 +818,7 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
       <Modal
         open={showDeployModal}
         onClose={() => !deploying && setShowDeployModal(false)}
-        title="Launch Software Deployment"
+        title={deployAction === 'uninstall' ? 'Launch Software Removal' : 'Launch Software Deployment'}
         size="md"
         dismissible={!deploying}
         footer={
@@ -789,12 +831,19 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
             >
               Cancel
             </button>
-            <button type="submit" form="deploy-form" className="btn btn-primary" disabled={deploying}>
+            <button
+              type="submit"
+              form="deploy-form"
+              className={deployAction === 'uninstall' ? 'btn btn-danger-outline' : 'btn btn-primary'}
+              disabled={deploying}
+            >
               {deploying ? (
                 <>
                   <RefreshCw size={16} className="spinning" />
                   <span>Dispatching Jobs...</span>
                 </>
+              ) : deployAction === 'uninstall' ? (
+                'Start Removal'
               ) : (
                 'Start Deployment'
               )}
@@ -833,6 +882,35 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
                 </option>
               ))}
             </select>
+          </div>
+
+          <div className="form-group">
+            <label className="form-label" htmlFor="deploy-action">
+              Operation
+            </label>
+            <select
+              id="deploy-action"
+              className="form-select"
+              value={deployAction}
+              onChange={(e) => setDeployAction(e.target.value as typeof deployAction)}
+            >
+              <option value="install">Install package</option>
+              <option value="uninstall">Uninstall package</option>
+            </select>
+            {deployAction === 'uninstall' && deployPackageId && !selectedDeployPkg?.uninstall_args?.trim() && (
+              <span className="form-hint form-hint-error">
+                {selectedDeployPkg?.name} has no uninstall arguments. An uninstaller with no silent
+                switches opens a window on the endpoint and waits for a person, so this deployment
+                will be refused. Edit the package and set its uninstall arguments first.
+              </span>
+            )}
+            {deployAction === 'uninstall' && (
+              <span className="form-hint">
+                The agent finds the program on the endpoint and removes it there. Nothing is
+                downloaded, and a package that is not installed on a machine is reported as
+                already compliant rather than as a failure.
+              </span>
+            )}
           </div>
 
           <div className="form-row">
@@ -914,7 +992,9 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
                       ? 'online'
                       : t.status === 'failed' || t.status === 'failed_lost'
                         ? 'danger'
-                        : t.status === 'installing' || t.status === 'downloading'
+                        : t.status === 'installing' ||
+                            t.status === 'uninstalling' ||
+                            t.status === 'downloading'
                           ? 'primary'
                           : 'offline'
                   }`}

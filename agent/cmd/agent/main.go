@@ -149,6 +149,27 @@ func runAgent(serverURL, enrollToken, credsPath string, heartbeatSecs int) {
 		return map[string]string{"status": "dispatched"}
 	})
 
+	dispatcher.Register("software.uninstall", func(ctx context.Context, command, id string, payload json.RawMessage) any {
+		var p software.UninstallPayload
+		if err := json.Unmarshal(payload, &p); err != nil || p.TaskID == "" {
+			log.Error().Err(err).Str("task", p.TaskID).Msg("software uninstall payload rejected")
+			return map[string]string{"status": "rejected", "error": "invalid uninstall payload"}
+		}
+		// Queued behind installs on purpose: see softwareQueue. An uninstall
+		// racing an install of the same product is the MSI collision, and it is
+		// the one an operator triggers by clicking retry on a slow install.
+		if err := softwareQueue.Submit(p.TaskID, "uninstall", func() {
+			defer guardAgentGoroutine("software.uninstall")
+			if err := software.ExecuteUninstall(context.Background(), targetServerURL, creds.DeviceID, creds.DeviceSecret, payload); err != nil {
+				log.Error().Err(err).Str("task", p.TaskID).Msg("software uninstall execution error")
+			}
+		}); err != nil {
+			log.Warn().Err(err).Str("task", p.TaskID).Msg("software uninstall not accepted")
+			return map[string]string{"status": "rejected", "error": err.Error()}
+		}
+		return map[string]string{"status": "dispatched"}
+	})
+
 	// Phase 5: Remote Execution & Live Interactive Terminal
 	termMgr := remoteexec.NewTerminalManager()
 	defer termMgr.CloseAll()

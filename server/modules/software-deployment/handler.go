@@ -298,6 +298,16 @@ func (h *Handler) createDeployment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// An absent action means install. Anything else must be one of the two
+	// verbs, so a typo does not silently become an install.
+	if req.Action == "" {
+		req.Action = ActionInstall
+	}
+	if req.Action != ActionInstall && req.Action != ActionUninstall {
+		writeErr(w, http.StatusBadRequest, "action must be 'install' or 'uninstall'")
+		return
+	}
+
 	pkg, err := h.repo.GetPackage(r.Context(), req.PackageID)
 	if errors.Is(err, ErrNotFound) {
 		writeErr(w, http.StatusNotFound, "package not found")
@@ -319,19 +329,68 @@ func (h *Handler) createDeployment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// An agent that predates a command answers it with an error that lands in
+	// agent_commands, not in deployment_tasks, so the task row never moves and the
+	// orphan sweep does not reap it either -- it only reaps offline devices. The
+	// task would sit in 'dispatched' forever on a perfectly healthy endpoint.
+	// Refusing before any row exists is the only version of this that ends.
+	command := "software.install"
+	if req.Action == ActionUninstall {
+		command = "software.uninstall"
+	}
+	missing, err := h.repo.DevicesWithoutCapability(r.Context(), deviceIDs, command)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "failed to check endpoint capabilities: "+err.Error())
+		return
+	}
+	if len(missing) > 0 {
+		names := make([]string, 0, len(missing))
+		for _, d := range missing {
+			label := d.OSName
+			if label == "" {
+				label = "unknown OS"
+			}
+			names = append(names, fmt.Sprintf("%s (%s)", d.ID, label))
+		}
+		writeErr(w, http.StatusBadRequest, fmt.Sprintf(
+			"%d of %d target endpoint(s) run an agent that cannot handle %q: %s. "+
+				"Update those agents first; the deployment was not created.",
+			len(missing), len(deviceIDs), command, strings.Join(names, ", ")))
+		return
+	}
+
 	depID := NewID()
 	actorID := auth.UserIDFromContext(r.Context())
 	now := time.Now().UTC()
 
+	// An uninstall with no uninstall_args would be dispatched to run an
+	// uninstaller with no switches, which is the exact thing this feature exists
+	// to never do -- the same reason install_args is required for an .exe. It is
+	// rejected here, at the boundary, rather than as a task failure the
+	// operator has to discover after a fleet-wide rollout has already started.
+	if req.Action == ActionUninstall && strings.TrimSpace(pkg.UninstallArgs) == "" {
+		writeErr(w, http.StatusBadRequest,
+			"this package has no uninstall_args: an uninstall would run the "+
+				"uninstaller with no silent switches, which opens an interactive "+
+				"window on the endpoint. Set uninstall_args on the package first "+
+				"(for an MSI, /x with its ProductCode; for a native uninstaller, "+
+				"its own silent switch such as /s)")
+		return
+	}
+
 	dep := SoftwareDeployment{
 		ID:         depID,
 		PackageID:  req.PackageID,
+		Action:     req.Action,
 		Name:       req.Name,
 		TargetType: req.TargetType,
 		TargetID:   req.TargetID,
 		CreatedBy:  actorID,
 		Status:     "running",
 		CreatedAt:  now,
+	}
+	if req.Action == ActionUninstall {
+		dep.TaskArgs = pkg.UninstallArgs
 	}
 
 	tasks, err := h.repo.CreateDeploymentTx(r.Context(), dep, deviceIDs)
@@ -348,16 +407,25 @@ func (h *Handler) createDeployment(w http.ResponseWriter, r *http.Request) {
 				"task_id":      task.ID,
 				"package_id":   pkg.ID,
 				"package_name": pkg.Name,
-				"download_url": fmt.Sprintf("/api/agent/packages/%s/download", pkg.ID),
-				"file_name":    pkg.FileName,
-				"package_type": pkg.PackageType,
-				"sha256":       pkg.SHA256,
-				"install_args": pkg.InstallArgs,
+			}
+			if req.Action == ActionUninstall {
+				// No download_url, no sha256, no file_name: the installer is
+				// already on the endpoint and the agent re-derives its own
+				// uninstall command from what it finds installed there. Sending
+				// an installer path would be sending a file that should not exist.
+				cmdPayload["package_type"] = pkg.PackageType
+				cmdPayload["uninstall_args"] = pkg.UninstallArgs
+			} else {
+				cmdPayload["download_url"] = fmt.Sprintf("/api/agent/packages/%s/download", pkg.ID)
+				cmdPayload["file_name"] = pkg.FileName
+				cmdPayload["package_type"] = pkg.PackageType
+				cmdPayload["sha256"] = pkg.SHA256
+				cmdPayload["install_args"] = pkg.InstallArgs
 			}
 			env := transport.Envelope{
 				Type:    transport.TypeCommand,
 				ID:      NewID(),
-				Command: "software.install",
+				Command: command,
 				Payload: cmdPayload,
 			}
 			envBytes, _ := json.Marshal(env)
@@ -373,7 +441,7 @@ func (h *Handler) createDeployment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if h.audit != nil {
-		_ = h.audit.Log(r.Context(), "user", actorID, "software.deploy", dep.ID, map[string]string{
+		_ = h.audit.Log(r.Context(), "user", actorID, "software."+req.Action, dep.ID, map[string]string{
 			"deployment_name": dep.Name, "package_id": pkg.ID, "targets_total": strconv.Itoa(len(tasks)), "dispatched_now": strconv.Itoa(dispatchedCount),
 		})
 	}

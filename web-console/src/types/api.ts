@@ -170,6 +170,10 @@ export interface SoftwareDeploymentDTO {
   id: string
   package_id: string
   name: string
+  // Which verb the deployment performed. The server defaults it to 'install',
+  // so it is optional here for the same reason; the list view still shows it so
+  // a removal is never mistaken for a rollout.
+  action?: 'install' | 'uninstall'
   target_type: 'device' | 'group' | 'all'
   target_id: string
   created_by: string
@@ -192,7 +196,17 @@ export interface DeploymentTaskDTO {
   // the agent stopped reporting before the task finished, so the package's
   // state on that endpoint is unknown rather than rejected. The server sets it
   // when an offline device still has a task in a running state.
-  status: 'pending' | 'dispatched' | 'downloading' | 'installing' | 'success' | 'failed' | 'failed_lost'
+  // 'uninstalling' is the running state of a removal deployment, kept separate
+  // from 'installing' so the console can say what the endpoint is doing.
+  status:
+    | 'pending'
+    | 'dispatched'
+    | 'downloading'
+    | 'installing'
+    | 'uninstalling'
+    | 'success'
+    | 'failed'
+    | 'failed_lost'
   exit_code?: number | null
   output_log?: string | null
   error_message?: string | null

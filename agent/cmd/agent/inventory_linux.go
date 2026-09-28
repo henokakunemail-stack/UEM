@@ -12,5 +12,5 @@ func newInventoryCollector() inventory.Collector { return linuxagent.NewCollecto
 
 // inventoryCapabilities are the command types this agent build can serve.
 func inventoryCapabilities() []string {
-	return []string{"ping", "inventory.collect", "software.install", "exec.run", "term.open", "patch.scan", "patch.install"}
+	return []string{"ping", "inventory.collect", "software.install", "exec.run", "term.open", "patch.scan", "patch.install", "software.uninstall"}
 }

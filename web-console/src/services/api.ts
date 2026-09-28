@@ -285,6 +285,9 @@ export const api = {
     package_id: string
     target_type: string
     target_id: string
+    // 'install' or 'uninstall'. Omitting it means install, which is what every
+    // caller sent before uninstall existed.
+    action?: 'install' | 'uninstall'
   }): Promise<{ deployment: SoftwareDeploymentDTO; tasks_total: number; dispatched_live: number }> {
     return request<{ deployment: SoftwareDeploymentDTO; tasks_total: number; dispatched_live: number }>(
       '/api/software/deployments',

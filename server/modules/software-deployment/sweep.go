@@ -54,7 +54,7 @@ func (r *Repository) AbandonOrphanedTasks(ctx context.Context, grace time.Durati
 	res, err := r.db.ExecContext(ctx, `
 		UPDATE deployment_tasks
 		SET status = ?, error_message = ?, updated_at = ?, completed_at = ?
-		WHERE status IN ('dispatched', 'downloading', 'installing')
+		WHERE status IN ('dispatched', 'downloading', 'installing', 'uninstalling')
 		  AND updated_at < ?
 		  AND device_id IN (SELECT id FROM devices WHERE status != 'online')
 		  AND completed_at IS NULL`, TaskStatusFailedLost, msg, now, now, cutoff)

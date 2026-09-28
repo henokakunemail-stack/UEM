@@ -3,8 +3,10 @@ package softwaredeployment
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/jmoiron/sqlx"
@@ -139,6 +141,61 @@ type DeviceCheck struct {
 	RetiredAt *time.Time `db:"retired_at"`
 }
 
+// DeviceCapability is one endpoint's answer to "can you run this command".
+type DeviceCapability struct {
+	ID    string `db:"id"`
+	OSName string `db:"os_name"`
+	// Capabilities is the raw JSON array the agent sent in its hello, or NULL on
+	// a device that has never reconnected with a build that advertises them.
+	Capabilities *string `db:"capabilities"`
+}
+
+// DevicesWithoutCapability returns the subset of deviceIDs whose agent did not
+// advertise the named command.
+//
+// A device with no stored capability list is treated as lacking everything.
+// That is the conservative direction and it is the right one: capabilities are
+// NULL until an agent first reconnects with a build that sends them, and
+// dispatching a command to an agent that will silently drop it produces a task
+// that never completes and never explains itself -- its command_result lands in
+// agent_commands, not in deployment_tasks, and the orphan sweep only reaps
+// offline devices, so on an online endpoint the row would sit in 'dispatched'
+// forever. A NULL is a reason to hold the deployment, not to assume the best.
+func (r *Repository) DevicesWithoutCapability(ctx context.Context, deviceIDs []string, command string) ([]DeviceCapability, error) {
+	if len(deviceIDs) == 0 {
+		return nil, nil
+	}
+	var rows []DeviceCapability
+	// sqlx.In expands the slice into a placeholder list; Rebind then converts
+	// those to the $1 form SQLite wants. Neither step alone is enough: In alone
+	// leaves ? in the query, and Rebind alone chokes on a []string argument.
+	query, args, err := sqlx.In(`SELECT id, os_name, capabilities FROM devices WHERE id IN (?)`, deviceIDs)
+	if err != nil {
+		return nil, fmt.Errorf("check device capabilities: %w", err)
+	}
+	if err := r.db.SelectContext(ctx, &rows, r.db.Rebind(query), args...); err != nil {
+		return nil, fmt.Errorf("check device capabilities: %w", err)
+	}
+
+	var missing []DeviceCapability
+	for _, row := range rows {
+		var caps []string
+		if row.Capabilities != nil && *row.Capabilities != "" {
+			if err := json.Unmarshal([]byte(*row.Capabilities), &caps); err != nil {
+				// Unparseable is treated as absent rather than as permission.
+				// The same reasoning as NULL: one stale or hand-edited row must
+				// not be the thing that dispatches a command nobody can run.
+				missing = append(missing, row)
+				continue
+			}
+		}
+		if !slices.Contains(caps, command) {
+			missing = append(missing, row)
+		}
+	}
+	return missing, nil
+}
+
 // CreateDeploymentTx atomically creates a deployment record and all associated endpoint tasks.
 func (r *Repository) CreateDeploymentTx(ctx context.Context, dep SoftwareDeployment, deviceIDs []string) ([]DeploymentTask, error) {
 	tx, err := r.db.BeginTxx(ctx, nil)
@@ -150,10 +207,14 @@ func (r *Repository) CreateDeploymentTx(ctx context.Context, dep SoftwareDeploym
 	// Insert Deployment
 	queryDep := `
 		INSERT INTO software_deployments (
-			id, package_id, name, target_type, target_id, created_by, status, created_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+			id, package_id, action, name, target_type, target_id, created_by, status, created_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	action := dep.Action
+	if action == "" {
+		action = ActionInstall
+	}
 	if _, err := tx.ExecContext(ctx, queryDep,
-		dep.ID, dep.PackageID, dep.Name, dep.TargetType, dep.TargetID, dep.CreatedBy, dep.Status, dep.CreatedAt,
+		dep.ID, dep.PackageID, action, dep.Name, dep.TargetType, dep.TargetID, dep.CreatedBy, dep.Status, dep.CreatedAt,
 	); err != nil {
 		return nil, fmt.Errorf("insert deployment: %w", err)
 	}
@@ -163,8 +224,8 @@ func (r *Repository) CreateDeploymentTx(ctx context.Context, dep SoftwareDeploym
 	now := time.Now().UTC()
 	queryTask := `
 		INSERT INTO deployment_tasks (
-			id, deployment_id, package_id, device_id, status, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?)`
+			id, deployment_id, package_id, device_id, status, args, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
 
 	for _, devID := range deviceIDs {
 		t := DeploymentTask{
@@ -173,11 +234,12 @@ func (r *Repository) CreateDeploymentTx(ctx context.Context, dep SoftwareDeploym
 			PackageID:    dep.PackageID,
 			DeviceID:     devID,
 			Status:       TaskStatusPending,
+			Args:         dep.TaskArgs,
 			CreatedAt:    now,
 			UpdatedAt:    now,
 		}
 		if _, err := tx.ExecContext(ctx, queryTask,
-			t.ID, t.DeploymentID, t.PackageID, t.DeviceID, t.Status, t.CreatedAt, t.UpdatedAt,
+			t.ID, t.DeploymentID, t.PackageID, t.DeviceID, t.Status, t.Args, t.CreatedAt, t.UpdatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("insert task for device %s: %w", devID, err)
 		}
@@ -194,7 +256,7 @@ func (r *Repository) CreateDeploymentTx(ctx context.Context, dep SoftwareDeploym
 func (r *Repository) ListDeployments(ctx context.Context) ([]SoftwareDeployment, error) {
 	query := `
 		SELECT
-			d.id, d.package_id, d.name, d.target_type, d.target_id, d.created_by, d.status,
+			d.id, d.package_id, d.action, d.name, d.target_type, d.target_id, d.created_by, d.status,
 			d.created_at, d.completed_at,
 			p.name AS package_name,
 			p.version AS package_version,
@@ -219,7 +281,7 @@ func (r *Repository) ListDeployments(ctx context.Context) ([]SoftwareDeployment,
 func (r *Repository) GetDeployment(ctx context.Context, id string) (SoftwareDeployment, error) {
 	query := `
 		SELECT
-			d.id, d.package_id, d.name, d.target_type, d.target_id, d.created_by, d.status,
+			d.id, d.package_id, d.action, d.name, d.target_type, d.target_id, d.created_by, d.status,
 			d.created_at, d.completed_at,
 			p.name AS package_name,
 			p.version AS package_version,
@@ -244,7 +306,7 @@ func (r *Repository) GetDeployment(ctx context.Context, id string) (SoftwareDepl
 func (r *Repository) ListDeploymentTasks(ctx context.Context, deploymentID string) ([]DeploymentTask, error) {
 	query := `
 		SELECT
-			t.id, t.deployment_id, t.package_id, t.device_id, t.status,
+			t.id, t.deployment_id, t.package_id, t.device_id, t.status, t.args,
 			t.exit_code, t.output_log, t.error_message, t.created_at, t.updated_at, t.completed_at,
 			dev.hostname, COALESCE(dev.site, '') AS site
 		FROM deployment_tasks t

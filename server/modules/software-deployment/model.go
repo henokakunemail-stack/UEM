@@ -29,12 +29,24 @@ const (
 	TargetGroup  = "group"
 	TargetAll    = "all"
 
+	// Action names which of the two operations a deployment performs. It is a
+	// column on the deployment rather than a separate table so that the list
+	// view, the task drill-down, the rollup and the audit trail all read the
+	// uninstall the same way they read an install.
+	ActionInstall   = "install"
+	ActionUninstall = "uninstall"
+
 	TaskStatusPending     = "pending"
 	TaskStatusDispatched  = "dispatched"
 	TaskStatusDownloading = "downloading"
 	TaskStatusInstalling  = "installing"
-	TaskStatusSuccess     = "success"
-	TaskStatusFailed      = "failed"
+	// TaskStatusUninstalling is 'installing' for an uninstall deployment. It is a
+	// separate value rather than a reuse of 'installing' so the console can say
+	// what the endpoint is actually doing: an operator watching a rollback
+	// progress needs to see it remove the package, not install it.
+	TaskStatusUninstalling = "uninstalling"
+	TaskStatusSuccess      = "success"
+	TaskStatusFailed       = "failed"
 
 	// TaskStatusFailedLost is terminal but distinct from TaskStatusFailed.
 	//
@@ -77,6 +89,7 @@ type SoftwarePackage struct {
 type SoftwareDeployment struct {
 	ID          string     `db:"id" json:"id"`
 	PackageID   string     `db:"package_id" json:"package_id"`
+	Action      string     `db:"action" json:"action"`
 	Name        string     `db:"name" json:"name"`
 	TargetType  string     `db:"target_type" json:"target_type"`
 	TargetID    string     `db:"target_id" json:"target_id"`
@@ -84,6 +97,11 @@ type SoftwareDeployment struct {
 	Status      string     `db:"status" json:"status"`
 	CreatedAt   time.Time  `db:"created_at" json:"created_at"`
 	CompletedAt *time.Time `db:"completed_at" json:"completed_at,omitempty"`
+
+	// TaskArgs is not a column. It carries the argument list that the agent
+	// will run, which CreateDeploymentTx copies onto every task it creates.
+	// Keeping it off the struct is what stops it from being written as one.
+	TaskArgs string `db:"-" json:"-"`
 
 	// Enriched fields for API responses
 	PackageName    string `db:"package_name" json:"package_name,omitempty"`
@@ -99,6 +117,7 @@ type DeploymentTask struct {
 	PackageID    string     `db:"package_id" json:"package_id"`
 	DeviceID     string     `db:"device_id" json:"device_id"`
 	Status       string     `db:"status" json:"status"`
+	Args         string     `db:"args" json:"args"`
 	ExitCode     *int       `db:"exit_code" json:"exit_code,omitempty"`
 	OutputLog    *string    `db:"output_log" json:"output_log,omitempty"`
 	ErrorMessage *string    `db:"error_message" json:"error_message,omitempty"`
@@ -116,6 +135,9 @@ type CreateDeploymentRequest struct {
 	PackageID  string `json:"package_id"`
 	TargetType string `json:"target_type"` // 'device', 'group', 'all'
 	TargetID   string `json:"target_id"`   // device_id or group_id (optional for 'all')
+	// Action is 'install' or 'uninstall'. An empty value means install, which is
+	// what every caller sent before uninstall existed.
+	Action string `json:"action"`
 }
 
 type TaskProgressReport struct {

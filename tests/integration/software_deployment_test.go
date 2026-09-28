@@ -34,6 +34,12 @@ const (
 	devWin2Secret = "win2-device-secret"
 	devLin1ID     = "dev-lin-1"
 	devLin1Secret = "lin1-device-secret"
+
+	// testCaps is the capability list a current agent advertises on its hello
+	// frame. The deployment handler gates on it, so a seeded device without it
+	// is a device that has never connected -- a state worth testing separately
+	// rather than as the default for the happy path.
+	testCaps = `["ping","inventory.collect","software.install","software.uninstall","exec.run","term.open","patch.scan","patch.install"]`
 )
 
 type mockHub struct {
@@ -109,15 +115,22 @@ func TestE2ESoftwareDeployment(t *testing.T) {
 	// 2. Seed devices: 2 Windows, 1 Linux
 	// The agent-facing endpoints authenticate on the device secret, so the
 	// hashes must be real SHA-256 digests of the secrets used later below.
+	//
+	// capabilities is what the agent writes on its hello. The deployment handler
+	// refuses to create a deployment for an endpoint whose agent never advertised
+	// the command, because a command an agent does not recognise produces a task
+	// that never completes and never explains itself. Seeding it here is what a
+	// real agent does on connect, so omitting it would test a state no agent is
+	// ever in.
 	_, err = d.ExecContext(ctx, `
-		INSERT INTO devices (id, hostname, os_name, os_version, agent_version, status, last_seen_at, enrolled_at, device_secret_hash, site, created_at, updated_at)
+		INSERT INTO devices (id, hostname, os_name, os_version, agent_version, status, last_seen_at, enrolled_at, device_secret_hash, site, capabilities, created_at, updated_at)
 		VALUES
-		('dev-win-1', 'DESKTOP-WIN1', 'windows', '10.0', '1.0.0', 'online', ?, ?, ?, 'hq', ?, ?),
-		('dev-win-2', 'DESKTOP-WIN2', 'windows', '10.0', '1.0.0', 'offline', ?, ?, ?, 'hq', ?, ?),
-		('dev-lin-1', 'SRV-LIN1', 'linux', '12.0', '1.0.0', 'online', ?, ?, ?, 'branch', ?, ?)`,
-		now, now, devicemgmt.HashToken(devWin1Secret), now, now,
-		now, now, devicemgmt.HashToken(devWin2Secret), now, now,
-		now, now, devicemgmt.HashToken(devLin1Secret), now, now)
+		('dev-win-1', 'DESKTOP-WIN1', 'windows', '10.0', '1.0.0', 'online', ?, ?, ?, 'hq', ?, ?, ?),
+		('dev-win-2', 'DESKTOP-WIN2', 'windows', '10.0', '1.0.0', 'offline', ?, ?, ?, 'hq', ?, ?, ?),
+		('dev-lin-1', 'SRV-LIN1', 'linux', '12.0', '1.0.0', 'online', ?, ?, ?, 'branch', ?, ?, ?)`,
+		now, now, devicemgmt.HashToken(devWin1Secret), testCaps, now, now,
+		now, now, devicemgmt.HashToken(devWin2Secret), testCaps, now, now,
+		now, now, devicemgmt.HashToken(devLin1Secret), testCaps, now, now)
 	if err != nil {
 		t.Fatalf("seed devices: %v", err)
 	}
