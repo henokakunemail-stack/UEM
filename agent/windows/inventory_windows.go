@@ -207,17 +207,25 @@ func (c *winCollector) collectDisks() []inventory.Disk {
 	if err != nil || n == 0 {
 		return nil
 	}
-	// Result is "C:\\\0D:\\\0\0"; split on NUL and drop the terminating empties.
-	drives := strings.Split(strings.TrimRight(windows.UTF16ToString(buf[:n]), "\x00"), "\x00")
-
-	disks := make([]inventory.Disk, 0, len(drives))
-	for _, d := range drives {
-		if d == "" {
-			continue
+	// The result is a run of NUL-terminated strings, "C:\\\0D:\\\0\0", and the
+	// length n counts the whole run including every terminator. That run cannot
+	// go through UTF16ToString: it stops at the first NUL, so a multi-drive
+	// machine yielded only the first volume and every data drive was silently
+	// missing from the hardware report. Walk the UTF-16 slice by hand instead.
+	disks := make([]inventory.Disk, 0, 4)
+	for i, total := 0, int(n); i < total; {
+		end := i
+		for end < total && buf[end] != 0 {
+			end++
 		}
-		if disk, ok := c.collectDisk(d); ok {
+		// A run of consecutive terminators is the end of the list, not a drive.
+		if end == i {
+			break
+		}
+		if disk, ok := c.collectDisk(windows.UTF16ToString(buf[i:end])); ok {
 			disks = append(disks, disk)
 		}
+		i = end + 1
 	}
 	return disks
 }

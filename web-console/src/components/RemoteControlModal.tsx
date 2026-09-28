@@ -145,6 +145,14 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
           hasPaintedRef.current = false
           lastFrameAtRef.current = performance.now()
           setAwaitingFirstFrame(false)
+          // A frame is the only proof the desktop is live, so it is what moves
+          // the session to 'active'. This was never set anywhere, and the canvas
+          // is only rendered for 'active' or 'stalled': the socket came up, the
+          // relay delivered megabytes of JPEG, and there was still nothing to
+          // paint on, so the operator saw an empty viewport for the full
+          // STALL_AFTER_MS window before 'stalled' wrongly claimed the endpoint
+          // had gone silent.
+          setStatus((prev) => (prev === 'active' || prev === 'ended' ? prev : 'active'))
           setBytesReceived((prev) => prev + buffer.byteLength)
           frameCountRef.current++
 
