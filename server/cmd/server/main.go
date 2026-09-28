@@ -8,10 +8,13 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"flag"
+	"fmt"
 	"net/http"
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -19,6 +22,7 @@ import (
 	"github.com/jmoiron/sqlx"
 	"github.com/rs/zerolog/log"
 
+	"github.com/henokakunemail-stack/Endpoint-Manager/agent/shared/service"
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/audit"
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/auth"
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/config"
@@ -26,6 +30,7 @@ import (
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/logger"
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/rbac"
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/transport"
+	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/wsticket"
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/modules/agentupdate"
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/modules/alerting"
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/modules/assetlicense"
@@ -42,13 +47,81 @@ import (
 	usermgmt "github.com/henokakunemail-stack/Endpoint-Manager/server/modules/user-management"
 )
 
+// serviceName is the OS service registration the server installer writes and
+// the -service flag manages. It is deliberately distinct from the agent's
+// "endpoint-agent": both run on the same Windows box during testing, and two
+// services with one name is an install-time collision, not a shared config.
+const serviceName = "endpoint-mgmt-server"
+
 func main() {
-	cfg, err := config.Load()
-	if err != nil {
-		// Logger not initialized yet; write to stderr directly.
-		println("config error:", err.Error())
+	// A management server that has to be started by hand after every reboot is
+	// not a management server, so it runs under the same OS service abstraction
+	// the agent uses. The flag is parsed before config.Load because a -service
+	// action is a request *about* the installation, and must work on a machine
+	// whose config is not yet complete.
+	var (
+		httpAddr      string
+		envFile       string
+		serviceAction string
+	)
+	flag.StringVar(&httpAddr, "addr", "", "HTTP listen address override (default from HTTP_ADDR, else :8443)")
+	flag.StringVar(&envFile, "env-file", "", "read KEY=VALUE runtime settings from a file (used by the service, which has no environment block)")
+	flag.StringVar(&serviceAction, "service", "", "OS service management action (install|uninstall|start|stop|status)")
+	flag.Parse()
+
+	if serviceAction != "" {
+		handleServiceAction(serviceAction, httpAddr, envFile)
+		return
+	}
+	// A service launched by the SCM inherits nothing from the operator's
+	// shell, so its configuration has to arrive by a path the SCM does carry.
+	if envFile != "" {
+		if err := loadEnvFile(envFile); err != nil {
+			println("env-file error:", err.Error())
+			os.Exit(1)
+		}
+		// The installer cannot invent a secret without shipping a CScript
+		// dependency that does not exist on Linux, and baking one into a public
+		// installer would be publishing it. So the file ships with the key
+		// present and empty, and the first run fills it in.
+		if err := ensureJWTSecret(envFile); err != nil {
+			println("secret error:", err.Error())
+			os.Exit(1)
+		}
+	}
+
+	// svc.Run is the only thing that keeps a Windows service transition to
+	// RUNNING, so the whole server has to live inside it. Interactive runs skip
+	// it and fall through to the ordinary signal handler below.
+	var stopServer context.CancelFunc
+	serve := func() error {
+		cfg, err := config.Load()
+		if err != nil {
+			return err
+		}
+		if httpAddr != "" {
+			cfg.HTTPAddr = httpAddr
+		}
+		return run(cfg, &stopServer)
+	}
+	if service.RunAsService() {
+		if err := service.Serve(serviceName, func() error {
+			return serve()
+		}); err != nil {
+			println("service error:", err.Error())
+			os.Exit(1)
+		}
+		return
+	}
+	if err := serve(); err != nil {
+		println("startup error:", err.Error())
 		os.Exit(1)
 	}
+}
+
+// run boots the database, the router and the background workers, then blocks
+// until a stop is signalled or the service handler cancels it.
+func run(cfg config.Config, stopService *context.CancelFunc) error {
 	logger.Init(cfg.LogLevel, cfg.LogFile)
 
 	database, err := db.Open(cfg.DBPath)
@@ -65,14 +138,168 @@ func main() {
 	srv, stopBackground := buildServer(cfg, database)
 	defer stopBackground()
 
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if stopService != nil {
+		*stopService = cancel
+	}
+
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
-	<-stop
+	select {
+	case <-stop:
+	case <-ctx.Done():
+	}
 	log.Info().Msg("shutting down")
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	if err := srv.Shutdown(ctx); err != nil {
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer shutdownCancel()
+	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Error().Err(err).Msg("graceful shutdown")
+	}
+	return nil
+}
+
+// ensureJWTSecret gives the server a signing secret on first run when the env
+// file does not carry one, and writes it back so a later restart -- including
+// one performed by the OS rather than by the operator -- keeps the same secret
+// and does not invalidate every issued token.
+//
+// The rewrite goes through a temp file and a rename so that a crash mid-write
+// cannot leave a truncated secret, which would be worse than none: it would
+// start, sign tokens, and then be unable to verify any of them on restart.
+func ensureJWTSecret(path string) error {
+	if os.Getenv("JWT_SECRET") != "" {
+		return nil
+	}
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return fmt.Errorf("generate signing secret: %w", err)
+	}
+	secret := hex.EncodeToString(b)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	replaced := false
+	lines := strings.Split(string(data), "\n")
+	for i, line := range lines {
+		if strings.HasPrefix(strings.TrimSpace(line), "JWT_SECRET=") {
+			lines[i] = "JWT_SECRET=" + secret
+			replaced = true
+			break
+		}
+	}
+	if !replaced {
+		lines = append(lines, "JWT_SECRET="+secret)
+	}
+	body := strings.Join(lines, "\n")
+
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, []byte(body), 0o600); err != nil {
+		return fmt.Errorf("write %s: %w", tmp, err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		os.Remove(tmp)
+		return fmt.Errorf("replace %s: %w", path, err)
+	}
+	// A service on Windows runs as LocalSystem, which can usually not read a
+	// file it did not create. Broadening here costs nothing: the file already
+	// holds a secret the service must read, and Administrators is who manages
+	// the install.
+	_ = os.Chmod(path, 0o600)
+	return os.Setenv("JWT_SECRET", secret)
+}
+
+// loadEnvFile applies KEY=VALUE lines to the process environment. Values already
+// present in the environment win, so an operator who starts the server by hand
+// with a one-off override is not silently overruled by the file on disk.
+func loadEnvFile(path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	for i, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		key, value, ok := strings.Cut(line, "=")
+		if !ok {
+			return fmt.Errorf("line %d is not KEY=VALUE: %q", i+1, line)
+		}
+		key, value = strings.TrimSpace(key), strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, exists := os.LookupEnv(key); exists {
+			continue
+		}
+		if err := os.Setenv(key, value); err != nil {
+			return fmt.Errorf("set %s: %w", key, err)
+		}
+	}
+	return nil
+}
+
+// handleServiceAction implements -service. The arguments the service is
+// registered with are exactly the ones the installer's env file sets, so a
+// service started later reads the same configuration as a console run.
+func handleServiceAction(action, httpAddr, envFile string) {
+	args := []string{}
+	if httpAddr != "" {
+		args = append(args, "-addr", httpAddr)
+	}
+	if envFile != "" {
+		args = append(args, "-env-file", envFile)
+	}
+
+	cfg := service.Config{
+		Name:        serviceName,
+		DisplayName: "Enterprise Endpoint Management Server",
+		Description: "Central endpoint management server: fleet, console, and agent gateway.",
+		Arguments:   args,
+	}
+	mgr, err := service.NewManager(cfg)
+	if err != nil {
+		println("service error:", err.Error())
+		os.Exit(1)
+	}
+
+	switch action {
+	case "install":
+		if err := mgr.Install(); err != nil {
+			println("install service failed:", err.Error())
+			os.Exit(1)
+		}
+		fmt.Printf("Service '%s' installed.\n", cfg.Name)
+	case "uninstall", "remove":
+		if err := mgr.Uninstall(); err != nil {
+			println("uninstall service failed:", err.Error())
+			os.Exit(1)
+		}
+		fmt.Printf("Service '%s' removed.\n", cfg.Name)
+	case "start":
+		if err := mgr.Start(); err != nil {
+			println("start service failed:", err.Error())
+			os.Exit(1)
+		}
+		fmt.Printf("Service '%s' started.\n", cfg.Name)
+	case "stop":
+		if err := mgr.Stop(); err != nil {
+			println("stop service failed:", err.Error())
+			os.Exit(1)
+		}
+		fmt.Printf("Service '%s' stopped.\n", cfg.Name)
+	case "status":
+		status, err := mgr.Status()
+		if err != nil {
+			fmt.Printf("Service '%s' status: %s (%v)\n", cfg.Name, status, err)
+		} else {
+			fmt.Printf("Service '%s' status: %s\n", cfg.Name, status)
+		}
+	default:
+		fmt.Printf("unknown -service action %q (install|uninstall|start|stop|status)\n", action)
+		os.Exit(1)
 	}
 }
 
@@ -139,6 +366,16 @@ func buildServer(cfg config.Config, database *sqlx.DB) (*http.Server, func()) {
 	loginH := auth.NewLoginHandler(database, jwtSvc)
 	defer loginH.Close()
 	loginH.Register(r)
+
+	// WebSocket handshakes cannot carry an Authorization header, so the console
+	// trades its access token for a single-use ticket over an ordinary request.
+	// Wired here, before any listener is serving, because the two handshake
+	// handlers are built without a database handle and read this from the
+	// package rather than from their own fields.
+	auth.SetWebSocketTicketIssuer(
+		wsticket.NewStore(database, wsticket.DefaultMaxLive),
+		auth.NewSessionStore(database, cfg.RefreshTokenTTL),
+	)
 
 	// Agent endpoints (authenticated by per-device secret, not JWT).
 	enrollH := devicemgmt.NewEnrollmentHandler(deviceRepo, database)
@@ -446,7 +683,8 @@ func runDeploymentSweep(repo *softwaredeployment.Repository) {
 
 // markOfflineBatch flips a batch of devices to offline inside a single
 // transaction, so the cost is one fsync per sweep rather than one per device.
-func markOfflineBatch(d *sqlx.DB, ids []string, now time.Time) {	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+func markOfflineBatch(d *sqlx.DB, ids []string, now time.Time) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	tx, err := d.BeginTxx(ctx, nil)

@@ -29,7 +29,10 @@ try {
     }
 
     Write-Host "[2/2] Compiling NSIS Installer..." -ForegroundColor Cyan
-    $NsisPath = (Get-Command makensis.exe -ErrorAction SilentlyContinue)?.Source
+    # Windows PowerShell 5.1 is what ships with the OS and has no null-
+    # conditional operator, so the lookup is written the long way.
+    $Cmd = Get-Command makensis.exe -ErrorAction SilentlyContinue
+    $NsisPath = if ($Cmd) { $Cmd.Source } else { $null }
     if (-not $NsisPath) {
         # Check standard default installation paths
         $Candidates = @(

@@ -1,0 +1,25 @@
+# Normalise line endings in the repository, regardless of what the committer's
+# core.autocrlf happens to be. Without this, a Windows checkout rewrites every
+# .go file to CRLF in the working tree, and gofmt then reports the whole file as
+# changed even where nothing is -- which is indistinguishable from a real
+# formatting problem and gets ignored until it hides an actual one.
+* text=auto eol=lf
+
+# The Windows packaging scripts are run by PowerShell and NSIS on Windows, and
+# the NSIS preprocessor is whitespace sensitive around its quoted batch lines.
+*.ps1 text eol=crlf
+*.nsi text eol=crlf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binary assets. Never let git try to normalise these.
+*.exe binary
+*.dll binary
+*.ico binary
+*.png binary
+*.jpg binary
+*.pdf binary
+*.zip binary
+*.deb binary
+*.msi binary
+*.db binary

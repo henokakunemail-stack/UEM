@@ -46,3 +46,7 @@ Thumbs.db
 
 # Working screenshots from verification runs, not product assets
 pic/
+
+# Session-to-session handoff notes. Useful locally, noise in a public repo:
+# it describes what the next session should do rather than what the code is.
+progress.md

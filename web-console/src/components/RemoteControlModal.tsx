@@ -9,7 +9,7 @@ import {
   RefreshCw,
   Keyboard,
 } from 'lucide-react'
-import { getStoredToken, api } from '../services/api'
+import { api } from '../services/api'
 import { Modal } from './ui'
 import type {
   DeviceDTO,
@@ -92,13 +92,6 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
   useEffect(() => {
     if (!device) return
 
-    const token = getStoredToken()
-    if (!token) {
-      setStatus('error')
-      setErrorMessage('Authentication token missing. Please log in again.')
-      return
-    }
-
     let isCancelled = false
     let currentSessionId = ''
     const deviceId = device.id
@@ -113,11 +106,23 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
         setSessionId(session.id)
         setStatus('connecting')
 
+        // A WebSocket handshake cannot carry an Authorization header, so the
+        // socket URL would otherwise have to carry the access token -- into the
+        // access log, into history, and into any Referer sent onward. A ticket
+        // is fetched over an ordinary authenticated request, is redeemable once,
+        // and expires in 60 seconds, so what reaches those logs is already spent.
+        //
+        // It is minted after the session POST so the ticket's 60s budget is spent
+        // on the handshake rather than on a server that may be slow to dispatch
+        // rc.start to the agent.
+        const ticket = await api.getWebSocketTicket('remote-desktop')
+        if (isCancelled) return
+
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
         const wsUrl =
           `${protocol}//${window.location.host}` +
           `/api/devices/${deviceId}/remotecontrol/ws` +
-          `?token=${encodeURIComponent(token)}&session=${encodeURIComponent(session.id)}`
+          `?ticket=${encodeURIComponent(ticket)}&session=${encodeURIComponent(session.id)}`
 
         const ws = new WebSocket(wsUrl)
         ws.binaryType = 'arraybuffer'

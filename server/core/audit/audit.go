@@ -10,8 +10,10 @@ import (
 
 // Log writes one audit trail entry. details may be nil.
 // actorType: user | agent | system. action examples: "auth.login", "device.enroll".
+//
+// The entry is appended to the tamper-evident hash chain; see chain.go.
 func Log(ctx context.Context, db *sqlx.DB, actorType, actorID, action, targetID string, details any) error {
-	var detailJSON any
+	var detailJSON string
 	if details != nil {
 		b, err := json.Marshal(details)
 		if err != nil {
@@ -19,11 +21,15 @@ func Log(ctx context.Context, db *sqlx.DB, actorType, actorID, action, targetID 
 		}
 		detailJSON = string(b)
 	}
-	_, err := db.ExecContext(ctx, `
-		INSERT INTO audit_logs (id, actor_type, actor_id, action, target_id, details, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		newID(), actorType, actorID, action, targetID, detailJSON, time.Now().UTC())
-	return err
+	return writeChained(ctx, db, Entry{
+		ID:        newID(),
+		ActorType: actorType,
+		ActorID:   actorID,
+		Action:    action,
+		TargetID:  targetID,
+		Details:   detailJSON,
+		CreatedAt: time.Now().UTC(),
+	})
 }
 
 // Entry is one audit log row.
@@ -35,6 +41,12 @@ type Entry struct {
 	TargetID  string    `db:"target_id" json:"target_id"`
 	Details   string    `db:"details" json:"details"`
 	CreatedAt time.Time `db:"created_at" json:"created_at"`
+	// Chain fields. Populated on rows written through Log; empty on rows that
+	// predate migration 0016 and on rows inserted directly with column
+	// defaults. JSON-exported so a console can show chain state without a
+	// second query, but not populated by List unless asked.
+	PrevHash  string `db:"prev_hash" json:"prev_hash,omitempty"`
+	EntryHash string `db:"entry_hash" json:"entry_hash,omitempty"`
 }
 
 // List returns the most recent entries.
@@ -43,10 +55,14 @@ func List(ctx context.Context, db *sqlx.DB, limit int) ([]Entry, error) {
 		limit = 100
 	}
 	var rows []Entry
+	// The chain columns are selected too: the struct declares them, and a column
+	// left out of the list comes back empty, which would tell a reader that a
+	// recent entry was never chained when it was.
 	err := db.SelectContext(ctx, &rows,
 		`SELECT id, actor_type, COALESCE(actor_id, '') AS actor_id, action,
 		        COALESCE(target_id, '') AS target_id,
-		        COALESCE(details, '{}') AS details, created_at
+		        COALESCE(details, '{}') AS details, created_at,
+		        prev_hash, entry_hash
 		 FROM audit_logs ORDER BY created_at DESC LIMIT ?`, limit)
 	return rows, err
 }

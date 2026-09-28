@@ -669,3 +669,19 @@ export interface RemoteControlCapabilities {
   keyboard: boolean
   reason?: string
 }
+
+/** One live login, as the server reports it. The jti is the handle a revocation
+ *  goes through; everything else is there so an operator can tell "my phone"
+ *  from "a session I do not recognise".
+ *
+ *  `user_agent` and `created_ip` are the only identifiers on offer -- the
+ *  console has no device registry to join them against, so they are shown raw
+ *  rather than prettified into a claim the server never made. */
+export interface AuthSession {
+  jti: string
+  user_agent: string
+  created_at: string
+  last_used_at: string
+  expires_at: string
+  created_ip: string
+}

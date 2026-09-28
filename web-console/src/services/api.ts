@@ -40,6 +40,7 @@ import type {
   TaskInfoDTO,
   RemoteControlMode,
   RemoteControlSessionDTO,
+  AuthSession,
 } from '../types/api'
 
 const TOKEN_KEY = 'em_access_token'
@@ -175,7 +176,51 @@ export const api = {
   },
 
   async logout(): Promise<void> {
+    // The server has to be told as well as the browser. Clearing local storage
+    // alone leaves the refresh token live on the server, so anyone holding a
+    // copy of it keeps a working credential for its whole TTL -- which is the
+    // reason logout exists at all. The server call is best effort: a logout that
+    // fails because the network is down must still clear this device.
+    const refreshToken = getStoredRefreshToken()
+    if (refreshToken) {
+      try {
+        await request<{ status: string }>('/api/auth/logout', {
+          method: 'POST',
+          body: JSON.stringify({ refresh_token: refreshToken }),
+        })
+      } catch {
+        // Deliberately swallowed. Reporting a failed logout to the user while
+        // their tokens are already gone would describe an outcome that no
+        // longer matches what is on screen.
+      }
+    }
     clearStoredTokens()
+  },
+
+  // A WebSocket handshake cannot carry an Authorization header, so the socket
+  // URL would otherwise have to carry the access token -- where it lands in the
+  // access log, in history, and in any Referer sent onward. A ticket is
+  // redeemed once and expires in 60 seconds, so the value that reaches those
+  // logs is already spent.
+  async getWebSocketTicket(purpose: 'remote-exec' | 'remote-desktop'): Promise<string> {
+    const res = await request<{ ticket: string; purpose: string }>(
+      '/api/auth/ws-ticket?purpose=' + purpose,
+      { method: 'POST' },
+    )
+    return res.ticket
+  },
+
+  async getAuthSessions(): Promise<AuthSession[]> {
+    return request<AuthSession[]>('/api/auth/sessions')
+  },
+
+  async revokeAuthSession(jti: string): Promise<void> {
+    // The value is encoded into `enc` first so the hole stays a bare `${enc}`:
+    // the route-contract test collapses `${name}` to `{}` and compares it against
+    // the chi pattern, and a call inside the hole is not a hole. Encoding it into
+    // the template would parse as a path that does not exist.
+    const enc = encodeURIComponent(jti)
+    await request<{ status: string }>(`/api/auth/sessions/${enc}`, { method: 'DELETE' })
   },
 
   // Dashboard APIs

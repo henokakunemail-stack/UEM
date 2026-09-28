@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { AlertCircle, Terminal } from 'lucide-react'
-import { getStoredToken } from '../services/api'
+import { api } from '../services/api'
 import { Modal } from './ui'
 import type { DeviceDTO } from '../types/api'
 
@@ -32,63 +32,84 @@ export const InteractiveTerminalModal: React.FC<InteractiveTerminalModalProps> =
   useEffect(() => {
     if (!device) return
 
-    const token = getStoredToken()
-    if (!token) {
-      setStatus('error')
-      setErrorMessage('Authentication token missing. Please log in again.')
-      return
-    }
-
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const wsUrl = `${protocol}//${window.location.host}/api/devices/${device.id}/terminal/ws?token=${encodeURIComponent(token)}&shell=${encodeURIComponent(shell)}`
-
     let ws: WebSocket
-    try {
-      ws = new WebSocket(wsUrl)
-    } catch {
-      setStatus('error')
-      setErrorMessage('Failed to open terminal connection.')
-      return
-    }
-    wsRef.current = ws
+    let cancelled = false
 
-    ws.onopen = () => {
-      setStatus('active')
-      inputRef.current?.focus()
-    }
-
-    ws.onmessage = (event) => {
+    // The ticket is fetched before the socket opens, over an ordinary
+    // authenticated request. The access token therefore never appears in a URL:
+    // a WebSocket handshake cannot carry an Authorization header, which is why
+    // the token used to go on the query string and into every access log,
+    // history entry and Referer between here and the server.
+    const connect = async () => {
+      let ticket: string
       try {
-        const msg: TerminalMessage = JSON.parse(event.data)
-        if (msg.type === 'term.open') {
-          if (msg.session_id) setSessionID(msg.session_id)
-          appendOutput(msg.data + '\r\n', 'system')
-        } else if (msg.type === 'term.data') {
-          if (msg.session_id) setSessionID(msg.session_id)
-          appendOutput(msg.data)
-        } else if (msg.type === 'term.close') {
-          setStatus('closed')
-          appendOutput('\r\n*** Remote shell session terminated ***\r\n', 'system')
-        }
+        ticket = await api.getWebSocketTicket('remote-exec')
+      } catch (err) {
+        if (cancelled) return
+        setStatus('error')
+        setErrorMessage(
+          err instanceof Error ? err.message : 'Failed to obtain a connection ticket.'
+        )
+        return
+      }
+      if (cancelled) return
+
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+      const wsUrl =
+        `${protocol}//${window.location.host}/api/devices/${device.id}/terminal/ws` +
+        `?ticket=${encodeURIComponent(ticket)}&shell=${encodeURIComponent(shell)}`
+
+      try {
+        ws = new WebSocket(wsUrl)
       } catch {
-        // Ignore malformed frames
+        setStatus('error')
+        setErrorMessage('Failed to open terminal connection.')
+        return
+      }
+      wsRef.current = ws
+
+      ws.onopen = () => {
+        setStatus('active')
+        inputRef.current?.focus()
+      }
+
+      ws.onmessage = (event) => {
+        try {
+          const msg: TerminalMessage = JSON.parse(event.data)
+          if (msg.type === 'term.open') {
+            if (msg.session_id) setSessionID(msg.session_id)
+            appendOutput(msg.data + '\r\n', 'system')
+          } else if (msg.type === 'term.data') {
+            if (msg.session_id) setSessionID(msg.session_id)
+            appendOutput(msg.data)
+          } else if (msg.type === 'term.close') {
+            setStatus('closed')
+            appendOutput('\r\n*** Remote shell session terminated ***\r\n', 'system')
+          }
+        } catch {
+          // Ignore malformed frames
+        }
+      }
+
+      ws.onerror = () => {
+        setStatus('error')
+        setErrorMessage('Terminal connection error. The endpoint may be offline.')
+      }
+
+      ws.onclose = () => {
+        // Read the live value rather than the one captured when this effect ran:
+        // a close arriving after an error must not overwrite the error the
+        // operator needs to see with a bland "closed".
+        setStatus((prev) => (prev === 'error' || prev === 'closed' ? prev : 'closed'))
       }
     }
 
-    ws.onerror = () => {
-      setStatus('error')
-      setErrorMessage('Terminal connection error. The endpoint may be offline.')
-    }
-
-    ws.onclose = () => {
-      if (status !== 'error' && status !== 'closed') {
-        setStatus('closed')
-      }
-    }
+    connect()
 
     return () => {
+      cancelled = true
       try {
-        ws.close()
+        wsRef.current?.close()
       } catch {
         // ignore
       }

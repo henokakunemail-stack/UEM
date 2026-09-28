@@ -177,19 +177,60 @@ func (h *Handler) listSessions(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, sessions)
 }
 
-func (h *Handler) handleOperatorWS(w http.ResponseWriter, r *http.Request) {
-	token := r.URL.Query().Get("token")
-	sessionID := r.URL.Query().Get("session")
+// authenticateHandshake decides who is opening a remote control socket and
+// writes the refusal itself when the answer is no.
+//
+// A ticket is the intended credential, for the same reason as on the terminal
+// socket: a browser cannot attach an Authorization header to a WebSocket, and a
+// credential in the query string is written to the access log, kept in history
+// and forwarded in Referer. The ?token= path stays for clients that have not
+// switched yet, but it now refuses a refresh token, which it previously
+// accepted -- a week-long credential that opened a remote desktop.
+func (h *Handler) authenticateHandshake(w http.ResponseWriter, r *http.Request) (auth.Claims, bool) {
+	const refuse = "unauthorized or insufficient privileges"
 
-	if token == "" || sessionID == "" {
-		http.Error(w, "missing token or session", http.StatusUnauthorized)
+	if ticket := auth.TicketFromRequest(r); ticket != "" {
+		userID, ok := auth.RedeemWebSocketTicket(r.Context(), ticket, auth.PurposeRemoteDesktop)
+		if !ok {
+			http.Error(w, refuse, http.StatusForbidden)
+			return auth.Claims{}, false
+		}
+		claims, ok := auth.ClaimsForUser(r.Context(), auth.CurrentRoleReader(), userID)
+		if !ok || claims.Role == rbac.RoleViewer {
+			http.Error(w, refuse, http.StatusForbidden)
+			return auth.Claims{}, false
+		}
+		return claims, true
+	}
+
+	token := r.URL.Query().Get("token")
+	if token == "" {
+		http.Error(w, refuse, http.StatusForbidden)
+		return auth.Claims{}, false
+	}
+	// The error is not echoed: distinguishing "forged" from "expired" from
+	// "wrong kind" turns the handshake into an oracle for what a prober holds.
+	claims, err := h.jwtSvc.ParseKind(token, auth.KindAccess)
+	if err != nil || claims.Role == rbac.RoleViewer {
+		http.Error(w, refuse, http.StatusForbidden)
+		return auth.Claims{}, false
+	}
+	return claims, true
+}
+
+func (h *Handler) handleOperatorWS(w http.ResponseWriter, r *http.Request) {
+	sessionID := r.URL.Query().Get("session")
+	if sessionID == "" {
+		http.Error(w, "missing session", http.StatusUnauthorized)
 		return
 	}
 
-	claims, err := h.jwtSvc.Parse(token)
-	if err != nil || claims.Role == rbac.RoleViewer {
-		http.Error(w, "unauthorized or insufficient privileges", http.StatusForbidden)
-		return
+	// The claims are not used past this point: the relay identifies the operator
+	// by session id, and the role check has already happened. Binding the
+	// operator to the authenticated user is left to the session record, which
+	// startSession created, rather than reconstructed here.
+	if _, ok := h.authenticateHandshake(w, r); !ok {
+		return // the refusal is already written
 	}
 
 	ws, err := h.upgrader.Upgrade(w, r, nil)
