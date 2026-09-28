@@ -298,16 +298,22 @@ func (r *Repository) syncDeploymentStatus(ctx context.Context, taskID string) er
 		return err
 	}
 
+	// 'done' counts success and failed together because a failed task is still
+	// finished, but the rollup has to know whether anything actually succeeded:
+	// every task failing used to land here with Done == Total and mark the
+	// parent 'completed', so a 0% deployment rendered a green Completed badge.
 	checkQuery := `
 		SELECT
 			COUNT(*) AS total,
-			COALESCE(SUM(CASE WHEN status IN ('success', 'failed') THEN 1 ELSE 0 END), 0) AS done
+			COALESCE(SUM(CASE WHEN status IN ('success', 'failed') THEN 1 ELSE 0 END), 0) AS done,
+			COALESCE(SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END), 0) AS succeeded
 		FROM deployment_tasks
 		WHERE deployment_id = ?`
 
 	var counts struct {
-		Total int `db:"total"`
-		Done  int `db:"done"`
+		Total     int `db:"total"`
+		Done      int `db:"done"`
+		Succeeded int `db:"succeeded"`
 	}
 	if err := r.db.GetContext(ctx, &counts, checkQuery, depID); err != nil {
 		return err
@@ -315,8 +321,12 @@ func (r *Repository) syncDeploymentStatus(ctx context.Context, taskID string) er
 
 	if counts.Total > 0 && counts.Total == counts.Done {
 		now := time.Now().UTC()
-		updateDep := `UPDATE software_deployments SET status = 'completed', completed_at = ? WHERE id = ?`
-		_, _ = r.db.ExecContext(ctx, updateDep, now, depID)
+		status := "completed"
+		if counts.Succeeded == 0 {
+			status = "failed"
+		}
+		updateDep := `UPDATE software_deployments SET status = ?, completed_at = ? WHERE id = ?`
+		_, _ = r.db.ExecContext(ctx, updateDep, status, now, depID)
 	}
 	return nil
 }
