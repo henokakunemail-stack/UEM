@@ -15,11 +15,12 @@ import (
 // install failed. Unix tools emit UTF-8, so this has to sniff rather than
 // assume per-OS.
 //
-// ponytail: this detects ASCII-range UTF-16 without a BOM, which is what
-// installer diagnostics actually are. BOM-less UTF-16 carrying non-ASCII is
-// not distinguishable from UTF-8 by any reliable test, so it is left as bytes
-// rather than guessed at; a Unicode-aware program emits a BOM, and that path
-// is handled above.
+// ponytail: this detects UTF-16 without a BOM by the shape of its code units.
+// That is unambiguous for ASCII text, which is what installer diagnostics are,
+// including their line breaks. BOM-less UTF-16 carrying non-ASCII cannot be
+// told apart from UTF-8 by any reliable test, so it is left as bytes rather
+// than guessed at; a Unicode-aware program emits a BOM, and that path is
+// handled above.
 func decodeOutput(b []byte) string {
 	switch {
 	case len(b) == 0:
@@ -34,11 +35,19 @@ func decodeOutput(b []byte) string {
 	return string(b)
 }
 
-// looksUTF16LE reports whether b is BOM-less UTF-16LE carrying ASCII text: a
-// NUL high byte and a printable low byte in every code unit. The scan stops at
-// a NUL unit, so a trailing terminator does not disqualify the stream, and two
-// units is the floor because rewriting a one-unit buffer is more risk than it
-// is worth.
+// looksUTF16LE reports whether b is BOM-less UTF-16LE.
+//
+// The test is: if the high byte of every code unit were zeroed, would the
+// result be plausible text? That accepts \r and \n, which the obvious
+// "printable low byte" check rejects -- and rejecting them defeats the whole
+// function, because an installer's failure message is almost never one line.
+// The earlier version here required 0x20 <= low <= 0x7E, so a two-line UTF-16
+// message failed detection and was returned as raw bytes with a NUL between
+// every character: precisely the unreadable output this exists to remove. A
+// test that only used a single line never saw it.
+//
+// A high byte above zero is the real disqualifier, because ASCII UTF-8 text
+// never carries one.
 func looksUTF16LE(b []byte) bool {
 	units := 0
 	for i := 0; i+1 < len(b) && units < 64; i += 2 {
@@ -46,7 +55,7 @@ func looksUTF16LE(b []byte) bool {
 		if low == 0x00 && high == 0x00 {
 			break // terminator
 		}
-		if high != 0x00 || low < 0x20 || low > 0x7E {
+		if high != 0x00 {
 			return false
 		}
 		units++

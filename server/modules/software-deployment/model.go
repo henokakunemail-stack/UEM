@@ -35,6 +35,27 @@ const (
 	TaskStatusInstalling  = "installing"
 	TaskStatusSuccess     = "success"
 	TaskStatusFailed      = "failed"
+
+	// TaskStatusFailedLost is terminal but distinct from TaskStatusFailed.
+	//
+	// The agent reports progress over HTTP from a goroutine, and an agent can
+	// die at any point: a user logs off, the update engine replaces the running
+	// binary mid-install, the machine is powered off, the network drops. When
+	// that happens no report ever arrives and the task row would sit in
+	// 'installing' forever, holding its parent deployment open and telling the
+	// operator a rollout is still in progress after the last device finished
+	// twenty minutes ago. The sweep moves those rows here.
+	//
+	// It is a separate status rather than 'failed' because the two mean
+	// different things to whoever reads the rollup: 'failed' is an installer
+	// that ran and rejected the operation, while 'failed_lost' is an installer
+	// whose fate is genuinely unknown. The machine may be fully installed, may
+	// be half-installed, or may have never started. The inventory sweep is what
+	// settles it, and the operator re-deploys if it did not take.
+	//
+	// deployment_tasks.status carries no CHECK constraint, so adding a value
+	// needs no migration.
+	TaskStatusFailedLost = "failed_lost"
 )
 
 type SoftwarePackage struct {

@@ -4,12 +4,9 @@ package software
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"os/exec"
 	"path/filepath"
 	"strings"
-	"syscall"
 )
 
 type windowsRunner struct{}
@@ -19,17 +16,24 @@ func DefaultRunner() Runner {
 }
 
 func (r *windowsRunner) Run(ctx context.Context, filePath, packageType, installArgs string) (int, string, error) {
-	var cmd *exec.Cmd
+	var (
+		name string
+		args []string
+	)
 
 	switch strings.ToLower(packageType) {
 	case "msi":
-		args := []string{"/i", filePath}
-		if installArgs == "" {
-			args = append(args, "/qn", "/norestart")
-		} else {
-			args = append(args, strings.Fields(installArgs)...)
-		}
-		cmd = exec.CommandContext(ctx, "msiexec.exe", args...)
+		// /qn and /norestart are appended unconditionally, and install_args is
+		// additive on top of them. They used to be either/or, which turned any
+		// operator-entered argument into a way to make a silent install
+		// interactive: typing /L*v C:\install.log to get a diagnostic log
+		// produced msiexec with no /qn, so the MSI's own UI opened on the
+		// endpoint and blocked on a human, and the /norestart protection was
+		// gone too. install_args is a log path or a property assignment, never
+		// a reason to drop the switches that make the install unattended.
+		args = []string{"/i", filePath, "/qn", "/norestart"}
+		args = append(args, splitArgs(installArgs)...)
+		name = "msiexec.exe"
 
 	case "exe":
 		// A bare .exe run with no switches is how a GUI installer escapes to the
@@ -39,48 +43,44 @@ func (r *windowsRunner) Run(ctx context.Context, filePath, packageType, installA
 		// install_args for exe at upload, so an empty value here means the package
 		// predates that rule; refuse it rather than open a dialog on someone's
 		// desktop. There is no safe universal silent switch -- NSIS wants /S,
-		// Inno Setup wants /VERYSILENT, WinRAR's SFX module wants /s -- so the
-		// flags have to come from the package.
-		if installArgs == "" {
+		// Inno Setup wants /VERYSILENT /SUPPRESSMSGBOXES /NORESTART, WinRAR's SFX
+		// module wants /s -- so the flags have to come with the package. That is
+		// the general shape of this whole feature: the agent knows how to run a
+		// package silently, not which switch silences a given package, and every
+		// new package type an operator uploads has to bring its own flags.
+		//
+		// Emptiness is tested on the parsed slice, not on the raw string.
+		// installArgs of "   " is not empty but splitArgs returns nothing for
+		// it, and launching bare is the exact failure this guard exists to
+		// stop -- the upload-time check in the server trims whitespace, but a
+		// package that predates that rule can still reach here.
+		args = splitArgs(installArgs)
+		if len(args) == 0 {
 			return -1, "", fmt.Errorf(
-				"no silent-install arguments for %s: an .exe package must supply them " +
-					"(for example /S, /VERYSILENT /SUPPRESSMSGBOXES /NORESTART, or /s for a WinRAR SFX), " +
+				"no silent-install arguments for %s: an .exe package must supply them "+
+					"(for example /S, /VERYSILENT /SUPPRESSMSGBOXES /NORESTART, or /s for a WinRAR SFX), "+
 					"otherwise it opens an interactive window on the endpoint", filepath.Base(filePath))
 		}
-		cmd = exec.CommandContext(ctx, filePath, strings.Fields(installArgs)...)
+		name = filePath
 
 	case "script", "ps1":
-		args := []string{"-ExecutionPolicy", "Bypass", "-NoProfile", "-NonInteractive", "-File", filePath}
+		name = "powershell.exe"
+		args = []string{"-ExecutionPolicy", "Bypass", "-NoProfile", "-NonInteractive", "-File", filePath}
 		if installArgs != "" {
-			args = append(args, strings.Fields(installArgs)...)
+			args = append(args, splitArgs(installArgs)...)
 		}
-		cmd = exec.CommandContext(ctx, "powershell.exe", args...)
 
 	case "bat", "cmd":
-		args := []string{"/c", filePath}
+		name = "cmd.exe"
+		args = []string{"/c", filePath}
 		if installArgs != "" {
-			args = append(args, strings.Fields(installArgs)...)
+			args = append(args, splitArgs(installArgs)...)
 		}
-		cmd = exec.CommandContext(ctx, "cmd.exe", args...)
 
 	default:
 		return -1, "", fmt.Errorf("unsupported windows package type: %s", packageType)
 	}
 
-	outBytes, err := cmd.CombinedOutput()
-	outStr := decodeOutput(outBytes)
-
-	if err == nil {
-		return 0, outStr, nil
-	}
-
-	var exitErr *exec.ExitError
-	if errors.As(err, &exitErr) {
-		if status, ok := exitErr.Sys().(syscall.WaitStatus); ok {
-			return status.ExitStatus(), outStr, err
-		}
-		return exitErr.ExitCode(), outStr, err
-	}
-
-	return -1, outStr, err
+	res := runProcess(ctx, name, args)
+	return res.exitCode, decodeOutput([]byte(res.output)), res.err
 }

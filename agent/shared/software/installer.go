@@ -202,8 +202,16 @@ func ExecuteInstall(ctx context.Context, serverURL, deviceID, deviceSecret strin
 	})
 
 	// 5. Execute installer
+	//
+	// The deadline covers the process only. The download above has its own
+	// 30-minute HTTP client, and the two budgets are unrelated: a slow mirror
+	// should not eat the installer's time, and a hung installer should not be
+	// reported as a network problem.
+	runCtx, cancelRun := taskContext(ctx)
+	defer cancelRun()
+
 	runner := DefaultRunner()
-	exitCode, output, runErr := runner.Run(ctx, tempPath, payload.PackageType, payload.InstallArgs)
+	exitCode, output, runErr := runner.Run(runCtx, tempPath, payload.PackageType, payload.InstallArgs)
 	_ = os.Remove(tempPath) // Clean up temp file immediately
 
 	isSuccess := false

@@ -188,7 +188,11 @@ export interface DeploymentTaskDTO {
   deployment_id: string
   package_id: string
   device_id: string
-  status: 'pending' | 'dispatched' | 'downloading' | 'installing' | 'success' | 'failed'
+  // 'failed_lost' is terminal but means something different from 'failed':
+  // the agent stopped reporting before the task finished, so the package's
+  // state on that endpoint is unknown rather than rejected. The server sets it
+  // when an offline device still has a task in a running state.
+  status: 'pending' | 'dispatched' | 'downloading' | 'installing' | 'success' | 'failed' | 'failed_lost'
   exit_code?: number | null
   output_log?: string | null
   error_message?: string | null

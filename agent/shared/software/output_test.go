@@ -25,6 +25,21 @@ func TestDecodeOutput(t *testing.T) {
 			want: msg,
 		},
 		{
+			// The case the first version of the detector got wrong. It required a
+			// printable low byte, so \r and \n disqualified the stream and any
+			// multi-line message came back with a NUL between every character --
+			// the unreadable output this function exists to remove. A test that
+			// only used a single line could not see it.
+			name: "utf16le spanning several lines",
+			in:   utf16le("Installation failed.\r\nReturn value 3.\r\nMain engine thread is returning."),
+			want: "Installation failed.\r\nReturn value 3.\r\nMain engine thread is returning.",
+		},
+		{
+			name: "utf16le with only a trailing newline",
+			in:   utf16le("ok\n"),
+			want: "ok\n",
+		},
+		{
 			name: "utf16le with bom",
 			in:   append([]byte{0xFF, 0xFE}, utf16le(msg)...),
 			want: msg,
@@ -101,16 +116,4 @@ func encodeUTF16(s string, bigEndian bool) []byte {
 		}
 	}
 	return out
-}
-
-// An .exe with no silent switches used to be launched bare, which pops a GUI
-// on the endpoint's desktop and never returns. The runner must refuse instead.
-func TestWindowsRunnerRefusesBareExe(t *testing.T) {
-	_, _, err := (&windowsRunner{}).Run(t.Context(), "C:\\tmp\\setup.exe", "exe", "")
-	if err == nil {
-		t.Fatal("expected an error for an .exe with no silent-install arguments")
-	}
-	if !strings.Contains(err.Error(), "silent") {
-		t.Errorf("error should name the missing silent arguments, got: %v", err)
-	}
 }

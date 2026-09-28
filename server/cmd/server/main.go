@@ -290,6 +290,12 @@ func buildServer(cfg config.Config, database *sqlx.DB) (*http.Server, func()) {
 	// Background sweeper: mark devices whose agents went silent as offline.
 	go runOfflineSweep(database, hub, cfg.AgentOfflineAfter)
 
+	// Deployment tasks whose agent died mid-install never get a final report:
+	// the agent posts progress over HTTP from a goroutine, and a logout, an
+	// agent update, or a pulled power cord all end that goroutine silently. This
+	// reaps them so a rollout does not read as 'still running' forever.
+	go runDeploymentSweep(softRepo)
+
 	// Periodic online database backups. VACUUM INTO takes a consistent
 	// snapshot without stopping the server, so a failed backup is logged but
 	// never fatal.
@@ -409,10 +415,38 @@ func runOfflineSweep(d *sqlx.DB, hub *transport.Hub, threshold time.Duration) {
 	}
 }
 
+// runDeploymentSweep closes out deployment tasks whose agent vanished.
+//
+// A software task reports progress by POSTing to the server from a goroutine in
+// the agent. Nothing guarantees that goroutine finishes: the agent can be
+// killed, restarted by the update engine mid-install, or lose power. Without
+// this the task row stays in 'installing' forever, its parent deployment never
+// completes, and the console shows a rollout in progress for a machine that was
+// switched off an hour ago.
+//
+// The sweep runs on the same cadence as the offline sweep and after it, so a
+// device is marked offline first and its tasks are reaped on a later tick.
+func runDeploymentSweep(repo *softwaredeployment.Repository) {
+	ticker := time.NewTicker(softwaredeployment.SweepInterval)
+	defer ticker.Stop()
+	for range ticker.C {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		n, err := repo.AbandonOrphanedTasks(ctx, softwaredeployment.AbandonGrace)
+		cancel()
+		if err != nil {
+			log.Warn().Err(err).Msg("deployment sweep: reap orphaned tasks")
+			continue
+		}
+		if n > 0 {
+			log.Warn().Int64("tasks", n).
+				Msg("deployment sweep: marked tasks failed because their agent stopped reporting")
+		}
+	}
+}
+
 // markOfflineBatch flips a batch of devices to offline inside a single
 // transaction, so the cost is one fsync per sweep rather than one per device.
-func markOfflineBatch(d *sqlx.DB, ids []string, now time.Time) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+func markOfflineBatch(d *sqlx.DB, ids []string, now time.Time) {	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	tx, err := d.BeginTxx(ctx, nil)

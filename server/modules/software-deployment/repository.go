@@ -200,7 +200,7 @@ func (r *Repository) ListDeployments(ctx context.Context) ([]SoftwareDeployment,
 			p.version AS package_version,
 			COUNT(t.id) AS total_tasks,
 			COALESCE(SUM(CASE WHEN t.status = 'success' THEN 1 ELSE 0 END), 0) AS success_tasks,
-			COALESCE(SUM(CASE WHEN t.status = 'failed' THEN 1 ELSE 0 END), 0) AS failed_tasks
+			COALESCE(SUM(CASE WHEN t.status IN ('failed', 'failed_lost') THEN 1 ELSE 0 END), 0) AS failed_tasks
 		FROM software_deployments d
 		LEFT JOIN software_packages p ON d.package_id = p.id
 		LEFT JOIN deployment_tasks t ON d.id = t.deployment_id
@@ -225,7 +225,7 @@ func (r *Repository) GetDeployment(ctx context.Context, id string) (SoftwareDepl
 			p.version AS package_version,
 			COUNT(t.id) AS total_tasks,
 			COALESCE(SUM(CASE WHEN t.status = 'success' THEN 1 ELSE 0 END), 0) AS success_tasks,
-			COALESCE(SUM(CASE WHEN t.status = 'failed' THEN 1 ELSE 0 END), 0) AS failed_tasks
+			COALESCE(SUM(CASE WHEN t.status IN ('failed', 'failed_lost') THEN 1 ELSE 0 END), 0) AS failed_tasks
 		FROM software_deployments d
 		LEFT JOIN software_packages p ON d.package_id = p.id
 		LEFT JOIN deployment_tasks t ON d.id = t.deployment_id
@@ -297,15 +297,21 @@ func (r *Repository) syncDeploymentStatus(ctx context.Context, taskID string) er
 	if err := r.db.GetContext(ctx, &depID, query, taskID); err != nil {
 		return err
 	}
+	return r.syncDeploymentStatusByID(ctx, depID)
+}
 
-	// 'done' counts success and failed together because a failed task is still
-	// finished, but the rollup has to know whether anything actually succeeded:
-	// every task failing used to land here with Done == Total and mark the
-	// parent 'completed', so a 0% deployment rendered a green Completed badge.
+// syncDeploymentStatusByID is the rollup for one deployment.
+//
+// 'done' counts success, failed and failed_lost together because all three are
+// terminal, but the rollup has to know whether anything actually succeeded:
+// every task failing used to land here with Done == Total and mark the parent
+// 'completed', so a 0% deployment rendered a green Completed badge. The same
+// now applies to a deployment whose every agent dropped offline.
+func (r *Repository) syncDeploymentStatusByID(ctx context.Context, depID string) error {
 	checkQuery := `
 		SELECT
 			COUNT(*) AS total,
-			COALESCE(SUM(CASE WHEN status IN ('success', 'failed') THEN 1 ELSE 0 END), 0) AS done,
+			COALESCE(SUM(CASE WHEN status IN ('success', 'failed', 'failed_lost') THEN 1 ELSE 0 END), 0) AS done,
 			COALESCE(SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END), 0) AS succeeded
 		FROM deployment_tasks
 		WHERE deployment_id = ?`

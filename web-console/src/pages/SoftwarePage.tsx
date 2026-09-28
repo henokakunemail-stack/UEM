@@ -912,14 +912,14 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
                   className={`status-pill ${
                     t.status === 'success'
                       ? 'online'
-                      : t.status === 'failed'
+                      : t.status === 'failed' || t.status === 'failed_lost'
                         ? 'danger'
                         : t.status === 'installing' || t.status === 'downloading'
                           ? 'primary'
                           : 'offline'
                   }`}
                 >
-                  {t.status}
+                  {t.status === 'failed_lost' ? 'failed (agent lost)' : t.status}
                 </span>
                 {(t.output_log || t.error_message) && (
                   <button

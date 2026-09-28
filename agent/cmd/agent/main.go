@@ -115,12 +115,37 @@ func runAgent(serverURL, enrollToken, credsPath string, heartbeatSecs int) {
 	dispatcher.Register("ping", func(ctx context.Context, command, id string, payload json.RawMessage) any {
 		return map[string]string{"pong": time.Now().Format(time.RFC3339)}
 	})
+
+	// One queue for every package task this device runs, installs and
+	// uninstalls alike. Two installers at once collide through MSI's own service
+	// and produce failures that read like corrupt packages; an uninstall racing
+	// an install of the same product is the same collision, and it is the one an
+	// operator triggers by clicking retry on a slow install.
+	softwareQueue := software.NewTaskQueue()
+	defer softwareQueue.Close()
+
 	dispatcher.Register("software.install", func(ctx context.Context, command, id string, payload json.RawMessage) any {
-		go func() {
+		var p software.InstallPayload
+		// Reject a malformed payload here rather than three goroutines deep, so
+		// the command result tells the server the task will never start instead
+		// of dispatching something that fails silently.
+		if err := json.Unmarshal(payload, &p); err != nil || p.TaskID == "" {
+			log.Error().Err(err).Str("task", p.TaskID).Msg("software install payload rejected")
+			return map[string]string{"status": "rejected", "error": "invalid install payload"}
+		}
+		// The install runs on Background, not the command context: that context
+		// is cancelled when the command's reply is sent, and an installer needs
+		// to outlive the request that started it. The deadline that does apply
+		// is installTimeout, set inside the task where the process is started.
+		if err := softwareQueue.Submit(p.TaskID, "install", func() {
+			defer guardAgentGoroutine("software.install")
 			if err := software.ExecuteInstall(context.Background(), targetServerURL, creds.DeviceID, creds.DeviceSecret, payload); err != nil {
-				log.Error().Err(err).Msg("software install execution error")
+				log.Error().Err(err).Str("task", p.TaskID).Msg("software install execution error")
 			}
-		}()
+		}); err != nil {
+			log.Warn().Err(err).Str("task", p.TaskID).Msg("software install not accepted")
+			return map[string]string{"status": "rejected", "error": err.Error()}
+		}
 		return map[string]string{"status": "dispatched"}
 	})
 
