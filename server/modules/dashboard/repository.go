@@ -97,7 +97,7 @@ func (r *Repository) GetSiteMetrics(ctx context.Context) ([]SiteMetric, error) {
 		GROUP BY site
 		ORDER BY total DESC, site ASC`
 
-	var list []SiteMetric
+	list := []SiteMetric{}
 	if err := r.db.SelectContext(ctx, &list, q); err != nil {
 		return nil, fmt.Errorf("dashboard site metrics: %w", err)
 	}
@@ -121,7 +121,7 @@ func (r *Repository) GetOSMetrics(ctx context.Context) ([]OSMetric, error) {
 		GROUP BY os_name
 		ORDER BY count DESC`
 
-	var list []OSMetric
+	list := []OSMetric{}
 	if err := r.db.SelectContext(ctx, &list, q); err != nil {
 		return nil, fmt.Errorf("dashboard os metrics: %w", err)
 	}
@@ -225,11 +225,13 @@ func (r *Repository) GetRecentActivity(ctx context.Context, limit int) ([]Activi
 		limit = 20
 	}
 	q := `
-		SELECT id, actor_type, actor_id, action, target_id, COALESCE(details, '{}') as details, created_at
+		SELECT id, actor_type, COALESCE(actor_id, '') AS actor_id, action,
+		       COALESCE(target_id, '') AS target_id,
+		       COALESCE(details, '{}') as details, created_at
 		FROM audit_logs
 		ORDER BY created_at DESC
 		LIMIT ?`
-	var items []ActivityItem
+	items := []ActivityItem{}
 	if err := r.db.SelectContext(ctx, &items, q, limit); err != nil {
 		return nil, fmt.Errorf("dashboard recent activity: %w", err)
 	}

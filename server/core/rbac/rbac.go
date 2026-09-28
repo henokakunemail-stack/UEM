@@ -2,20 +2,31 @@ package rbac
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 )
 
+// deny writes the same {"error": ...} shape every handler in this server uses.
+// http.Error would emit text/plain, and the console's request() helper parses
+// JSON — so an RBAC refusal surfaced as "Request failed with HTTP 403" with no
+// explanation of which role would have been accepted.
+func deny(w http.ResponseWriter, code int, msg string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	_ = json.NewEncoder(w).Encode(map[string]string{"error": msg})
+}
+
 // Role levels. Higher = more privileged.
 const (
-	RoleViewer    = "viewer"
+	RoleViewer     = "viewer"
 	RoleTechnician = "technician"
-	RoleAdmin     = "admin"
+	RoleAdmin      = "admin"
 )
 
 var rank = map[string]int{
-	RoleViewer:    1,
+	RoleViewer:     1,
 	RoleTechnician: 2,
-	RoleAdmin:     3,
+	RoleAdmin:      3,
 }
 
 // RequireRole returns middleware allowing roles with rank >= minRole.
@@ -29,12 +40,12 @@ func RequireRole(minRole string) func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			role, _ := r.Context().Value(roleKey{}).(string)
 			if role == "" {
-				http.Error(w, "unauthorized: no role in context", http.StatusForbidden)
+				deny(w, http.StatusForbidden, "unauthorized: no role in context")
 				return
 			}
 			got, ok := rank[role]
 			if !ok || got < minRank {
-				http.Error(w, "forbidden: role '"+role+"' insufficient", http.StatusForbidden)
+				deny(w, http.StatusForbidden, "forbidden: role '"+role+"' insufficient, requires '"+minRole+"' or higher")
 				return
 			}
 			next.ServeHTTP(w, r)

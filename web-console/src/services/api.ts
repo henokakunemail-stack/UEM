@@ -18,8 +18,10 @@ import type {
   ScriptDTO,
   ScheduleDTO,
   TaskRunDTO,
+  DeviceRunDTO,
+  FilterPolicyDTO,
   FilterRuleDTO,
-  DeviceFilterComplianceDTO,
+  DeviceFilterStateDTO,
   AlertIncidentDTO,
   AlertRuleDTO,
   HardwareAssetDTO,
@@ -29,6 +31,15 @@ import type {
   AgentReleaseDTO,
   UpdateCampaignDTO,
   UserDTO,
+  ServerLogResponse,
+  DeviceGroupDTO,
+  MaintenanceJobDTO,
+  MaintenanceProgressDTO,
+  MaintenanceRunResponse,
+  MaintenanceTaskDTO,
+  TaskInfoDTO,
+  RemoteControlMode,
+  RemoteControlSessionDTO,
 } from '../types/api'
 
 const TOKEN_KEY = 'em_access_token'
@@ -116,6 +127,35 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   }
 
   return res.json()
+}
+
+/**
+ * Same auth + 401-refresh path as request(), but returns the raw Response so a
+ * streaming or binary endpoint is never JSON-parsed. Report exports are CSV/JSON
+ * *documents*, not API envelopes, so they cannot go through request<T>.
+ * The caller must check `res.ok` itself — this never throws on a 4xx/5xx.
+ */
+export async function fetchRaw(path: string, init: RequestInit = {}): Promise<Response> {
+  const send = async (): Promise<Response> => {
+    const headers = new Headers(init.headers || {})
+    const token = getStoredToken()
+    if (token) headers.set('Authorization', `Bearer ${token}`)
+    return fetch(path, { ...init, headers })
+  }
+
+  const res = await send()
+  if (res.status !== 401) return res
+
+  const refreshToken = getStoredRefreshToken()
+  if (!refreshToken) return res
+  const refreshRes = await fetch('/api/auth/refresh', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ refresh_token: refreshToken }),
+  })
+  if (!refreshRes.ok) return res
+  setStoredTokens(await refreshRes.json())
+  return send()
 }
 
 export const api = {
@@ -206,6 +246,10 @@ export const api = {
     return request<{ logs: ActivityItem[]; count: number }>('/api/audit-logs')
   },
 
+  async getServerLogs(limit = 200): Promise<ServerLogResponse> {
+    return request<ServerLogResponse>(`/api/logs?limit=${limit}`)
+  },
+
   // Software Deployment APIs
   async getPackages(): Promise<SoftwarePackageDTO[]> {
     return request<SoftwarePackageDTO[]>('/api/software/packages')
@@ -251,7 +295,7 @@ export const api = {
     )
   },
 
-  // Remote Execution APIs (Fase 5)
+  // Remote Execution APIs (Phase 5)
   async runRemoteCommand(
     deviceId: string,
     shell: string,
@@ -279,13 +323,24 @@ export const api = {
     return request<TerminalSessionDTO[]>(`/api/devices/${deviceId}/terminal/sessions`)
   },
 
-  // Patch Management APIs (Fase 6)
+  // Patch Management APIs (Phase 6)
   async getPatchSummary(): Promise<PatchSummaryDTO> {
     return request<PatchSummaryDTO>('/api/patches/summary')
   },
 
-  async getDevicePatches(deviceId: string): Promise<{ patches: PatchDetailDTO[]; total: number; pending: number }> {
-    return request<{ patches: PatchDetailDTO[]; total: number; pending: number }>(`/api/devices/${deviceId}/patches`)
+  // The server returns a bare array here, not a {patches,total} envelope.
+  async getFleetPatches(state = ''): Promise<PatchDetailDTO[]> {
+    const q = state ? `?state=${encodeURIComponent(state)}` : ''
+    return request<PatchDetailDTO[]>(`/api/patches${q}`)
+  },
+
+  // `state` is passed through to the server, which filters on
+  // device_patches.installed_state (patch-management/repository.go). The
+  // console needs 'missing': without it a fully-patched device still returns
+  // its installed rows, and the page presents them as pending work.
+  async getDevicePatches(deviceId: string, state = 'missing'): Promise<PatchDetailDTO[]> {
+    const q = state ? `?state=${encodeURIComponent(state)}` : ''
+    return request<PatchDetailDTO[]>(`/api/devices/${deviceId}/patches${q}`)
   },
 
   async scanDevicePatches(deviceId: string): Promise<{ status: string }> {
@@ -294,33 +349,38 @@ export const api = {
     })
   },
 
-  async installDevicePatches(deviceId: string, patchIds: string[], rebootPolicy = 'suppress'): Promise<{ status: string; job_id?: string }> {
+  async installDevicePatches(deviceId: string, patchIds: string[], rebootPolicy = 'no_reboot'): Promise<{ status: string; job_id?: string }> {
     return request<{ status: string; job_id?: string }>(`/api/devices/${deviceId}/patches/install`, {
       method: 'POST',
       body: JSON.stringify({ patch_ids: patchIds, reboot_policy: rebootPolicy }),
     })
   },
 
-  // Task Scheduler & Script Repository APIs (Fase 10)
+  // Task Scheduler & Script Repository APIs (Phase 10)
   async getScripts(): Promise<ScriptDTO[]> {
-    return request<ScriptDTO[]>('/api/scheduler/scripts')
+    return request<ScriptDTO[]>('/api/scripts')
   },
 
-  async createScript(data: { name: string; description: string; shell_type: string; script_content: string }): Promise<ScriptDTO> {
-    return request<ScriptDTO>('/api/scheduler/scripts', {
+  async createScript(data: {
+    name: string
+    description: string
+    script_type: string
+    script_content: string
+  }): Promise<ScriptDTO> {
+    return request<ScriptDTO>('/api/scripts', {
       method: 'POST',
       body: JSON.stringify(data),
     })
   },
 
   async deleteScript(id: string): Promise<{ status: string }> {
-    return request<{ status: string }>(`/api/scheduler/scripts/${id}`, {
+    return request<{ status: string }>(`/api/scripts/${id}`, {
       method: 'DELETE',
     })
   },
 
   async getSchedules(): Promise<ScheduleDTO[]> {
-    return request<ScheduleDTO[]>('/api/scheduler/schedules')
+    return request<ScheduleDTO[]>('/api/schedules')
   },
 
   async createSchedule(data: {
@@ -329,58 +389,119 @@ export const api = {
     target_type: string
     target_id: string
     schedule_type: string
-    cron_expr?: string
-    interval_seconds?: number
+    // One field for both trigger shapes: a seconds count for `interval`, a
+    // cron expression for `cron`, parsed per `schedule_type`.
+    schedule_expr: string
+    // The server decodes this into a plain bool with no omitempty, so omitting
+    // it persisted false — every schedule the console created was born paused,
+    // while the toast said "created and activated" and the list showed Paused.
+    is_enabled: boolean
   }): Promise<ScheduleDTO> {
-    return request<ScheduleDTO>('/api/scheduler/schedules', {
+    return request<ScheduleDTO>('/api/schedules', {
       method: 'POST',
       body: JSON.stringify(data),
     })
   },
 
   async getTaskRuns(): Promise<TaskRunDTO[]> {
-    return request<TaskRunDTO[]>('/api/scheduler/runs')
+    return request<TaskRunDTO[]>('/api/schedules/runs')
   },
 
-  // Network & Web Filter APIs (Fase 12)
-  async getFilterRules(): Promise<FilterRuleDTO[]> {
-    return request<FilterRuleDTO[]>('/api/network-filter/rules')
+  async getRunDeviceRuns(runId: string): Promise<DeviceRunDTO[]> {
+    return request<DeviceRunDTO[]>(`/api/schedules/runs/${runId}/devices`)
   },
 
-  async createFilterRule(data: {
+  // Network & Web Filter APIs (Phase 12)
+  // The server models this as policy -> rules: a rule belongs to a policy, the
+  // policy carries the target scope, and sync happens per device. The console
+  // previously called /api/network-filter/{rules,apply,compliance}, none of
+  // which the server ever registered.
+  async getFilterPolicies(): Promise<FilterPolicyDTO[]> {
+    // The server returns an envelope, not a bare array. Typing this as
+    // FilterPolicyDTO[] compiled fine and then handed the page an object, so
+    // NetworkFilterPage's `list.some(...)` threw and blanked the whole page.
+    const res = await request<{ policies: FilterPolicyDTO[]; count: number }>(
+      '/api/filter/policies'
+    )
+    return res.policies || []
+  },
+
+  async createFilterPolicy(data: {
+    name: string
+    description: string
     target_type: string
     target_id: string
-    rule_type: string
-    domain_pattern: string
-    category: string
-    action: string
-  }): Promise<FilterRuleDTO> {
-    return request<FilterRuleDTO>('/api/network-filter/rules', {
+    priority: number
+  }): Promise<FilterPolicyDTO> {
+    return request<FilterPolicyDTO>('/api/filter/policies', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    })
+  },
+
+  async updateFilterPolicy(
+    id: string,
+    data: { name?: string; description?: string; is_enabled?: boolean; priority?: number }
+  ): Promise<FilterPolicyDTO> {
+    return request<FilterPolicyDTO>(`/api/filter/policies/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    })
+  },
+
+  async deleteFilterPolicy(id: string): Promise<{ status: string }> {
+    return request<{ status: string }>(`/api/filter/policies/${id}`, {
+      method: 'DELETE',
+    })
+  },
+
+  async getFilterRules(policyId: string): Promise<FilterRuleDTO[]> {
+    const res = await request<{ rules: FilterRuleDTO[]; count: number }>(
+      `/api/filter/policies/${policyId}/rules`
+    )
+    return res.rules || []
+  },
+
+  async createFilterRule(
+    policyId: string,
+    data: { rule_type: string; pattern: string; category: string; action: string }
+  ): Promise<FilterRuleDTO> {
+    return request<FilterRuleDTO>(`/api/filter/policies/${policyId}/rules`, {
       method: 'POST',
       body: JSON.stringify(data),
     })
   },
 
   async deleteFilterRule(id: string): Promise<{ status: string }> {
-    return request<{ status: string }>(`/api/network-filter/rules/${id}`, {
+    return request<{ status: string }>(`/api/filter/rules/${id}`, {
       method: 'DELETE',
     })
   },
 
-  async applyFilterPolicies(): Promise<{ status: string; version: string; rule_count: number }> {
-    return request<{ status: string; version: string; rule_count: number }>('/api/network-filter/apply', {
-      method: 'POST',
-    })
+  // Push the effective rule set to one device over its live socket. There is no
+  // fleet-wide "apply": enforcement is per device, so the caller loops.
+  async syncDeviceFilter(
+    deviceId: string
+  ): Promise<{ status: string; policy_version: string; effective_rules: number }> {
+    return request<{ status: string; policy_version: string; effective_rules: number }>(
+      `/api/devices/${deviceId}/filter/sync`,
+      { method: 'POST' }
+    )
   },
 
-  async getFilterCompliance(): Promise<DeviceFilterComplianceDTO[]> {
-    return request<DeviceFilterComplianceDTO[]>('/api/network-filter/compliance')
+  async getDeviceFilterState(deviceId: string): Promise<DeviceFilterStateDTO> {
+    return request<DeviceFilterStateDTO>(`/api/devices/${deviceId}/filter/state`)
   },
 
-  // Alerting & Incidents APIs (Fase 9)
+  // Alerting & Incidents APIs (Phase 9)
   async getAlertIncidents(status = ''): Promise<{ incidents: AlertIncidentDTO[]; count: number }> {
     const q = status ? `?status=${status}` : ''
-    return request<{ incidents: AlertIncidentDTO[]; count: number }>(`/api/alerts/incidents${q}`)
+    // The server writes the bare slice (alerting/handler.go:186), not an
+    // envelope. Destructuring `.incidents` off an Array gave undefined, so the
+    // page reported "no incidents" while the server had them — a wrong answer
+    // with no error anywhere, which is worse than a crash.
+    const list = await request<AlertIncidentDTO[]>(`/api/alerts/incidents${q}`)
+    return { incidents: list || [], count: list?.length ?? 0 }
   },
 
   async getAlertRules(): Promise<AlertRuleDTO[]> {
@@ -399,7 +520,7 @@ export const api = {
     })
   },
 
-  // Asset & License Management APIs (Fase 14)
+  // Asset & License Management APIs (Phase 14)
   async getAssets(site = '', status = ''): Promise<HardwareAssetDTO[]> {
     const params = new URLSearchParams()
     if (site) params.append('site', site)
@@ -454,7 +575,7 @@ export const api = {
     })
   },
 
-  // Agent Self-Update APIs (Fase 13)
+  // Agent Self-Update APIs (Phase 13)
   async getAgentReleases(): Promise<AgentReleaseDTO[]> {
     return request<AgentReleaseDTO[]>('/api/agent-updates/releases')
   },
@@ -484,6 +605,15 @@ export const api = {
     })
   },
 
+  async startUpdateCampaign(
+    id: string,
+  ): Promise<{ status: string; total_targets: number; dispatched_live: number }> {
+    return request<{ status: string; total_targets: number; dispatched_live: number }>(
+      `/api/agent-updates/campaigns/${id}/start`,
+      { method: 'POST' },
+    )
+  },
+
   async dispatchDeviceUpdate(deviceId: string, targetVersion: string): Promise<{ status: string; task_id: string }> {
     return request<{ status: string; task_id: string }>(`/api/devices/${deviceId}/update/dispatch`, {
       method: 'POST',
@@ -491,7 +621,71 @@ export const api = {
     })
   },
 
-  // User Management APIs (Fase 7)
+  // Device Maintenance APIs (Phase 15)
+  //
+  // FE-AUTHORED CONTRACT. These paths are the console's side of the contract; the
+  // server handler for this module does not exist yet, so anything listed under
+  // ASSUMED below must match what server/modules/maintenance/handler.go ends up
+  // registering, or TestEveryConsoleAPIPathIsRegistered fails on a path the
+  // console calls and the server never mounts.
+  //   ASSUMED  GET  /api/maintenance/tasks            -> bare array
+  //   ASSUMED  POST /api/maintenance/jobs             -> {job,total_targets,dispatched_live,skipped}
+  //   ASSUMED  GET  /api/maintenance/jobs/{id}/progress -> JobProgress object
+  //   ASSUMED  GET  /api/maintenance/jobs/{id}/tasks   -> bare array
+  // Not assumed, already registered elsewhere: GET /api/groups
+  // (device-management/inventory_handler.go:220) is the real group endpoint and
+  // the target picker binds to it, not to an invented maintenance groups route.
+
+  // The server's own TaskCatalog. Fetched rather than hardcoded: the six labels
+  // live in server/modules/maintenance/model.go, and a copy here would drift the
+  // moment a task type is added or renamed.
+  async getMaintenanceTaskCatalog(): Promise<TaskInfoDTO[]> {
+    return request<TaskInfoDTO[]>('/api/maintenance/tasks')
+  },
+
+  async getMaintenanceJobs(limit = 50, offset = 0): Promise<MaintenanceJobDTO[]> {
+    return request<MaintenanceJobDTO[]>(`/api/maintenance/jobs?limit=${limit}&offset=${offset}`)
+  },
+
+  // No getMaintenanceJob(id) here on purpose. The job row the detail modal
+  // needs is already held by openDetail from the list row it was clicked on, and
+  // every field the modal renders that can change mid-run comes from /progress
+  // or /tasks. A single-job read would be a sixth route whose only purpose is to
+  // satisfy a method nobody calls.
+
+  async getMaintenanceJobProgress(id: string): Promise<MaintenanceProgressDTO> {
+    return request<MaintenanceProgressDTO>(`/api/maintenance/jobs/${id}/progress`)
+  },
+
+  async getMaintenanceJobTasks(jobId: string): Promise<MaintenanceTaskDTO[]> {
+    return request<MaintenanceTaskDTO[]>(`/api/maintenance/jobs/${jobId}/tasks`)
+  },
+
+  // `skipped` is a top-level field, not inside the job: a job targeting the
+  // whole fleet on a weekend comes back with almost every device skipped, and
+  // the operator needs to be told that in the toast rather than inferring it
+  // from a completed count of zero.
+  async runMaintenance(data: {
+    name: string
+    task_type: string
+    target_type: 'device' | 'group' | 'all'
+    target_id: string
+  }): Promise<MaintenanceRunResponse> {
+    return request<MaintenanceRunResponse>('/api/maintenance/jobs', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    })
+  },
+
+  // Device groups for the group target picker. The server answers an envelope,
+  // not a bare array (inventory_handler.go:340), so the unwrap happens here
+  // rather than in the page — same reason getFilterPolicies does it.
+  async getDeviceGroups(): Promise<DeviceGroupDTO[]> {
+    const res = await request<{ groups: DeviceGroupDTO[]; count: number }>('/api/groups')
+    return res.groups || []
+  },
+
+  // User Management APIs (Phase 7)
   async getUsers(): Promise<UserDTO[]> {
     return request<UserDTO[]>('/api/users')
   },
@@ -510,9 +704,11 @@ export const api = {
     })
   },
 
+  // The server soft-deactivates rather than erasing the row, so the audit
+  // trail survives. Its route is DELETE /api/users/{id}.
   async deactivateUser(id: string): Promise<{ status: string }> {
-    return request<{ status: string }>(`/api/users/${id}/deactivate`, {
-      method: 'POST',
+    return request<{ status: string }>(`/api/users/${id}`, {
+      method: 'DELETE',
     })
   },
 
@@ -521,6 +717,38 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify({ new_password: password }),
     })
+  },
+
+  // Remote control. The session lifecycle is REST; the live desktop is a
+  // WebSocket the modal opens itself, because a binary frame stream does not
+  // belong in the JSON `request` helper.
+
+  // Starts a relay session and dispatches `rc.start` to the agent. Rejects with
+  // 409 when the device is offline, so the caller can say "device is offline"
+  // rather than "could not connect".
+  async startRemoteControlSession(
+    deviceId: string,
+    mode: RemoteControlMode
+  ): Promise<RemoteControlSessionDTO> {
+    return request<RemoteControlSessionDTO>(`/api/devices/${deviceId}/remotecontrol/session`, {
+      method: 'POST',
+      body: JSON.stringify({ mode }),
+    })
+  },
+
+  async stopRemoteControlSession(deviceId: string, sessionId: string): Promise<{ status: string }> {
+    return request<{ status: string }>(
+      `/api/devices/${deviceId}/remotecontrol/sessions/${sessionId}/stop`,
+      { method: 'POST' }
+    )
+  },
+
+  // Session history for a device, joined with hostname and operator name by the
+  // repository. Viewer-visible, unlike starting a session.
+  async getRemoteControlSessions(deviceId: string, limit = 20): Promise<RemoteControlSessionDTO[]> {
+    return request<RemoteControlSessionDTO[]>(
+      `/api/devices/${deviceId}/remotecontrol/sessions?limit=${limit}`
+    )
   },
 
   // Reports Export URL Helper

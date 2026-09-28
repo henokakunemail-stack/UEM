@@ -1,4 +1,4 @@
--- Fase 1: core schema. Users, device registry, audit log, agent command queue.
+-- Phase 1: core schema. Users, device registry, audit log, agent command queue.
 
 CREATE TABLE IF NOT EXISTS users (
   id            TEXT PRIMARY KEY,

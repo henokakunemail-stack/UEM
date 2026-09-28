@@ -1,5 +1,5 @@
 -- 0006_patch_management.sql
--- Fase 6: Patch Management & OS Updates
+-- Phase 6: Patch Management & OS Updates
 
 CREATE TABLE IF NOT EXISTS device_patches (
     id TEXT PRIMARY KEY,

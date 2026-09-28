@@ -25,9 +25,9 @@ type WSHandler struct {
 	offlineAfter time.Duration
 	flusher      *HeartbeatFlusher
 	// inventory accepts agent collection reports. Optional: nil means reports are
-	// logged and dropped, which keeps Fase 1 deployments working unchanged.
+	// logged and dropped, which keeps Phase 1 deployments working unchanged.
 	inventory InventoryReceiver
-	// terminal accepts interactive terminal data from agents (Fase 5).
+	// terminal accepts interactive terminal data from agents (Phase 5).
 	terminal TerminalReceiver
 	// setCapabilities stores the capability list advertised in hello.
 	setCapabilities func(ctx context.Context, deviceID, capabilitiesJSON string) error
@@ -47,7 +47,7 @@ type InventoryReceiver interface {
 }
 
 // NewWSHandler builds a handler with no inventory receiver; use
-// (WSHandler).WithInventory to enable Fase 2 collection.
+// (WSHandler).WithInventory to enable Phase 2 collection.
 func NewWSHandler(hub *Hub, repo *devicemgmt.Repository, db *sqlx.DB, offlineAfter time.Duration) *WSHandler {
 	var flusher *HeartbeatFlusher
 	if db != nil {
@@ -62,7 +62,7 @@ func NewWSHandler(hub *Hub, repo *devicemgmt.Repository, db *sqlx.DB, offlineAft
 	}
 }
 
-// WithInventory attaches the Fase 2 inventory receiver so agent collection
+// WithInventory attaches the Phase 2 inventory receiver so agent collection
 // reports are persisted instead of dropped.
 func (h *WSHandler) WithInventory(r InventoryReceiver) *WSHandler {
 	h.inventory = r
@@ -72,7 +72,7 @@ func (h *WSHandler) WithInventory(r InventoryReceiver) *WSHandler {
 	return h
 }
 
-// WithTerminal attaches the Fase 5 terminal receiver for interactive shell streaming.
+// WithTerminal attaches the Phase 5 terminal receiver for interactive shell streaming.
 func (h *WSHandler) WithTerminal(t TerminalReceiver) *WSHandler {
 	h.terminal = t
 	return h
@@ -89,7 +89,7 @@ func (h *WSHandler) WithOriginChecker(check auth.OriginChecker) *WSHandler {
 }
 
 // capabilitiesSetter is implemented by the inventory receiver when it can store
-// the capability list. Discovered by assertion so the Fase 1-only wiring keeps
+// the capability list. Discovered by assertion so the Phase 1-only wiring keeps
 // working without it.
 type capabilitiesSetter interface {
 	SetCapabilities(ctx context.Context, deviceID, capabilitiesJSON string) error
@@ -349,7 +349,7 @@ func (h *WSHandler) Close() {
 }
 
 func (h *WSHandler) handleCommandResult(ctx context.Context, c *Conn, env Envelope) {
-	// Fase 1 only records the result; full command tracking comes with the queue.
+	// Phase 1 only records the result; full command tracking comes with the queue.
 	var resultJSON string
 	if env.Result != nil {
 		b, _ := json.Marshal(env.Result)

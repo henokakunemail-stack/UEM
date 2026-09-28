@@ -73,7 +73,7 @@ func (r *Repository) ListExecutions(ctx context.Context, deviceID string, limit 
 		ORDER BY e.started_at DESC
 		LIMIT ?`
 
-	var rows []RemoteExecution
+	rows := []RemoteExecution{}
 	if err := r.db.SelectContext(ctx, &rows, query, deviceID, limit); err != nil {
 		return nil, err
 	}
@@ -150,7 +150,7 @@ func (r *Repository) ListTerminalSessions(ctx context.Context, deviceID string, 
 		ORDER BY t.created_at DESC
 		LIMIT ?`
 
-	var rows []TerminalSession
+	rows := []TerminalSession{}
 	if err := r.db.SelectContext(ctx, &rows, query, deviceID, limit); err != nil {
 		return nil, err
 	}

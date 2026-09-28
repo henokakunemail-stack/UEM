@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"path/filepath"
 	"time"
 
 	"github.com/jmoiron/sqlx"
@@ -22,6 +23,40 @@ type AgentRelease struct {
 	IsActive       bool      `db:"is_active" json:"is_active"`
 	UploadedBy     string    `db:"uploaded_by" json:"uploaded_by"`
 	CreatedAt      time.Time `db:"created_at" json:"created_at"`
+}
+
+// AgentReleaseDTO is the console-facing shape of a release. It is separate from
+// AgentRelease on purpose: FilePath is a server-side absolute path that
+// http.ServeFile needs, but shipping it to the browser would leak the server's
+// directory layout for no benefit. The console only ever needs the name.
+type AgentReleaseDTO struct {
+	ID             string    `json:"id"`
+	Version        string    `json:"version"`
+	OSName         string    `json:"os_name"`
+	Arch           string    `json:"arch"`
+	FileName       string    `json:"file_name"`
+	FileSize       int64     `json:"file_size"`
+	SHA256Checksum string    `json:"sha256_checksum"`
+	Changelog      string    `json:"changelog"`
+	IsActive       bool      `json:"is_active"`
+	UploadedBy     string    `json:"uploaded_by"`
+	CreatedAt      time.Time `json:"created_at"`
+}
+
+func (a AgentRelease) toDTO() AgentReleaseDTO {
+	return AgentReleaseDTO{
+		ID:             a.ID,
+		Version:        a.Version,
+		OSName:         a.OSName,
+		Arch:           a.Arch,
+		FileName:       filepath.Base(a.FilePath),
+		FileSize:       a.FileSize,
+		SHA256Checksum: a.SHA256Checksum,
+		Changelog:      a.Changelog,
+		IsActive:       a.IsActive,
+		UploadedBy:     a.UploadedBy,
+		CreatedAt:      a.CreatedAt,
+	}
 }
 
 type UpdateCampaign struct {
@@ -114,7 +149,7 @@ func (r *Repository) GetActiveReleaseForDevice(ctx context.Context, targetVersio
 }
 
 func (r *Repository) ListReleases(ctx context.Context) ([]*AgentRelease, error) {
-	var list []*AgentRelease
+	list := []*AgentRelease{}
 	err := r.db.SelectContext(ctx, &list, `SELECT * FROM agent_releases ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, fmt.Errorf("list releases: %w", err)
@@ -165,7 +200,7 @@ func (r *Repository) GetCampaign(ctx context.Context, id string) (*UpdateCampaig
 }
 
 func (r *Repository) ListCampaigns(ctx context.Context) ([]*UpdateCampaign, error) {
-	var list []*UpdateCampaign
+	list := []*UpdateCampaign{}
 	err := r.db.SelectContext(ctx, &list, `SELECT * FROM update_campaigns ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, fmt.Errorf("list campaigns: %w", err)

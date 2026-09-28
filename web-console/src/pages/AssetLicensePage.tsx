@@ -2,8 +2,8 @@ import React, { useEffect, useState } from 'react'
 import {
   AlertTriangle,
   Award,
+  Cpu,
   DollarSign,
-  HardDrive,
   Key,
   Laptop,
   Plus,
@@ -15,6 +15,10 @@ import {
 } from 'lucide-react'
 import { api } from '../services/api'
 import { useToast } from '../context/ToastContext'
+import { usePermission } from '../hooks/usePermission'
+import { DataTable } from '../components/ui/DataTable'
+import { ConfirmDialog } from '../components/ui/ConfirmDialog'
+import { Modal } from '../components/ui/Modal'
 import type {
   AssetSummaryDTO,
   HardwareAssetDTO,
@@ -22,8 +26,20 @@ import type {
   SoftwareLicenseDTO,
 } from '../types/api'
 
-export const AssetLicensePage: React.FC = () => {
-  const [subTab, setSubTab] = useState<'hardware' | 'licenses'>('hardware')
+export type AssetTab = 'hardware' | 'licenses'
+
+interface AssetLicensePageProps {
+  activeTab: AssetTab
+  onTabChange: (tab: AssetTab) => void
+}
+
+export const AssetLicensePage: React.FC<AssetLicensePageProps> = ({ activeTab: subTab, onTabChange: setSubTab }) => {
+  // The server's gates differ per action here, so mirror them exactly rather
+  // than using one blanket "can edit" flag: registering an asset needs
+  // technician, but licences and deletions are admin-only.
+  const { can } = usePermission()
+  const canRegister = can('technician')
+  const canAdmin = can('admin')
   const [assets, setAssets] = useState<HardwareAssetDTO[]>([])
   const [summary, setSummary] = useState<AssetSummaryDTO | null>(null)
   const [licenses, setLicenses] = useState<SoftwareLicenseDTO[]>([])
@@ -33,6 +49,11 @@ export const AssetLicensePage: React.FC = () => {
   // Modals
   const [isAssetModalOpen, setIsAssetModalOpen] = useState(false)
   const [isLicenseModalOpen, setIsLicenseModalOpen] = useState(false)
+  // Destructive deletes go through a stateful dialog instead of window.confirm
+  // so the pending state can block a double-submit while the request is in
+  // flight. Null = no dialog open; the row id is what gets deleted on confirm.
+  const [assetPendingDelete, setAssetPendingDelete] = useState<{ id: string; tag: string } | null>(null)
+  const [deletingAsset, setDeletingAsset] = useState(false)
   const [msg, setMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
   const toast = useToast()
 
@@ -112,18 +133,23 @@ export const AssetLicensePage: React.FC = () => {
     }
   }
 
-  const handleDeleteAsset = async (id: string, tag: string) => {
-    if (!confirm(`Delete hardware asset '${tag}'?`)) return
+  const handleDeleteAsset = async () => {
+    if (!assetPendingDelete) return
+    const { id, tag } = assetPendingDelete
+    setDeletingAsset(true)
     try {
       await api.deleteAsset(id)
       const infoText = `Asset '${tag}' removed from inventory.`
       setMsg({ type: 'success', text: infoText })
       toast.info(infoText, 'Asset Removed')
+      setAssetPendingDelete(null)
       loadData()
     } catch (err: any) {
       const errorText = err.message || 'Failed to delete asset'
       setMsg({ type: 'error', text: errorText })
       toast.error(errorText, 'Deletion Failed')
+    } finally {
+      setDeletingAsset(false)
     }
   }
 
@@ -162,16 +188,16 @@ export const AssetLicensePage: React.FC = () => {
         </div>
         <div className="header-controls">
           <button type="button" className="btn btn-secondary" onClick={loadData} disabled={loading}>
-            <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
+            <RefreshCw size={16} className={loading ? 'spinning' : ''} />
             <span>Refresh</span>
           </button>
-          {subTab === 'hardware' && (
+          {subTab === 'hardware' && canRegister && (
             <button type="button" className="btn btn-primary" onClick={() => setIsAssetModalOpen(true)}>
               <Plus size={16} />
               <span>Register Hardware Asset</span>
             </button>
           )}
-          {subTab === 'licenses' && (
+          {subTab === 'licenses' && canAdmin && (
             <button type="button" className="btn btn-primary" onClick={() => setIsLicenseModalOpen(true)}>
               <Plus size={16} />
               <span>Add Software License</span>
@@ -183,7 +209,7 @@ export const AssetLicensePage: React.FC = () => {
       {msg && (
         <div className={`alert-banner ${msg.type === 'error' ? 'alert-error' : 'alert-success'}`}>
           <span>{msg.text}</span>
-          <button type="button" onClick={() => setMsg(null)} className="close-btn">
+          <button type="button" onClick={() => setMsg(null)} className="close-btn" aria-label="Dismiss message">
             <X size={14} />
           </button>
         </div>
@@ -237,7 +263,7 @@ export const AssetLicensePage: React.FC = () => {
           className={`tab-btn ${subTab === 'hardware' ? 'active' : ''}`}
           onClick={() => setSubTab('hardware')}
         >
-          <HardDrive size={16} />
+          <Cpu size={16} />
           <span>Hardware Assets (HAM)</span>
         </button>
         <button
@@ -253,7 +279,7 @@ export const AssetLicensePage: React.FC = () => {
       {/* Tab 1: Hardware Assets */}
       {subTab === 'hardware' && (
         <div className="table-card">
-          <div className="table-responsive">
+          <DataTable label="Hardware assets">
             <table className="data-table">
               <thead>
                 <tr>
@@ -283,7 +309,7 @@ export const AssetLicensePage: React.FC = () => {
                       <td>
                         <div>
                           <span className="font-semibold text-main">{a.model_name}</span>
-                          <span className="text-xs text-dim block">{a.vendor}</span>
+                          <span className="text-sm text-dim">{a.vendor}</span>
                         </div>
                       </td>
                       <td className="font-mono text-sm">{a.serial_number || '—'}</td>
@@ -296,35 +322,40 @@ export const AssetLicensePage: React.FC = () => {
                         </span>
                       </td>
                       <td>
-                        <button
-                          type="button"
-                          className="btn-action text-danger"
-                          onClick={() => handleDeleteAsset(a.id, a.asset_tag)}
-                          title="Delete asset record"
-                        >
-                          <Trash2 size={14} />
-                          <span>Delete</span>
-                        </button>
+                        {canAdmin && (
+                          <button
+                            type="button"
+                            className="btn-action text-danger"
+                            onClick={() => setAssetPendingDelete({ id: a.id, tag: a.asset_tag })}
+                            title="Delete asset record"
+                          >
+                            <Trash2 size={14} />
+                            <span>Delete</span>
+                          </button>
+                        )}
                       </td>
                     </tr>
                   ))
                 )}
               </tbody>
             </table>
-          </div>
+          </DataTable>
         </div>
       )}
 
       {/* Tab 2: Software Licenses & Compliance */}
       {subTab === 'licenses' && (
         <div className="table-card">
-          <div className="card-header-bar">
-            <h3 className="card-title">Live License Seat Reconciliation</h3>
+          <div className="card-header">
+            <div className="card-title-group">
+              <ShieldCheck size={18} className="card-icon" />
+              <h3 className="card-title">Live License Seat Reconciliation</h3>
+            </div>
             <span className="text-sm text-dim">
               Cross-checked in real-time against agent software inventory
             </span>
           </div>
-          <div className="table-responsive">
+          <DataTable label="Software license compliance">
             <table className="data-table">
               <thead>
                 <tr>
@@ -361,18 +392,26 @@ export const AssetLicensePage: React.FC = () => {
                       </td>
                       <td>
                         {c.status === 'compliant' && (
-                          <span className="status-pill online flex items-center gap-1 w-max">
+                          <span className="status-pill online">
                             <ShieldCheck size={13} /> Compliant
                           </span>
                         )}
                         {c.status === 'over_allocated' && (
-                          <span className="status-pill danger flex items-center gap-1 w-max" title="Installation count exceeds purchased seats!">
+                          <span className="status-pill danger" title="Installation count exceeds purchased seats!">
                             <ShieldAlert size={13} /> Over Allocated (Deficit!)
                           </span>
                         )}
                         {c.status === 'expiring_soon' && (
-                          <span className="status-pill warning flex items-center gap-1 w-max">
+                          <span className="status-pill warning">
                             <AlertTriangle size={13} /> Expiring Soon
+                          </span>
+                        )}
+                        {/* The server sets 'expired' once now() is past expires_at.
+                            Without this branch the cell rendered blank for the one
+                            state that most needs to be visible. */}
+                        {c.status === 'expired' && (
+                          <span className="status-pill danger">
+                            <AlertTriangle size={13} /> Expired
                           </span>
                         )}
                       </td>
@@ -381,154 +420,188 @@ export const AssetLicensePage: React.FC = () => {
                 )}
               </tbody>
             </table>
-          </div>
+          </DataTable>
         </div>
       )}
 
       {/* Register Asset Modal */}
-      {isAssetModalOpen && (
-        <div className="modal-overlay" onClick={() => setIsAssetModalOpen(false)}>
-          <div className="modal-dialog modal-md" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h3 className="modal-title">Register Physical Hardware Asset</h3>
-              <button type="button" className="btn-close" onClick={() => setIsAssetModalOpen(false)}>
-                <X size={18} />
-              </button>
-            </div>
-            <form onSubmit={handleCreateAsset}>
-              <div className="modal-body space-y-4">
-                <div className="form-group">
-                  <label className="form-label">Asset Tag (Barcode / Sticker ID)</label>
-                  <input
-                    type="text"
-                    className="form-input"
-                    required
-                    placeholder="e.g. AST-JKT-2026-001"
-                    value={newAsset.asset_tag}
-                    onChange={(e) => setNewAsset({ ...newAsset, asset_tag: e.target.value })}
-                  />
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Model Name</label>
-                  <input
-                    type="text"
-                    className="form-input"
-                    required
-                    placeholder="e.g. Dell Latitude 3420"
-                    value={newAsset.model_name}
-                    onChange={(e) => setNewAsset({ ...newAsset, model_name: e.target.value })}
-                  />
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Serial Number</label>
-                  <input
-                    type="text"
-                    className="form-input"
-                    placeholder="e.g. SN-DELL-99213"
-                    value={newAsset.serial_number}
-                    onChange={(e) => setNewAsset({ ...newAsset, serial_number: e.target.value })}
-                  />
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Assigned User & Department</label>
-                  <div className="grid grid-cols-2 gap-2">
-                    <input
-                      type="text"
-                      className="form-input"
-                      placeholder="User Name"
-                      value={newAsset.assigned_user}
-                      onChange={(e) => setNewAsset({ ...newAsset, assigned_user: e.target.value })}
-                    />
-                    <input
-                      type="text"
-                      className="form-input"
-                      placeholder="Department"
-                      value={newAsset.department}
-                      onChange={(e) => setNewAsset({ ...newAsset, department: e.target.value })}
-                    />
-                  </div>
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Purchase Valuation (IDR)</label>
-                  <input
-                    type="number"
-                    className="form-input"
-                    placeholder="15000000"
-                    value={newAsset.purchase_cost}
-                    onChange={(e) => setNewAsset({ ...newAsset, purchase_cost: Number(e.target.value) })}
-                  />
-                </div>
-              </div>
-              <div className="modal-footer">
-                <button type="button" className="btn btn-secondary" onClick={() => setIsAssetModalOpen(false)}>
-                  Cancel
-                </button>
-                <button type="submit" className="btn btn-primary">
-                  Save Asset
-                </button>
-              </div>
-            </form>
+      <Modal
+        open={isAssetModalOpen}
+        onClose={() => setIsAssetModalOpen(false)}
+        title="Register Physical Hardware Asset"
+        size="md"
+        footer={
+          <>
+            <button type="button" className="btn btn-secondary" onClick={() => setIsAssetModalOpen(false)}>
+              Cancel
+            </button>
+            <button type="submit" form="asset-form" className="btn btn-primary">
+              Save Asset
+            </button>
+          </>
+        }
+      >
+        <form id="asset-form" onSubmit={handleCreateAsset}>
+          <div className="form-group">
+            <label className="form-label" htmlFor="asset-tag">
+              Asset Tag (Barcode / Sticker ID)
+            </label>
+            <input
+              id="asset-tag"
+              type="text"
+              className="form-input"
+              required
+              placeholder="e.g. AST-JKT-2026-001"
+              value={newAsset.asset_tag}
+              onChange={(e) => setNewAsset({ ...newAsset, asset_tag: e.target.value })}
+            />
           </div>
-        </div>
-      )}
+          <div className="form-group">
+            <label className="form-label" htmlFor="asset-model">
+              Model Name
+            </label>
+            <input
+              id="asset-model"
+              type="text"
+              className="form-input"
+              required
+              placeholder="e.g. Dell Latitude 3420"
+              value={newAsset.model_name}
+              onChange={(e) => setNewAsset({ ...newAsset, model_name: e.target.value })}
+            />
+          </div>
+          <div className="form-group">
+            <label className="form-label" htmlFor="asset-serial">
+              Serial Number
+            </label>
+            <input
+              id="asset-serial"
+              type="text"
+              className="form-input"
+              placeholder="e.g. SN-DELL-99213"
+              value={newAsset.serial_number}
+              onChange={(e) => setNewAsset({ ...newAsset, serial_number: e.target.value })}
+            />
+          </div>
+          <div className="form-row">
+            <div className="form-field">
+              <label className="form-label" htmlFor="asset-user">
+                Assigned User
+              </label>
+              <input
+                id="asset-user"
+                type="text"
+                className="form-input"
+                placeholder="User Name"
+                value={newAsset.assigned_user}
+                onChange={(e) => setNewAsset({ ...newAsset, assigned_user: e.target.value })}
+              />
+            </div>
+            <div className="form-field">
+              <label className="form-label" htmlFor="asset-dept">
+                Department
+              </label>
+              <input
+                id="asset-dept"
+                type="text"
+                className="form-input"
+                placeholder="Department"
+                value={newAsset.department}
+                onChange={(e) => setNewAsset({ ...newAsset, department: e.target.value })}
+              />
+            </div>
+          </div>
+          <div className="form-group">
+            <label className="form-label" htmlFor="asset-cost">
+              Purchase Valuation (IDR)
+            </label>
+            <input
+              id="asset-cost"
+              type="number"
+              className="form-input"
+              placeholder="15000000"
+              value={newAsset.purchase_cost}
+              onChange={(e) => setNewAsset({ ...newAsset, purchase_cost: Number(e.target.value) })}
+            />
+          </div>
+        </form>
+      </Modal>
 
       {/* Add License Modal */}
-      {isLicenseModalOpen && (
-        <div className="modal-overlay" onClick={() => setIsLicenseModalOpen(false)}>
-          <div className="modal-dialog modal-md" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h3 className="modal-title">Record Software License Contract</h3>
-              <button type="button" className="btn-close" onClick={() => setIsLicenseModalOpen(false)}>
-                <X size={18} />
-              </button>
-            </div>
-            <form onSubmit={handleCreateLicense}>
-              <div className="modal-body space-y-4">
-                <div className="form-group">
-                  <label className="form-label">Software Title</label>
-                  <input
-                    type="text"
-                    className="form-input"
-                    required
-                    placeholder="e.g. Endpoint Security Suite"
-                    value={newLicense.software_name}
-                    onChange={(e) => setNewLicense({ ...newLicense, software_name: e.target.value })}
-                  />
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Publisher / Vendor</label>
-                  <input
-                    type="text"
-                    className="form-input"
-                    placeholder="e.g. Microsoft Corporation"
-                    value={newLicense.publisher}
-                    onChange={(e) => setNewLicense({ ...newLicense, publisher: e.target.value })}
-                  />
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Total Purchased Seats</label>
-                  <input
-                    type="number"
-                    className="form-input"
-                    required
-                    min={1}
-                    value={newLicense.total_seats}
-                    onChange={(e) => setNewLicense({ ...newLicense, total_seats: Number(e.target.value) })}
-                  />
-                </div>
-              </div>
-              <div className="modal-footer">
-                <button type="button" className="btn btn-secondary" onClick={() => setIsLicenseModalOpen(false)}>
-                  Cancel
-                </button>
-                <button type="submit" className="btn btn-primary">
-                  Save License
-                </button>
-              </div>
-            </form>
+      <Modal
+        open={isLicenseModalOpen}
+        onClose={() => setIsLicenseModalOpen(false)}
+        title="Record Software License Contract"
+        size="md"
+        footer={
+          <>
+            <button type="button" className="btn btn-secondary" onClick={() => setIsLicenseModalOpen(false)}>
+              Cancel
+            </button>
+            <button type="submit" form="license-form" className="btn btn-primary">
+              Save License
+            </button>
+          </>
+        }
+      >
+        <form id="license-form" onSubmit={handleCreateLicense}>
+          <div className="form-group">
+            <label className="form-label" htmlFor="license-title">
+              Software Title
+            </label>
+            <input
+              id="license-title"
+              type="text"
+              className="form-input"
+              required
+              placeholder="e.g. Endpoint Security Suite"
+              value={newLicense.software_name}
+              onChange={(e) => setNewLicense({ ...newLicense, software_name: e.target.value })}
+            />
           </div>
-        </div>
-      )}
+          <div className="form-group">
+            <label className="form-label" htmlFor="license-publisher">
+              Publisher / Vendor
+            </label>
+            <input
+              id="license-publisher"
+              type="text"
+              className="form-input"
+              placeholder="e.g. Microsoft Corporation"
+              value={newLicense.publisher}
+              onChange={(e) => setNewLicense({ ...newLicense, publisher: e.target.value })}
+            />
+          </div>
+          <div className="form-group">
+            <label className="form-label" htmlFor="license-seats">
+              Total Purchased Seats
+            </label>
+            <input
+              id="license-seats"
+              type="number"
+              className="form-input"
+              required
+              min={1}
+              value={newLicense.total_seats}
+              onChange={(e) => setNewLicense({ ...newLicense, total_seats: Number(e.target.value) })}
+            />
+          </div>
+        </form>
+      </Modal>
+
+      <ConfirmDialog
+        open={assetPendingDelete !== null}
+        title="Delete hardware asset"
+        message={
+          assetPendingDelete
+            ? `Delete hardware asset '${assetPendingDelete.tag}'? This removes it from inventory and cannot be undone.`
+            : ''
+        }
+        confirmLabel="Delete"
+        pending={deletingAsset}
+        onConfirm={handleDeleteAsset}
+        onCancel={() => setAssetPendingDelete(null)}
+      />
     </div>
   )
 }

@@ -10,7 +10,7 @@ import (
 )
 
 // inventoryRepository handles inventory, group and lifecycle persistence.
-// It is a separate type from Repository so the Fase 1 enrollment/status code
+// It is a separate type from Repository so the Phase 1 enrollment/status code
 // stays unaffected as inventory queries grow.
 type inventoryRepository struct {
 	db *sqlx.DB
@@ -152,7 +152,7 @@ func (r *inventoryRepository) getGroup(ctx context.Context, id string) (DeviceGr
 
 // listGroups returns all groups with their member counts in one query.
 func (r *inventoryRepository) listGroups(ctx context.Context) ([]GroupMemberCount, error) {
-	var groups []GroupMemberCount
+	groups := []GroupMemberCount{}
 	err := r.db.SelectContext(ctx, &groups, `
 		SELECT g.*, COUNT(m.device_id) AS member_count
 		FROM device_groups g
@@ -227,7 +227,7 @@ func (r *inventoryRepository) removeMember(ctx context.Context, groupID, deviceI
 
 // listGroupDevices returns the devices in a group with pagination.
 func (r *inventoryRepository) listGroupDevices(ctx context.Context, groupID string, limit, offset int) ([]Device, error) {
-	var devices []Device
+	devices := []Device{}
 	err := r.db.SelectContext(ctx, &devices, `
 		SELECT d.* FROM devices d
 		JOIN device_group_members m ON m.device_id = d.id

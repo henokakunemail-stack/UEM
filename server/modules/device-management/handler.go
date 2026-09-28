@@ -16,7 +16,7 @@ import (
 // Handler exposes the device-management HTTP API.
 type Handler struct {
 	repo     *Repository
-	inventory *inventoryRepository // Fase 2: filters the device list by group
+	inventory *inventoryRepository // Phase 2: filters the device list by group
 	db       *sqlx.DB
 	jwt      *auth.JWTService
 	ttl      time.Duration // enrollment token TTL

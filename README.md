@@ -116,7 +116,10 @@ Enterprise-grade, central endpoint management and security compliance platform a
 cd web-console
 npm install
 npm run build
-# The build output is automatically synced to server/cmd/server/dist/
+# Output goes directly to server/cmd/server/dist/ (vite.config.ts outDir),
+# which is the directory server/cmd/server/web_embed.go embeds. Run this BEFORE
+# building the server binary — go:embed captures the files at compile time, so a
+# server built against a stale dist serves the old console.
 ```
 
 ### 2. Build Server Binary (Linux amd64 for Physical Ubuntu Server)

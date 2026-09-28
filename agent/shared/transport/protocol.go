@@ -17,8 +17,8 @@ const (
 	TypeCommand          = "command"
 	TypeInventory        = "inventory"           // agent -> server: collection result
 	TypeInventoryCollect = "inventory.collect"   // server -> agent: collect now
-	TypeTermData         = "term.data"           // Fase 5: interactive terminal data stream
-	TypeTermClose        = "term.close"          // Fase 5: interactive terminal session closed
+	TypeTermData         = "term.data"           // Phase 5: interactive terminal data stream
+	TypeTermClose        = "term.close"          // Phase 5: interactive terminal session closed
 
 	StatusDone   = "done"
 	StatusFailed = "failed"

@@ -270,7 +270,12 @@ try {
 
     # 12. Agent Reports Success and Version Promotion
     Write-Host "`n11. Agent Reporting Success Status and Version Promotion..."
-    $reportResp = Invoke-RestMethod -Uri "$base/api/agent/devices/$deviceId/update/report" -Method POST -Body (@{
+    # The device credential headers are required: the real agent sets both
+    # (agent/shared/update/engine.go:194-195) and the endpoint authenticates the
+    # agent with them. Without them the report is rejected with 401, so the test
+    # was failing on a call the production agent makes correctly.
+    $reportHeaders = @{ "X-Device-Id" = $deviceId; "X-Device-Secret" = $deviceSecret }
+    $reportResp = Invoke-RestMethod -Uri "$base/api/agent/devices/$deviceId/update/report" -Method POST -Headers $reportHeaders -Body (@{
         task_id = $taskId
         status = "success"
         target_version = "1.2.0"

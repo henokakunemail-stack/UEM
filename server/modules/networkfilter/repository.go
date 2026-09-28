@@ -100,7 +100,7 @@ func (r *Repository) GetPolicyByID(ctx context.Context, id string) (*FilterPolic
 }
 
 func (r *Repository) ListPolicies(ctx context.Context) ([]FilterPolicy, error) {
-	var policies []FilterPolicy
+	policies := []FilterPolicy{}
 	query := `
 		SELECT
 			p.id, p.name, p.description, p.target_type, p.target_id,
@@ -179,7 +179,7 @@ func (r *Repository) AddRule(ctx context.Context, rule *FilterRule) error {
 }
 
 func (r *Repository) ListRulesByPolicy(ctx context.Context, policyID string) ([]FilterRule, error) {
-	var rules []FilterRule
+	rules := []FilterRule{}
 	query := `
 		SELECT id, policy_id, rule_type, pattern, action, category, created_at
 		FROM filter_rules

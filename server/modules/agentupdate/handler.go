@@ -153,7 +153,7 @@ func (h *Handler) handleUploadRelease(w http.ResponseWriter, r *http.Request) {
 		"checksum": checksum,
 	})
 
-	writeJSON(w, http.StatusCreated, release)
+	writeJSON(w, http.StatusCreated, release.toDTO())
 }
 
 func (h *Handler) handleListReleases(w http.ResponseWriter, r *http.Request) {
@@ -162,7 +162,12 @@ func (h *Handler) handleListReleases(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, list)
+	// Never hand the browser the server-side absolute path.
+	out := make([]AgentReleaseDTO, 0, len(list))
+	for _, rel := range list {
+		out = append(out, rel.toDTO())
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (h *Handler) handleGetRelease(w http.ResponseWriter, r *http.Request) {
@@ -172,7 +177,7 @@ func (h *Handler) handleGetRelease(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "release not found"})
 		return
 	}
-	writeJSON(w, http.StatusOK, rel)
+	writeJSON(w, http.StatusOK, rel.toDTO())
 }
 
 func (h *Handler) handleDownloadRelease(w http.ResponseWriter, r *http.Request) {

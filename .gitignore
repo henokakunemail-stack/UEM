@@ -27,9 +27,19 @@ data/
 .env
 *-creds.json
 
+# Local test scratch. .testrun/creds.json holds a real device secret and
+# .testrun/data/backups/ holds copies of the operational database, so the whole
+# directory stays out of the repo rather than relying on a filename pattern that
+# a future run could rename around.
+.testrun/
+**/.testrun/
+
 # Editor / OS noise
 .idea/
 .vscode/
 *.swp
 .DS_Store
 Thumbs.db
+
+# Claude Code local state: worktrees are full checkouts, settings are personal
+.claude/

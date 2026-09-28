@@ -1,18 +1,29 @@
-import React, { useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
 import {
   Edit2,
   Key,
   RefreshCw,
+  ShieldAlert,
   UserPlus,
   Users,
   UserX,
   X,
 } from 'lucide-react'
+import { ConfirmDialog } from '../components/ui/ConfirmDialog'
+import { DataTable } from '../components/ui/DataTable'
+import { Modal } from '../components/ui/Modal'
+import { usePermission } from '../hooks/usePermission'
 import { api } from '../services/api'
 import { useToast } from '../context/ToastContext'
 import type { UserDTO } from '../types/api'
 
+type Role = 'admin' | 'technician' | 'viewer'
+
 export const UsersPage: React.FC = () => {
+  const { can } = usePermission()
+  // Every /api/users route except the self-service password change is admin
+  // only, so a technician gets an explanation rather than a 403 on load.
+  const isAdmin = can('admin')
   const [users, setUsers] = useState<UserDTO[]>([])
   const [loading, setLoading] = useState(true)
   const [msg, setMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
@@ -23,39 +34,46 @@ export const UsersPage: React.FC = () => {
   const [isEditModalOpen, setIsEditModalOpen] = useState(false)
   const [isPasswordModalOpen, setIsPasswordModalOpen] = useState(false)
   const [selectedUser, setSelectedUser] = useState<UserDTO | null>(null)
+  const [deactivateTarget, setDeactivateTarget] = useState<UserDTO | null>(null)
+  const [deactivating, setDeactivating] = useState(false)
+  const [saving, setSaving] = useState(false)
 
   // Create Form
   const [newUsername, setNewUsername] = useState('')
   const [newDisplayName, setNewDisplayName] = useState('')
   const [newPassword, setNewPassword] = useState('')
-  const [newRole, setNewRole] = useState<'admin' | 'technician' | 'viewer'>('technician')
+  const [newRole, setNewRole] = useState<Role>('technician')
 
   // Edit Form
   const [editDisplayName, setEditDisplayName] = useState('')
-  const [editRole, setEditRole] = useState<'admin' | 'technician' | 'viewer'>('technician')
+  const [editRole, setEditRole] = useState<Role>('technician')
 
   // Password Reset Form
   const [resetPassword, setResetPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
 
-  const loadUsers = async () => {
+  const loadUsers = useCallback(async () => {
     setLoading(true)
     try {
-      const uList = await api.getUsers()
-      setUsers(uList)
-    } catch (err: any) {
-      setMsg({ type: 'error', text: err.message || 'Failed to load user accounts' })
+      setUsers(await api.getUsers())
+    } catch (err: unknown) {
+      setMsg({
+        type: 'error',
+        text: err instanceof Error ? err.message : 'Failed to load user accounts',
+      })
     } finally {
       setLoading(false)
     }
-  }
+  }, [])
 
   useEffect(() => {
-    loadUsers()
-  }, [])
+    if (isAdmin) loadUsers()
+    else setLoading(false)
+  }, [isAdmin, loadUsers])
 
   const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault()
+    setSaving(true)
     try {
       await api.createUser({
         username: newUsername,
@@ -71,16 +89,20 @@ export const UsersPage: React.FC = () => {
       setNewDisplayName('')
       setNewPassword('')
       loadUsers()
-    } catch (err: any) {
-      const errorText = err.message || 'Failed to create user'
+    } catch (err: unknown) {
+      const errorText = err instanceof Error ? err.message : 'Failed to create user'
       setMsg({ type: 'error', text: errorText })
       toast.error(errorText, 'Creation Failed')
+    } finally {
+      setSaving(false)
     }
   }
 
   const handleOpenEdit = (u: UserDTO) => {
     setSelectedUser(u)
-    setEditDisplayName(u.display_name)
+    // display_name is a nullable column on the server, so an unset name must
+    // open the editor as an empty string, not as null.
+    setEditDisplayName(u.display_name || '')
     setEditRole(u.role)
     setIsEditModalOpen(true)
   }
@@ -88,6 +110,7 @@ export const UsersPage: React.FC = () => {
   const handleSaveEdit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!selectedUser) return
+    setSaving(true)
     try {
       await api.updateUser(selectedUser.id, {
         display_name: editDisplayName,
@@ -98,10 +121,12 @@ export const UsersPage: React.FC = () => {
       toast.success(successText, 'User Updated')
       setIsEditModalOpen(false)
       loadUsers()
-    } catch (err: any) {
-      const errorText = err.message || 'Failed to update user'
+    } catch (err: unknown) {
+      const errorText = err instanceof Error ? err.message : 'Failed to update user'
       setMsg({ type: 'error', text: errorText })
       toast.error(errorText, 'Update Failed')
+    } finally {
+      setSaving(false)
     }
   }
 
@@ -126,49 +151,89 @@ export const UsersPage: React.FC = () => {
       return
     }
 
+    setSaving(true)
     try {
       await api.adminResetPassword(selectedUser.id, resetPassword)
       const successText = `Password for '${selectedUser.username}' updated successfully.`
       setMsg({ type: 'success', text: successText })
       toast.success(successText, 'Password Reset')
       setIsPasswordModalOpen(false)
-    } catch (err: any) {
-      const errorText = err.message || 'Failed to reset password'
+    } catch (err: unknown) {
+      const errorText = err instanceof Error ? err.message : 'Failed to reset password'
       setMsg({ type: 'error', text: errorText })
       toast.error(errorText, 'Reset Failed')
+    } finally {
+      setSaving(false)
     }
   }
 
-  const handleDeactivate = async (u: UserDTO) => {
-    if (!confirm(`Are you sure you want to deactivate user account '${u.username}'?`)) return
+  const handleDeactivate = async () => {
+    if (!deactivateTarget) return
+    setDeactivating(true)
     try {
-      await api.deactivateUser(u.id)
-      const infoText = `User '${u.username}' deactivated.`
+      await api.deactivateUser(deactivateTarget.id)
+      const infoText = `User '${deactivateTarget.username}' deactivated.`
       setMsg({ type: 'success', text: infoText })
       toast.info(infoText, 'Account Deactivated')
+      setDeactivateTarget(null)
       loadUsers()
-    } catch (err: any) {
-      const errorText = err.message || 'Failed to deactivate user'
+    } catch (err: unknown) {
+      const errorText = err instanceof Error ? err.message : 'Failed to deactivate user'
       setMsg({ type: 'error', text: errorText })
       toast.error(errorText, 'Deactivation Failed')
+    } finally {
+      setDeactivating(false)
     }
+  }
+
+  if (!isAdmin) {
+    return (
+      <div className="page-container">
+        <div className="page-header">
+          <div>
+            <h2 className="page-title">User Accounts &amp; RBAC Permissions</h2>
+            <p className="page-subtitle">
+              Enterprise role-based access control, operator identity management, and credential
+              provisioning
+            </p>
+          </div>
+        </div>
+        <div className="alert-banner alert-error" role="status">
+          <ShieldAlert size={18} />
+          <span>
+            Operator accounts are administrator-only. Your role can read the audit trail, not
+            manage users.
+          </span>
+        </div>
+      </div>
+    )
   }
 
   return (
     <div className="page-container">
       <div className="page-header">
         <div>
-          <h2 className="page-title">User Accounts & RBAC Permissions</h2>
+          <h2 className="page-title">User Accounts &amp; RBAC Permissions</h2>
           <p className="page-subtitle">
-            Enterprise role-based access control, operator identity management, and credential provisioning
+            Enterprise role-based access control, operator identity management, and credential
+            provisioning
           </p>
         </div>
         <div className="header-controls">
-          <button type="button" className="btn btn-secondary" onClick={loadUsers} disabled={loading}>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={loadUsers}
+            disabled={loading}
+          >
             <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
             <span>Refresh</span>
           </button>
-          <button type="button" className="btn btn-primary" onClick={() => setIsCreateModalOpen(true)}>
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={() => setIsCreateModalOpen(true)}
+          >
             <UserPlus size={16} />
             <span>Create User</span>
           </button>
@@ -176,9 +241,17 @@ export const UsersPage: React.FC = () => {
       </div>
 
       {msg && (
-        <div className={`alert-banner ${msg.type === 'error' ? 'alert-error' : 'alert-success'}`}>
+        <div
+          className={`alert-banner ${msg.type === 'error' ? 'alert-error' : 'alert-success'}`}
+          role="status"
+        >
           <span>{msg.text}</span>
-          <button type="button" onClick={() => setMsg(null)} className="close-btn">
+          <button
+            type="button"
+            onClick={() => setMsg(null)}
+            className="close-btn"
+            aria-label="Dismiss notification"
+          >
             <X size={14} />
           </button>
         </div>
@@ -186,263 +259,323 @@ export const UsersPage: React.FC = () => {
 
       {/* Users Table */}
       <div className="table-card">
-        <div className="table-responsive">
-          <table className="data-table">
-            <thead>
+        <DataTable label="Console operator accounts">
+          <thead>
+            <tr>
+              <th>Username</th>
+              <th>Display Name</th>
+              <th>Assigned Role</th>
+              <th>Account Status</th>
+              <th>Last Login</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {loading ? (
               <tr>
-                <th>Username</th>
-                <th>Display Name</th>
-                <th>Assigned Role</th>
-                <th>Account Status</th>
-                <th>Created At</th>
-                <th>Actions</th>
+                <td colSpan={6} className="text-center py-8 text-muted">
+                  Loading accounts…
+                </td>
               </tr>
-            </thead>
-            <tbody>
-              {users.length === 0 ? (
-                <tr>
-                  <td colSpan={6} className="text-center py-8 text-muted">
-                    No users found.
+            ) : users.length === 0 ? (
+              <tr>
+                <td colSpan={6} className="text-center py-8 text-muted">
+                  No users found.
+                </td>
+              </tr>
+            ) : (
+              users.map((u) => (
+                <tr key={u.id}>
+                  <td data-label="Username">
+                    <div className="font-semibold text-main flex items-center gap-2">
+                      <Users size={16} className="text-primary" />
+                      <span>{u.username}</span>
+                    </div>
                   </td>
-                </tr>
-              ) : (
-                users.map((u) => (
-                  <tr key={u.id}>
-                    <td>
-                      <div className="font-semibold text-main flex items-center gap-2">
-                        <Users size={16} className="text-primary" />
-                        <span>{u.username}</span>
-                      </div>
-                    </td>
-                    <td>{u.display_name}</td>
-                    <td>
-                      <span
-                        className={`badge-role ${
-                          u.role === 'admin'
-                            ? 'role-admin'
-                            : u.role === 'technician'
+                  <td data-label="Display Name">{u.display_name || '—'}</td>
+                  <td data-label="Assigned Role">
+                    <span
+                      className={`badge-role ${
+                        u.role === 'admin'
+                          ? 'role-admin'
+                          : u.role === 'technician'
                             ? 'role-technician'
                             : 'role-viewer'
-                        }`}
+                      }`}
+                    >
+                      {u.role.toUpperCase()}
+                    </span>
+                  </td>
+                  <td data-label="Account Status">
+                    <span className={`status-pill ${u.is_active ? 'online' : 'offline'}`}>
+                      {u.is_active ? 'active' : 'deactivated'}
+                    </span>
+                  </td>
+                  <td data-label="Last Login" className="text-sm text-muted">
+                    {u.last_login_at
+                      ? new Date(u.last_login_at).toLocaleString()
+                      : 'Never signed in'}
+                  </td>
+                  <td data-label="Actions">
+                    <div className="action-buttons">
+                      <button
+                        type="button"
+                        className="btn-action"
+                        onClick={() => handleOpenEdit(u)}
+                        title="Edit role / name"
                       >
-                        {u.role.toUpperCase()}
-                      </span>
-                    </td>
-                    <td>
-                      <span className={`status-pill ${u.status === 'active' ? 'online' : 'offline'}`}>
-                        {u.status}
-                      </span>
-                    </td>
-                    <td className="text-sm text-muted">{new Date(u.created_at).toLocaleDateString()}</td>
-                    <td>
-                      <div className="action-buttons">
+                        <Edit2 size={14} />
+                        <span>Edit</span>
+                      </button>
+                      <button
+                        type="button"
+                        className="btn-action text-warning"
+                        onClick={() => handleOpenPasswordReset(u)}
+                        title="Reset password"
+                      >
+                        <Key size={14} />
+                        <span>Password</span>
+                      </button>
+                      {u.is_active && u.username !== 'admin' && (
                         <button
                           type="button"
-                          className="btn-action"
-                          onClick={() => handleOpenEdit(u)}
-                          title="Edit role / name"
+                          className="btn-action text-danger"
+                          onClick={() => setDeactivateTarget(u)}
+                          title="Deactivate account"
                         >
-                          <Edit2 size={14} />
-                          <span>Edit</span>
+                          <UserX size={14} />
+                          <span>Deactivate</span>
                         </button>
-                        <button
-                          type="button"
-                          className="btn-action text-warning"
-                          onClick={() => handleOpenPasswordReset(u)}
-                          title="Reset password"
-                        >
-                          <Key size={14} />
-                          <span>Password</span>
-                        </button>
-                        {u.status === 'active' && u.username !== 'admin' && (
-                          <button
-                            type="button"
-                            className="btn-action text-danger"
-                            onClick={() => handleDeactivate(u)}
-                            title="Deactivate account"
-                          >
-                            <UserX size={14} />
-                            <span>Deactivate</span>
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </DataTable>
       </div>
 
       {/* Create User Modal */}
-      {isCreateModalOpen && (
-        <div className="modal-overlay" onClick={() => setIsCreateModalOpen(false)}>
-          <div className="modal-dialog modal-md" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h3 className="modal-title">Create Console Operator Account</h3>
-              <button type="button" className="btn-close" onClick={() => setIsCreateModalOpen(false)}>
-                <X size={18} />
-              </button>
-            </div>
-            <form onSubmit={handleCreateUser}>
-              <div className="modal-body space-y-4">
-                <div className="form-group">
-                  <label className="form-label">Username</label>
-                  <input
-                    type="text"
-                    className="form-input"
-                    required
-                    placeholder="e.g. jdoe"
-                    value={newUsername}
-                    onChange={(e) => setNewUsername(e.target.value)}
-                  />
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Display Name</label>
-                  <input
-                    type="text"
-                    className="form-input"
-                    required
-                    placeholder="e.g. John Doe"
-                    value={newDisplayName}
-                    onChange={(e) => setNewDisplayName(e.target.value)}
-                  />
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Temporary Password</label>
-                  <input
-                    type="password"
-                    className="form-input"
-                    required
-                    minLength={8}
-                    placeholder="Min 8 characters"
-                    value={newPassword}
-                    onChange={(e) => setNewPassword(e.target.value)}
-                  />
-                </div>
-                <div className="form-group">
-                  <label className="form-label">RBAC Role</label>
-                  <select
-                    className="form-select"
-                    value={newRole}
-                    onChange={(e) => setNewRole(e.target.value as any)}
-                  >
-                    <option value="technician">Technician / Operator (Deploy, Exec, Patches)</option>
-                    <option value="admin">Administrator (Full Access & User Mgmt)</option>
-                    <option value="viewer">Viewer (Read-only)</option>
-                  </select>
-                </div>
-              </div>
-              <div className="modal-footer">
-                <button type="button" className="btn btn-secondary" onClick={() => setIsCreateModalOpen(false)}>
-                  Cancel
-                </button>
-                <button type="submit" className="btn btn-primary">
-                  Create User
-                </button>
-              </div>
-            </form>
+      <Modal
+        open={isCreateModalOpen}
+        onClose={() => setIsCreateModalOpen(false)}
+        title="Create Console Operator Account"
+        size="md"
+        footer={
+          <>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => setIsCreateModalOpen(false)}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              form="create-user-form"
+              className="btn btn-primary"
+              disabled={saving}
+            >
+              {saving ? 'Creating…' : 'Create User'}
+            </button>
+          </>
+        }
+      >
+        {/* The footer buttons live outside this form in the <dialog>, so the
+            form is associated by id rather than wrapping the footer. */}
+        <form id="create-user-form" onSubmit={handleCreateUser} className="space-y-4">
+          <div className="form-group">
+            <label className="form-label" htmlFor="new-username">
+              Username
+            </label>
+            <input
+              id="new-username"
+              type="text"
+              className="form-input"
+              required
+              placeholder="e.g. jdoe"
+              value={newUsername}
+              onChange={(e) => setNewUsername(e.target.value)}
+            />
           </div>
-        </div>
-      )}
+          <div className="form-group">
+            <label className="form-label" htmlFor="new-display-name">
+              Display Name
+            </label>
+            <input
+              id="new-display-name"
+              type="text"
+              className="form-input"
+              required
+              placeholder="e.g. John Doe"
+              value={newDisplayName}
+              onChange={(e) => setNewDisplayName(e.target.value)}
+            />
+          </div>
+          <div className="form-group">
+            <label className="form-label" htmlFor="new-password">
+              Temporary Password
+            </label>
+            <input
+              id="new-password"
+              type="password"
+              className="form-input"
+              required
+              minLength={8}
+              placeholder="Min 8 characters"
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+            />
+          </div>
+          <div className="form-group">
+            <label className="form-label" htmlFor="new-role">
+              RBAC Role
+            </label>
+            <select
+              id="new-role"
+              className="form-select"
+              value={newRole}
+              onChange={(e) => setNewRole(e.target.value as Role)}
+            >
+              <option value="technician">Technician / Operator (Deploy, Exec, Patches)</option>
+              <option value="admin">Administrator (Full Access &amp; User Mgmt)</option>
+              <option value="viewer">Viewer (Read-only)</option>
+            </select>
+          </div>
+        </form>
+      </Modal>
 
       {/* Edit User Modal */}
-      {isEditModalOpen && selectedUser && (
-        <div className="modal-overlay" onClick={() => setIsEditModalOpen(false)}>
-          <div className="modal-dialog modal-md" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h3 className="modal-title">Edit User: {selectedUser.username}</h3>
-              <button type="button" className="btn-close" onClick={() => setIsEditModalOpen(false)}>
-                <X size={18} />
-              </button>
-            </div>
-            <form onSubmit={handleSaveEdit}>
-              <div className="modal-body space-y-4">
-                <div className="form-group">
-                  <label className="form-label">Display Name</label>
-                  <input
-                    type="text"
-                    className="form-input"
-                    required
-                    value={editDisplayName}
-                    onChange={(e) => setEditDisplayName(e.target.value)}
-                  />
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Role</label>
-                  <select
-                    className="form-select"
-                    value={editRole}
-                    onChange={(e) => setEditRole(e.target.value as any)}
-                  >
-                    <option value="technician">Technician / Operator</option>
-                    <option value="admin">Administrator</option>
-                    <option value="viewer">Viewer (Read-only)</option>
-                  </select>
-                </div>
-              </div>
-              <div className="modal-footer">
-                <button type="button" className="btn btn-secondary" onClick={() => setIsEditModalOpen(false)}>
-                  Cancel
-                </button>
-                <button type="submit" className="btn btn-primary">
-                  Save Changes
-                </button>
-              </div>
-            </form>
+      <Modal
+        open={isEditModalOpen && Boolean(selectedUser)}
+        onClose={() => setIsEditModalOpen(false)}
+        title={selectedUser ? `Edit User: ${selectedUser.username}` : ''}
+        size="md"
+        footer={
+          <>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => setIsEditModalOpen(false)}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              form="edit-user-form"
+              className="btn btn-primary"
+              disabled={saving}
+            >
+              {saving ? 'Saving…' : 'Save Changes'}
+            </button>
+          </>
+        }
+      >
+        <form id="edit-user-form" onSubmit={handleSaveEdit} className="space-y-4">
+          <div className="form-group">
+            <label className="form-label" htmlFor="edit-display-name">
+              Display Name
+            </label>
+            <input
+              id="edit-display-name"
+              type="text"
+              className="form-input"
+              required
+              value={editDisplayName}
+              onChange={(e) => setEditDisplayName(e.target.value)}
+            />
           </div>
-        </div>
-      )}
+          <div className="form-group">
+            <label className="form-label" htmlFor="edit-role">
+              Role
+            </label>
+            <select
+              id="edit-role"
+              className="form-select"
+              value={editRole}
+              onChange={(e) => setEditRole(e.target.value as Role)}
+            >
+              <option value="technician">Technician / Operator</option>
+              <option value="admin">Administrator</option>
+              <option value="viewer">Viewer (Read-only)</option>
+            </select>
+          </div>
+        </form>
+      </Modal>
 
       {/* Password Reset Modal */}
-      {isPasswordModalOpen && selectedUser && (
-        <div className="modal-overlay" onClick={() => setIsPasswordModalOpen(false)}>
-          <div className="modal-dialog modal-md" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h3 className="modal-title">Reset Password: {selectedUser.username}</h3>
-              <button type="button" className="btn-close" onClick={() => setIsPasswordModalOpen(false)}>
-                <X size={18} />
-              </button>
-            </div>
-            <form onSubmit={handleSavePassword}>
-              <div className="modal-body space-y-4">
-                <div className="form-group">
-                  <label className="form-label">New Password</label>
-                  <input
-                    type="password"
-                    className="form-input"
-                    required
-                    minLength={8}
-                    placeholder="Enter new password"
-                    value={resetPassword}
-                    onChange={(e) => setResetPassword(e.target.value)}
-                  />
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Confirm New Password</label>
-                  <input
-                    type="password"
-                    className="form-input"
-                    required
-                    placeholder="Re-type new password"
-                    value={confirmPassword}
-                    onChange={(e) => setConfirmPassword(e.target.value)}
-                  />
-                </div>
-              </div>
-              <div className="modal-footer">
-                <button type="button" className="btn btn-secondary" onClick={() => setIsPasswordModalOpen(false)}>
-                  Cancel
-                </button>
-                <button type="submit" className="btn btn-primary">
-                  Update Password
-                </button>
-              </div>
-            </form>
+      <Modal
+        open={isPasswordModalOpen && Boolean(selectedUser)}
+        onClose={() => setIsPasswordModalOpen(false)}
+        title={selectedUser ? `Reset Password: ${selectedUser.username}` : ''}
+        size="md"
+        footer={
+          <>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => setIsPasswordModalOpen(false)}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              form="reset-password-form"
+              className="btn btn-primary"
+              disabled={saving}
+            >
+              {saving ? 'Updating…' : 'Update Password'}
+            </button>
+          </>
+        }
+      >
+        <form id="reset-password-form" onSubmit={handleSavePassword} className="space-y-4">
+          <div className="form-group">
+            <label className="form-label" htmlFor="reset-password">
+              New Password
+            </label>
+            <input
+              id="reset-password"
+              type="password"
+              className="form-input"
+              required
+              minLength={8}
+              placeholder="Enter new password"
+              value={resetPassword}
+              onChange={(e) => setResetPassword(e.target.value)}
+            />
           </div>
-        </div>
-      )}
+          <div className="form-group">
+            <label className="form-label" htmlFor="confirm-password">
+              Confirm New Password
+            </label>
+            <input
+              id="confirm-password"
+              type="password"
+              className="form-input"
+              required
+              placeholder="Re-type new password"
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+            />
+          </div>
+        </form>
+      </Modal>
+
+      <ConfirmDialog
+        open={Boolean(deactivateTarget)}
+        title="Deactivate account"
+        message={
+          deactivateTarget
+            ? `Deactivate '${deactivateTarget.username}'? They will be signed out and unable to sign in again. The audit trail of their past actions is kept.`
+            : ''
+        }
+        confirmLabel="Deactivate"
+        pending={deactivating}
+        onConfirm={handleDeactivate}
+        onCancel={() => setDeactivateTarget(null)}
+      />
     </div>
   )
 }

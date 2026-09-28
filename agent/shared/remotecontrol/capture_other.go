@@ -3,36 +3,38 @@
 package remotecontrol
 
 import (
-	"bytes"
-	"image"
-	"image/color"
-	"image/draw"
-	"image/jpeg"
+	"fmt"
+	"runtime"
 )
 
+// OtherCapturer is the fallback for any other GOOS (freebsd, openbsd, js/wasm).
+// It reports itself as incapable; see the note on LinuxCapturer for why a
+// placeholder image is not an acceptable substitute.
 type OtherCapturer struct{}
 
 func NewPlatformCapturer() ScreenCapturer {
 	return &OtherCapturer{}
 }
 
-func (c *OtherCapturer) CaptureScreen() ([]byte, int, int, error) {
-	width := 1280
-	height := 720
-	img := image.NewRGBA(image.Rect(0, 0, width, height))
-	draw.Draw(img, img.Bounds(), &image.Uniform{color.RGBA{R: 20, G: 20, B: 20, A: 255}}, image.Point{}, draw.Src)
-
-	var buf bytes.Buffer
-	if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: 50}); err != nil {
-		return nil, 0, 0, err
+func (c *OtherCapturer) Capabilities() Capabilities {
+	return Capabilities{
+		Capture:  false,
+		Mouse:    false,
+		Keyboard: false,
+		Reason:   fmt.Sprintf("Screen capture and input injection are not implemented for %s.", runtime.GOOS),
 	}
-	return buf.Bytes(), width, height, nil
 }
 
-func (c *OtherCapturer) InjectMouseEvent(action string, x, y int, button string, delta int) error {
-	return nil
+func (c *OtherCapturer) CaptureScreen() ([]byte, int, int, error) {
+	return nil, 0, 0, fmt.Errorf("screen capture is not implemented on this platform")
 }
 
-func (c *OtherCapturer) InjectKeyboardEvent(action string, key string, code int) error {
-	return nil
+func (c *OtherCapturer) InjectMouseEvent(e InputEvent) error {
+	return fmt.Errorf("input injection is not implemented on this platform")
 }
+
+func (c *OtherCapturer) InjectKeyboardEvent(e InputEvent) error {
+	return fmt.Errorf("input injection is not implemented on this platform")
+}
+
+func (c *OtherCapturer) ReleaseAllKeys() error { return nil }

@@ -47,7 +47,7 @@ func (r *Repository) GetByID(ctx context.Context, id string) (Device, error) {
 }
 
 // List returns devices, optionally filtered by status and/or site.
-// Fase 2: retired devices are excluded — they are no longer fleet members, and
+// Phase 2: retired devices are excluded — they are no longer fleet members, and
 // including them would inflate every dashboard count. Use the audit trail to
 // review retired devices.
 func (r *Repository) List(ctx context.Context, status, site string) ([]Device, error) {
@@ -62,7 +62,7 @@ func (r *Repository) List(ctx context.Context, status, site string) ([]Device, e
 		args = append(args, site)
 	}
 	q += ` ORDER BY hostname ASC`
-	var devices []Device
+	devices := []Device{}
 	if err := r.db.SelectContext(ctx, &devices, q, args...); err != nil {
 		return nil, fmt.Errorf("list devices: %w", err)
 	}
@@ -73,9 +73,16 @@ func (r *Repository) List(ctx context.Context, status, site string) ([]Device, e
 // Pagination is performed in SQL (LIMIT/OFFSET) so only the requested page is
 // transferred from the database.
 func (r *Repository) ListPaged(ctx context.Context, status, site string, limit, offset int) ([]Device, int, error) {
+	// Retirement is a column, not a status value: the dashboard counts retired
+	// endpoints as `retired_at IS NOT NULL`. Asking for status='retired' against
+	// the default `retired_at IS NULL` predicate ANDs a false pair, so the
+	// console's "Retired Only" filter and the dashboard's retired KPI link both
+	// returned zero rows no matter how many devices had been decommissioned.
 	where := `WHERE retired_at IS NULL`
 	args := []any{}
-	if status != "" {
+	if status == "retired" {
+		where = `WHERE retired_at IS NOT NULL`
+	} else if status != "" {
 		where += ` AND status = ?`
 		args = append(args, status)
 	}
@@ -93,7 +100,7 @@ func (r *Repository) ListPaged(ctx context.Context, status, site string, limit, 
 
 	q := `SELECT * FROM devices ` + where + ` ORDER BY hostname ASC LIMIT ? OFFSET ?`
 	args = append(args, limit, offset)
-	var devices []Device
+	devices := []Device{}
 	if err := r.db.SelectContext(ctx, &devices, q, args...); err != nil {
 		return nil, 0, fmt.Errorf("list devices paged: %w", err)
 	}

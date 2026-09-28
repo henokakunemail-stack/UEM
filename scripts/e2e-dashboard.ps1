@@ -196,6 +196,14 @@ try {
 
     # 9. Verify Hardware & Software from API
     Write-Host "`n8. Validating Ground-Truth Hardware & Software Specs..."
+    # Enrollment does not create an inventory row; the snapshot only exists once
+    # the agent has reported one. Ask the online device to collect first, exactly
+    # as e2e-inventory.ps1 does, and wait for the round-trip to land.
+    $collect = Invoke-RestMethod -Uri "$base/api/devices/$($dev.id)/inventory/collect" -Method POST -Headers $authHeader
+    if ($collect.status -ne "sent") {
+        throw "collect to an online device must be sent, got $($collect.status)"
+    }
+    Start-Sleep -Seconds 4
     $inv = Invoke-RestMethod -Uri "$base/api/devices/$($dev.id)/inventory" -Headers $authHeader
     $cpuName = if ($inv.hw.cpu.name) { $inv.hw.cpu.name } else { $inv.cpu_model }
     $ramTotal = if ($inv.hw.ram_total_bytes) { $inv.hw.ram_total_bytes } else { $inv.ram_bytes }

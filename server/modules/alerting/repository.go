@@ -60,7 +60,7 @@ func NewID() string {
 }
 
 func (r *Repository) ListRules(ctx context.Context) ([]AlertRule, error) {
-	var rules []AlertRule
+	rules := []AlertRule{}
 	err := r.db.SelectContext(ctx, &rules, `
 		SELECT id, name, rule_type, threshold_val, severity, webhook_url, is_enabled, created_by, created_at, updated_at
 		FROM alert_rules
@@ -165,7 +165,7 @@ func (r *Repository) ListIncidents(ctx context.Context, status, severity string,
 	query += " ORDER BY i.last_triggered_at DESC LIMIT ?"
 	args = append(args, limit)
 
-	var incidents []AlertIncident
+	incidents := []AlertIncident{}
 	if err := r.db.SelectContext(ctx, &incidents, query, args...); err != nil {
 		return nil, fmt.Errorf("list incidents: %w", err)
 	}

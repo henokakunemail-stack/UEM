@@ -67,10 +67,16 @@ func (h *Handler) exportInventory(w http.ResponseWriter, r *http.Request) {
 			if row.CPUModel != nil {
 				cpu = *row.CPUModel
 			}
+			// nil means the device has never checked in; the zero time would
+			// render as 0001-01-01 and read as a real, ancient timestamp.
+			lastSeen := ""
+			if row.LastSeenAt != nil {
+				lastSeen = row.LastSeenAt.Format(time.RFC3339)
+			}
 			_ = writer.Write([]string{
 				row.ID, row.Hostname, row.OSName, row.OSVersion, row.AgentVersion,
 				row.Site, row.Status, ram, disk, cpu,
-				row.LastSeenAt.Format(time.RFC3339), row.EnrolledAt.Format(time.RFC3339),
+				lastSeen, row.EnrolledAt.Format(time.RFC3339),
 			})
 		}
 		return

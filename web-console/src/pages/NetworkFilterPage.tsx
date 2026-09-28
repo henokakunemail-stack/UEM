@@ -1,47 +1,136 @@
 import React, { useEffect, useState } from 'react'
 import {
   CheckCircle2,
+  CloudUpload,
   Globe,
+  Layers,
   Plus,
+  Power,
   RefreshCw,
-  Send,
   Shield,
   Trash2,
   X,
 } from 'lucide-react'
 import { api } from '../services/api'
+import { usePermission } from '../hooks/usePermission'
+import { DataTable } from '../components/ui/DataTable'
+import { ConfirmDialog } from '../components/ui/ConfirmDialog'
+import { Modal } from '../components/ui/Modal'
 import { useToast } from '../context/ToastContext'
-import type { DeviceFilterComplianceDTO, FilterRuleDTO } from '../types/api'
+import type { DeviceDTO, DeviceFilterStateDTO, FilterPolicyDTO, FilterRuleDTO } from '../types/api'
 
+// The server owns the policy model: a policy carries the target scope and
+// holds rules, and enforcement is pushed per device rather than fleet-wide.
+// This page therefore selects a policy, edits its rules, and syncs devices
+// individually — which is what the API can actually do.
 export const NetworkFilterPage: React.FC = () => {
+  // Server-side: policy/rule create, update and delete are RoleAdmin; the
+  // per-device filter sync is RoleTechnician. Reads are open to any
+  // authenticated user.
+  const { can } = usePermission()
+  const canAdmin = can('admin')
+  const canSync = can('technician')
+
+  const [policies, setPolicies] = useState<FilterPolicyDTO[]>([])
+  const [selectedId, setSelectedId] = useState<string | null>(null)
   const [rules, setRules] = useState<FilterRuleDTO[]>([])
-  const [compliance, setCompliance] = useState<DeviceFilterComplianceDTO[]>([])
+  const [devices, setDevices] = useState<DeviceDTO[]>([])
+  const [states, setStates] = useState<Record<string, DeviceFilterStateDTO>>({})
+  // Filter state is only exposed per device and has no fleet-wide endpoint, so
+  // it is fetched one request at a time. The old code folded every failure
+  // into a missing row, which rendered as "0 rules / never reported" — a
+  // device whose state read 403s looks identical to a device that was never
+  // synced. Track the outcome of each read instead.
+  const [stateErrors, setStateErrors] = useState<Record<string, string>>({})
+  const [statesLoading, setStatesLoading] = useState(false)
   const [loading, setLoading] = useState(true)
-  const [applying, setApplying] = useState(false)
-  const [isModalOpen, setIsModalOpen] = useState(false)
+  const [syncingId, setSyncingId] = useState<string | null>(null)
+  const [isPolicyModalOpen, setIsPolicyModalOpen] = useState(false)
+  const [isRuleModalOpen, setIsRuleModalOpen] = useState(false)
   const [msg, setMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
+  const [policyPendingDelete, setPolicyPendingDelete] = useState<{
+    id: string
+    name: string
+    rules_count: number
+  } | null>(null)
+  const [rulePendingDelete, setRulePendingDelete] = useState<{ id: string; pattern: string } | null>(null)
+  const [deleting, setDeleting] = useState(false)
   const toast = useToast()
 
-  const [newRule, setNewRule] = useState({
+  const [newPolicy, setNewPolicy] = useState({
+    name: '',
+    description: '',
     target_type: 'all',
     target_id: '',
-    rule_type: 'block_domain',
-    domain_pattern: '',
+    priority: 100,
+  })
+
+  const [newRule, setNewRule] = useState({
+    rule_type: 'domain',
+    pattern: '',
     category: 'Security & Phishing',
     action: 'block',
   })
 
+  const selected = policies.find((p) => p.id === selectedId) || null
+
+  const loadPolicies = async () => {
+    const list = await api.getFilterPolicies()
+    setPolicies(list)
+    // Keep a selection alive across refreshes; fall back to the first policy so
+    // the rules table is never orphaned from its header.
+    setSelectedId((prev) => (prev && list.some((p) => p.id === prev) ? prev : list[0]?.id ?? null))
+  }
+
+  const loadDevices = async () => {
+    const res = await api.getDevices(100, 0)
+    const list = res.devices || []
+    setDevices(list)
+    return list
+  }
+
+  const loadStates = async (list: DeviceDTO[]) => {
+    // One request per device. The server exposes filter state per device and
+    // has no fleet-wide equivalent, so this is the only way to see it.
+    setStatesLoading(true)
+    try {
+      const entries = await Promise.all(
+        list.map(async (d) => {
+          try {
+            return [d.id, await api.getDeviceFilterState(d.id), null] as const
+          } catch (err: any) {
+            return [d.id, null, err?.message || 'Failed to read filter state'] as const
+          }
+        })
+      )
+      const next: Record<string, DeviceFilterStateDTO> = {}
+      const failed: Record<string, string> = {}
+      for (const [id, s, err] of entries) {
+        if (s) next[id] = s
+        else failed[id] = err
+      }
+      setStates(next)
+      setStateErrors(failed)
+    } finally {
+      setStatesLoading(false)
+    }
+  }
+
+  const loadRules = async (policyId: string | null) => {
+    if (!policyId) {
+      setRules([])
+      return
+    }
+    setRules(await api.getFilterRules(policyId))
+  }
+
   const loadData = async () => {
     setLoading(true)
     try {
-      const [rList, compList] = await Promise.all([
-        api.getFilterRules().catch(() => []),
-        api.getFilterCompliance().catch(() => []),
-      ])
-      setRules(rList)
-      setCompliance(compList)
+      const [, devList] = await Promise.all([loadPolicies(), loadDevices()])
+      await loadStates(devList)
     } catch (err: any) {
-      setMsg({ type: 'error', text: err.message || 'Failed to load filter rules' })
+      setMsg({ type: 'error', text: err.message || 'Failed to load filter data' })
     } finally {
       setLoading(false)
     }
@@ -51,294 +140,646 @@ export const NetworkFilterPage: React.FC = () => {
     loadData()
   }, [])
 
-  const handleApply = async () => {
-    setApplying(true)
+  useEffect(() => {
+    loadRules(selectedId).catch(() => setRules([]))
+  }, [selectedId])
+
+  const handleCreatePolicy = async (e: React.FormEvent) => {
+    e.preventDefault()
     try {
-      const res = await api.applyFilterPolicies()
-      const successText = `Policy compiled successfully (Version: ${res.version.slice(0, 12)}..., ${res.rule_count} rules pushed live via WebSocket).`
-      setMsg({
-        type: 'success',
-        text: successText,
-      })
-      toast.success(successText, 'Policy Pushed Live')
-      loadData()
+      const created = await api.createFilterPolicy(newPolicy)
+      const text = `Policy '${created.name}' created. Add rules, then sync devices to enforce.`
+      setMsg({ type: 'success', text })
+      toast.success(text, 'Policy Created')
+      setIsPolicyModalOpen(false)
+      setNewPolicy({ name: '', description: '', target_type: 'all', target_id: '', priority: 100 })
+      await loadPolicies()
+      setSelectedId(created.id)
     } catch (err: any) {
-      const errorText = err.message || 'Failed to apply filter policies'
-      setMsg({ type: 'error', text: errorText })
-      toast.error(errorText, 'Deployment Failed')
+      const text = err.message || 'Failed to create policy'
+      setMsg({ type: 'error', text })
+      toast.error(text, 'Create Failed')
+    }
+  }
+
+  const handleTogglePolicy = async (p: FilterPolicyDTO) => {
+    try {
+      await api.updateFilterPolicy(p.id, { is_enabled: !p.is_enabled })
+      const text = `Policy '${p.name}' ${p.is_enabled ? 'disabled' : 'enabled'}.`
+      setMsg({ type: 'success', text })
+      toast.info(text)
+      await loadPolicies()
+    } catch (err: any) {
+      const text = err.message || 'Failed to update policy'
+      setMsg({ type: 'error', text })
+      toast.error(text)
+    }
+  }
+
+  const handleDeletePolicy = async () => {
+    if (!policyPendingDelete) return
+    const { id, name } = policyPendingDelete
+    setDeleting(true)
+    try {
+      await api.deleteFilterPolicy(id)
+      const text = `Policy '${name}' deleted.`
+      setMsg({ type: 'success', text })
+      toast.success(text)
+      setPolicyPendingDelete(null)
+      await loadPolicies()
+    } catch (err: any) {
+      const text = err.message || 'Failed to delete policy'
+      setMsg({ type: 'error', text })
+      toast.error(text)
     } finally {
-      setApplying(false)
+      setDeleting(false)
     }
   }
 
   const handleCreateRule = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (!selected) return
     try {
-      await api.createFilterRule(newRule)
-      const successText = `Rule for '${newRule.domain_pattern}' added to policy draft.`
-      setMsg({ type: 'success', text: successText })
-      toast.success(successText)
-      setIsModalOpen(false)
+      await api.createFilterRule(selected.id, newRule)
+      const text = `Rule for '${newRule.pattern}' added to '${selected.name}'.`
+      setMsg({ type: 'success', text })
+      toast.success(text)
+      setIsRuleModalOpen(false)
       setNewRule({
-        target_type: 'all',
-        target_id: '',
-        rule_type: 'block_domain',
-        domain_pattern: '',
+        rule_type: 'domain',
+        pattern: '',
         category: 'Security & Phishing',
         action: 'block',
       })
-      loadData()
+      await loadRules(selected.id)
+      await loadPolicies()
     } catch (err: any) {
-      const errorText = err.message || 'Failed to create rule'
-      setMsg({ type: 'error', text: errorText })
-      toast.error(errorText)
+      const text = err.message || 'Failed to create rule'
+      setMsg({ type: 'error', text })
+      toast.error(text)
     }
   }
 
-  const handleDeleteRule = async (id: string, domain: string) => {
-    if (!confirm(`Delete rule '${domain}'?`)) return
+  const handleDeleteRule = async () => {
+    if (!rulePendingDelete) return
+    const { id, pattern } = rulePendingDelete
+    setDeleting(true)
     try {
       await api.deleteFilterRule(id)
-      const infoText = 'Rule deleted from draft. Remember to click "Deploy Policy" to push live.'
-      setMsg({ type: 'success', text: infoText })
-      toast.info(infoText)
-      loadData()
+      const text = `Rule '${pattern}' deleted. Devices keep the old list until their next sync.`
+      setMsg({ type: 'success', text })
+      toast.info(text)
+      setRulePendingDelete(null)
+      await loadRules(selectedId)
+      await loadPolicies()
     } catch (err: any) {
-      const errorText = err.message || 'Failed to delete rule'
-      setMsg({ type: 'error', text: errorText })
-      toast.error(errorText)
+      const text = err.message || 'Failed to delete rule'
+      setMsg({ type: 'error', text })
+      toast.error(text)
+    } finally {
+      setDeleting(false)
     }
   }
+
+  const handleSync = async (d: DeviceDTO) => {
+    setSyncingId(d.id)
+    try {
+      const res = await api.syncDeviceFilter(d.id)
+      const text =
+        res.status === 'dispatched'
+          ? `Pushed ${res.effective_rules} rule(s) to ${d.hostname} (version ${res.policy_version.slice(0, 12)}).`
+          : `${d.hostname} is offline — command queued until it reconnects.`
+      setMsg({ type: 'success', text })
+      toast.success(text, 'Filter Sync')
+      setStates((prev) => ({
+        ...prev,
+        [d.id]: { ...(prev[d.id] || ({} as DeviceFilterStateDTO)), device_id: d.id, policy_version: res.policy_version, status: res.status },
+      }))
+      // A successful sync is proof the read path works for this device, so a
+      // stale read error on the row would contradict the row's own values.
+      setStateErrors((prev) => {
+        if (!(d.id in prev)) return prev
+        const next = { ...prev }
+        delete next[d.id]
+        return next
+      })
+    } catch (err: any) {
+      const text = err.message || 'Failed to sync device'
+      setMsg({ type: 'error', text })
+      toast.error(text, 'Sync Failed')
+    } finally {
+      setSyncingId(null)
+    }
+  }
+
+  const blockCount = rules.filter((r) => r.action === 'block').length
 
   return (
     <div className="page-container">
       <div className="page-header">
         <div>
-          <h2 className="page-title">Network & Web Security Filter</h2>
+          <h2 className="page-title">Network &amp; Web Security Filter</h2>
           <p className="page-subtitle">
-            Zero-CGO DNS sinkholing, corporate domain blocking, and real-time policy enforcement across branch endpoints
+            DNS sinkholing, corporate domain blocking, and per-device policy enforcement
           </p>
         </div>
         <div className="header-controls">
           <button type="button" className="btn btn-secondary" onClick={loadData} disabled={loading}>
-            <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
+            <RefreshCw size={16} className={loading ? 'spinning' : ''} />
             <span>Refresh</span>
           </button>
-          <button type="button" className="btn btn-secondary" onClick={() => setIsModalOpen(true)}>
-            <Plus size={16} />
-            <span>Add Rule</span>
-          </button>
-          <button type="button" className="btn btn-primary" onClick={handleApply} disabled={applying}>
-            <Send size={16} />
-            <span>{applying ? 'Deploying...' : 'Deploy Policy to Fleet'}</span>
-          </button>
+          {canAdmin && (
+            <button type="button" className="btn btn-secondary" onClick={() => setIsPolicyModalOpen(true)}>
+              <Layers size={16} />
+              <span>New Policy</span>
+            </button>
+          )}
+          {canAdmin && (
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={() => selected && setIsRuleModalOpen(true)}
+              disabled={!selected}
+              title={selected ? `Add a rule to ${selected.name}` : 'Create a policy first'}
+            >
+              <Plus size={16} />
+              <span>Add Rule</span>
+            </button>
+          )}
         </div>
       </div>
 
       {msg && (
         <div className={`alert-banner ${msg.type === 'error' ? 'alert-error' : 'alert-success'}`}>
           <span>{msg.text}</span>
-          <button type="button" onClick={() => setMsg(null)} className="close-btn">
+          <button type="button" onClick={() => setMsg(null)} className="close-btn" aria-label="Dismiss message">
             <X size={14} />
           </button>
         </div>
       )}
 
-      {/* Rules Table */}
+      {/* Policy list */}
       <div className="table-card">
         <div className="card-header-bar">
-          <div className="flex items-center gap-2">
+          <div className="card-title-group">
             <Shield className="text-primary" size={18} />
-            <h3 className="card-title">Corporate Filter Rules ({rules.length})</h3>
+            <h3 className="card-title">Filter Policies ({policies.length})</h3>
           </div>
           <span className="text-sm text-dim">
-            Rules apply atomically and trigger automatic local OS DNS cache flush
+            A rule only exists inside a policy — pick one to edit its rules
           </span>
         </div>
 
-        <div className="table-responsive">
+        <DataTable label="Filter policies">
           <table className="data-table">
             <thead>
               <tr>
-                <th>Domain / Hostname Pattern</th>
-                <th>Category</th>
-                <th>Target Fleet</th>
-                <th>Action</th>
+                <th>Policy</th>
+                <th>Scope</th>
+                <th>Rules</th>
                 <th>Status</th>
                 <th>Actions</th>
               </tr>
             </thead>
             <tbody>
-              {rules.length === 0 ? (
+              {policies.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="text-center py-8 text-muted">
-                    No filter rules configured. Click "Add Rule" to block or allow domains.
+                  <td colSpan={5} className="text-center py-8 text-muted">
+                    No policies yet. Create one to start blocking domains.
+                  </td>
+                </tr>
+              ) : (
+                policies.map((p) => (
+                  <tr
+                    key={p.id}
+                    className={p.id === selectedId ? 'row-selected' : ''}
+                    onClick={() => setSelectedId(p.id)}
+                    style={{ cursor: 'pointer' }}
+                  >
+                    <td>
+                      <div className="font-semibold text-main">{p.name}</div>
+                      {p.description && <div className="text-sm text-dim">{p.description}</div>}
+                    </td>
+                    <td>
+                      <span className="badge-target">{p.target_type}</span>
+                      {p.target_id && <span className="text-sm text-dim"> {p.target_id}</span>}
+                    </td>
+                    <td>
+                      <span className="font-mono">{p.rules_count}</span>
+                    </td>
+                    <td>
+                      <span className={`status-pill ${p.is_enabled ? 'online' : 'offline'}`}>
+                        {p.is_enabled ? 'Enabled' : 'Disabled'}
+                      </span>
+                    </td>
+                    <td onClick={(e) => e.stopPropagation()}>
+                      {canAdmin && (
+                        <div className="action-buttons">
+                          <button
+                            type="button"
+                            className="btn-action"
+                            onClick={() => handleTogglePolicy(p)}
+                            title={p.is_enabled ? 'Disable this policy' : 'Enable this policy'}
+                          >
+                            <Power size={14} />
+                            <span>{p.is_enabled ? 'Disable' : 'Enable'}</span>
+                          </button>
+                          <button
+                            type="button"
+                            className="btn-action text-danger"
+                            onClick={() =>
+                              setPolicyPendingDelete({ id: p.id, name: p.name, rules_count: p.rules_count })
+                            }
+                            aria-label={`Delete policy ${p.name}`}
+                          >
+                            <Trash2 size={14} />
+                            <span>Delete</span>
+                          </button>
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </DataTable>
+      </div>
+
+      {/* Rules in the selected policy */}
+      <div className="table-card">
+        <div className="card-header-bar">
+          <div className="card-title-group">
+            <Globe className="text-primary" size={18} />
+            <h3 className="card-title">
+              Rules {selected ? `in "${selected.name}"` : ''} ({rules.length})
+            </h3>
+          </div>
+          {selected && (
+            <span className="text-sm text-dim">
+              {blockCount} blocking, {rules.length - blockCount} allow — only blocking rules are
+              compiled and pushed to agents
+            </span>
+          )}
+        </div>
+
+        <DataTable label="Policy rules">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Domain / Hostname Pattern</th>
+                <th>Type</th>
+                <th>Category</th>
+                <th>Action</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {!selected ? (
+                <tr>
+                  <td colSpan={5} className="text-center py-8 text-muted">
+                    Select a policy above to see its rules.
+                  </td>
+                </tr>
+              ) : rules.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="text-center py-8 text-muted">
+                    This policy has no rules yet. Use "Add Rule" to block or allow domains.
                   </td>
                 </tr>
               ) : (
                 rules.map((r) => (
                   <tr key={r.id}>
                     <td>
-                      <div className="font-mono font-semibold text-main flex items-center gap-2">
-                        <Globe size={15} className="text-dim" />
-                        <span>{r.domain_pattern}</span>
-                      </div>
+                      <div className="font-mono font-semibold text-main">{r.pattern}</div>
+                    </td>
+                    <td>
+                      <span className="badge-target">{r.rule_type}</span>
                     </td>
                     <td>{r.category || 'General'}</td>
-                    <td>
-                      <span className="badge-target">{r.target_type}</span>
-                    </td>
                     <td>
                       <span className={`badge-action ${r.action === 'block' ? 'block' : 'allow'}`}>
                         {r.action.toUpperCase()}
                       </span>
                     </td>
                     <td>
-                      <span className="status-pill online">Active</span>
-                    </td>
-                    <td>
-                      <button
-                        type="button"
-                        className="btn-action text-danger"
-                        onClick={() => handleDeleteRule(r.id, r.domain_pattern)}
-                      >
-                        <Trash2 size={14} />
-                        <span>Delete</span>
-                      </button>
+                      {canAdmin && (
+                        <button
+                          type="button"
+                          className="btn-action text-danger"
+                          onClick={() => setRulePendingDelete({ id: r.id, pattern: r.pattern })}
+                          aria-label={`Delete rule ${r.pattern}`}
+                        >
+                          <Trash2 size={14} />
+                          <span>Delete</span>
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))
               )}
             </tbody>
           </table>
-        </div>
+        </DataTable>
       </div>
 
-      {/* Device Compliance Status */}
+      {/* Per-device enforcement */}
       <div className="table-card">
         <div className="card-header-bar">
-          <div className="flex items-center gap-2">
+          <div className="card-title-group">
             <CheckCircle2 className="text-success" size={18} />
-            <h3 className="card-title">Fleet Enforcement Compliance</h3>
+            <h3 className="card-title">Device Enforcement</h3>
           </div>
+          <span className="text-sm text-dim">
+            {statesLoading
+              ? `Reading filter state for ${devices.length} device(s)...`
+              : Object.keys(stateErrors).length > 0
+                ? `${Object.keys(stateErrors).length} of ${devices.length} device state read(s) failed`
+                : 'Sync compiles every enabled policy that targets the device and pushes it over the live socket'}
+          </span>
         </div>
 
-        <div className="table-responsive">
+        <DataTable label="Device enforcement">
           <table className="data-table">
             <thead>
               <tr>
                 <th>Device</th>
-                <th>Branch Site</th>
-                <th>Active Policy Version</th>
-                <th>Sync Status</th>
-                <th>Last Applied</th>
+                <th>Site</th>
+                <th>Agent Policy Version</th>
+                <th>Rules Applied</th>
+                <th>Last Report</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
-              {compliance.length === 0 ? (
+              {devices.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="text-center py-8 text-muted">
-                    No compliance reports received yet.
+                  <td colSpan={6} className="text-center py-8 text-muted">
+                    No devices enrolled yet.
                   </td>
                 </tr>
               ) : (
-                compliance.map((c) => (
-                  <tr key={c.device_id}>
-                    <td>
-                      <span className="font-semibold text-main">{c.hostname}</span>
-                    </td>
-                    <td>{c.site || '—'}</td>
-                    <td>
-                      <span className="font-mono text-sm">{c.active_version ? c.active_version.slice(0, 14) + '...' : '—'}</span>
-                    </td>
-                    <td>
-                      <span className={`status-pill ${c.status === 'applied' ? 'online' : 'warning'}`}>
-                        {c.status}
-                      </span>
-                    </td>
-                    <td className="text-sm text-muted">
-                      {c.last_reported_at ? new Date(c.last_reported_at).toLocaleString() : '—'}
-                    </td>
-                  </tr>
-                ))
+                devices.map((d) => {
+                  const s = states[d.id]
+                  const stateError = stateErrors[d.id]
+                  return (
+                    <tr key={d.id}>
+                      <td>
+                        <span className="font-semibold text-main">{d.hostname}</span>
+                      </td>
+                      <td>{d.site || '—'}</td>
+                      {/* A failed read is reported as a failure on the row, not
+                          rendered as the zero/never values a never-synced device
+                          would legitimately show. */}
+                      {stateError ? (
+                        <td colSpan={3} className="text-sm text-danger">
+                          Filter state unavailable: {stateError}
+                        </td>
+                      ) : (
+                        <>
+                          <td>
+                            <span className="font-mono text-sm">
+                              {s && s.policy_version && s.policy_version !== 'none'
+                                ? s.policy_version.slice(0, 14) + '...'
+                                : '—'}
+                            </span>
+                          </td>
+                          <td>
+                            <span className="font-mono">{s?.rules_applied ?? 0}</span>
+                          </td>
+                          <td className="text-sm text-muted">
+                            {s?.last_applied_at ? new Date(s.last_applied_at).toLocaleString() : '—'}
+                          </td>
+                        </>
+                      )}
+                      <td>
+                        {canSync && (
+                          <button
+                            type="button"
+                            className="btn-action"
+                            onClick={() => handleSync(d)}
+                            disabled={syncingId === d.id}
+                            title="Compile and push the effective rule set to this device"
+                          >
+                            <CloudUpload size={14} className={syncingId === d.id ? 'spinning' : ''} />
+                            <span>{syncingId === d.id ? 'Syncing...' : 'Sync Now'}</span>
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  )
+                })
               )}
             </tbody>
           </table>
-        </div>
+        </DataTable>
       </div>
 
-      {/* Add Rule Modal */}
-      {isModalOpen && (
-        <div className="modal-overlay" onClick={() => setIsModalOpen(false)}>
-          <div className="modal-dialog modal-md" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h3 className="modal-title">Add Web Filter Rule</h3>
-              <button type="button" className="btn-close" onClick={() => setIsModalOpen(false)}>
-                <X size={18} />
-              </button>
-            </div>
-            <form onSubmit={handleCreateRule}>
-              <div className="modal-body space-y-4">
-                <div className="form-group">
-                  <label className="form-label">Domain or Hostname</label>
-                  <input
-                    type="text"
-                    className="form-input"
-                    required
-                    placeholder="e.g. gambling-site.com or malware.tracker.net"
-                    value={newRule.domain_pattern}
-                    onChange={(e) => setNewRule({ ...newRule, domain_pattern: e.target.value })}
-                  />
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Action</label>
-                  <select
-                    className="form-select"
-                    value={newRule.action}
-                    onChange={(e) => setNewRule({ ...newRule, action: e.target.value })}
-                  >
-                    <option value="block">BLOCK (Sinkhole to 0.0.0.0)</option>
-                    <option value="allow">ALLOW (Exempt from blocking)</option>
-                  </select>
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Category</label>
-                  <select
-                    className="form-select"
-                    value={newRule.category}
-                    onChange={(e) => setNewRule({ ...newRule, category: e.target.value })}
-                  >
-                    <option value="Security & Phishing">Security & Phishing</option>
-                    <option value="Adult & Gambling">Adult & Gambling</option>
-                    <option value="Bandwidth Heavy / Streaming">Bandwidth Heavy / Streaming</option>
-                    <option value="Social Media">Social Media</option>
-                    <option value="Custom Policy">Custom Corporate Policy</option>
-                  </select>
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Scope</label>
-                  <select
-                    className="form-select"
-                    value={newRule.target_type}
-                    onChange={(e) => setNewRule({ ...newRule, target_type: e.target.value })}
-                  >
-                    <option value="all">Entire Fleet (All Devices)</option>
-                    <option value="group">Branch Site Group</option>
-                  </select>
-                </div>
-              </div>
-              <div className="modal-footer">
-                <button type="button" className="btn btn-secondary" onClick={() => setIsModalOpen(false)}>
-                  Cancel
-                </button>
-                <button type="submit" className="btn btn-primary">
-                  Add Rule to Policy
-                </button>
-              </div>
-            </form>
+      {/* New Policy Modal */}
+      <Modal
+        open={isPolicyModalOpen}
+        onClose={() => setIsPolicyModalOpen(false)}
+        title="New Filter Policy"
+        size="md"
+        footer={
+          <>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => setIsPolicyModalOpen(false)}
+            >
+              Cancel
+            </button>
+            <button type="submit" form="filter-policy-form" className="btn btn-primary">
+              Create Policy
+            </button>
+          </>
+        }
+      >
+        <form id="filter-policy-form" onSubmit={handleCreatePolicy}>
+          <div className="form-group">
+            <label className="form-label" htmlFor="filter-policy-name">
+              Policy Name
+            </label>
+            <input
+              id="filter-policy-name"
+              type="text"
+              className="form-input"
+              required
+              placeholder="e.g. Corporate Baseline"
+              value={newPolicy.name}
+              onChange={(e) => setNewPolicy({ ...newPolicy, name: e.target.value })}
+            />
           </div>
-        </div>
-      )}
+          <div className="form-group">
+            <label className="form-label" htmlFor="filter-policy-desc">
+              Description
+            </label>
+            <input
+              id="filter-policy-desc"
+              type="text"
+              className="form-input"
+              placeholder="What this policy is for"
+              value={newPolicy.description}
+              onChange={(e) => setNewPolicy({ ...newPolicy, description: e.target.value })}
+            />
+          </div>
+          <div className="form-group">
+            <label className="form-label" htmlFor="filter-policy-scope">
+              Scope
+            </label>
+            <select
+              id="filter-policy-scope"
+              className="form-select"
+              value={newPolicy.target_type}
+              onChange={(e) => setNewPolicy({ ...newPolicy, target_type: e.target.value })}
+            >
+              <option value="all">Entire Fleet (All Devices)</option>
+              <option value="group">Device Group</option>
+              <option value="device">Single Device</option>
+            </select>
+          </div>
+          <div className="form-group">
+            <label className="form-label" htmlFor="filter-policy-target">
+              Target ID (group or device ID)
+            </label>
+            <input
+              id="filter-policy-target"
+              type="text"
+              className="form-input"
+              placeholder="Leave empty for fleet-wide"
+              value={newPolicy.target_id}
+              onChange={(e) => setNewPolicy({ ...newPolicy, target_id: e.target.value })}
+            />
+          </div>
+          <div className="form-group">
+            <label className="form-label" htmlFor="filter-policy-priority">
+              Priority (lower wins)
+            </label>
+            <input
+              id="filter-policy-priority"
+              type="number"
+              className="form-input"
+              min={1}
+              value={newPolicy.priority}
+              onChange={(e) => setNewPolicy({ ...newPolicy, priority: Number(e.target.value) })}
+            />
+          </div>
+        </form>
+      </Modal>
+
+      {/* Add Rule Modal */}
+      <Modal
+        open={isRuleModalOpen && selected !== null}
+        onClose={() => setIsRuleModalOpen(false)}
+        title="Add Rule"
+        size="md"
+        description={selected ? `to "${selected.name}"` : undefined}
+        footer={
+          <>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => setIsRuleModalOpen(false)}
+            >
+              Cancel
+            </button>
+            <button type="submit" form="filter-rule-form" className="btn btn-primary">
+              Add Rule
+            </button>
+          </>
+        }
+      >
+        <form id="filter-rule-form" onSubmit={handleCreateRule}>
+          <div className="form-group">
+            <label className="form-label" htmlFor="filter-rule-pattern">
+              Domain or Hostname
+            </label>
+            <input
+              id="filter-rule-pattern"
+              type="text"
+              className="form-input"
+              required
+              placeholder="e.g. gambling-site.com or malware.tracker.net"
+              value={newRule.pattern}
+              onChange={(e) => setNewRule({ ...newRule, pattern: e.target.value })}
+            />
+          </div>
+          <div className="form-group">
+            <label className="form-label" htmlFor="filter-rule-type">
+              Rule Type
+            </label>
+            <select
+              id="filter-rule-type"
+              className="form-select"
+              value={newRule.rule_type}
+              onChange={(e) => setNewRule({ ...newRule, rule_type: e.target.value })}
+            >
+              <option value="domain">Domain / Hostname</option>
+              <option value="ip_port">IP:Port</option>
+            </select>
+          </div>
+          <div className="form-group">
+            <label className="form-label" htmlFor="filter-rule-action">
+              Action
+            </label>
+            <select
+              id="filter-rule-action"
+              className="form-select"
+              value={newRule.action}
+              onChange={(e) => setNewRule({ ...newRule, action: e.target.value })}
+            >
+              <option value="block">BLOCK (Sinkhole to 0.0.0.0)</option>
+              <option value="allow">ALLOW (exempt from blocking)</option>
+            </select>
+          </div>
+          <div className="form-group">
+            <label className="form-label" htmlFor="filter-rule-category">
+              Category
+            </label>
+            <select
+              id="filter-rule-category"
+              className="form-select"
+              value={newRule.category}
+              onChange={(e) => setNewRule({ ...newRule, category: e.target.value })}
+            >
+              <option value="Security & Phishing">Security &amp; Phishing</option>
+              <option value="Adult & Gambling">Adult &amp; Gambling</option>
+              <option value="Bandwidth Heavy / Streaming">Bandwidth Heavy / Streaming</option>
+              <option value="Social Media">Social Media</option>
+              <option value="Custom Policy">Custom Corporate Policy</option>
+            </select>
+          </div>
+        </form>
+      </Modal>
+
+      <ConfirmDialog
+        open={policyPendingDelete !== null}
+        title="Delete filter policy"
+        message={
+          policyPendingDelete
+            ? `Delete policy '${policyPendingDelete.name}' and its ${policyPendingDelete.rules_count} rule(s)? Devices keep their current rule set until their next sync.`
+            : ''
+        }
+        confirmLabel="Delete"
+        pending={deleting}
+        onConfirm={handleDeletePolicy}
+        onCancel={() => setPolicyPendingDelete(null)}
+      />
+
+      <ConfirmDialog
+        open={rulePendingDelete !== null}
+        title="Delete filter rule"
+        message={
+          rulePendingDelete
+            ? `Delete rule '${rulePendingDelete.pattern}'? Devices keep the old list until their next sync.`
+            : ''
+        }
+        confirmLabel="Delete"
+        pending={deleting}
+        onConfirm={handleDeleteRule}
+        onCancel={() => setRulePendingDelete(null)}
+      />
     </div>
   )
 }

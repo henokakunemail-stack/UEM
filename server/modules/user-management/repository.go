@@ -84,7 +84,7 @@ func (r *Repository) List(ctx context.Context, limit int) ([]User, error) {
 		COALESCE(is_active, 1) as is_active,
 		last_login_at, created_at, updated_at
 		FROM users ORDER BY created_at ASC LIMIT ?`
-	var users []User
+	users := []User{}
 	if err := r.db.SelectContext(ctx, &users, query, limit); err != nil {
 		return nil, fmt.Errorf("list users: %w", err)
 	}

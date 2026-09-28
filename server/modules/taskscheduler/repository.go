@@ -94,7 +94,7 @@ func CalculateSHA256(content string) string {
 // --- Script CRUD ---
 
 func (r *Repository) ListScripts(ctx context.Context) ([]ScriptTemplate, error) {
-	var scripts []ScriptTemplate
+	scripts := []ScriptTemplate{}
 	err := r.db.SelectContext(ctx, &scripts, `
 		SELECT id, name, description, script_type, script_content, sha256_hash,
 		       default_args, timeout_seconds, created_by, created_at, updated_at
@@ -185,7 +185,7 @@ func (r *Repository) DeleteScript(ctx context.Context, id string) error {
 // --- Schedule CRUD ---
 
 func (r *Repository) ListSchedules(ctx context.Context) ([]TaskSchedule, error) {
-	var schedules []TaskSchedule
+	schedules := []TaskSchedule{}
 	query := `
 		SELECT
 			s.id, s.name, s.description, s.script_id, s.target_type, s.target_id,
@@ -363,7 +363,7 @@ func (r *Repository) ListRuns(ctx context.Context, scheduleID string, limit int)
 	if limit <= 0 || limit > 100 {
 		limit = 50
 	}
-	var runs []ScheduledTaskRun
+	runs := []ScheduledTaskRun{}
 	query := `
 		SELECT
 			r.id, r.schedule_id, r.script_id, r.status, r.triggered_at, r.completed_at,
@@ -407,7 +407,7 @@ func (r *Repository) GetRunByID(ctx context.Context, id string) (*ScheduledTaskR
 }
 
 func (r *Repository) ListDeviceRuns(ctx context.Context, runID string) ([]ScheduledTaskDeviceRun, error) {
-	var runs []ScheduledTaskDeviceRun
+	runs := []ScheduledTaskDeviceRun{}
 	query := `
 		SELECT
 			dr.id, dr.run_id, dr.device_id, dr.status, dr.exit_code, dr.output_log,

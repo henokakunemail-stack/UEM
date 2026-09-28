@@ -111,7 +111,7 @@ func (c *winCollector) readUninstallEntry(root registry.Key, path string) (inven
 
 // collectOSDetail gathers build/edition/architecture facts. RtlGetVersion reports
 // the real kernel version rather than the version the application manifest claims
-// (a Fase 1 finding).
+// (a Phase 1 finding).
 func (c *winCollector) collectOSDetail() (inventory.OSDetail, error) {
 	var osd inventory.OSDetail
 

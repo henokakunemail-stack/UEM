@@ -17,7 +17,7 @@ import (
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/rbac"
 )
 
-// inventoryHandler exposes the Fase 2 API: inventory storage and retrieval,
+// inventoryHandler exposes the Phase 2 API: inventory storage and retrieval,
 // device lifecycle (retire/restore), and static groups.
 type inventoryHandler struct {
 	repo *inventoryRepository
@@ -72,7 +72,7 @@ func (h *inventoryHandler) SetCapabilities(ctx context.Context, deviceID, capabi
 	return h.repo.setCapabilities(ctx, deviceID, capabilitiesJSON)
 }
 
-// Register mounts the Fase 2 routes on the given router.
+// Register mounts the Phase 2 routes on the given router.
 func (h *inventoryHandler) Register(r chi.Router) { h.routes(r) }
 
 // WithAuth supplies the JWT middleware used by every route. The module does not
@@ -201,7 +201,7 @@ func freePctOf(total, free int64) float64 {
 
 // --- HTTP handlers ---
 
-// routes registers the Fase 2 routes under /api. It uses Group, not Route:
+// routes registers the Phase 2 routes under /api. It uses Group, not Route:
 // Handler.Register already mounts /api on the same root router, and chi's Route
 // calls Mount, which panics on a duplicate prefix. Group applies middleware
 // inline without mounting, so two handlers can share a prefix and each own a

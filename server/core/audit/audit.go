@@ -28,13 +28,13 @@ func Log(ctx context.Context, db *sqlx.DB, actorType, actorID, action, targetID 
 
 // Entry is one audit log row.
 type Entry struct {
-	ID         string    `db:"id" json:"id"`
-	ActorType  string    `db:"actor_type" json:"actor_type"`
-	ActorID    string    `db:"actor_id" json:"actor_id"`
-	Action     string    `db:"action" json:"action"`
-	TargetID   string    `db:"target_id" json:"target_id"`
-	Details    string    `db:"details" json:"details"`
-	CreatedAt  time.Time `db:"created_at" json:"created_at"`
+	ID        string    `db:"id" json:"id"`
+	ActorType string    `db:"actor_type" json:"actor_type"`
+	ActorID   string    `db:"actor_id" json:"actor_id"`
+	Action    string    `db:"action" json:"action"`
+	TargetID  string    `db:"target_id" json:"target_id"`
+	Details   string    `db:"details" json:"details"`
+	CreatedAt time.Time `db:"created_at" json:"created_at"`
 }
 
 // List returns the most recent entries.
@@ -44,7 +44,9 @@ func List(ctx context.Context, db *sqlx.DB, limit int) ([]Entry, error) {
 	}
 	var rows []Entry
 	err := db.SelectContext(ctx, &rows,
-		`SELECT id, actor_type, actor_id, action, target_id, COALESCE(details, '{}') AS details, created_at
+		`SELECT id, actor_type, COALESCE(actor_id, '') AS actor_id, action,
+		        COALESCE(target_id, '') AS target_id,
+		        COALESCE(details, '{}') AS details, created_at
 		 FROM audit_logs ORDER BY created_at DESC LIMIT ?`, limit)
 	return rows, err
 }

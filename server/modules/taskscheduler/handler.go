@@ -55,6 +55,10 @@ func (h *Handler) Register(r chi.Router) {
 
 	// Schedule Execution & History
 	r.With(h.authMiddleware, rbac.RequireRole(rbac.RoleTechnician)).Post("/api/schedules/{id}/trigger", h.triggerSchedule)
+	// Fleet-wide run history. Chi keeps this distinct from the {id} route above
+	// because it has one segment fewer, and ListRuns already treats an empty
+	// scheduleID as "every run" — so no separate handler is needed.
+	r.With(h.authMiddleware).Get("/api/schedules/runs", h.listScheduleRuns)
 	r.With(h.authMiddleware).Get("/api/schedules/{id}/runs", h.listScheduleRuns)
 	r.With(h.authMiddleware).Get("/api/schedules/runs/{runId}", h.getRun)
 	r.With(h.authMiddleware).Get("/api/schedules/runs/{runId}/devices", h.listDeviceRuns)

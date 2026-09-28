@@ -1,5 +1,5 @@
 -- server/core/db/migrations/0012_agent_self_update.sql
--- Fase 13: Agent Self-Update & Rollout Management
+-- Phase 13: Agent Self-Update & Rollout Management
 
 CREATE TABLE IF NOT EXISTS agent_releases (
     id TEXT PRIMARY KEY,

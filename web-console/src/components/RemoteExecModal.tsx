@@ -6,9 +6,9 @@ import {
   Play,
   RefreshCw,
   Terminal,
-  X,
 } from 'lucide-react'
 import { api } from '../services/api'
+import { DataTable, Modal } from './ui'
 import type { DeviceDTO, RemoteExecutionDTO } from '../types/api'
 
 interface RemoteExecModalProps {
@@ -53,7 +53,7 @@ export const RemoteExecModal: React.FC<RemoteExecModalProps> = ({ device, onClos
           setSelectedExec(updated)
         }
       }
-    } catch (err: unknown) {
+    } catch {
       // Silent fail: history refresh is best-effort
     }
   }, [device, selectedExec])
@@ -123,196 +123,200 @@ export const RemoteExecModal: React.FC<RemoteExecModalProps> = ({ device, onClos
   }
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div
-        className="modal modal-wide"
-        onClick={(e) => e.stopPropagation()}
-        style={{ maxWidth: '960px' }}
-      >
-        <div className="modal-header">
-          <div>
-            <h2 className="modal-title">
-              <Terminal size={20} /> Remote Command Execution
-            </h2>
-            <p className="modal-subtitle">
-              {device.hostname} · {device.os_name} ·{' '}
-              <span className="font-mono">{device.id.substring(0, 16)}</span>
-            </p>
+    <Modal
+      open={device !== null}
+      onClose={onClose}
+      size="xl"
+      title={
+        <span className="modal-title-group">
+          <Terminal size={20} /> Remote Command Execution
+        </span>
+      }
+      description={
+        <>
+          {device.hostname} · {device.os_name} ·{' '}
+          <span className="font-mono">{device.id.substring(0, 16)}</span>
+        </>
+      }
+      // A dispatched command is in flight: only a deliberate click may navigate
+      // away, and Escape must not take the result with it.
+      dismissible={!running}
+    >
+      <div className="modal-body">
+        {error && (
+          <div className="notification-banner error" role="alert">
+            <AlertCircle size={18} />
+            <span>{error}</span>
           </div>
-          <button type="button" className="btn btn-icon" onClick={onClose} title="Close">
-            <X size={18} />
+        )}
+
+        <div className="exec-form">
+          <div className="form-row">
+            <div className="form-field">
+              <label className="form-label" htmlFor="exec-shell">
+                Shell Runtime
+              </label>
+              <select
+                id="exec-shell"
+                className="select-input"
+                value={shell}
+                onChange={(e) => setShell(e.target.value)}
+              >
+                {availableShells.map((s) => (
+                  <option key={s.value} value={s.value}>
+                    {s.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="form-field" style={{ maxWidth: '180px' }}>
+              <label className="form-label" htmlFor="exec-timeout">
+                <Clock size={12} style={{ display: 'inline', marginRight: 4 }} />
+                Timeout (s)
+              </label>
+              <input
+                id="exec-timeout"
+                type="number"
+                className="text-input"
+                min={5}
+                max={300}
+                value={timeoutSec}
+                onChange={(e) => setTimeoutSec(Number(e.target.value))}
+              />
+            </div>
+          </div>
+
+          <div className="form-field">
+            <label className="form-label" htmlFor="exec-command">
+              Command Payload
+            </label>
+            <textarea
+              id="exec-command"
+              className="exec-textarea"
+              rows={4}
+              placeholder={
+                shell === 'powershell'
+                  ? 'Get-Service | Where-Object Status -eq "Running"'
+                  : 'systemctl status --type=service --state=running'
+              }
+              value={command}
+              onChange={(e) => setCommand(e.target.value)}
+              onKeyDown={handleKeyDown}
+              spellCheck={false}
+            />
+            <span className="form-hint">Ctrl + Enter to execute</span>
+          </div>
+
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={handleRun}
+            disabled={running || !command.trim()}
+          >
+            {running ? <RefreshCw size={16} className="spinning" /> : <Play size={16} />}
+            <span>{running ? 'Dispatching...' : 'Run Command'}</span>
           </button>
         </div>
 
-        <div className="modal-body">
-          {error && (
-            <div className="notification-banner error">
-              <AlertCircle size={18} />
-              <span>{error}</span>
+        {selectedExec && (
+          <div className="exec-output-section">
+            <div className="exec-output-header">
+              <h3 className="section-title">Execution Output</h3>
+              {statusBadge(selectedExec.status)}
+              {selectedExec.exit_code !== null && selectedExec.exit_code !== undefined && (
+                <span className="exit-code-badge">Exit Code: {selectedExec.exit_code}</span>
+              )}
             </div>
-          )}
-
-          <div className="exec-form">
-            <div className="form-row">
-              <div className="form-field">
-                <label className="form-label">Shell Runtime</label>
-                <select
-                  className="select-input"
-                  value={shell}
-                  onChange={(e) => setShell(e.target.value)}
-                >
-                  {availableShells.map((s) => (
-                    <option key={s.value} value={s.value}>
-                      {s.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="form-field" style={{ maxWidth: '180px' }}>
-                <label className="form-label">
-                  <Clock size={12} style={{ display: 'inline', marginRight: 4 }} />
-                  Timeout (s)
-                </label>
-                <input
-                  type="number"
-                  className="text-input"
-                  min={5}
-                  max={300}
-                  value={timeoutSec}
-                  onChange={(e) => setTimeoutSec(Number(e.target.value))}
-                />
-              </div>
+            <div className="exec-output-terminal" aria-live="polite">
+              {selectedExec.output ? (
+                <pre className="terminal-pre">{selectedExec.output}</pre>
+              ) : (
+                <span className="terminal-placeholder">
+                  No output captured. {selectedExec.error_message || ''}
+                </span>
+              )}
+              {selectedExec.error_message && selectedExec.output && (
+                <pre className="terminal-pre terminal-error">{selectedExec.error_message}</pre>
+              )}
             </div>
+          </div>
+        )}
 
-            <div className="form-field">
-              <label className="form-label">Command Payload</label>
-              <textarea
-                className="exec-textarea"
-                rows={4}
-                placeholder={
-                  shell === 'powershell'
-                    ? 'Get-Service | Where-Object Status -eq "Running"'
-                    : 'systemctl status --type=service --state=running'
-                }
-                value={command}
-                onChange={(e) => setCommand(e.target.value)}
-                onKeyDown={handleKeyDown}
-                spellCheck={false}
-              />
-              <span className="form-hint">Ctrl + Enter to execute</span>
-            </div>
-
-            <button
-              type="button"
-              className="btn btn-primary"
-              onClick={handleRun}
-              disabled={running || !command.trim()}
-            >
-              {running ? <RefreshCw size={16} className="spinning" /> : <Play size={16} />}
-              <span>{running ? 'Dispatching...' : 'Run Command'}</span>
+        <div className="exec-history-section">
+          <div className="exec-history-header">
+            <h3 className="section-title">Execution History</h3>
+            <button type="button" className="btn btn-sm btn-secondary" onClick={fetchHistory}>
+              <RefreshCw size={14} />
+              <span>Refresh</span>
             </button>
           </div>
-
-          {selectedExec && (
-            <div className="exec-output-section">
-              <div className="exec-output-header">
-                <h3 className="section-title">Execution Output</h3>
-                {statusBadge(selectedExec.status)}
-                {selectedExec.exit_code !== null && selectedExec.exit_code !== undefined && (
-                  <span className="exit-code-badge">
-                    Exit Code: {selectedExec.exit_code}
-                  </span>
-                )}
-              </div>
-              <div className="exec-output-terminal">
-                {selectedExec.output ? (
-                  <pre className="terminal-pre">{selectedExec.output}</pre>
-                ) : (
-                  <span className="terminal-placeholder">
-                    No output captured. {selectedExec.error_message || ''}
-                  </span>
-                )}
-                {selectedExec.error_message && selectedExec.output && (
-                  <pre className="terminal-pre terminal-error">{selectedExec.error_message}</pre>
-                )}
-              </div>
+          {history.length === 0 ? (
+            <div className="empty-state">
+              <Terminal size={28} />
+              <p>No remote commands executed on this endpoint yet.</p>
             </div>
-          )}
-
-          <div className="exec-history-section">
-            <div className="exec-history-header">
-              <h3 className="section-title">Execution History</h3>
-              <button
-                type="button"
-                className="btn btn-sm btn-secondary"
-                onClick={fetchHistory}
-              >
-                <RefreshCw size={14} />
-                <span>Refresh</span>
-              </button>
-            </div>
-            {history.length === 0 ? (
-              <div className="empty-state">
-                <Terminal size={28} />
-                <p>No remote commands executed on this endpoint yet.</p>
-              </div>
-            ) : (
-              <div className="table-wrapper">
-                <table className="data-table">
-                  <thead>
-                    <tr>
-                      <th>Status</th>
-                      <th>Command</th>
-                      <th>Shell</th>
-                      <th>Operator</th>
-                      <th>Exit</th>
-                      <th>Started</th>
-                      <th></th>
+          ) : (
+            <DataTable label="Remote command execution history">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Status</th>
+                    <th>Command</th>
+                    <th>Shell</th>
+                    <th>Operator</th>
+                    <th>Exit</th>
+                    <th>Started</th>
+                    <th>
+                      <span className="form-hint">Output</span>
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {history.map((h) => (
+                    <tr
+                      key={h.id}
+                      className={`exec-row ${selectedExec?.id === h.id ? 'row-selected' : ''}`}
+                    >
+                      <td>{statusBadge(h.status)}</td>
+                      <td>
+                        <span
+                          className="font-mono text-sm exec-command-cell"
+                          title={h.command_text}
+                        >
+                          {h.command_text.length > 64
+                            ? h.command_text.substring(0, 64) + '...'
+                            : h.command_text}
+                        </span>
+                      </td>
+                      <td>
+                        <span className="shell-badge">{h.shell_type}</span>
+                      </td>
+                      <td>{h.operator_name || h.operator_id.substring(0, 8)}</td>
+                      <td className="font-mono text-sm">
+                        {h.exit_code !== null && h.exit_code !== undefined ? h.exit_code : '—'}
+                      </td>
+                      <td className="timestamp-cell">
+                        {new Date(h.started_at).toLocaleString()}
+                      </td>
+                      <td className="text-right">
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-secondary"
+                          onClick={() => setSelectedExec(h)}
+                          title="View Output"
+                          aria-label={`View output for ${h.command_text}`}
+                        >
+                          <ChevronRight size={12} />
+                        </button>
+                      </td>
                     </tr>
-                  </thead>
-                  <tbody>
-                    {history.map((h) => (
-                      <tr
-                        key={h.id}
-                        className={`exec-row ${selectedExec?.id === h.id ? 'row-selected' : ''}`}
-                      >
-                        <td>{statusBadge(h.status)}</td>
-                        <td>
-                          <span className="font-mono text-sm exec-command-cell" title={h.command_text}>
-                            {h.command_text.length > 64
-                              ? h.command_text.substring(0, 64) + '...'
-                              : h.command_text}
-                          </span>
-                        </td>
-                        <td>
-                          <span className="shell-badge">{h.shell_type}</span>
-                        </td>
-                        <td>{h.operator_name || h.operator_id.substring(0, 8)}</td>
-                        <td className="font-mono text-sm">
-                          {h.exit_code !== null && h.exit_code !== undefined ? h.exit_code : '—'}
-                        </td>
-                        <td className="timestamp-cell">
-                          {new Date(h.started_at).toLocaleString()}
-                        </td>
-                        <td className="text-right">
-                          <button
-                            type="button"
-                            className="btn btn-sm btn-secondary"
-                            onClick={() => setSelectedExec(h)}
-                            title="View Output"
-                          >
-                            <ChevronRight size={12} />
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
+                  ))}
+                </tbody>
+              </table>
+            </DataTable>
+          )}
         </div>
       </div>
-    </div>
+    </Modal>
   )
 }

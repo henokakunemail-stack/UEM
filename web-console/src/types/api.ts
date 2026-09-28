@@ -47,7 +47,9 @@ export interface HardwareInfo {
   }>
   nics?: Array<{
     name: string
-    mac_address?: string
+    // The agent emits `mac`, not `mac_address` — MAC is the stable cross-OS
+    // identifier while Name is OS-native ("WiFi" vs "eth0").
+    mac?: string
     ips?: string[]
   }>
   model?: {
@@ -69,7 +71,7 @@ export interface OSDetailInfo {
   edition?: string
   build_number?: string
   install_date?: string
-  boot_time?: string
+  last_boot_utc?: string
   architecture?: string
 }
 
@@ -135,6 +137,18 @@ export interface ActivityItem {
   target_id: string
   details: string
   created_at: string
+}
+
+// GET /api/logs — the server's own log tail, backing the "Log" menu.
+// Unlike the audit trail this is what the server itself did, not what an
+// operator did to it, so it is the place to read when a menu 500s.
+export interface ServerLogResponse {
+  lines: string[]
+  total: number
+  // Empty when LOG_FILE is unset and logs go to stdout only.
+  log_file: string
+  // True when `lines` is a suffix of the full buffer.
+  truncated: boolean
 }
 
 export interface SoftwarePackageDTO {
@@ -213,14 +227,15 @@ export interface TerminalSessionDTO {
   hostname?: string
 }
 
-// Fase 6: Patch Management
+// Phase 6: Patch Management
+// FleetPatchSummary on the server. The console used to declare its own
+// compliance-percentage shape here, which shared not one field with this —
+// every card on the Patches page rendered `undefined` against a real response.
 export interface PatchSummaryDTO {
-  total_devices: number
-  compliant_devices: number
-  compliance_pct: number
-  pending_patches: number
-  critical_patches: number
-  reboot_required: number
+  total_missing_patches: number
+  critical_security_patches: number
+  reboot_pending_devices: number
+  vulnerable_devices: number
 }
 
 export interface DevicePatchStatusDTO {
@@ -237,23 +252,35 @@ export interface DevicePatchStatusDTO {
 
 export interface PatchDetailDTO {
   id: string
+  patch_id: string
+  device_id: string
   kb_id: string
   title: string
+  description: string
   severity: string
   category: string
-  installed: boolean
   size_bytes: number
-  published_at?: string | null
+  installed_state: string
+  reboot_required: boolean
+  discovered_at: string
+  updated_at: string
+  hostname?: string
+  os_name?: string
 }
 
-// Fase 10: Task Scheduler & Script Repository
+// Phase 10: Task Scheduler & Script Repository
+// ScriptTemplate / TaskSchedule / ScheduledTaskRun on the server. Note the
+// server names the shell field `script_type` and the trigger `schedule_expr`;
+// the console had renamed both, so every scheduled-job row read as blank.
 export interface ScriptDTO {
   id: string
   name: string
   description: string
-  shell_type: string
+  script_type: string
   script_content: string
   sha256_hash: string
+  default_args: string
+  timeout_seconds: number
   created_by: string
   created_at: string
   updated_at: string
@@ -262,83 +289,127 @@ export interface ScriptDTO {
 export interface ScheduleDTO {
   id: string
   name: string
+  description: string
   script_id: string
   script_name?: string
   target_type: string
   target_id: string
   schedule_type: string
-  cron_expr?: string
-  interval_seconds?: number
-  is_active: boolean
+  schedule_expr: string
+  is_enabled: boolean
+  last_run_at?: string | null
   next_run_at?: string | null
+  created_by: string
   created_at: string
+  updated_at: string
 }
 
 export interface TaskRunDTO {
   id: string
-  schedule_id?: string | null
+  schedule_id: string
   script_id: string
+  status: string
+  triggered_at: string
+  completed_at?: string | null
+  schedule_name?: string
   script_name?: string
+}
+
+// A per-device row under a run. The run list is fleet-wide and has no device
+// on it, so the per-device detail (exit code, output, error) lives here.
+export interface DeviceRunDTO {
+  id: string
+  run_id: string
   device_id: string
-  hostname?: string
   status: string
   exit_code?: number | null
   output_log?: string | null
   error_message?: string | null
-  started_at: string
+  started_at?: string | null
   completed_at?: string | null
+  hostname?: string
+  site?: string
 }
 
-// Fase 12: Network & Web Filter
+// Phase 12: Network & Web Filter
+// The server models this as policy -> rules, not as a flat rule list: a rule
+// only exists inside a policy, and the policy is what gets targeted and synced.
+// The console's flat DTO (target_type/domain_pattern on the rule) matched no
+// endpoint on the server at all.
+export interface FilterPolicyDTO {
+  id: string
+  name: string
+  description: string
+  target_type: 'all' | 'group' | 'device'
+  target_id: string
+  is_enabled: boolean
+  priority: number
+  created_by: string
+  created_at: string
+  updated_at: string
+  rules_count: number
+}
+
 export interface FilterRuleDTO {
   id: string
-  target_type: string
-  target_id: string
-  rule_type: string
-  domain_pattern: string
-  category: string
+  policy_id: string
+  rule_type: 'domain' | 'ip_port'
+  pattern: string
   action: 'block' | 'allow'
-  is_active: boolean
-  priority: number
+  category: string
   created_at: string
 }
 
-export interface DeviceFilterComplianceDTO {
+export interface DeviceFilterStateDTO {
   device_id: string
-  hostname: string
-  site: string
-  active_version: string
+  policy_version: string
   status: string
-  last_reported_at?: string | null
+  rules_applied: number
+  // The server's not-found fallback (networkfilter/handler.go:338-343) returns
+  // neither key, so these are genuinely optional rather than merely nullable.
+  last_applied_at?: string | null
+  error_message?: string | null
 }
 
-// Fase 9: Alerting & Incidents
+// Phase 9: Alerting & Incidents
+// AlertIncident / AlertRule on the server. The incident's headline text is
+// `title` and its trigger count is `trigger_count`; the console read a
+// `triggered_at` that the server never sends (it sends first_triggered_at and
+// last_triggered_at) and rendered no title at all.
 export interface AlertIncidentDTO {
   id: string
   rule_id: string
-  rule_name: string
+  rule_name?: string
   severity: 'info' | 'warning' | 'critical'
   device_id: string
   hostname?: string
   site?: string
+  title: string
   message: string
   status: 'open' | 'acknowledged' | 'resolved'
-  triggered_at: string
+  trigger_count: number
+  acknowledged_by?: string | null
   acknowledged_at?: string | null
+  resolved_by?: string | null
   resolved_at?: string | null
+  first_triggered_at: string
+  last_triggered_at: string
 }
 
 export interface AlertRuleDTO {
   id: string
   name: string
   rule_type: string
+  threshold_val: number
   severity: 'info' | 'warning' | 'critical'
-  threshold_value: number
-  is_active: boolean
+  webhook_url: string
+  is_enabled: boolean
+  created_by: string
   created_at: string
+  updated_at: string
 }
 
-// Fase 14: Asset & License Management
+// Phase 14: Asset & License Management
 export interface HardwareAssetDTO {
   id: string
   asset_tag: string
@@ -392,7 +463,20 @@ export interface LicenseComplianceSummaryDTO {
   status: 'compliant' | 'over_allocated' | 'expiring_soon' | 'expired'
 }
 
-// Fase 13: Agent Self-Update & Rollouts
+// Phase 2: device_groups, as served by GET /api/groups
+// (device-management/inventory_handler.go:340). The envelope is {groups,count},
+// not a bare array — see the note in getDeviceGroups below.
+// GroupMemberCount embeds DeviceGroup and adds member_count.
+export interface DeviceGroupDTO {
+  id: string
+  name: string
+  description: string
+  created_at: string
+  updated_at: string
+  member_count: number
+}
+
+// Phase 13: Agent Self-Update & Rollouts
 export interface AgentReleaseDTO {
   id: string
   version: string
@@ -420,19 +504,150 @@ export interface UpdateCampaignDTO {
   created_by: string
   created_at: string
   updated_at: string
-  total_devices?: number
-  completed_devices?: number
-  failed_devices?: number
 }
 
-// Fase 7: User Management
-export interface UserDTO {
+// Phase 15: Device Maintenance
+// Every field name below is a verbatim copy of the json tag on the matching
+// struct in server/modules/maintenance/model.go. The pointers there (completed_at,
+// exit_code, output_log, error_message) are nullable in SQLite, so they are
+// `| null` here and every render site must guard rather than call a method on
+// them. A page that renames one of these renders `undefined` with no error, which
+// is how the earlier console/server drift shipped.
+
+// maintenance.Job
+export interface MaintenanceJobDTO {
   id: string
-  username: string
-  display_name: string
-  role: 'admin' | 'technician' | 'viewer'
-  status: 'active' | 'deactivated'
+  name: string
+  task_type: string
+  target_type: 'device' | 'group' | 'all'
+  target_id: string
+  created_by: string
+  total_tasks: number
+  dispatched: number
+  skipped: number
+  completed: number
+  failed: number
+  status: 'running' | 'completed' | 'partial' | 'failed'
+  started_at: string
+  completed_at?: string | null
+}
+
+// maintenance.Task
+export interface MaintenanceTaskDTO {
+  id: string
+  job_id: string
+  device_id: string
+  hostname: string
+  task_type: string
+  status: 'pending' | 'dispatched' | 'running' | 'completed' | 'failed' | 'skipped'
+  // Empty until the agent reports a step. Full Health Scan posts once per step.
+  step: string
+  exit_code?: number | null
+  output_log?: string | null
+  error_message?: string | null
+  reboot_required: boolean
+  bytes_freed: number
+  started_at?: string | null
+  completed_at?: string | null
   created_at: string
   updated_at: string
 }
 
+// maintenance.TaskInfo — the server's own TaskCatalog entry, served verbatim so
+// the chooser never hardcodes labels the agent may not implement.
+export interface TaskInfoDTO {
+  id: string
+  label: string
+  description: string
+  // True when the operation may interrupt a logged-in user or needs a reboot;
+  // the console confirms before dispatching one of these.
+  disruptive: boolean
+}
+
+// maintenance.JobProgress (server/modules/maintenance/repository.go) — the
+// poll-while-running read. `percent` is computed server-side and already covers
+// skipped devices, so the console must not recompute it from completed+failed.
+export interface MaintenanceProgressDTO {
+  job_id: string
+  // A bare `string` in Go (repository.go, JobProgress.Status), NOT the job
+  // status union — so the console narrows it before it writes it back onto a
+  // MaintenanceJobDTO. Typing it as the union here would be a claim the server
+  // does not make.
+  status: string
+  total_tasks: number
+  // Server-side aggregate of tasks still pending/dispatched/running. The server
+  // does NOT send a `pending` key, so this console never reads one.
+  remaining: number
+  dispatched: number
+  skipped: number
+  completed: number
+  failed: number
+  bytes_freed: number
+  reboot_required: number
+  percent: number
+  completed_at?: string | null
+}
+
+// The response to POST /api/maintenance/jobs. `skipped` is the offline-target
+// count, which matters here: an operator who targets the whole fleet on a
+// Sunday sees most devices skipped and needs to be told that, not shown 0
+// completed with no explanation.
+export interface MaintenanceRunResponse {
+  job: MaintenanceJobDTO
+  total_targets: number
+  dispatched_live: number
+  skipped: number
+}
+
+// Phase 7: User Management
+// The server sends `is_active` (a bool), not a `status` string, and a
+// nullable display_name; the console's `status` was always undefined, so every
+// user row rendered an unknown badge and the deactivate button had no state to
+// reflect.
+export interface UserDTO {
+  id: string
+  username: string
+  display_name: string | null
+  role: 'admin' | 'technician' | 'viewer'
+  is_active: boolean
+  last_login_at?: string | null
+  created_at: string
+  updated_at: string
+}
+
+
+// Phase 11: Remote Control
+// A live relay session, as returned by POST .../remotecontrol/session and
+// GET .../remotecontrol/sessions. `mode` is 'full_control' or 'view_only';
+// the session row is the record, the relay is the live connection.
+export type RemoteControlMode = 'full_control' | 'view_only'
+
+export interface RemoteControlSessionDTO {
+  id: string
+  device_id: string
+  operator_id: string
+  session_mode: RemoteControlMode
+  status: 'active' | 'ended' | 'rejected'
+  frames_transmitted: number
+  bytes_transmitted: number
+  input_events_count: number
+  started_at: string
+  ended_at?: string | null
+  created_at: string
+  // Joined in by the repository so history needs no second request.
+  hostname?: string
+  site?: string
+  operator_name?: string
+}
+
+// What the agent reports about itself in its `hello` control message, before
+// the first frame. The console uses this to refuse to present a session that
+// cannot actually work: `capture: false` means the endpoint will never send a
+// real desktop, and saying so up front is the difference between an honest
+// error and a black rectangle.
+export interface RemoteControlCapabilities {
+  capture: boolean
+  mouse: boolean
+  keyboard: boolean
+  reason?: string
+}

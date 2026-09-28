@@ -52,7 +52,7 @@ type InventoryRepository struct {
 	inventoryRepository
 }
 
-// NewInventoryRepository builds the Fase 2 repository over an existing pool.
+// NewInventoryRepository builds the Phase 2 repository over an existing pool.
 func NewInventoryRepository(db *sqlx.DB) *InventoryRepository {
 	return &InventoryRepository{inventoryRepository{db: db}}
 }

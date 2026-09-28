@@ -3,6 +3,7 @@ import {
   Package,
   UploadCloud,
   Play,
+  Rocket,
   CheckCircle2,
   XCircle,
   Clock,
@@ -15,8 +16,11 @@ import {
   X,
   Server,
 } from 'lucide-react'
-import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
+import { usePermission } from '../hooks/usePermission'
+import { DataTable } from '../components/ui/DataTable'
+import { ConfirmDialog } from '../components/ui/ConfirmDialog'
+import { Modal } from '../components/ui/Modal'
 import { api } from '../services/api'
 import type {
   SoftwarePackageDTO,
@@ -24,9 +28,19 @@ import type {
   DeploymentTaskDTO,
 } from '../types/api'
 
-export const SoftwarePage: React.FC = () => {
-  const { user } = useAuth()
-  const [activeTab, setActiveTab] = useState<'packages' | 'deployments'>('packages')
+export type SoftwareTab = 'packages' | 'deployments'
+
+interface SoftwarePageProps {
+  activeTab: SoftwareTab
+  onTabChange: (tab: SoftwareTab) => void
+}
+
+export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChange }) => {
+  // Server-side: package upload and deployment creation are technician-or-above,
+  // package deletion is admin-only. Reads are open to any authenticated user.
+  const { can } = usePermission()
+  const canDeploy = can('technician')
+  const canAdmin = can('admin')
   const [packages, setPackages] = useState<SoftwarePackageDTO[]>([])
   const [deployments, setDeployments] = useState<SoftwareDeploymentDTO[]>([])
   const [loading, setLoading] = useState(true)
@@ -57,6 +71,11 @@ export const SoftwarePage: React.FC = () => {
   const [deploymentTasks, setDeploymentTasks] = useState<DeploymentTaskDTO[]>([])
   const [loadingTasks, setLoadingTasks] = useState(false)
   const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null)
+
+  // Package deletion moved off window.confirm so the dialog can hold a pending
+  // state while the request is in flight.
+  const [packagePendingDelete, setPackagePendingDelete] = useState<{ id: string; name: string } | null>(null)
+  const [deletingPackage, setDeletingPackage] = useState(false)
 
   const fetchData = useCallback(async () => {
     setLoading(true)
@@ -116,20 +135,23 @@ export const SoftwarePage: React.FC = () => {
     }
   }
 
-  const handleDeletePackage = async (id: string, name: string) => {
-    if (!window.confirm(`Are you sure you want to delete package "${name}"? This action cannot be undone.`)) {
-      return
-    }
+  const handleDeletePackage = async () => {
+    if (!packagePendingDelete) return
+    const { id, name } = packagePendingDelete
+    setDeletingPackage(true)
     try {
       await api.deletePackage(id)
       const successText = `Package ${name} deleted successfully`
       setStatusMsg({ type: 'success', text: successText })
       toast.info(successText)
+      setPackagePendingDelete(null)
       fetchData()
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to delete package'
       setStatusMsg({ type: 'error', text: msg })
       toast.error(msg)
+    } finally {
+      setDeletingPackage(false)
     }
   }
 
@@ -159,7 +181,7 @@ export const SoftwarePage: React.FC = () => {
       setDeployName('')
       setDeployPackageId('')
       setDeployTargetId('')
-      setActiveTab('deployments')
+      onTabChange('deployments')
       fetchData()
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to trigger deployment'
@@ -204,46 +226,50 @@ export const SoftwarePage: React.FC = () => {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="page-container">
       {/* Top Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      <div className="page-header">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-white flex items-center gap-2">
-            <Package className="h-6 w-6 text-cyan-400" />
+          <h1 className="page-title">
+            <Package size={20} className="text-primary" />
             Software Deployment
           </h1>
-          <p className="text-sm text-slate-400 mt-1">
+          <p className="page-subtitle">
             Silent multi-platform distribution with integrity verification and progress tracking
           </p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="header-controls">
           <button
+            type="button"
+            className="btn btn-secondary"
             onClick={() => fetchData()}
-            className="p-2 text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-750 border border-slate-700 rounded-lg transition-colors"
-            title="Refresh"
+            disabled={loading}
           >
-            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+            <RefreshCw size={16} className={loading ? 'spinning' : ''} />
+            <span>Refresh</span>
           </button>
-          {user?.rol !== 'viewer' && (
+          {canDeploy && (
             <>
               <button
+                type="button"
+                className="btn btn-secondary"
                 onClick={() => setShowUploadModal(true)}
-                className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-white bg-slate-800 hover:bg-slate-700 border border-slate-600 rounded-lg transition-colors"
               >
-                <UploadCloud className="h-4 w-4 text-cyan-400" />
-                Upload Package
+                <UploadCloud size={16} />
+                <span>Upload Package</span>
               </button>
               <button
+                type="button"
+                className="btn btn-primary"
                 onClick={() => {
                   setDeployPackageId(packages[0]?.id || '')
                   setDeployName(`Deploy ${packages[0]?.name || 'Package'} - ${new Date().toLocaleDateString()}`)
                   setShowDeployModal(true)
                 }}
                 disabled={packages.length === 0}
-                className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-white bg-cyan-600 hover:bg-cyan-500 rounded-lg transition-colors disabled:opacity-50"
               >
-                <Play className="h-4 w-4" />
-                New Deployment
+                <Play size={16} />
+                <span>New Deployment</span>
               </button>
             </>
           )}
@@ -252,226 +278,225 @@ export const SoftwarePage: React.FC = () => {
 
       {/* Notifications */}
       {statusMsg && (
-        <div
-          className={`p-4 rounded-lg flex items-center justify-between border ${
-            statusMsg.type === 'success'
-              ? 'bg-emerald-950/40 text-emerald-300 border-emerald-800/60'
-              : 'bg-rose-950/40 text-rose-300 border-rose-800/60'
-          }`}
-        >
-          <div className="flex items-center gap-2 text-sm">
-            {statusMsg.type === 'success' ? <CheckCircle2 className="h-4 w-4" /> : <AlertCircle className="h-4 w-4" />}
+        <div className={`alert-banner ${statusMsg.type === 'error' ? 'alert-error' : 'alert-success'}`}>
+          <span>
+            {statusMsg.type === 'success' ? <CheckCircle2 size={16} /> : <AlertCircle size={16} />}
             {statusMsg.text}
-          </div>
-          <button onClick={() => setStatusMsg(null)} className="text-slate-400 hover:text-white">
-            <X className="h-4 w-4" />
+          </span>
+          <button
+            type="button"
+            onClick={() => setStatusMsg(null)}
+            className="close-btn"
+            aria-label="Dismiss message"
+          >
+            <X size={16} />
           </button>
         </div>
       )}
 
       {/* Stats Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-slate-800/80 border border-slate-700 rounded-xl p-4">
-          <div className="flex items-center justify-between text-slate-400 text-xs font-semibold uppercase tracking-wider">
-            Repository Packages
-            <Package className="h-4 w-4 text-cyan-400" />
+      <div className="kpi-grid">
+        <div className="kpi-card">
+          <div className="kpi-header">
+            <span className="kpi-label">Repository Packages</span>
+            <span className="kpi-icon">
+              <Package size={16} />
+            </span>
           </div>
-          <div className="mt-2 text-2xl font-bold text-white">{packages.length}</div>
-          <div className="text-xs text-slate-400 mt-1">Cross-platform installers ready</div>
+          <div className="kpi-value">{packages.length}</div>
+          <div className="kpi-hint">Cross-platform installers ready</div>
         </div>
 
-        <div className="bg-slate-800/80 border border-slate-700 rounded-xl p-4">
-          <div className="flex items-center justify-between text-slate-400 text-xs font-semibold uppercase tracking-wider">
-            Active Deployments
-            <Play className="h-4 w-4 text-amber-400" />
+        <div className="kpi-card">
+          <div className="kpi-header">
+            <span className="kpi-label">Active Deployments</span>
+            <span className="kpi-icon">
+              <Play size={16} />
+            </span>
           </div>
-          <div className="mt-2 text-2xl font-bold text-white">
+          <div className="kpi-value">
             {deployments.filter((d) => d.status === 'running').length}
           </div>
-          <div className="text-xs text-slate-400 mt-1">In-progress rollout jobs</div>
+          <div className="kpi-hint">In-progress rollout jobs</div>
         </div>
 
-        <div className="bg-slate-800/80 border border-slate-700 rounded-xl p-4">
-          <div className="flex items-center justify-between text-slate-400 text-xs font-semibold uppercase tracking-wider">
-            Total Endpoints Targeted
-            <Server className="h-4 w-4 text-indigo-400" />
+        <div className="kpi-card">
+          <div className="kpi-header">
+            <span className="kpi-label">Total Endpoints Targeted</span>
+            <span className="kpi-icon">
+              <Server size={16} />
+            </span>
           </div>
-          <div className="mt-2 text-2xl font-bold text-white">
+          <div className="kpi-value">
             {deployments.reduce((acc, d) => acc + d.total_tasks, 0)}
           </div>
-          <div className="text-xs text-slate-400 mt-1">Across all deployment tasks</div>
+          <div className="kpi-hint">Across all deployment tasks</div>
         </div>
 
-        <div className="bg-slate-800/80 border border-slate-700 rounded-xl p-4">
-          <div className="flex items-center justify-between text-slate-400 text-xs font-semibold uppercase tracking-wider">
-            Execution Success Rate
-            <CheckCircle2 className="h-4 w-4 text-emerald-400" />
+        <div className="kpi-card">
+          <div className="kpi-header">
+            <span className="kpi-label">Execution Success Rate</span>
+            <span className="kpi-icon">
+              <CheckCircle2 size={16} />
+            </span>
           </div>
-          <div className="mt-2 text-2xl font-bold text-white">
+          <div className="kpi-value">
             {(() => {
               const total = deployments.reduce((acc, d) => acc + d.total_tasks, 0)
               const success = deployments.reduce((acc, d) => acc + d.success_tasks, 0)
               return total > 0 ? `${((success / total) * 100).toFixed(1)}%` : '100%'
             })()}
           </div>
-          <div className="text-xs text-emerald-400/80 mt-1">Cryptographic verified runs</div>
+          <div className="kpi-hint">Cryptographic verified runs</div>
         </div>
       </div>
 
       {/* Tabs & Search */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-slate-800 pb-4">
-        <div className="flex items-center gap-2">
+      <div className="table-toolbar">
+        <div className="tabs-nav">
           <button
-            onClick={() => setActiveTab('packages')}
-            className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
-              activeTab === 'packages'
-                ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/30'
-                : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
-            }`}
+            type="button"
+            className={`tab-btn ${activeTab === 'packages' ? 'active' : ''}`}
+            onClick={() => onTabChange('packages')}
           >
-            Package Repository ({packages.length})
+            <Package size={16} />
+            <span>Package Repository ({packages.length})</span>
           </button>
           <button
-            onClick={() => setActiveTab('deployments')}
-            className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
-              activeTab === 'deployments'
-                ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/30'
-                : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
-            }`}
+            type="button"
+            className={`tab-btn ${activeTab === 'deployments' ? 'active' : ''}`}
+            onClick={() => onTabChange('deployments')}
           >
-            Deployments & Rollouts ({deployments.length})
+            <Rocket size={16} />
+            <span>Deployments &amp; Rollouts ({deployments.length})</span>
           </button>
         </div>
 
-        <div className="relative">
-          <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+        <div className="search-wrap">
+          <Search size={16} className="search-icon" />
           <input
             type="text"
+            className="search-input"
             placeholder={activeTab === 'packages' ? 'Search packages...' : 'Search deployments...'}
+            aria-label={activeTab === 'packages' ? 'Search packages' : 'Search deployments'}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="w-full sm:w-64 pl-9 pr-4 py-1.5 text-sm bg-slate-900 border border-slate-700 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500"
           />
         </div>
       </div>
 
       {/* TAB 1: Package Repository */}
       {activeTab === 'packages' && (
-        <div className="bg-slate-900/60 border border-slate-800 rounded-xl overflow-hidden shadow-sm">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm text-slate-300">
-              <thead className="bg-slate-800/80 text-xs font-semibold uppercase tracking-wider text-slate-400 border-b border-slate-700">
+        <div className="table-card">
+          <DataTable label="Package repository">
+            <table className="data-table">
+              <thead>
                 <tr>
-                  <th className="px-6 py-3">Package Name</th>
-                  <th className="px-6 py-3">Target OS</th>
-                  <th className="px-6 py-3">Type</th>
-                  <th className="px-6 py-3">File & Size</th>
-                  <th className="px-6 py-3">SHA-256 Hash</th>
-                  <th className="px-6 py-3">Install Flags</th>
-                  <th className="px-6 py-3 text-right">Actions</th>
+                  <th>Package Name</th>
+                  <th>Target OS</th>
+                  <th>Type</th>
+                  <th>File &amp; Size</th>
+                  <th>SHA-256 Hash</th>
+                  <th>Install Flags</th>
+                  <th className="text-right">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-800">
+              <tbody>
                 {filteredPackages.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="px-6 py-8 text-center text-slate-500">
+                    <td colSpan={7} className="py-8 text-center text-muted">
                       No software packages in repository. Click "Upload Package" to add your first installer.
                     </td>
                   </tr>
                 ) : (
                   filteredPackages.map((pkg) => (
-                    <tr key={pkg.id} className="hover:bg-slate-800/30 transition-colors">
-                      <td className="px-6 py-4 font-medium text-white">
-                        <div className="flex items-center gap-2">
-                          <Package className="h-4 w-4 text-cyan-400 shrink-0" />
+                    <tr key={pkg.id}>
+                      <td>
+                        <div className="card-title-group">
+                          <Package size={16} className="card-icon" />
                           <div>
-                            <div>{pkg.name}</div>
-                            <div className="text-xs text-slate-400">v{pkg.version}</div>
+                            <div className="font-semibold text-main">{pkg.name}</div>
+                            <div className="text-sm text-muted">v{pkg.version}</div>
                           </div>
                         </div>
                       </td>
-                      <td className="px-6 py-4">
-                        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium uppercase bg-slate-800 text-slate-300 border border-slate-700">
-                          {pkg.os_target}
-                        </span>
+                      <td>
+                        <span className="os-badge">{pkg.os_target}</span>
                       </td>
-                      <td className="px-6 py-4">
-                        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-mono font-medium uppercase bg-indigo-950/60 text-indigo-300 border border-indigo-800/50">
-                          {pkg.package_type}
-                        </span>
+                      <td>
+                        <span className="os-badge font-mono">{pkg.package_type}</span>
                       </td>
-                      <td className="px-6 py-4 text-slate-300">
-                        <div className="truncate max-w-[160px]" title={pkg.file_name}>
-                          {pkg.file_name}
-                        </div>
-                        <div className="text-xs text-slate-500">{formatBytes(pkg.file_size)}</div>
+                      <td>
+                        <div title={pkg.file_name}>{pkg.file_name}</div>
+                        <div className="text-sm text-dim">{formatBytes(pkg.file_size)}</div>
                       </td>
-                      <td className="px-6 py-4">
-                        <span
-                          className="font-mono text-xs text-slate-400 bg-slate-950 px-2 py-1 rounded border border-slate-800 select-all"
-                          title={pkg.sha256}
-                        >
+                      <td>
+                        <span className="font-mono text-sm text-dim" title={pkg.sha256}>
                           {pkg.sha256.substring(0, 10)}...{pkg.sha256.substring(pkg.sha256.length - 8)}
                         </span>
                       </td>
-                      <td className="px-6 py-4">
-                        <code className="text-xs bg-slate-950 px-2 py-1 rounded text-cyan-300 border border-slate-800">
+                      <td>
+                        <span className="font-mono text-sm text-muted">
                           {pkg.install_args || '(default silent)'}
-                        </code>
+                        </span>
                       </td>
-                      <td className="px-6 py-4 text-right space-x-2">
-                        {user?.rol !== 'viewer' && (
-                          <button
-                            onClick={() => {
-                              setDeployPackageId(pkg.id)
-                              setDeployName(`Deploy ${pkg.name} v${pkg.version}`)
-                              setShowDeployModal(true)
-                            }}
-                            className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-cyan-400 bg-cyan-950/40 hover:bg-cyan-900/50 border border-cyan-800/60 rounded-md transition-colors"
-                          >
-                            <Play className="h-3 w-3" />
-                            Deploy
-                          </button>
-                        )}
-                        {user?.rol === 'admin' && (
-                          <button
-                            onClick={() => handleDeletePackage(pkg.id, pkg.name)}
-                            className="inline-flex items-center p-1 text-slate-400 hover:text-rose-400 hover:bg-rose-950/30 rounded-md transition-colors"
-                            title="Delete Package"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </button>
-                        )}
+                      <td className="text-right">
+                        <div className="action-buttons">
+                          {canDeploy && (
+                            <button
+                              type="button"
+                              className="btn btn-sm btn-secondary"
+                              onClick={() => {
+                                setDeployPackageId(pkg.id)
+                                setDeployName(`Deploy ${pkg.name} v${pkg.version}`)
+                                setShowDeployModal(true)
+                              }}
+                            >
+                              <Play size={14} />
+                              <span>Deploy</span>
+                            </button>
+                          )}
+                          {canAdmin && (
+                            <button
+                              type="button"
+                              className="btn btn-sm btn-secondary"
+                              onClick={() => setPackagePendingDelete({ id: pkg.id, name: pkg.name })}
+                              aria-label={`Delete package ${pkg.name}`}
+                            >
+                              <Trash2 size={14} className="text-danger" />
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ))
                 )}
               </tbody>
             </table>
-          </div>
+          </DataTable>
         </div>
       )}
 
       {/* TAB 2: Deployments & Rollouts */}
       {activeTab === 'deployments' && (
-        <div className="bg-slate-900/60 border border-slate-800 rounded-xl overflow-hidden shadow-sm">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm text-slate-300">
-              <thead className="bg-slate-800/80 text-xs font-semibold uppercase tracking-wider text-slate-400 border-b border-slate-700">
+        <div className="table-card">
+          <DataTable label="Deployments and rollouts">
+            <table className="data-table">
+              <thead>
                 <tr>
-                  <th className="px-6 py-3">Deployment Name</th>
-                  <th className="px-6 py-3">Package</th>
-                  <th className="px-6 py-3">Target Scope</th>
-                  <th className="px-6 py-3">Status</th>
-                  <th className="px-6 py-3">Progress</th>
-                  <th className="px-6 py-3">Started</th>
-                  <th className="px-6 py-3 text-right">Actions</th>
+                  <th>Deployment Name</th>
+                  <th>Package</th>
+                  <th>Target Scope</th>
+                  <th>Status</th>
+                  <th>Progress</th>
+                  <th>Started</th>
+                  <th className="text-right">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-800">
+              <tbody>
                 {filteredDeployments.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="px-6 py-8 text-center text-slate-500">
+                    <td colSpan={7} className="py-8 text-center text-muted">
                       No deployments initiated yet. Select a package and click "Deploy" to start a rollout.
                     </td>
                   </tr>
@@ -479,65 +504,59 @@ export const SoftwarePage: React.FC = () => {
                   filteredDeployments.map((dep) => {
                     const pct = dep.total_tasks > 0 ? (dep.success_tasks / dep.total_tasks) * 100 : 0
                     return (
-                      <tr key={dep.id} className="hover:bg-slate-800/30 transition-colors">
-                        <td className="px-6 py-4 font-medium text-white">
-                          <div className="flex items-center gap-2">
-                            <Layers className="h-4 w-4 text-cyan-400 shrink-0" />
-                            {dep.name}
+                      <tr key={dep.id}>
+                        <td>
+                          <div className="card-title-group">
+                            <Layers size={16} className="card-icon" />
+                            <span className="font-semibold text-main">{dep.name}</span>
                           </div>
                         </td>
-                        <td className="px-6 py-4 text-slate-300">
+                        <td>
                           <div>{dep.package_name || dep.package_id}</div>
-                          <div className="text-xs text-slate-500">v{dep.package_version || 'latest'}</div>
+                          <div className="text-sm text-dim">v{dep.package_version || 'latest'}</div>
                         </td>
-                        <td className="px-6 py-4">
-                          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium uppercase bg-slate-800 text-slate-300 border border-slate-700">
+                        <td>
+                          <span className="os-badge">
                             {dep.target_type} {dep.target_id ? `(${dep.target_id})` : ''}
                           </span>
                         </td>
-                        <td className="px-6 py-4">
+                        <td>
                           {dep.status === 'completed' ? (
-                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-950/60 text-emerald-400 border border-emerald-800/60">
-                              <CheckCircle2 className="h-3 w-3" /> Completed
+                            <span className="status-pill online">
+                              <CheckCircle2 size={12} /> Completed
                             </span>
                           ) : dep.status === 'running' ? (
-                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-cyan-950/60 text-cyan-400 border border-cyan-800/60">
-                              <Clock className="h-3 w-3 animate-spin" /> In Progress
+                            <span className="status-pill primary">
+                              <Clock size={12} className="spinning" /> In Progress
                             </span>
                           ) : (
-                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-rose-950/60 text-rose-400 border border-rose-800/60">
-                              <XCircle className="h-3 w-3" /> Failed
+                            <span className="status-pill danger">
+                              <XCircle size={12} /> Failed
                             </span>
                           )}
                         </td>
-                        <td className="px-6 py-4">
-                          <div className="w-36">
-                            <div className="flex justify-between text-xs text-slate-400 mb-1">
-                              <span>
-                                {dep.success_tasks}/{dep.total_tasks}
-                              </span>
-                              <span>{pct.toFixed(0)}%</span>
-                            </div>
-                            <div className="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden">
-                              <div
-                                className={`h-1.5 rounded-full ${
-                                  dep.failed_tasks > 0 ? 'bg-amber-500' : 'bg-emerald-500'
-                                }`}
-                                style={{ width: `${pct}%` }}
-                              />
-                            </div>
+                        <td>
+                          <div className="text-sm text-muted">
+                            {dep.success_tasks}/{dep.total_tasks} ({pct.toFixed(0)}%)
+                          </div>
+                          <div className="progress-bar-bg">
+                            <div
+                              className={`progress-bar-fill ${dep.failed_tasks > 0 ? 'warning' : 'healthy'}`}
+                              style={{ width: `${pct}%` }}
+                            />
                           </div>
                         </td>
-                        <td className="px-6 py-4 text-xs text-slate-400">
+                        <td className="text-sm text-muted">
                           {new Date(dep.created_at).toLocaleString()}
                         </td>
-                        <td className="px-6 py-4 text-right">
+                        <td className="text-right">
                           <button
+                            type="button"
+                            className="btn btn-sm btn-secondary"
                             onClick={() => handleOpenTasks(dep)}
-                            className="inline-flex items-center gap-1.5 px-3 py-1 text-xs font-medium text-white bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-md transition-colors"
                           >
-                            <Terminal className="h-3.5 w-3.5 text-cyan-400" />
-                            View Tasks
+                            <Terminal size={14} />
+                            <span>View Tasks</span>
                           </button>
                         </td>
                       </tr>
@@ -546,347 +565,341 @@ export const SoftwarePage: React.FC = () => {
                 )}
               </tbody>
             </table>
-          </div>
+          </DataTable>
         </div>
       )}
 
       {/* UPLOAD PACKAGE MODAL */}
-      {showUploadModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
-          <div className="bg-slate-900 border border-slate-800 rounded-xl shadow-2xl max-w-lg w-full p-6 space-y-4">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
-              <h2 className="text-lg font-bold text-white flex items-center gap-2">
-                <UploadCloud className="h-5 w-5 text-cyan-400" />
-                Upload Software Package
-              </h2>
-              <button onClick={() => setShowUploadModal(false)} className="text-slate-400 hover:text-white">
-                <X className="h-5 w-5" />
-              </button>
+      <Modal
+        open={showUploadModal}
+        onClose={() => !uploading && setShowUploadModal(false)}
+        title="Upload Software Package"
+        size="md"
+        dismissible={!uploading}
+        footer={
+          <>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => setShowUploadModal(false)}
+              disabled={uploading}
+            >
+              Cancel
+            </button>
+            <button type="submit" form="upload-package-form" className="btn btn-primary" disabled={uploading}>
+              {uploading ? (
+                <>
+                  <RefreshCw size={16} className="spinning" />
+                  <span>Computing SHA-256 &amp; Uploading...</span>
+                </>
+              ) : (
+                'Upload &amp; Index'
+              )}
+            </button>
+          </>
+        }
+      >
+        <form id="upload-package-form" onSubmit={handleUpload}>
+          <div className="form-row">
+            <div className="form-group">
+              <label className="form-label" htmlFor="pkg-name">
+                Package Name
+              </label>
+              <input
+                id="pkg-name"
+                type="text"
+                className="form-input"
+                required
+                placeholder="e.g. 7-Zip Archiver"
+                value={uploadName}
+                onChange={(e) => setUploadName(e.target.value)}
+              />
             </div>
-
-            <form onSubmit={handleUpload} className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">Package Name</label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="e.g. 7-Zip Archiver"
-                    value={uploadName}
-                    onChange={(e) => setUploadName(e.target.value)}
-                    className="w-full px-3 py-2 text-sm bg-slate-950 border border-slate-700 rounded-lg text-white focus:outline-none focus:border-cyan-500"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">Version</label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="e.g. 24.08"
-                    value={uploadVersion}
-                    onChange={(e) => setUploadVersion(e.target.value)}
-                    className="w-full px-3 py-2 text-sm bg-slate-950 border border-slate-700 rounded-lg text-white focus:outline-none focus:border-cyan-500"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">Target Operating System</label>
-                  <select
-                    value={uploadOS}
-                    onChange={(e) => setUploadOS(e.target.value as any)}
-                    className="w-full px-3 py-2 text-sm bg-slate-950 border border-slate-700 rounded-lg text-white focus:outline-none focus:border-cyan-500"
-                  >
-                    <option value="windows">Windows</option>
-                    <option value="linux">Linux</option>
-                    <option value="macos">macOS</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">Package Format</label>
-                  <select
-                    value={uploadType}
-                    onChange={(e) => setUploadType(e.target.value as any)}
-                    className="w-full px-3 py-2 text-sm bg-slate-950 border border-slate-700 rounded-lg text-white focus:outline-none focus:border-cyan-500 font-mono text-xs"
-                  >
-                    {uploadOS === 'windows' && (
-                      <>
-                        <option value="msi">MSI (Windows Installer)</option>
-                        <option value="exe">EXE (Executable)</option>
-                        <option value="script">PowerShell Script (.ps1)</option>
-                      </>
-                    )}
-                    {uploadOS === 'linux' && (
-                      <>
-                        <option value="deb">DEB (Debian/Ubuntu)</option>
-                        <option value="rpm">RPM (RHEL/CentOS)</option>
-                        <option value="script">Shell Script (.sh)</option>
-                      </>
-                    )}
-                    {uploadOS === 'macos' && (
-                      <>
-                        <option value="pkg">PKG (Apple Installer)</option>
-                        <option value="script">Shell Script (.sh)</option>
-                      </>
-                    )}
-                  </select>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">Silent Install Arguments</label>
-                <input
-                  type="text"
-                  placeholder={uploadType === 'msi' ? '/qn /norestart' : uploadType === 'exe' ? '/S' : ''}
-                  value={uploadInstallArgs}
-                  onChange={(e) => setUploadInstallArgs(e.target.value)}
-                  className="w-full px-3 py-2 text-sm bg-slate-950 border border-slate-700 rounded-lg text-white font-mono text-xs focus:outline-none focus:border-cyan-500"
-                />
-                <span className="text-[11px] text-slate-500">Leave blank for automatic default silent flags</span>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">Installer Binary File</label>
-                <input
-                  type="file"
-                  required
-                  onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
-                  className="w-full text-xs text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-slate-800 file:text-cyan-400 hover:file:bg-slate-700 cursor-pointer bg-slate-950 border border-slate-700 rounded-lg p-1.5"
-                />
-              </div>
-
-              <div className="flex justify-end gap-3 pt-3 border-t border-slate-800">
-                <button
-                  type="button"
-                  onClick={() => setShowUploadModal(false)}
-                  className="px-4 py-2 text-sm text-slate-400 hover:text-white"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={uploading}
-                  className="px-4 py-2 text-sm font-semibold text-white bg-cyan-600 hover:bg-cyan-500 rounded-lg transition-colors flex items-center gap-2 disabled:opacity-50"
-                >
-                  {uploading ? (
-                    <>
-                      <RefreshCw className="h-4 w-4 animate-spin" />
-                      Computing SHA-256 & Uploading...
-                    </>
-                  ) : (
-                    'Upload & Index'
-                  )}
-                </button>
-              </div>
-            </form>
+            <div className="form-group">
+              <label className="form-label" htmlFor="pkg-version">
+                Version
+              </label>
+              <input
+                id="pkg-version"
+                type="text"
+                className="form-input"
+                required
+                placeholder="e.g. 24.08"
+                value={uploadVersion}
+                onChange={(e) => setUploadVersion(e.target.value)}
+              />
+            </div>
           </div>
-        </div>
-      )}
+
+          <div className="form-row">
+            <div className="form-group">
+              <label className="form-label" htmlFor="pkg-os">
+                Target Operating System
+              </label>
+              <select
+                id="pkg-os"
+                className="form-select"
+                value={uploadOS}
+                onChange={(e) => setUploadOS(e.target.value as typeof uploadOS)}
+              >
+                <option value="windows">Windows</option>
+                <option value="linux">Linux</option>
+                <option value="macos">macOS</option>
+              </select>
+            </div>
+            <div className="form-group">
+              <label className="form-label" htmlFor="pkg-type">
+                Package Format
+              </label>
+              <select
+                id="pkg-type"
+                className="form-select font-mono"
+                value={uploadType}
+                onChange={(e) => setUploadType(e.target.value as typeof uploadType)}
+              >
+                {uploadOS === 'windows' && (
+                  <>
+                    <option value="msi">MSI (Windows Installer)</option>
+                    <option value="exe">EXE (Executable)</option>
+                    <option value="script">PowerShell Script (.ps1)</option>
+                  </>
+                )}
+                {uploadOS === 'linux' && (
+                  <>
+                    <option value="deb">DEB (Debian/Ubuntu)</option>
+                    <option value="rpm">RPM (RHEL/CentOS)</option>
+                    <option value="script">Shell Script (.sh)</option>
+                  </>
+                )}
+                {uploadOS === 'macos' && (
+                  <>
+                    <option value="pkg">PKG (Apple Installer)</option>
+                    <option value="script">Shell Script (.sh)</option>
+                  </>
+                )}
+              </select>
+            </div>
+          </div>
+
+          <div className="form-group">
+            <label className="form-label" htmlFor="pkg-args">
+              Silent Install Arguments
+            </label>
+            <input
+              id="pkg-args"
+              type="text"
+              className="form-input font-mono"
+              placeholder={uploadType === 'msi' ? '/qn /norestart' : uploadType === 'exe' ? '/S' : ''}
+              value={uploadInstallArgs}
+              onChange={(e) => setUploadInstallArgs(e.target.value)}
+            />
+            <span className="form-hint">Leave blank for automatic default silent flags</span>
+          </div>
+
+          <div className="form-group">
+            <label className="form-label" htmlFor="pkg-file">
+              Installer Binary File
+            </label>
+            <input
+              id="pkg-file"
+              type="file"
+              className="form-input"
+              required
+              onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
+            />
+          </div>
+        </form>
+      </Modal>
 
       {/* DEPLOYMENT WIZARD MODAL */}
-      {showDeployModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
-          <div className="bg-slate-900 border border-slate-800 rounded-xl shadow-2xl max-w-lg w-full p-6 space-y-4">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
-              <h2 className="text-lg font-bold text-white flex items-center gap-2">
-                <Play className="h-5 w-5 text-cyan-400" />
-                Launch Software Deployment
-              </h2>
-              <button onClick={() => setShowDeployModal(false)} className="text-slate-400 hover:text-white">
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-
-            <form onSubmit={handleCreateDeployment} className="space-y-4">
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">Deployment Name</label>
-                <input
-                  type="text"
-                  required
-                  value={deployName}
-                  onChange={(e) => setDeployName(e.target.value)}
-                  className="w-full px-3 py-2 text-sm bg-slate-950 border border-slate-700 rounded-lg text-white focus:outline-none focus:border-cyan-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">Software Package</label>
-                <select
-                  value={deployPackageId}
-                  onChange={(e) => setDeployPackageId(e.target.value)}
-                  className="w-full px-3 py-2 text-sm bg-slate-950 border border-slate-700 rounded-lg text-white focus:outline-none focus:border-cyan-500"
-                >
-                  {packages.map((pkg) => (
-                    <option key={pkg.id} value={pkg.id}>
-                      {pkg.name} v{pkg.version} ({pkg.os_target} - {pkg.package_type})
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">Target Scope</label>
-                  <select
-                    value={deployTargetType}
-                    onChange={(e) => setDeployTargetType(e.target.value as any)}
-                    className="w-full px-3 py-2 text-sm bg-slate-950 border border-slate-700 rounded-lg text-white focus:outline-none focus:border-cyan-500"
-                  >
-                    <option value="all">All Compatible Devices</option>
-                    <option value="group">Static Device Group</option>
-                    <option value="device">Single Endpoint</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">Target ID</label>
-                  <input
-                    type="text"
-                    disabled={deployTargetType === 'all'}
-                    placeholder={deployTargetType === 'all' ? '(Applies to all fleet)' : 'Enter Group ID or Device ID'}
-                    value={deployTargetId}
-                    onChange={(e) => setDeployTargetId(e.target.value)}
-                    className="w-full px-3 py-2 text-sm bg-slate-950 border border-slate-700 rounded-lg text-white disabled:opacity-50 focus:outline-none focus:border-cyan-500"
-                  />
-                </div>
-              </div>
-
-              <div className="p-3 bg-cyan-950/20 border border-cyan-800/40 rounded-lg text-xs text-cyan-300 flex items-start gap-2">
-                <AlertCircle className="h-4 w-4 shrink-0 mt-0.5 text-cyan-400" />
-                <span>
-                  Online endpoints receive execution triggers immediately via persistent WebSocket transport.
-                  Packages are cryptographically validated against SHA-256 before silent background installation.
-                </span>
-              </div>
-
-              <div className="flex justify-end gap-3 pt-3 border-t border-slate-800">
-                <button
-                  type="button"
-                  onClick={() => setShowDeployModal(false)}
-                  className="px-4 py-2 text-sm text-slate-400 hover:text-white"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={deploying}
-                  className="px-4 py-2 text-sm font-semibold text-white bg-cyan-600 hover:bg-cyan-500 rounded-lg transition-colors flex items-center gap-2 disabled:opacity-50"
-                >
-                  {deploying ? (
-                    <>
-                      <RefreshCw className="h-4 w-4 animate-spin" />
-                      Dispatching Jobs...
-                    </>
-                  ) : (
-                    'Start Deployment'
-                  )}
-                </button>
-              </div>
-            </form>
+      <Modal
+        open={showDeployModal}
+        onClose={() => !deploying && setShowDeployModal(false)}
+        title="Launch Software Deployment"
+        size="md"
+        dismissible={!deploying}
+        footer={
+          <>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => setShowDeployModal(false)}
+              disabled={deploying}
+            >
+              Cancel
+            </button>
+            <button type="submit" form="deploy-form" className="btn btn-primary" disabled={deploying}>
+              {deploying ? (
+                <>
+                  <RefreshCw size={16} className="spinning" />
+                  <span>Dispatching Jobs...</span>
+                </>
+              ) : (
+                'Start Deployment'
+              )}
+            </button>
+          </>
+        }
+      >
+        <form id="deploy-form" onSubmit={handleCreateDeployment}>
+          <div className="form-group">
+            <label className="form-label" htmlFor="deploy-name">
+              Deployment Name
+            </label>
+            <input
+              id="deploy-name"
+              type="text"
+              className="form-input"
+              required
+              value={deployName}
+              onChange={(e) => setDeployName(e.target.value)}
+            />
           </div>
-        </div>
-      )}
+
+          <div className="form-group">
+            <label className="form-label" htmlFor="deploy-package">
+              Software Package
+            </label>
+            <select
+              id="deploy-package"
+              className="form-select"
+              value={deployPackageId}
+              onChange={(e) => setDeployPackageId(e.target.value)}
+            >
+              {packages.map((pkg) => (
+                <option key={pkg.id} value={pkg.id}>
+                  {pkg.name} v{pkg.version} ({pkg.os_target} - {pkg.package_type})
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="form-row">
+            <div className="form-group">
+              <label className="form-label" htmlFor="deploy-scope">
+                Target Scope
+              </label>
+              <select
+                id="deploy-scope"
+                className="form-select"
+                value={deployTargetType}
+                onChange={(e) => setDeployTargetType(e.target.value as typeof deployTargetType)}
+              >
+                <option value="all">All Compatible Devices</option>
+                <option value="group">Static Device Group</option>
+                <option value="device">Single Endpoint</option>
+              </select>
+            </div>
+            <div className="form-group">
+              <label className="form-label" htmlFor="deploy-target-id">
+                Target ID
+              </label>
+              <input
+                id="deploy-target-id"
+                type="text"
+                className="form-input"
+                disabled={deployTargetType === 'all'}
+                placeholder={deployTargetType === 'all' ? '(Applies to all fleet)' : 'Enter Group ID or Device ID'}
+                value={deployTargetId}
+                onChange={(e) => setDeployTargetId(e.target.value)}
+              />
+            </div>
+          </div>
+
+          <div className="security-notice">
+            <AlertCircle size={16} />
+            <span>
+              Online endpoints receive execution triggers immediately via persistent WebSocket transport.
+              Packages are cryptographically validated against SHA-256 before silent background installation.
+            </span>
+          </div>
+        </form>
+      </Modal>
 
       {/* VIEW TASKS MODAL */}
-      {viewingDeployment && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
-          <div className="bg-slate-900 border border-slate-800 rounded-xl shadow-2xl max-w-4xl w-full p-6 space-y-4 max-h-[90vh] flex flex-col">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
-              <div>
-                <h2 className="text-lg font-bold text-white flex items-center gap-2">
-                  <Terminal className="h-5 w-5 text-cyan-400" />
-                  Deployment Tasks: {viewingDeployment.name}
-                </h2>
-                <p className="text-xs text-slate-400 mt-0.5">
-                  Package: {viewingDeployment.package_name} | Target: {viewingDeployment.target_type}
-                </p>
+      <Modal
+        open={viewingDeployment !== null}
+        onClose={() => setViewingDeployment(null)}
+        title="Deployment Tasks"
+        size="lg"
+        description={
+          viewingDeployment
+            ? `${viewingDeployment.name} · package ${viewingDeployment.package_name} · target ${viewingDeployment.target_type}`
+            : undefined
+        }
+        footer={
+          <button type="button" className="btn btn-secondary" onClick={() => setViewingDeployment(null)}>
+            Close
+          </button>
+        }
+      >
+        {loadingTasks ? (
+          <div className="py-8 text-center text-muted">
+            <RefreshCw size={24} className="spinning" />
+            <div>Loading execution logs...</div>
+          </div>
+        ) : deploymentTasks.length === 0 ? (
+          <div className="py-8 text-center text-muted">No tasks generated for this deployment.</div>
+        ) : (
+          deploymentTasks.map((t) => (
+            <div key={t.id} className="form-group">
+              <div className="card-title-group">
+                <Server size={16} className="text-muted" />
+                <span className="font-mono font-semibold text-main">{t.hostname || t.device_id}</span>
+                {t.site && <span className="os-badge">{t.site}</span>}
+                <span
+                  className={`status-pill ${
+                    t.status === 'success'
+                      ? 'online'
+                      : t.status === 'failed'
+                        ? 'danger'
+                        : t.status === 'installing' || t.status === 'downloading'
+                          ? 'primary'
+                          : 'offline'
+                  }`}
+                >
+                  {t.status}
+                </span>
+                {(t.output_log || t.error_message) && (
+                  <button
+                    type="button"
+                    className="btn-action"
+                    onClick={() => setExpandedTaskId(expandedTaskId === t.id ? null : t.id)}
+                  >
+                    {expandedTaskId === t.id ? 'Hide Logs' : 'View Logs'}
+                  </button>
+                )}
               </div>
-              <button onClick={() => setViewingDeployment(null)} className="text-slate-400 hover:text-white">
-                <X className="h-5 w-5" />
-              </button>
-            </div>
 
-            <div className="flex-1 overflow-y-auto space-y-2 pr-1">
-              {loadingTasks ? (
-                <div className="py-12 text-center text-slate-500 flex flex-col items-center gap-2">
-                  <RefreshCw className="h-6 w-6 animate-spin text-cyan-400" />
-                  Loading execution logs...
-                </div>
-              ) : deploymentTasks.length === 0 ? (
-                <div className="py-8 text-center text-slate-500">No tasks generated for this deployment.</div>
-              ) : (
-                deploymentTasks.map((t) => (
-                  <div key={t.id} className="bg-slate-950 border border-slate-800 rounded-lg p-3 space-y-2">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2 font-mono text-sm text-white">
-                        <Server className="h-4 w-4 text-slate-400" />
-                        <span>{t.hostname || t.device_id}</span>
-                        {t.site && (
-                          <span className="text-xs text-slate-500 bg-slate-900 px-1.5 py-0.5 rounded">
-                            {t.site}
-                          </span>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <span
-                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-semibold ${
-                            t.status === 'success'
-                              ? 'bg-emerald-950/60 text-emerald-400 border border-emerald-800/60'
-                              : t.status === 'failed'
-                              ? 'bg-rose-950/60 text-rose-400 border border-rose-800/60'
-                              : t.status === 'installing' || t.status === 'downloading'
-                              ? 'bg-cyan-950/60 text-cyan-400 border border-cyan-800/60 animate-pulse'
-                              : 'bg-slate-900 text-slate-400 border border-slate-700'
-                          }`}
-                        >
-                          {t.status}
-                        </span>
-                        {(t.output_log || t.error_message) && (
-                          <button
-                            onClick={() => setExpandedTaskId(expandedTaskId === t.id ? null : t.id)}
-                            className="text-xs text-cyan-400 hover:text-cyan-300 font-medium"
-                          >
-                            {expandedTaskId === t.id ? 'Hide Logs' : 'View Logs'}
-                          </button>
-                        )}
-                      </div>
+              {expandedTaskId === t.id && (
+                <>
+                  {t.exit_code !== undefined && t.exit_code !== null && (
+                    <div className="text-sm text-muted font-mono">
+                      Exit Code: <span className="exit-code-badge">{t.exit_code}</span>
                     </div>
-
-                    {expandedTaskId === t.id && (
-                      <div className="mt-2 pt-2 border-t border-slate-800 space-y-2">
-                        {t.exit_code !== undefined && t.exit_code !== null && (
-                          <div className="text-xs text-slate-400 font-mono">
-                            Exit Code: <span className="text-white">{t.exit_code}</span>
-                          </div>
-                        )}
-                        {t.error_message && (
-                          <div className="p-2 bg-rose-950/40 border border-rose-800/50 rounded text-xs text-rose-300 font-mono">
-                            Error: {t.error_message}
-                          </div>
-                        )}
-                        {t.output_log && (
-                          <pre className="p-3 bg-slate-900 border border-slate-800 rounded text-xs text-slate-300 font-mono overflow-x-auto max-h-48 whitespace-pre-wrap">
-                            {t.output_log}
-                          </pre>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                ))
+                  )}
+                  {t.error_message && <div className="alert-banner alert-error">{t.error_message}</div>}
+                  {t.output_log && <pre className="terminal-log-output">{t.output_log}</pre>}
+                </>
               )}
             </div>
+          ))
+        )}
+      </Modal>
 
-            <div className="flex justify-end pt-3 border-t border-slate-800">
-              <button
-                onClick={() => setViewingDeployment(null)}
-                className="px-4 py-2 text-sm font-semibold text-white bg-slate-800 hover:bg-slate-700 rounded-lg transition-colors"
-              >
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ConfirmDialog
+        open={packagePendingDelete !== null}
+        title="Delete package"
+        message={
+          packagePendingDelete
+            ? `Delete package "${packagePendingDelete.name}"? This action cannot be undone.`
+            : ''
+        }
+        confirmLabel="Delete"
+        pending={deletingPackage}
+        onConfirm={handleDeletePackage}
+        onCancel={() => setPackagePendingDelete(null)}
+      />
     </div>
   )
 }

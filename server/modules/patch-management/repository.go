@@ -97,7 +97,7 @@ func (r *Repository) ListDevicePatches(ctx context.Context, deviceID string, sta
 	}
 	query += " ORDER BY p.severity = 'critical' DESC, p.severity = 'important' DESC, p.title ASC"
 
-	var rows []DevicePatch
+	rows := []DevicePatch{}
 	if err := r.db.SelectContext(ctx, &rows, query, args...); err != nil {
 		return nil, fmt.Errorf("list device patches: %w", err)
 	}
@@ -124,7 +124,7 @@ func (r *Repository) ListFleetPatches(ctx context.Context, limit int, state stri
 	query += " ORDER BY p.severity = 'critical' DESC, p.severity = 'important' DESC, p.updated_at DESC LIMIT ?"
 	args = append(args, limit)
 
-	var rows []DevicePatch
+	rows := []DevicePatch{}
 	if err := r.db.SelectContext(ctx, &rows, query, args...); err != nil {
 		return nil, fmt.Errorf("list fleet patches: %w", err)
 	}
@@ -215,7 +215,7 @@ func (r *Repository) ListInstallJobs(ctx context.Context, deviceID string, limit
 		ORDER BY j.started_at DESC
 		LIMIT ?
 	`
-	var rows []PatchInstallJob
+	rows := []PatchInstallJob{}
 	if err := r.db.SelectContext(ctx, &rows, query, deviceID, limit); err != nil {
 		return nil, fmt.Errorf("list patch install jobs: %w", err)
 	}

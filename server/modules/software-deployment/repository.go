@@ -51,7 +51,7 @@ func (r *Repository) GetPackage(ctx context.Context, id string) (SoftwarePackage
 
 // ListPackages returns all software packages sorted by creation date descending.
 func (r *Repository) ListPackages(ctx context.Context) ([]SoftwarePackage, error) {
-	var pkgs []SoftwarePackage
+	pkgs := []SoftwarePackage{}
 	query := `SELECT * FROM software_packages ORDER BY created_at DESC`
 	err := r.db.SelectContext(ctx, &pkgs, query)
 	if err != nil {
@@ -100,20 +100,28 @@ func (r *Repository) ResolveTargetDevices(ctx context.Context, targetType, targe
 			FROM devices d
 			JOIN device_group_members m ON d.id = m.device_id
 			WHERE m.group_id = ? AND d.retired_at IS NULL`
+		args := []any{targetID}
 		if osTarget != "" {
-			query += " AND d.os_name = '" + osTarget + "'"
+			// Parameterised, never concatenated. os_target is a raw multipart
+			// form field (handler.go:94) that was persisted in software_packages
+			// and only reached this function later, at deploy time — so the
+			// injection was stored, not reflected.
+			query += " AND d.os_name = ?"
+			args = append(args, osTarget)
 		}
-		err := r.db.SelectContext(ctx, &deviceIDs, query, targetID)
+		err := r.db.SelectContext(ctx, &deviceIDs, query, args...)
 		if err != nil {
 			return nil, err
 		}
 
 	case TargetAll:
 		query := `SELECT id FROM devices WHERE retired_at IS NULL`
+		var args []any
 		if osTarget != "" {
-			query += " AND os_name = '" + osTarget + "'"
+			query += " AND os_name = ?"
+			args = append(args, osTarget)
 		}
-		err := r.db.SelectContext(ctx, &deviceIDs, query)
+		err := r.db.SelectContext(ctx, &deviceIDs, query, args...)
 		if err != nil {
 			return nil, err
 		}
@@ -199,7 +207,7 @@ func (r *Repository) ListDeployments(ctx context.Context) ([]SoftwareDeployment,
 		GROUP BY d.id
 		ORDER BY d.created_at DESC`
 
-	var deps []SoftwareDeployment
+	deps := []SoftwareDeployment{}
 	err := r.db.SelectContext(ctx, &deps, query)
 	if err != nil {
 		return nil, err
@@ -238,13 +246,13 @@ func (r *Repository) ListDeploymentTasks(ctx context.Context, deploymentID strin
 		SELECT
 			t.id, t.deployment_id, t.package_id, t.device_id, t.status,
 			t.exit_code, t.output_log, t.error_message, t.created_at, t.updated_at, t.completed_at,
-			dev.hostname, dev.site
+			dev.hostname, COALESCE(dev.site, '') AS site
 		FROM deployment_tasks t
 		JOIN devices dev ON t.device_id = dev.id
 		WHERE t.deployment_id = ?
 		ORDER BY dev.hostname ASC`
 
-	var tasks []DeploymentTask
+	tasks := []DeploymentTask{}
 	err := r.db.SelectContext(ctx, &tasks, query, deploymentID)
 	if err != nil {
 		return nil, err

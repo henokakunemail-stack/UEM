@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strconv"
 
 	"github.com/go-chi/chi/v5"
 
@@ -318,7 +319,9 @@ func (h *Handler) syncDeviceFilter(w http.ResponseWriter, r *http.Request) {
 
 	actorID := auth.UserIDFromContext(r.Context())
 	_ = h.audit.Log(r.Context(), "user", actorID, "filter.sync_dispatched", deviceID, map[string]string{
-		"version": version, "rule_count": string(rune(len(patterns))),
+		// strconv, not string(rune(...)): the rune conversion turns a count of
+		// 12 into a control character rather than the text "12".
+		"version": version, "rule_count": strconv.Itoa(len(patterns)),
 	})
 
 	writeJSON(w, http.StatusOK, map[string]any{

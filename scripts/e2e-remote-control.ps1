@@ -157,6 +157,12 @@ try {
     }
 
     $wsAgentRelay = New-Object System.Net.WebSockets.ClientWebSocket
+    # The relay authenticates the agent with the device credentials, the same
+    # way the transport socket does. Without them the handshake is rejected and
+    # the attach fails — which is exactly the bug that made remote control
+    # non-functional on every platform until the agent was taught to send them.
+    $wsAgentRelay.Options.SetRequestHeader("X-Device-Id", $deviceId)
+    $wsAgentRelay.Options.SetRequestHeader("X-Device-Secret", $deviceSecret)
     $agUri = [uri]"ws://localhost:$port/api/agent/devices/$deviceId/remotecontrol/ws?session=$sessionId"
     $wsAgentRelay.ConnectAsync($agUri, $ctSource.Token).Wait(5000) | Out-Null
     if ($wsAgentRelay.State -ne [System.Net.WebSockets.WebSocketState]::Open) {

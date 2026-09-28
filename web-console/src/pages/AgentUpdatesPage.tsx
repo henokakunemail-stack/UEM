@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import {
   ArrowUpCircle,
-  FileCode,
+  FolderArchive,
   Layers,
   Play,
   RefreshCw,
@@ -11,10 +11,23 @@ import {
 } from 'lucide-react'
 import { api } from '../services/api'
 import { useToast } from '../context/ToastContext'
+import { usePermission } from '../hooks/usePermission'
+import { DataTable } from '../components/ui/DataTable'
+import { Modal } from '../components/ui/Modal'
 import type { AgentReleaseDTO, UpdateCampaignDTO } from '../types/api'
 
-export const AgentUpdatesPage: React.FC = () => {
-  const [subTab, setSubTab] = useState<'releases' | 'campaigns'>('releases')
+export type UpdatesTab = 'releases' | 'campaigns'
+
+interface AgentUpdatesPageProps {
+  activeTab: UpdatesTab
+  onTabChange: (tab: UpdatesTab) => void
+}
+
+export const AgentUpdatesPage: React.FC<AgentUpdatesPageProps> = ({ activeTab: subTab, onTabChange: setSubTab }) => {
+  // Publishing a binary and starting a fleet-wide rollout are both RoleAdmin on
+  // the server. A viewer can still read the catalog and watch campaign progress.
+  const { can } = usePermission()
+  const canAdmin = can('admin')
   const [releases, setReleases] = useState<AgentReleaseDTO[]>([])
   const [campaigns, setCampaigns] = useState<UpdateCampaignDTO[]>([])
   const [loading, setLoading] = useState(true)
@@ -113,6 +126,20 @@ export const AgentUpdatesPage: React.FC = () => {
     }
   }
 
+  const handleStartCampaign = async (id: string, name: string) => {
+    try {
+      const res = await api.startUpdateCampaign(id)
+      const successText = `Campaign '${name}' started: ${res.dispatched_live} of ${res.total_targets} targets dispatched live.`
+      setMsg({ type: 'success', text: successText })
+      toast.success(successText, 'Rollout Started')
+      loadData()
+    } catch (err: any) {
+      const errorText = err.message || 'Failed to start campaign'
+      setMsg({ type: 'error', text: errorText })
+      toast.error(errorText, 'Start Failed')
+    }
+  }
+
   const formatFileSize = (bytes: number) => {
     if (!bytes) return '—'
     const mb = bytes / (1024 * 1024)
@@ -130,16 +157,16 @@ export const AgentUpdatesPage: React.FC = () => {
         </div>
         <div className="header-controls">
           <button type="button" className="btn btn-secondary" onClick={loadData} disabled={loading}>
-            <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
+            <RefreshCw size={16} className={loading ? 'spinning' : ''} />
             <span>Refresh</span>
           </button>
-          {subTab === 'releases' && (
+          {canAdmin && subTab === 'releases' && (
             <button type="button" className="btn btn-primary" onClick={() => setIsReleaseModalOpen(true)}>
               <UploadCloud size={16} />
               <span>Publish Release Binary</span>
             </button>
           )}
-          {subTab === 'campaigns' && (
+          {canAdmin && subTab === 'campaigns' && (
             <button type="button" className="btn btn-primary" onClick={() => setIsCampaignModalOpen(true)}>
               <Play size={16} />
               <span>Launch Update Campaign</span>
@@ -151,7 +178,7 @@ export const AgentUpdatesPage: React.FC = () => {
       {msg && (
         <div className={`alert-banner ${msg.type === 'error' ? 'alert-error' : 'alert-success'}`}>
           <span>{msg.text}</span>
-          <button type="button" onClick={() => setMsg(null)} className="close-btn">
+          <button type="button" onClick={() => setMsg(null)} className="close-btn" aria-label="Dismiss message">
             <X size={14} />
           </button>
         </div>
@@ -196,7 +223,7 @@ export const AgentUpdatesPage: React.FC = () => {
           className={`tab-btn ${subTab === 'releases' ? 'active' : ''}`}
           onClick={() => setSubTab('releases')}
         >
-          <FileCode size={16} />
+          <FolderArchive size={16} />
           <span>Release Catalog ({releases.length})</span>
         </button>
         <button
@@ -212,7 +239,7 @@ export const AgentUpdatesPage: React.FC = () => {
       {/* Tab 1: Releases Catalog */}
       {subTab === 'releases' && (
         <div className="table-card">
-          <div className="table-responsive">
+          <DataTable label="Agent releases">
             <table className="data-table">
               <thead>
                 <tr>
@@ -245,7 +272,7 @@ export const AgentUpdatesPage: React.FC = () => {
                       <td className="font-mono text-sm">{r.file_name}</td>
                       <td>{formatFileSize(r.file_size)}</td>
                       <td>
-                        <span className="font-mono text-xs text-dim" title={r.sha256_checksum}>
+                        <span className="font-mono text-sm text-dim" title={r.sha256_checksum}>
                           {r.sha256_checksum ? r.sha256_checksum.slice(0, 16) + '...' : '—'}
                         </span>
                       </td>
@@ -261,14 +288,14 @@ export const AgentUpdatesPage: React.FC = () => {
                 )}
               </tbody>
             </table>
-          </div>
+          </DataTable>
         </div>
       )}
 
       {/* Tab 2: Campaigns */}
       {subTab === 'campaigns' && (
         <div className="table-card">
-          <div className="table-responsive">
+          <DataTable label="Update campaigns">
             <table className="data-table">
               <thead>
                 <tr>
@@ -277,8 +304,8 @@ export const AgentUpdatesPage: React.FC = () => {
                   <th>Scope</th>
                   <th>Batch / Interval</th>
                   <th>Status</th>
-                  <th>Progress</th>
                   <th>Created At</th>
+                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -314,188 +341,217 @@ export const AgentUpdatesPage: React.FC = () => {
                           {c.status}
                         </span>
                       </td>
+                      <td className="text-sm text-muted">{new Date(c.created_at).toLocaleString()}</td>
                       <td>
-                        <div className="text-sm font-semibold">
-                          {c.completed_devices || 0} / {c.total_devices || 0} updated
+                        <div className="action-buttons">
+                          {/* Creating a campaign only writes a draft row. Nothing is
+                              dispatched to a single endpoint until /start is called,
+                              so without this button a rollout never leaves the database. */}
+                          {canAdmin && (c.status === 'draft' || c.status === 'pending') && (
+                            <button
+                              type="button"
+                              className="btn-action"
+                              onClick={() => handleStartCampaign(c.id, c.name)}
+                              title="Dispatch update tasks to resolved target devices"
+                            >
+                              <Play size={15} />
+                              <span>Start</span>
+                            </button>
+                          )}
                         </div>
                       </td>
-                      <td className="text-sm text-muted">{new Date(c.created_at).toLocaleString()}</td>
                     </tr>
                   ))
                 )}
               </tbody>
             </table>
-          </div>
+          </DataTable>
         </div>
       )}
 
       {/* Publish Release Modal */}
-      {isReleaseModalOpen && (
-        <div className="modal-overlay" onClick={() => setIsReleaseModalOpen(false)}>
-          <div className="modal-dialog modal-md" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h3 className="modal-title">Publish Agent Binary Release</h3>
-              <button type="button" className="btn-close" onClick={() => setIsReleaseModalOpen(false)}>
-                <X size={18} />
-              </button>
-            </div>
-            <form onSubmit={handleUploadRelease}>
-              <div className="modal-body space-y-4">
-                <div className="form-group">
-                  <label className="form-label">Version Number</label>
-                  <input
-                    type="text"
-                    className="form-input"
-                    required
-                    placeholder="e.g. 1.2.0"
-                    value={relVersion}
-                    onChange={(e) => setRelVersion(e.target.value)}
-                  />
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="form-group">
-                    <label className="form-label">Target OS</label>
-                    <select className="form-select" value={relOS} onChange={(e) => setRelOS(e.target.value)}>
-                      <option value="windows">Windows</option>
-                      <option value="linux">Linux</option>
-                      <option value="darwin">macOS (Darwin)</option>
-                    </select>
-                  </div>
-                  <div className="form-group">
-                    <label className="form-label">Architecture</label>
-                    <select className="form-select" value={relArch} onChange={(e) => setRelArch(e.target.value)}>
-                      <option value="amd64">x86_64 (amd64)</option>
-                      <option value="arm64">ARM64 (Apple Silicon / aarch64)</option>
-                    </select>
-                  </div>
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Executable Binary File</label>
-                  <input
-                    type="file"
-                    className="form-input"
-                    required
-                    onChange={(e) => {
-                      if (e.target.files && e.target.files.length > 0) {
-                        setSelectedFile(e.target.files[0])
-                      }
-                    }}
-                  />
-                  <span className="text-xs text-dim mt-1 block">
-                    Server will calculate and verify SHA-256 checksum automatically.
-                  </span>
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Changelog / Release Notes</label>
-                  <textarea
-                    className="form-textarea"
-                    rows={3}
-                    placeholder="Summary of bug fixes, enhancements, or security patches..."
-                    value={relChangelog}
-                    onChange={(e) => setRelChangelog(e.target.value)}
-                  />
-                </div>
-              </div>
-              <div className="modal-footer">
-                <button type="button" className="btn btn-secondary" onClick={() => setIsReleaseModalOpen(false)}>
-                  Cancel
-                </button>
-                <button type="submit" className="btn btn-primary" disabled={uploading}>
-                  {uploading ? 'Uploading & Hashing...' : 'Publish Release'}
-                </button>
-              </div>
-            </form>
+      <Modal
+        open={isReleaseModalOpen}
+        onClose={() => setIsReleaseModalOpen(false)}
+        title="Publish Agent Binary Release"
+        size="md"
+        footer={
+          <>
+            <button type="button" className="btn btn-secondary" onClick={() => setIsReleaseModalOpen(false)}>
+              Cancel
+            </button>
+            <button type="submit" form="agent-release-form" className="btn btn-primary" disabled={uploading}>
+              {uploading ? 'Uploading & Hashing...' : 'Publish Release'}
+            </button>
+          </>
+        }
+      >
+        <form id="agent-release-form" onSubmit={handleUploadRelease}>
+          <div className="form-group">
+            <label className="form-label" htmlFor="rel-version">
+              Version Number
+            </label>
+            <input
+              id="rel-version"
+              type="text"
+              className="form-input"
+              required
+              placeholder="e.g. 1.2.0"
+              value={relVersion}
+              onChange={(e) => setRelVersion(e.target.value)}
+            />
           </div>
-        </div>
-      )}
+          <div className="form-row">
+            <div className="form-field">
+              <label className="form-label" htmlFor="rel-os">
+                Target OS
+              </label>
+              <select id="rel-os" className="form-select" value={relOS} onChange={(e) => setRelOS(e.target.value)}>
+                <option value="windows">Windows</option>
+                <option value="linux">Linux</option>
+                <option value="darwin">macOS (Darwin)</option>
+              </select>
+            </div>
+            <div className="form-field">
+              <label className="form-label" htmlFor="rel-arch">
+                Architecture
+              </label>
+              <select id="rel-arch" className="form-select" value={relArch} onChange={(e) => setRelArch(e.target.value)}>
+                <option value="amd64">x86_64 (amd64)</option>
+                <option value="arm64">ARM64 (Apple Silicon / aarch64)</option>
+              </select>
+            </div>
+          </div>
+          <div className="form-group">
+            <label className="form-label" htmlFor="rel-file">
+              Executable Binary File
+            </label>
+            <input
+              id="rel-file"
+              type="file"
+              className="form-input"
+              required
+              onChange={(e) => {
+                if (e.target.files && e.target.files.length > 0) {
+                  setSelectedFile(e.target.files[0])
+                }
+              }}
+            />
+            <span className="form-hint">Server will calculate and verify SHA-256 checksum automatically.</span>
+          </div>
+          <div className="form-group">
+            <label className="form-label" htmlFor="rel-changelog">
+              Changelog / Release Notes
+            </label>
+            <textarea
+              id="rel-changelog"
+              className="form-textarea"
+              rows={3}
+              placeholder="Summary of bug fixes, enhancements, or security patches..."
+              value={relChangelog}
+              onChange={(e) => setRelChangelog(e.target.value)}
+            />
+          </div>
+        </form>
+      </Modal>
 
       {/* Launch Campaign Modal */}
-      {isCampaignModalOpen && (
-        <div className="modal-overlay" onClick={() => setIsCampaignModalOpen(false)}>
-          <div className="modal-dialog modal-md" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h3 className="modal-title">Launch Phased Rollout Campaign</h3>
-              <button type="button" className="btn-close" onClick={() => setIsCampaignModalOpen(false)}>
-                <X size={18} />
-              </button>
-            </div>
-            <form onSubmit={handleCreateCampaign}>
-              <div className="modal-body space-y-4">
-                <div className="form-group">
-                  <label className="form-label">Campaign Name</label>
-                  <input
-                    type="text"
-                    className="form-input"
-                    required
-                    placeholder="e.g. Q4 2026 Fleet Upgrade to v1.2.0"
-                    value={newCampaign.name}
-                    onChange={(e) => setNewCampaign({ ...newCampaign, name: e.target.value })}
-                  />
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Target Release Version</label>
-                  <select
-                    className="form-select"
-                    required
-                    value={newCampaign.target_version}
-                    onChange={(e) => setNewCampaign({ ...newCampaign, target_version: e.target.value })}
-                  >
-                    <option value="">-- Select Release Version --</option>
-                    {Array.from(new Set(releases.map((r) => r.version))).map((v) => (
-                      <option key={v} value={v}>
-                        v{v}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Rollout Scope</label>
-                  <select
-                    className="form-select"
-                    value={newCampaign.target_type}
-                    onChange={(e) => setNewCampaign({ ...newCampaign, target_type: e.target.value })}
-                  >
-                    <option value="all">Entire Fleet (All Connected Agents)</option>
-                    <option value="group">Branch Site / Device Group</option>
-                  </select>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="form-group">
-                    <label className="form-label">Batch Size (Devices / Wave)</label>
-                    <input
-                      type="number"
-                      className="form-input"
-                      min={1}
-                      value={newCampaign.batch_size}
-                      onChange={(e) => setNewCampaign({ ...newCampaign, batch_size: Number(e.target.value) })}
-                    />
-                  </div>
-                  <div className="form-group">
-                    <label className="form-label">Stagger Interval (Seconds)</label>
-                    <input
-                      type="number"
-                      className="form-input"
-                      min={10}
-                      value={newCampaign.stagger_interval_sec}
-                      onChange={(e) =>
-                        setNewCampaign({ ...newCampaign, stagger_interval_sec: Number(e.target.value) })
-                      }
-                    />
-                  </div>
-                </div>
-              </div>
-              <div className="modal-footer">
-                <button type="button" className="btn btn-secondary" onClick={() => setIsCampaignModalOpen(false)}>
-                  Cancel
-                </button>
-                <button type="submit" className="btn btn-primary">
-                  Start Campaign
-                </button>
-              </div>
-            </form>
+      <Modal
+        open={isCampaignModalOpen}
+        onClose={() => setIsCampaignModalOpen(false)}
+        title="Launch Phased Rollout Campaign"
+        size="md"
+        footer={
+          <>
+            <button type="button" className="btn btn-secondary" onClick={() => setIsCampaignModalOpen(false)}>
+              Cancel
+            </button>
+            <button type="submit" form="update-campaign-form" className="btn btn-primary">
+              Start Campaign
+            </button>
+          </>
+        }
+      >
+        <form id="update-campaign-form" onSubmit={handleCreateCampaign}>
+          <div className="form-group">
+            <label className="form-label" htmlFor="campaign-name">
+              Campaign Name
+            </label>
+            <input
+              id="campaign-name"
+              type="text"
+              className="form-input"
+              required
+              placeholder="e.g. Q4 2026 Fleet Upgrade to v1.2.0"
+              value={newCampaign.name}
+              onChange={(e) => setNewCampaign({ ...newCampaign, name: e.target.value })}
+            />
           </div>
-        </div>
-      )}
+          <div className="form-group">
+            <label className="form-label" htmlFor="campaign-version">
+              Target Release Version
+            </label>
+            <select
+              id="campaign-version"
+              className="form-select"
+              required
+              value={newCampaign.target_version}
+              onChange={(e) => setNewCampaign({ ...newCampaign, target_version: e.target.value })}
+            >
+              <option value="">-- Select Release Version --</option>
+              {Array.from(new Set(releases.map((r) => r.version))).map((v) => (
+                <option key={v} value={v}>
+                  v{v}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="form-group">
+            <label className="form-label" htmlFor="campaign-scope">
+              Rollout Scope
+            </label>
+            <select
+              id="campaign-scope"
+              className="form-select"
+              value={newCampaign.target_type}
+              onChange={(e) => setNewCampaign({ ...newCampaign, target_type: e.target.value })}
+            >
+              <option value="all">Entire Fleet (All Connected Agents)</option>
+              <option value="group">Branch Site / Device Group</option>
+            </select>
+          </div>
+          <div className="form-row">
+            <div className="form-field">
+              <label className="form-label" htmlFor="campaign-batch">
+                Batch Size (Devices / Wave)
+              </label>
+              <input
+                id="campaign-batch"
+                type="number"
+                className="form-input"
+                min={1}
+                value={newCampaign.batch_size}
+                onChange={(e) => setNewCampaign({ ...newCampaign, batch_size: Number(e.target.value) })}
+              />
+            </div>
+            <div className="form-field">
+              <label className="form-label" htmlFor="campaign-stagger">
+                Stagger Interval (Seconds)
+              </label>
+              <input
+                id="campaign-stagger"
+                type="number"
+                className="form-input"
+                min={10}
+                value={newCampaign.stagger_interval_sec}
+                onChange={(e) =>
+                  setNewCampaign({ ...newCampaign, stagger_interval_sec: Number(e.target.value) })
+                }
+              />
+            </div>
+          </div>
+        </form>
+      </Modal>
     </div>
   )
 }

@@ -12,7 +12,7 @@ import (
 )
 
 func init() {
-	logger.Init("disabled")
+	logger.Init("disabled", "")
 }
 
 func TestHeartbeatFlusher_BatchExecution(t *testing.T) {

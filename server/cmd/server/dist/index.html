@@ -4,9 +4,20 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark light" />
     <title>Enterprise Endpoint Manager</title>
-    <script type="module" crossorigin src="/assets/index-DTnvjt5n.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-BSUVlYs2.css">
+    <script>
+      (() => {
+        let theme = matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'
+        try {
+          const saved = localStorage.getItem('em_theme')
+          if (saved === 'light' || saved === 'dark') theme = saved
+        } catch {}
+        document.documentElement.dataset.theme = theme
+      })()
+    </script>
+    <script type="module" crossorigin src="/assets/index-BVCJ06IS.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-CEKmoYIM.css">
   </head>
   <body>
     <div id="root"></div>

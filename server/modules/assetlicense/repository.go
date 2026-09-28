@@ -146,7 +146,7 @@ func (r *Repository) ListAssets(ctx context.Context, site, status string) ([]*Ha
 	}
 	query += ` ORDER BY created_at DESC`
 
-	var list []*HardwareAsset
+	list := []*HardwareAsset{}
 	err := r.db.SelectContext(ctx, &list, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list assets: %w", err)
@@ -216,7 +216,7 @@ func (r *Repository) GetLicense(ctx context.Context, id string) (*SoftwareLicens
 }
 
 func (r *Repository) ListLicenses(ctx context.Context) ([]*SoftwareLicense, error) {
-	var list []*SoftwareLicense
+	list := []*SoftwareLicense{}
 	err := r.db.SelectContext(ctx, &list, `SELECT * FROM software_licenses ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, fmt.Errorf("list licenses: %w", err)

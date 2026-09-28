@@ -16,8 +16,8 @@ type RemoteControlSession struct {
 	OperatorID       string     `json:"operator_id" db:"operator_id"`
 	SessionMode      string     `json:"session_mode" db:"session_mode"` // 'full_control', 'view_only'
 	Status           string     `json:"status" db:"status"`             // 'active', 'ended', 'rejected'
-	FramesTransacted int        `json:"frames_transmitted" db:"frames_transmitted"`
-	BytesTransacted  int64      `json:"bytes_transmitted" db:"bytes_transmitted"`
+	FramesTransmitted int       `json:"frames_transmitted" db:"frames_transmitted"`
+	BytesTransmitted  int64     `json:"bytes_transmitted" db:"bytes_transmitted"`
 	InputEventsCount int        `json:"input_events_count" db:"input_events_count"`
 	StartedAt        time.Time  `json:"started_at" db:"started_at"`
 	EndedAt          *time.Time `json:"ended_at" db:"ended_at"`
@@ -59,7 +59,7 @@ func (r *Repository) CreateSession(ctx context.Context, s *RemoteControlSession)
 			started_at, created_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, s.ID, s.DeviceID, s.OperatorID, s.SessionMode, s.Status,
-		s.FramesTransacted, s.BytesTransacted, s.InputEventsCount,
+		s.FramesTransmitted, s.BytesTransmitted, s.InputEventsCount,
 		s.StartedAt, s.CreatedAt)
 	if err != nil {
 		return fmt.Errorf("create rc session: %w", err)
@@ -113,7 +113,7 @@ func (r *Repository) ListSessionsByDevice(ctx context.Context, deviceID string, 
 	if limit <= 0 || limit > 100 {
 		limit = 50
 	}
-	var sessions []RemoteControlSession
+	sessions := []RemoteControlSession{}
 	query := `
 		SELECT
 			s.id, s.device_id, s.operator_id, s.session_mode, s.status,

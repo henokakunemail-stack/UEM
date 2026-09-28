@@ -139,20 +139,29 @@ try {
     # 6. Seed Target Devices
     Write-Host "`n5. Seeding Target Devices..."
     Push-Location (Resolve-Path (Join-Path $PSScriptRoot ".."))
+    # The secret hash must be the real HashToken of a known secret: the task
+    # result endpoint authenticates the agent (AuthenticateAgent), and a literal
+    # placeholder like 'h1' matches no secret, so the report is rejected with 401.
+    $schedSecret1 = 'e2e-scheduler-secret-one'
+    $schedSecret2 = 'e2e-scheduler-secret-two'
     $seedDevices = @"
 package main
+
 import (
     "time"
+
+    devicemgmt "github.com/henokakunemail-stack/Endpoint-Manager/server/modules/device-management"
     "github.com/jmoiron/sqlx"
     _ "modernc.org/sqlite"
 )
+
 func main() {
     d, err := sqlx.Open("sqlite", "$($dbPath.Replace('\', '/'))")
     if err != nil { panic(err) }
     defer d.Close()
     now := time.Now().UTC()
-    _, _ = d.Exec("INSERT INTO devices (id, hostname, os_name, os_version, agent_version, site, status, enrolled_at, last_seen_at, device_secret_hash, created_at, updated_at) VALUES ('d-sched-1', 'PC-SURABAYA-01', 'windows', '11.0', '1.0.0', 'Surabaya', 'online', ?, ?, 'h1', ?, ?)", now, now, now, now)
-    _, _ = d.Exec("INSERT INTO devices (id, hostname, os_name, os_version, agent_version, site, status, enrolled_at, last_seen_at, device_secret_hash, created_at, updated_at) VALUES ('d-sched-2', 'PC-MEDAN-02', 'windows', '10.0', '1.0.0', 'Medan', 'online', ?, ?, 'h2', ?, ?)", now, now, now, now)
+    _, _ = d.Exec("INSERT INTO devices (id, hostname, os_name, os_version, agent_version, site, status, enrolled_at, last_seen_at, device_secret_hash, created_at, updated_at) VALUES ('d-sched-1', 'PC-SURABAYA-01', 'windows', '11.0', '1.0.0', 'Surabaya', 'online', ?, ?, ?, ?, ?)", now, now, devicemgmt.HashToken("$schedSecret1"), now, now)
+    _, _ = d.Exec("INSERT INTO devices (id, hostname, os_name, os_version, agent_version, site, status, enrolled_at, last_seen_at, device_secret_hash, created_at, updated_at) VALUES ('d-sched-2', 'PC-MEDAN-02', 'windows', '10.0', '1.0.0', 'Medan', 'online', ?, ?, ?, ?, ?)", now, now, devicemgmt.HashToken("$schedSecret2"), now, now)
 }
 "@
     $helperFile = Join-Path $env:TEMP "seed_sched_devices.go"
@@ -198,7 +207,14 @@ func main() {
         output_log = "DNS Cache Flushed Successfully`r`nCleared 12 entries."
         error_message = ""
     } | ConvertTo-Json
-    $repRes = Invoke-RestMethod -Uri "$base/api/agent/schedules/tasks/$firstTaskId/result" -Method POST -Body $reportPayload -ContentType "application/json"
+    # The endpoint authenticates the reporting agent with these headers, exactly
+    # as the production agent does when it reports a finished task. The device ID
+    # comes from the dispatch row, and the secret is whichever one that device was
+    # seeded with.
+    $firstDeviceId = $devRuns[0].device_id
+    $firstDeviceSecret = if ($firstDeviceId -eq 'd-sched-1') { $schedSecret1 } else { $schedSecret2 }
+    $schedHeaders = @{ "X-Device-Id" = $firstDeviceId; "X-Device-Secret" = $firstDeviceSecret }
+    $repRes = Invoke-RestMethod -Uri "$base/api/agent/schedules/tasks/$firstTaskId/result" -Method POST -Headers $schedHeaders -Body $reportPayload -ContentType "application/json"
     if ($repRes.status -ne "recorded") { throw "Failed to report task result" }
     Write-Host "  [PASS] Agent task execution reported successfully" -ForegroundColor Green
 

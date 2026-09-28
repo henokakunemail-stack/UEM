@@ -17,18 +17,22 @@ func NewRepository(db *sqlx.DB) *Repository {
 }
 
 type DeviceInventoryRow struct {
-	ID           string     `json:"id" db:"id"`
-	Hostname     string     `json:"hostname" db:"hostname"`
-	OSName       string     `json:"os_name" db:"os_name"`
-	OSVersion    string     `json:"os_version" db:"os_version"`
-	AgentVersion string     `json:"agent_version" db:"agent_version"`
-	Site         string     `json:"site" db:"site"`
-	Status       string     `json:"status" db:"status"`
-	RAMBytes     *int64     `json:"ram_bytes" db:"hw_ram_bytes"`
-	DiskFreePct  *float64   `json:"disk_free_pct" db:"hw_disk_free_pct"`
-	CPUModel     *string    `json:"cpu_model" db:"hw_cpu_model"`
-	LastSeenAt   time.Time  `json:"last_seen_at" db:"last_seen_at"`
-	EnrolledAt   time.Time  `json:"enrolled_at" db:"enrolled_at"`
+	ID           string    `json:"id" db:"id"`
+	Hostname     string    `json:"hostname" db:"hostname"`
+	OSName       string    `json:"os_name" db:"os_name"`
+	OSVersion    string    `json:"os_version" db:"os_version"`
+	AgentVersion string    `json:"agent_version" db:"agent_version"`
+	Site         string    `json:"site" db:"site"`
+	Status       string    `json:"status" db:"status"`
+	RAMBytes     *int64    `json:"ram_bytes" db:"hw_ram_bytes"`
+	DiskFreePct  *float64  `json:"disk_free_pct" db:"hw_disk_free_pct"`
+	CPUModel     *string   `json:"cpu_model" db:"hw_cpu_model"`
+	// A device that has been issued an enrollment token but has never checked
+	// in has last_seen_at = NULL, and that is not the same fact as "seen at
+	// 0001-01-01". So this stays a pointer and the exporter nils it out, the
+	// same way Device.LastSeenAt and offlineRow.LastSeenAt already do.
+	LastSeenAt *time.Time `json:"last_seen_at" db:"last_seen_at"`
+	EnrolledAt time.Time  `json:"enrolled_at" db:"enrolled_at"`
 }
 
 type PatchComplianceRow struct {
@@ -76,7 +80,10 @@ type AuditReportRow struct {
 func (r *Repository) GetDeviceInventoryReport(ctx context.Context, site, osName string) ([]DeviceInventoryRow, error) {
 	query := `
 		SELECT
-			d.id, d.hostname, d.os_name, d.os_version, d.agent_version, d.site, d.status,
+			d.id, d.hostname, d.os_name,
+			COALESCE(d.os_version, '') AS os_version,
+			COALESCE(d.agent_version, '') AS agent_version,
+			COALESCE(d.site, '') AS site, d.status,
 			i.hw_ram_bytes, i.hw_disk_free_pct, i.hw_cpu_model, d.last_seen_at, d.enrolled_at
 		FROM devices d
 		LEFT JOIN device_inventory i ON i.device_id = d.id
@@ -103,7 +110,7 @@ func (r *Repository) GetDeviceInventoryReport(ctx context.Context, site, osName 
 func (r *Repository) GetPatchComplianceReport(ctx context.Context, severity, state string) ([]PatchComplianceRow, error) {
 	query := `
 		SELECT
-			p.device_id, d.hostname, d.os_name, d.site, p.patch_id, p.title,
+			p.device_id, d.hostname, d.os_name, COALESCE(d.site, '') AS site, p.patch_id, p.title,
 			p.severity, p.category, p.installed_state, p.reboot_required, p.discovered_at
 		FROM device_patches p
 		JOIN devices d ON d.id = p.device_id
@@ -151,8 +158,12 @@ func (r *Repository) GetAuditTrailReport(ctx context.Context, action string, lim
 	if limit <= 0 || limit > 5000 {
 		limit = 1000
 	}
+	// actor_id is also nullable, so it is COALESCEd into a plain string to match
+	// AuditReportRow.ActorID. target_id and details stay nullable on purpose:
+	// their fields are *string, and the export format distinguishes "no target"
+	// (null) from "empty target" ("") — do not collapse the two.
 	query := `
-		SELECT id, actor_type, actor_id, action, target_id, details, created_at
+		SELECT id, actor_type, COALESCE(actor_id, '') AS actor_id, action, target_id, details, created_at
 		FROM audit_logs
 	`
 	var args []any

@@ -1,4 +1,5 @@
-import React, { useCallback, useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   Activity,
   AlertCircle,
@@ -15,17 +16,24 @@ import {
   TerminalSquare,
 } from 'lucide-react'
 import { DeviceDetailModal } from '../components/DeviceDetailModal'
-import { useAuth } from '../context/AuthContext'
+import { ConfirmDialog } from '../components/ui/ConfirmDialog'
+import { DataTable } from '../components/ui/DataTable'
+import { usePermission } from '../hooks/usePermission'
 import { useToast } from '../context/ToastContext'
 import { api } from '../services/api'
 import type { DeviceDTO, DeviceListResponse } from '../types/api'
+import { PAGE_SIZES, buildDevicesQuery, parseDevicesQuery } from './devicesQuery'
+import type { DeviceStatus } from './devicesQuery'
 
 export const DevicesPage: React.FC<{
   onOpenExec?: (device: DeviceDTO) => void
   onOpenTerminal?: (device: DeviceDTO, shell: string) => void
   onOpenRemoteControl?: (device: DeviceDTO) => void
 }> = ({ onOpenExec, onOpenTerminal, onOpenRemoteControl }) => {
-  const { user } = useAuth()
+  const { can } = usePermission()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const query = parseDevicesQuery(searchParams)
+
   const [data, setData] = useState<DeviceListResponse>({
     devices: [],
     count: 0,
@@ -34,22 +42,31 @@ export const DevicesPage: React.FC<{
     offset: 0,
   })
   const [loading, setLoading] = useState(true)
-  const [search, setSearch] = useState('')
-  const [statusFilter, setStatusFilter] = useState('')
-  const [siteFilter, setSiteFilter] = useState('')
-  const [currentPage, setCurrentPage] = useState(1)
-  const [pageSize, setPageSize] = useState(10)
+  // Page size is a view preference, not a server filter, so it stays out of
+  // the URL — a hand-edited ?limit=100000 would ask for the whole fleet.
+  const [pageSize, setPageSize] = useState<(typeof PAGE_SIZES)[number]>(10)
   const [selectedDevice, setSelectedDevice] = useState<DeviceDTO | null>(null)
+  const [retireTarget, setRetireTarget] = useState<DeviceDTO | null>(null)
+  const [retiring, setRetiring] = useState(false)
   const [actionMsg, setActionMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(
     null
   )
   const toast = useToast()
 
+  const { status, site, page, q, deviceId } = query
+  const offset = (page - 1) * pageSize
+
+  const setQuery = useCallback(
+    (next: Partial<typeof query>) => {
+      setSearchParams(buildDevicesQuery({ ...query, ...next }))
+    },
+    [query, setSearchParams]
+  )
+
   const fetchDevices = useCallback(async () => {
     setLoading(true)
     try {
-      const offset = (currentPage - 1) * pageSize
-      const res = await api.getDevices(pageSize, offset, statusFilter, siteFilter)
+      const res = await api.getDevices(pageSize, offset, status, site)
       setData(res)
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to fetch devices'
@@ -57,15 +74,52 @@ export const DevicesPage: React.FC<{
     } finally {
       setLoading(false)
     }
-  }, [currentPage, pageSize, statusFilter, siteFilter])
+  }, [offset, pageSize, site, status])
 
   useEffect(() => {
     fetchDevices()
   }, [fetchDevices])
 
+  // Deep link from the dashboard alert list: ?device_id=… fetches that one
+  // device and opens its detail modal, rather than filtering a list by
+  // hostname and hoping the first substring match is the right machine.
+  // The ref is compared, never reset, so re-navigating to a device already
+  // opened once is a no-op — including after the modal is closed and the user
+  // clicks the same alert again. Clearing it whenever the id is absent lets the
+  // next link to that device reopen it.
+  const openedDeviceId = useRef<string | null>(null)
+  useEffect(() => {
+    if (!deviceId) {
+      openedDeviceId.current = null
+      return
+    }
+    if (openedDeviceId.current === deviceId) return
+    openedDeviceId.current = deviceId
+    let active = true
+    api
+      .getDevice(deviceId)
+      .then((d) => {
+        if (active) setSelectedDevice(d)
+      })
+      .catch((err: unknown) => {
+        if (!active) return
+        // Let a retry through: the fetch failed, so this id is not "opened".
+        openedDeviceId.current = null
+        const msg = err instanceof Error ? err.message : 'Failed to load device'
+        setActionMsg({ type: 'error', text: `Could not open device: ${msg}` })
+        toast.error(msg, 'Device Not Found')
+      })
+    return () => {
+      active = false
+    }
+  }, [deviceId, toast])
+
+  // Server-side filtered. q is deliberately NOT in here — the server has no
+  // search parameter, so q narrows the rows already on this page only, and
+  // the input says so.
   const filteredItems = (data.devices || []).filter((d: DeviceDTO) => {
-    if (!search) return true
-    const term = search.toLowerCase()
+    if (!q) return true
+    const term = q.toLowerCase()
     return (
       d.hostname.toLowerCase().includes(term) ||
       d.id.toLowerCase().includes(term) ||
@@ -76,23 +130,27 @@ export const DevicesPage: React.FC<{
 
   const totalPages = Math.max(1, Math.ceil(data.total / pageSize))
 
-  const handleRetire = async (device: DeviceDTO) => {
-    if (!window.confirm(`Are you sure you want to retire endpoint "${device.hostname}"?`)) {
-      return
-    }
+  // The backend gates retire at admin, so offering it to a technician only
+  // walks them into a 403. Same endpoint, admin only.
+  const canManage = can('technician')
+  const canRetire = can('admin')
+
+  const handleRetire = async () => {
+    if (!retireTarget) return
+    setRetiring(true)
     try {
-      await api.retireDevice(device.id)
-      const successText = `Device ${device.hostname} retired successfully.`
-      setActionMsg({
-        type: 'success',
-        text: successText,
-      })
+      await api.retireDevice(retireTarget.id)
+      const successText = `Device ${retireTarget.hostname} retired successfully.`
+      setActionMsg({ type: 'success', text: successText })
       toast.success(successText, 'Device Retired')
+      setRetireTarget(null)
       fetchDevices()
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Retire failed'
       setActionMsg({ type: 'error', text: msg })
       toast.error(msg, 'Retire Failed')
+    } finally {
+      setRetiring(false)
     }
   }
 
@@ -100,10 +158,7 @@ export const DevicesPage: React.FC<{
     try {
       const res = await api.pingDevice(device.id)
       const successText = `Ping sent to ${device.hostname} (Command: ${res.command_id})`
-      setActionMsg({
-        type: 'success',
-        text: successText,
-      })
+      setActionMsg({ type: 'success', text: successText })
       toast.info(successText, 'Ping Dispatched')
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Ping failed'
@@ -111,8 +166,6 @@ export const DevicesPage: React.FC<{
       toast.error(msg, 'Ping Failed')
     }
   }
-
-  const canManage = user?.rol === 'admin' || user?.rol === 'technician'
 
   return (
     <div className="page-container devices-page">
@@ -137,13 +190,14 @@ export const DevicesPage: React.FC<{
       </div>
 
       {actionMsg && (
-        <div className={`notification-banner ${actionMsg.type}`}>
+        <div className={`notification-banner ${actionMsg.type}`} role="status">
           {actionMsg.type === 'success' ? <CheckCircle2 size={18} /> : <AlertCircle size={18} />}
           <span>{actionMsg.text}</span>
           <button
             type="button"
             className="banner-dismiss"
             onClick={() => setActionMsg(null)}
+            aria-label="Dismiss notification"
           >
             &times;
           </button>
@@ -153,25 +207,24 @@ export const DevicesPage: React.FC<{
       {/* Filter / Search Bar */}
       <div className="filter-bar">
         <div className="search-wrap">
-          <Search size={18} className="search-icon" />
+          <Search size={18} className="search-icon" aria-hidden="true" />
           <input
             type="text"
             className="search-input"
-            placeholder="Search by hostname, device ID, OS, or site..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Filter this page by hostname, device ID, OS, or site…"
+            aria-label="Filter the endpoints on this page"
+            value={q}
+            onChange={(e) => setQuery({ q: e.target.value })}
           />
         </div>
 
         <div className="filter-group">
-          <Filter size={16} className="filter-icon" />
+          <Filter size={16} className="filter-icon" aria-hidden="true" />
           <select
-            value={statusFilter}
-            onChange={(e) => {
-              setStatusFilter(e.target.value)
-              setCurrentPage(1)
-            }}
+            value={status}
+            onChange={(e) => setQuery({ status: e.target.value as DeviceStatus, page: 1 })}
             className="select-input"
+            aria-label="Filter by status"
           >
             <option value="">All Statuses</option>
             <option value="online">Online Only</option>
@@ -180,12 +233,10 @@ export const DevicesPage: React.FC<{
           </select>
 
           <select
-            value={siteFilter}
-            onChange={(e) => {
-              setSiteFilter(e.target.value)
-              setCurrentPage(1)
-            }}
+            value={site}
+            onChange={(e) => setQuery({ site: e.target.value, page: 1 })}
             className="select-input"
+            aria-label="Filter by site"
           >
             <option value="">All Sites</option>
             <option value="hq">Headquarters (HQ)</option>
@@ -196,93 +247,105 @@ export const DevicesPage: React.FC<{
           <select
             value={pageSize}
             onChange={(e) => {
-              setPageSize(Number(e.target.value))
-              setCurrentPage(1)
+              setPageSize(Number(e.target.value) as (typeof PAGE_SIZES)[number])
+              setQuery({ page: 1 })
             }}
             className="select-input"
+            aria-label="Endpoints per page"
           >
-            <option value={10}>10 / page</option>
-            <option value={25}>25 / page</option>
-            <option value={50}>50 / page</option>
+            {PAGE_SIZES.map((n) => (
+              <option key={n} value={n}>
+                {n} / page
+              </option>
+            ))}
           </select>
         </div>
       </div>
 
+      {/* The text filter runs on the current page only — the server has no
+          search endpoint, so this narrows 10–50 rows, not the fleet. */}
+      {q && (
+        <p className="filter-hint">
+          Showing {filteredItems.length} of {(data.devices || []).length} endpoints on this page
+          matching “{q}”. Clear the box to see all {data.total}.
+        </p>
+      )}
+
       {/* Table */}
       <div className="table-card">
-        <div className="table-wrapper">
-          <table className="data-table">
-            <thead>
+        <DataTable label="Fleet endpoints">
+          <thead>
+            <tr>
+              <th>Status</th>
+              <th>Hostname &amp; Identity</th>
+              <th>Operating System</th>
+              <th>Site</th>
+              <th>Agent</th>
+              <th>Last Heartbeat</th>
+              <th className="text-right">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {loading ? (
               <tr>
-                <th>Status</th>
-                <th>Hostname & Identity</th>
-                <th>Operating System</th>
-                <th>Site</th>
-                <th>Agent</th>
-                <th>Last Heartbeat</th>
-                <th className="text-right">Actions</th>
+                <td colSpan={7} className="text-center py-8">
+                  <div className="table-loader">
+                    <RefreshCw size={24} className="spinning" />
+                    <span>Loading fleet records...</span>
+                  </div>
+                </td>
               </tr>
-            </thead>
-            <tbody>
-              {loading ? (
-                <tr>
-                  <td colSpan={7} className="text-center py-8">
-                    <div className="table-loader">
-                      <RefreshCw size={24} className="spinning" />
-                      <span>Loading fleet records...</span>
-                    </div>
-                  </td>
-                </tr>
-              ) : filteredItems.length === 0 ? (
-                <tr>
-                  <td colSpan={7} className="text-center py-8">
-                    <div className="empty-state">
-                      <Laptop size={32} />
-                      <p>No endpoints match the current filters</p>
-                    </div>
-                  </td>
-                </tr>
-              ) : (
-                filteredItems.map((d: DeviceDTO) => {
-                  const isRetired = Boolean(d.retired_at)
-                  return (
+            ) : filteredItems.length === 0 ? (
+              <tr>
+                <td colSpan={7} className="text-center py-8">
+                  <div className="empty-state">
+                    <Laptop size={32} />
+                    <p>No endpoints match the current filters</p>
+                  </div>
+                </td>
+              </tr>
+            ) : (
+              filteredItems.map((d: DeviceDTO) => {
+                const isRetired = Boolean(d.retired_at)
+                return (
                   <tr key={d.id} className="device-row">
-                    <td>
+                    <td data-label="Status">
                       <span className={`status-pill ${isRetired ? 'retired' : d.status}`}>
                         <span className="dot"></span>
                         {isRetired ? 'RETIRED' : d.status.toUpperCase()}
                       </span>
                     </td>
-                    <td>
-                      <div
+                    <td data-label="Hostname & Identity">
+                      {/* A cell that opens a modal is a button, not a div with
+                          an onClick. */}
+                      <button
+                        type="button"
                         className="device-identity-cell"
                         onClick={() => setSelectedDevice(d)}
-                        title="Click to view hardware specs & software"
+                        title="View hardware specs & software"
                       >
                         <strong className="device-name">{d.hostname}</strong>
                         <span className="device-id font-mono">{d.id.substring(0, 16)}...</span>
-                      </div>
+                      </button>
                     </td>
-                    <td>
+                    <td data-label="Operating System">
                       <div className="os-cell">
                         <span className="os-name">{d.os_name}</span>
                         <span className="os-version">{d.os_version}</span>
                       </div>
                     </td>
-                    <td>
+                    <td data-label="Site">
                       <span className="site-badge">{d.site || 'HQ'}</span>
                     </td>
-                    <td>
+                    <td data-label="Agent">
                       <span className="font-mono text-sm">{d.agent_version || '0.1.0'}</span>
                     </td>
-                    <td>
+                    <td data-label="Last Heartbeat">
                       <span className="timestamp-cell">
-                        {d.last_seen_at
-                          ? new Date(d.last_seen_at).toLocaleTimeString()
-                          : 'Never'}
+                        {d.last_seen_at ? new Date(d.last_seen_at).toLocaleTimeString() : 'Never'}
                       </span>
                     </td>
-                    <td className="text-right">
+                    <td className="text-right" data-label="Actions">
                       <div className="row-actions">
                         <button
                           type="button"
@@ -298,6 +361,7 @@ export const DevicesPage: React.FC<{
                             className="btn btn-sm btn-primary"
                             onClick={() => onOpenExec?.(d)}
                             title="Run Remote Command"
+                            aria-label={`Run remote command on ${d.hostname}`}
                           >
                             <TerminalSquare size={12} />
                           </button>
@@ -313,6 +377,7 @@ export const DevicesPage: React.FC<{
                               )
                             }
                             title="Open Interactive Terminal"
+                            aria-label={`Open interactive terminal on ${d.hostname}`}
                           >
                             <Terminal size={12} />
                           </button>
@@ -323,26 +388,29 @@ export const DevicesPage: React.FC<{
                             className="btn btn-sm btn-primary"
                             onClick={() => onOpenRemoteControl?.(d)}
                             title="Open Remote Desktop Screen & Control"
+                            aria-label={`Open remote desktop control for ${d.hostname}`}
                           >
                             <Monitor size={12} />
                           </button>
                         )}
-                        {d.status === 'online' && !isRetired && (
+                        {d.status === 'online' && !isRetired && canManage && (
                           <button
                             type="button"
                             className="btn btn-sm btn-secondary"
                             onClick={() => handlePing(d)}
                             title="Send Ping"
+                            aria-label={`Send ping to ${d.hostname}`}
                           >
                             <Activity size={12} />
                           </button>
                         )}
-                        {canManage && !isRetired && (
+                        {canRetire && !isRetired && (
                           <button
                             type="button"
                             className="btn btn-sm btn-danger-outline"
-                            onClick={() => handleRetire(d)}
+                            onClick={() => setRetireTarget(d)}
                             title="Retire Device"
+                            aria-label={`Retire ${d.hostname}`}
                           >
                             <Archive size={12} />
                           </button>
@@ -350,37 +418,36 @@ export const DevicesPage: React.FC<{
                       </div>
                     </td>
                   </tr>
-                )})
-              )}
-            </tbody>
-          </table>
-        </div>
+                )
+              })
+            )}
+          </tbody>
+        </DataTable>
 
         {/* Pagination Bar */}
         <div className="pagination-bar">
           <div className="pagination-info">
-            Showing {data.total > 0 ? data.offset + 1 : 0} to{' '}
-            {Math.min(data.offset + (data.devices || []).length, data.total)} of {data.total}{' '}
-            endpoints
+            Showing {data.total > 0 ? offset + 1 : 0} to{' '}
+            {Math.min(offset + (data.devices || []).length, data.total)} of {data.total} endpoints
           </div>
           <div className="pagination-controls">
             <button
               type="button"
               className="btn btn-sm btn-secondary"
-              onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-              disabled={currentPage <= 1}
+              onClick={() => setQuery({ page: Math.max(1, page - 1) })}
+              disabled={page <= 1}
             >
               <ChevronLeft size={16} />
               <span>Previous</span>
             </button>
             <span className="page-indicator">
-              Page {currentPage} of {totalPages}
+              Page {page} of {totalPages}
             </span>
             <button
               type="button"
               className="btn btn-sm btn-secondary"
-              onClick={() => setCurrentPage((p) => p + 1)}
-              disabled={currentPage >= totalPages}
+              onClick={() => setQuery({ page: page + 1 })}
+              disabled={page >= totalPages}
             >
               <span>Next</span>
               <ChevronRight size={16} />
@@ -389,11 +456,30 @@ export const DevicesPage: React.FC<{
         </div>
       </div>
 
+      <ConfirmDialog
+        open={Boolean(retireTarget)}
+        title="Retire endpoint"
+        message={
+          retireTarget
+            ? `Retire "${retireTarget.hostname}"? It stops reporting telemetry and is excluded from fleet health. This can be reversed with Restore.`
+            : ''
+        }
+        confirmLabel="Retire device"
+        pending={retiring}
+        onConfirm={handleRetire}
+        onCancel={() => setRetireTarget(null)}
+      />
+
       {/* Detail Modal */}
       {selectedDevice && (
         <DeviceDetailModal
           device={selectedDevice}
-          onClose={() => setSelectedDevice(null)}
+          onClose={() => {
+            setSelectedDevice(null)
+            // Drop ?device_id= on close so a refresh does not immediately
+            // reopen the same modal.
+            if (deviceId) setQuery({ deviceId: null })
+          }}
         />
       )}
     </div>

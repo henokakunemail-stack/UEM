@@ -11,9 +11,9 @@ import (
 
 // Config is the server runtime configuration. Loaded once at startup.
 type Config struct {
-	HTTPAddr      string        // HTTP listen address, e.g. ":8443"
-	DBPath        string        // SQLite database file path
-	JWTSecret     string        // secret used to sign JWTs
+	HTTPAddr        string // HTTP listen address, e.g. ":8443"
+	DBPath          string // SQLite database file path
+	JWTSecret       string // secret used to sign JWTs
 	AccessTokenTTL  time.Duration
 	RefreshTokenTTL time.Duration
 
@@ -42,26 +42,35 @@ type Config struct {
 	AllowedOriginDomains []string
 
 	LogLevel string // zerolog level: debug|info|warn|error
+
+	// LogFile is an optional path for a full server log. When empty, logs go to
+	// stdout only. The console's "Log" menu tails this file, so on a systemd
+	// box the operator can point it at a real file and still read it in the UI.
+	LogFile string
+	// LogTailLines caps how many recent lines GET /api/logs holds in memory.
+	LogTailLines int
 }
 
 // Load reads configuration from environment variables with sane defaults.
 func Load() (Config, error) {
 	dbPath := getEnv("DB_PATH", "data/endpoint-mgmt.db")
 	cfg := Config{
-		HTTPAddr:          getEnv("HTTP_ADDR", ":8443"),
-		DBPath:            dbPath,
-		JWTSecret:         getEnv("JWT_SECRET", ""),
-		AccessTokenTTL:    getDuration("ACCESS_TOKEN_TTL", 15*time.Minute),
-		RefreshTokenTTL:   getDuration("REFRESH_TOKEN_TTL", 24*7*time.Hour),
-		TLSCertFile:       getEnv("TLS_CERT_FILE", ""),
-		TLSKeyFile:        getEnv("TLS_KEY_FILE", ""),
-		EnrollmentTTL:     getDuration("ENROLLMENT_TTL", 30*time.Minute),
-		AgentOfflineAfter: getDuration("AGENT_OFFLINE_AFTER", 90*time.Second),
-		BackupDir:         getEnv("BACKUP_DIR", defaultBackupDir(dbPath)),
-		BackupInterval:    getDuration("BACKUP_INTERVAL", time.Hour),
-		BackupRetain:      getEnvInt("BACKUP_RETAIN", 24),
+		HTTPAddr:             getEnv("HTTP_ADDR", ":8443"),
+		DBPath:               dbPath,
+		JWTSecret:            getEnv("JWT_SECRET", ""),
+		AccessTokenTTL:       getDuration("ACCESS_TOKEN_TTL", 15*time.Minute),
+		RefreshTokenTTL:      getDuration("REFRESH_TOKEN_TTL", 24*7*time.Hour),
+		TLSCertFile:          getEnv("TLS_CERT_FILE", ""),
+		TLSKeyFile:           getEnv("TLS_KEY_FILE", ""),
+		EnrollmentTTL:        getDuration("ENROLLMENT_TTL", 30*time.Minute),
+		AgentOfflineAfter:    getDuration("AGENT_OFFLINE_AFTER", 90*time.Second),
+		BackupDir:            getEnv("BACKUP_DIR", defaultBackupDir(dbPath)),
+		BackupInterval:       getDuration("BACKUP_INTERVAL", time.Hour),
+		BackupRetain:         getEnvInt("BACKUP_RETAIN", 24),
 		AllowedOriginDomains: getCSVEnv("ALLOWED_ORIGIN_DOMAINS"),
 		LogLevel:             getEnv("LOG_LEVEL", "info"),
+		LogFile:              getEnv("LOG_FILE", ""),
+		LogTailLines:         getEnvInt("LOG_TAIL_LINES", 2000),
 	}
 	if cfg.JWTSecret == "" {
 		return cfg, fmt.Errorf("JWT_SECRET must be set (generate one, e.g. 32+ random bytes)")

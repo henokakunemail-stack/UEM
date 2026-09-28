@@ -183,5 +183,5 @@ func TestHeartbeatFlusher_SustainedHeartbeatCycles(t *testing.T) {
 }
 
 func init() {
-	logger.Init("disabled")
+	logger.Init("disabled", "")
 }

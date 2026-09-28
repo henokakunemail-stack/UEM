@@ -1,4 +1,4 @@
-// Command endpoint-mgmt-server is the central management server (Fase 1).
+// Command endpoint-mgmt-server is the central management server (Phase 1).
 package main
 
 import (
@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -25,19 +26,20 @@ import (
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/logger"
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/rbac"
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/transport"
+	"github.com/henokakunemail-stack/Endpoint-Manager/server/modules/agentupdate"
+	"github.com/henokakunemail-stack/Endpoint-Manager/server/modules/alerting"
+	"github.com/henokakunemail-stack/Endpoint-Manager/server/modules/assetlicense"
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/modules/dashboard"
 	devicemgmt "github.com/henokakunemail-stack/Endpoint-Manager/server/modules/device-management"
+	"github.com/henokakunemail-stack/Endpoint-Manager/server/modules/maintenance"
+	"github.com/henokakunemail-stack/Endpoint-Manager/server/modules/networkfilter"
 	patchmgmt "github.com/henokakunemail-stack/Endpoint-Manager/server/modules/patch-management"
 	remoteexec "github.com/henokakunemail-stack/Endpoint-Manager/server/modules/remote-exec"
-	softwaredeployment "github.com/henokakunemail-stack/Endpoint-Manager/server/modules/software-deployment"
-	"github.com/henokakunemail-stack/Endpoint-Manager/server/modules/reports"
-	usermgmt "github.com/henokakunemail-stack/Endpoint-Manager/server/modules/user-management"
-	"github.com/henokakunemail-stack/Endpoint-Manager/server/modules/alerting"
-	"github.com/henokakunemail-stack/Endpoint-Manager/server/modules/agentupdate"
-	"github.com/henokakunemail-stack/Endpoint-Manager/server/modules/assetlicense"
-	"github.com/henokakunemail-stack/Endpoint-Manager/server/modules/networkfilter"
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/modules/remotecontrol"
+	"github.com/henokakunemail-stack/Endpoint-Manager/server/modules/reports"
+	softwaredeployment "github.com/henokakunemail-stack/Endpoint-Manager/server/modules/software-deployment"
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/modules/taskscheduler"
+	usermgmt "github.com/henokakunemail-stack/Endpoint-Manager/server/modules/user-management"
 )
 
 func main() {
@@ -47,7 +49,7 @@ func main() {
 		println("config error:", err.Error())
 		os.Exit(1)
 	}
-	logger.Init(cfg.LogLevel)
+	logger.Init(cfg.LogLevel, cfg.LogFile)
 
 	database, err := db.Open(cfg.DBPath)
 	if err != nil {
@@ -55,16 +57,38 @@ func main() {
 	}
 	defer database.Close()
 
-	// Fase 1 bootstrap: ensure an admin user exists so the console can log in.
+	// Phase 1 bootstrap: ensure an admin user exists so the console can log in.
 	if err := bootstrapAdmin(database); err != nil {
 		log.Fatal().Err(err).Msg("bootstrap admin")
 	}
 
+	srv, stopBackground := buildServer(cfg, database)
+	defer stopBackground()
+
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
+	<-stop
+	log.Info().Msg("shutting down")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(ctx); err != nil {
+		log.Error().Err(err).Msg("graceful shutdown")
+	}
+}
+
+// buildServer wires every module's routes onto one router and starts the
+// background workers the server depends on. It is split out of main() so tests
+// can build the exact production router and assert that every path the web
+// console calls is actually registered — a route typo in either side then
+// fails the build instead of silently 404-ing in the browser.
+//
+// The returned cleanup stops the background goroutines; main() passes nil.
+func buildServer(cfg config.Config, database *sqlx.DB) (*http.Server, func()) {
 	jwtSvc := auth.NewJWTService(cfg.JWTSecret, cfg.AccessTokenTTL, cfg.RefreshTokenTTL)
 	deviceRepo := devicemgmt.NewRepository(database)
 	hub := transport.NewHub()
 
-	// Fase 2: inventory receiver + HTTP routes. The handler needs the hub both to
+	// Phase 2: inventory receiver + HTTP routes. The handler needs the hub both to
 	// answer "is this device online" and to deliver the collect request; the
 	// routes need the real JWT middleware, injected here to avoid a package-level
 	// dependency from the module on the auth service internals.
@@ -72,10 +96,44 @@ func main() {
 	invH := devicemgmt.NewInventoryHandler(invRepo, database, hub).
 		WithAuth(jwtSvc.RequireAuth)
 
+	// Phase 15: device maintenance. The handler is both the console's REST
+	// surface and the agent's step-report receiver, so it is constructed here,
+	// above wsH, and wired into the socket handler below.
+	maintRepo := maintenance.NewRepository(database)
+	maintH := maintenance.NewHandler(maintRepo, hub, &auditAdapter{db: database}, jwtSvc.RequireAuth, deviceRepo)
+
 	r := chi.NewRouter()
 	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "agents_online": hub.Count()})
 	})
+
+	// Server log tail, backing the console's "Log" menu. The audit trail
+	// (/api/audit-logs) records operator actions; this records what the server
+	// itself did, which is what you actually read when a menu 500s.
+	r.With(jwtSvc.RequireAuth, rbac.RequireRole(rbac.RoleViewer)).
+		Get("/api/logs", func(w http.ResponseWriter, r *http.Request) {
+			lines := logger.Tail()
+			// Default to the last 200 lines: the console is a viewer, not a
+			// log archive — the file on disk is the archive.
+			limit := 200
+			if v := r.URL.Query().Get("limit"); v != "" {
+				if n, err := strconv.Atoi(v); err == nil && n > 0 {
+					limit = n
+				}
+			}
+			if limit > len(lines) {
+				limit = len(lines)
+			}
+			if lines == nil {
+				lines = []string{}
+			}
+			writeJSON(w, http.StatusOK, map[string]any{
+				"lines":     lines[len(lines)-limit:],
+				"total":     len(lines),
+				"log_file":  cfg.LogFile,
+				"truncated": limit < len(lines),
+			})
+		})
 
 	// Admin console auth (public endpoints).
 	loginH := auth.NewLoginHandler(database, jwtSvc)
@@ -90,7 +148,7 @@ func main() {
 	// WebSocket endpoint so the console is trusted consistently.
 	checkOrigin := auth.NewOriginChecker(cfg.AllowedOriginDomains)
 
-	// Fase 5: remote command execution and interactive terminal relay.
+	// Phase 5: remote command execution and interactive terminal relay.
 	remoteExecRepo := remoteexec.NewRepository(database)
 	termRelay := remoteexec.NewTerminalRelay()
 	remoteExecH := remoteexec.NewHandler(remoteExecRepo, hub, termRelay, &auditAdapter{db: database}, jwtSvc, jwtSvc.RequireAuth, deviceRepo, checkOrigin)
@@ -107,71 +165,74 @@ func main() {
 	deviceH := devicemgmt.NewHandler(deviceRepo, database, jwtSvc, cfg.EnrollmentTTL)
 	deviceH.Register(r)
 
-	// Fase 2: inventory, device lifecycle and static groups.
+	// Phase 2: inventory, device lifecycle and static groups.
 	invH.Register(r)
 
-	// Fase 3: dashboard executive metrics.
+	// Phase 3: dashboard executive metrics.
 	dashRepo := dashboard.NewRepository(database)
 	dashH := dashboard.NewHandler(dashRepo, jwtSvc.RequireAuth)
 	dashH.Register(r)
 
-	// Fase 4: software package repository and deployment engine.
+	// Phase 4: software package repository and deployment engine.
 	softRepo := softwaredeployment.NewRepository(database)
 	softH := softwaredeployment.NewHandler(softRepo, hub, &auditAdapter{db: database}, "./data/packages", jwtSvc.RequireAuth, deviceRepo)
 	softH.Register(r)
 
-	// Fase 5: remote execution & terminal routes.
+	// Phase 5: remote execution & terminal routes.
 	remoteExecH.Register(r)
 
-	// Fase 6: patch management & OS updates.
+	// Phase 6: patch management & OS updates.
 	patchRepo := patchmgmt.NewRepository(database)
 	patchH := patchmgmt.NewHandler(patchRepo, hub, &auditAdapter{db: database}, jwtSvc, jwtSvc.RequireAuth, deviceRepo)
 	patchH.Register(r)
 
-	// Fase 7: user management & lifecycle.
+	// Phase 7: user management & lifecycle.
 	userRepo := usermgmt.NewRepository(database)
 	userH := usermgmt.NewHandler(userRepo, &auditAdapter{db: database}, jwtSvc.RequireAuth)
 	userH.Register(r)
 
-	// Fase 8: reports & export engine.
+	// Phase 8: reports & export engine.
 	reportsRepo := reports.NewRepository(database)
 	reportsH := reports.NewHandler(reportsRepo, jwtSvc.RequireAuth)
 	reportsH.Register(r)
 
-	// Fase 9: alerting & notification engine.
+	// Phase 9: alerting & notification engine.
 	alertRepo := alerting.NewRepository(database)
 	alertEval := alerting.NewEvaluator(database, alertRepo)
 	alertH := alerting.NewHandler(alertRepo, alertEval, &auditAdapter{db: database}, jwtSvc.RequireAuth)
 	alertH.Register(r)
 	alertEval.StartBackgroundEvaluator(30 * time.Second)
 
-	// Fase 10: task scheduler & script repository.
+	// Phase 10: task scheduler & script repository.
 	schedRepo := taskscheduler.NewRepository(database)
 	schedulerSvc := taskscheduler.NewScheduler(schedRepo, hub)
 	schedH := taskscheduler.NewHandler(schedRepo, schedulerSvc, &auditAdapter{db: database}, jwtSvc.RequireAuth, deviceRepo)
 	schedH.Register(r)
 	schedulerSvc.StartBackgroundScheduler(30 * time.Second)
 
-	// Fase 11: remote control & screen capture relay.
+	// Phase 11: remote control & screen capture relay.
 	rcRepo := remotecontrol.NewRepository(database)
 	rcRelay := remotecontrol.NewRelayManager(rcRepo)
 	rcH := remotecontrol.NewHandler(rcRepo, rcRelay, hub, deviceRepo, &auditAdapter{db: database}, jwtSvc, jwtSvc.RequireAuth, checkOrigin)
 	rcH.Register(r)
 
-	// Fase 12: network & web filter security policies.
+	// Phase 12: network & web filter security policies.
 	filterRepo := networkfilter.NewRepository(database)
 	filterH := networkfilter.NewHandler(filterRepo, hub, deviceRepo, &auditAdapter{db: database}, jwtSvc.RequireAuth)
 	filterH.Register(r)
 
-	// Fase 13: agent self-update & rollout management.
+	// Phase 13: agent self-update & rollout management.
 	updateRepo := agentupdate.NewRepository(database)
 	updateH := agentupdate.NewHandler(updateRepo, hub, deviceRepo, &auditAdapter{db: database}, "./data/agent-releases", jwtSvc.RequireAuth)
 	updateH.Register(r)
 
-	// Fase 14: asset & license management.
+	// Phase 14: asset & license management.
 	assetRepo := assetlicense.NewRepository(database)
 	assetH := assetlicense.NewHandler(assetRepo, &auditAdapter{db: database}, jwtSvc.RequireAuth)
 	assetH.Register(r)
+
+	// Phase 15: device maintenance.
+	maintH.Register(r)
 
 	// Command dispatch demo endpoint: send "ping" to a device's live connection.
 	r.With(jwtSvc.RequireAuth, rbac.RequireRole(rbac.RoleTechnician)).
@@ -247,6 +308,7 @@ func main() {
 		Int("retain", cfg.BackupRetain).
 		Msg("scheduled online database backups")
 
+	// Listen and block until the process is asked to stop.
 	go func() {
 		if cfg.TLSCertFile != "" && cfg.TLSKeyFile != "" {
 			log.Info().Str("addr", cfg.HTTPAddr).
@@ -264,15 +326,10 @@ func main() {
 		}
 	}()
 
-	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
-	<-stop
-	log.Info().Msg("shutting down")
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	if err := srv.Shutdown(ctx); err != nil {
-		log.Error().Err(err).Msg("graceful shutdown")
+	cleanup := func() {
+		stopBackups()
 	}
+	return srv, cleanup
 }
 
 // bootstrapAdmin creates the default admin if no users exist yet.

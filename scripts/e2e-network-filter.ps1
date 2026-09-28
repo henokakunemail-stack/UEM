@@ -234,7 +234,10 @@ try {
 
     # 11. Agent Reports Compliance Status to Server
     Write-Host "`n10. Agent Reporting Compliance Status to Server..."
-    $reportResp = Invoke-RestMethod -Uri "$base/api/agent/devices/$deviceId/filter/report" -Method POST -Body (@{
+    # Authenticated with the device credentials, as the production agent does
+    # when it reports filter state (agent/shared/networkfilter).
+    $filterHeaders = @{ "X-Device-Id" = $deviceId; "X-Device-Secret" = $deviceSecret }
+    $reportResp = Invoke-RestMethod -Uri "$base/api/agent/devices/$deviceId/filter/report" -Method POST -Headers $filterHeaders -Body (@{
         policy_version = $expectedVersion
         status = "synced"
         rules_applied = 3

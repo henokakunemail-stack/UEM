@@ -9,7 +9,12 @@ Dokumen ini adalah panduan produksi untuk memasang biner server pusat **Endpoint
 - **Sistem Operasi**: Ubuntu 20.04+ LTS atau Debian 11+ (arsitektur `amd64` atau `arm64`)
 - **Spesifikasi Minimum (500 Endpoint)**: 2 vCPU, 2 GB RAM, 20 GB Disk (SSD/NVMe disarankan)
 - **Spesifikasi Rekomendasi (5.000 - 10.000+ Endpoint)**: 4 vCPU, 8 GB RAM, 100+ GB SSD (koneksi persistensi WebSocket & penyimpanan paket software/patch)
-- **Jaringan**: IP publik statis, domain terdaftar (contoh: `mgmt.perusahaan.com`), port `80` dan `443` terbuka ke internet/kantor cabang
+- **Jaringan**: IP publik statis, domain terdaftar (contoh: `mgmt.example.com`), port `80` dan `443` terbuka ke internet/kantor cabang
+
+> Angka lengkap per profil, beserta cara mengukurnya di mesin Anda sendiri, ada di
+> **[server-specs.md](./server-specs.md)**. Ringkasnya: 10.000+ endpoint butuh
+> 8 vCPU / **32 GB** RAM (bukan 16 GB) dan NVMe, karena pembatasnya I/O database
+> dan page cache — bukan jumlah inti CPU.
 
 ---
 
@@ -74,6 +79,7 @@ HTTP_ADDR=127.0.0.1:8443
 DB_PATH=/opt/endpoint-mgmt/data/endpoint-mgmt.db
 JWT_SECRET=${JWT_KEY}
 LOG_LEVEL=info
+LOG_FILE=/var/log/endpoint-mgmt/server.log
 ADMIN_PASSWORD=${ADMIN_PASS}
 ACCESS_TOKEN_TTL=30m
 REFRESH_TOKEN_TTL=168h

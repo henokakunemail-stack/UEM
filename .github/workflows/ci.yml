@@ -101,11 +101,32 @@ jobs:
         run: npm run build
 
       - name: Verify embed sync
+        # vite writes straight into server/cmd/server/dist (see vite.config.ts
+        # outDir), so the embed directory IS the build output. A "directory
+        # exists" check passed for months while index.html kept pointing at a
+        # stale bundle, which is why frontend changes appeared to do nothing.
+        # Assert the actual invariant instead: the files index.html references
+        # must exist, and the directory must hold exactly one JS and one CSS.
         run: |
-          if [ ! -d "../server/cmd/server/dist" ]; then
-            echo "::error::server/cmd/server/dist missing after frontend build"
+          set -euo pipefail
+          DIST=../server/cmd/server/dist
+          if [ ! -f "$DIST/index.html" ]; then
+            echo "::error::$DIST/index.html missing after frontend build"
             exit 1
           fi
+          for asset in $(grep -oE '/assets/[A-Za-z0-9._-]+' "$DIST/index.html" | sort -u); do
+            if [ ! -f "$DIST$asset" ]; then
+              echo "::error::index.html references $asset but it does not exist — the Go embed would serve a broken console"
+              exit 1
+            fi
+          done
+          js_count=$(ls "$DIST/assets" | grep -c '\.js$')
+          css_count=$(ls "$DIST/assets" | grep -c '\.css$')
+          if [ "$js_count" -ne 1 ] || [ "$css_count" -ne 1 ]; then
+            echo "::error::expected exactly 1 js and 1 css in $DIST/assets, found $js_count js and $css_count css — stale bundles from a previous build"
+            exit 1
+          fi
+          echo "embed output verified: $(ls "$DIST/assets" | tr '\n' ' ')"
 
   docker-smoke:
     name: Docker smoke test

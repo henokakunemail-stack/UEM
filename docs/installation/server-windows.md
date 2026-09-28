@@ -11,6 +11,11 @@ Dokumen ini menjelaskan implementasi produksi server pusat **Endpoint Management
 - **Jaringan**: IP statis, Port `443` (atau `8443`) dapat diakses oleh komputer agen di seluruh kantor cabang.
 - **Sertifikat TLS**: Sertifikat SSL x509 (format PEM: `.crt` dan private key `.key`) atau sertifikat PFX yang diekstrak.
 
+> Angka lengkap per profil, beserta cara mengukurnya di mesin Anda sendiri, ada di
+> **[server-specs.md](./server-specs.md)**. Ringkasnya: 10.000+ endpoint butuh
+> 8 vCPU / **32 GB** RAM (bukan 16 GB) dan NVMe, karena pembatasnya I/O database
+> dan page cache — bukan jumlah inti CPU.
+
 ---
 
 ## 2. Struktur Direktori Rekomendasi
@@ -77,6 +82,7 @@ HTTP_ADDR=0.0.0.0:8443
 DB_PATH=C:/EndpointMgmt/data/endpoint-mgmt.db
 JWT_SECRET=$jwtSecret
 LOG_LEVEL=info
+LOG_FILE=C:/EndpointMgmt/logs/server.log
 ADMIN_PASSWORD=$adminPass
 ACCESS_TOKEN_TTL=30m
 REFRESH_TOKEN_TTL=168h

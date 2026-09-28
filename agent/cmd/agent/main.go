@@ -22,6 +22,7 @@ import (
 
 	"github.com/henokakunemail-stack/Endpoint-Manager/agent/shared/enrollment"
 	"github.com/henokakunemail-stack/Endpoint-Manager/agent/shared/inventory"
+	"github.com/henokakunemail-stack/Endpoint-Manager/agent/shared/maintenance"
 	"github.com/henokakunemail-stack/Endpoint-Manager/agent/shared/networkfilter"
 	"github.com/henokakunemail-stack/Endpoint-Manager/agent/shared/patch"
 	"github.com/henokakunemail-stack/Endpoint-Manager/agent/shared/remotecontrol"
@@ -123,7 +124,7 @@ func runAgent(serverURL, enrollToken, credsPath string, heartbeatSecs int) {
 		return map[string]string{"status": "dispatched"}
 	})
 
-	// Fase 5: Remote Execution & Live Interactive Terminal
+	// Phase 5: Remote Execution & Live Interactive Terminal
 	termMgr := remoteexec.NewTerminalManager()
 	defer termMgr.CloseAll()
 
@@ -203,7 +204,7 @@ func runAgent(serverURL, enrollToken, credsPath string, heartbeatSecs int) {
 		return map[string]string{"status": "closed"}
 	})
 
-	// Fase 6: Patch Management & OS Updates
+	// Phase 6: Patch Management & OS Updates
 	patchEngine := patch.NewEngine(targetServerURL, creds.DeviceID, creds.DeviceSecret)
 
 	dispatcher.Register("patch.scan", func(ctx context.Context, command, id string, payload json.RawMessage) any {
@@ -244,7 +245,7 @@ func runAgent(serverURL, enrollToken, credsPath string, heartbeatSecs int) {
 		return map[string]string{"status": "dispatched"}
 	})
 
-	// Fase 11: Remote Control
+	// Phase 11: Remote Control
 	rcCapturer := remotecontrol.NewPlatformCapturer()
 	var activeRCSession *remotecontrol.Session
 	var rcMu sync.Mutex
@@ -261,7 +262,10 @@ func runAgent(serverURL, enrollToken, credsPath string, heartbeatSecs int) {
 			activeRCSession.Stop()
 			activeRCSession = nil
 		}
-		session := remotecontrol.NewSession(cfg, targetServerURL, rcCapturer)
+		session := remotecontrol.NewSession(cfg, targetServerURL, remotecontrol.Credentials{
+			DeviceID:     creds.DeviceID,
+			DeviceSecret: creds.DeviceSecret,
+		}, rcCapturer)
 		activeRCSession = session
 		rcMu.Unlock()
 
@@ -284,7 +288,7 @@ func runAgent(serverURL, enrollToken, credsPath string, heartbeatSecs int) {
 		return map[string]string{"status": "stopped"}
 	})
 
-	// Fase 12: Network & Web Filter
+	// Phase 12: Network & Web Filter
 	filterEngine := networkfilter.NewEngine(targetServerURL, creds.DeviceID, creds.DeviceSecret)
 
 	dispatcher.Register("filter.apply", func(ctx context.Context, command, id string, payload json.RawMessage) any {
@@ -313,7 +317,7 @@ func runAgent(serverURL, enrollToken, credsPath string, heartbeatSecs int) {
 		return map[string]string{"status": "applying", "version": p.PolicyVersion}
 	})
 
-	// Fase 13: Agent Self-Update & Rollout
+	// Phase 13: Agent Self-Update & Rollout
 	updateEngine := update.NewEngine(targetServerURL, creds.DeviceID, creds.DeviceSecret)
 
 	dispatcher.Register("update.apply", func(ctx context.Context, command, id string, payload json.RawMessage) any {
@@ -329,6 +333,34 @@ func runAgent(serverURL, enrollToken, credsPath string, heartbeatSecs int) {
 				log.Error().Err(err).Str("task_id", params.TaskID).Msg("agent self-update failed")
 			} else {
 				log.Info().Str("task_id", params.TaskID).Str("version", params.TargetVersion).Msg("agent self-update completed successfully")
+			}
+		}()
+
+		return map[string]string{"status": "dispatched", "task_id": params.TaskID}
+	})
+
+	// Phase 15: Device Maintenance
+	maintEngine := maintenance.NewEngine(targetServerURL, creds.DeviceID, creds.DeviceSecret)
+
+	dispatcher.Register("maintenance.run", func(ctx context.Context, command, id string, payload json.RawMessage) any {
+		var params maintenance.StepRequest
+		_ = json.Unmarshal(payload, &params)
+		if params.TaskID == "" {
+			params.TaskID = id
+		}
+
+		// Cheap first gate so the immediate command_result reply is honest.
+		// Engine.Run re-checks; do not rely on this one.
+		if !maintenance.Allowed(params.TaskType) {
+			log.Warn().Str("task_id", params.TaskID).Str("task_type", params.TaskType).
+				Msg("rejecting maintenance task with unknown task type")
+			return map[string]string{"error": "unsupported task type"}
+		}
+
+		go func() {
+			defer guardAgentGoroutine("maintenance.run")
+			if err := maintEngine.Run(context.Background(), payload); err != nil {
+				log.Error().Err(err).Str("task_id", params.TaskID).Msg("maintenance task failed")
 			}
 		}()
 
@@ -359,7 +391,7 @@ func runAgent(serverURL, enrollToken, credsPath string, heartbeatSecs int) {
 	// Advertise what this build can do, so the server avoids sending commands to
 	// an agent that would silently drop them.
 	client.SetHelloExtra(map[string]any{
-		"capabilities": inventoryCapabilities(),
+		"capabilities": append(inventoryCapabilities(), maintenance.Capabilities()...),
 	})
 
 	// On shutdown, close the socket so the server marks the device offline

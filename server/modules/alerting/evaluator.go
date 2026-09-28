@@ -71,7 +71,7 @@ type diskTarget struct {
 func (e *Evaluator) evalDiskLow(ctx context.Context, rule *AlertRule, res *EvalResult) {
 	var targets []diskTarget
 	query := `
-		SELECT d.id as device_id, d.hostname, d.site, i.hw_disk_free_pct
+		SELECT d.id as device_id, d.hostname, COALESCE(d.site, '') AS site, i.hw_disk_free_pct
 		FROM devices d
 		JOIN device_inventory i ON i.device_id = d.id
 		WHERE d.retired_at IS NULL AND i.hw_disk_free_pct IS NOT NULL AND i.hw_disk_free_pct < ?
@@ -106,16 +106,21 @@ func (e *Evaluator) evalDiskLow(ctx context.Context, rule *AlertRule, res *EvalR
 }
 
 type offlineTarget struct {
-	DeviceID   string    `db:"id"`
-	Hostname   string    `db:"hostname"`
-	Site       string    `db:"site"`
-	LastSeenAt time.Time `db:"last_seen_at"`
+	DeviceID string  `db:"id"`
+	Hostname string  `db:"hostname"`
+	Site     string  `db:"site"`
+	// status = 'offline' is the DEFAULT for a device that has an enrollment
+	// token but has never checked in, so last_seen_at is legitimately NULL for
+	// every one of those. This is a pointer rather than a COALESCE because
+	// "never seen" is a different fact from "seen at the zero time", and the
+	// message below renders them differently.
+	LastSeenAt *time.Time `db:"last_seen_at"`
 }
 
 func (e *Evaluator) evalDeviceOffline(ctx context.Context, rule *AlertRule, res *EvalResult) {
 	var targets []offlineTarget
 	query := `
-		SELECT id, hostname, site, last_seen_at
+		SELECT id, hostname, COALESCE(site, '') AS site, last_seen_at
 		FROM devices
 		WHERE retired_at IS NULL AND status = 'offline'
 	`
@@ -125,9 +130,13 @@ func (e *Evaluator) evalDeviceOffline(ctx context.Context, rule *AlertRule, res 
 	}
 
 	for _, t := range targets {
+		lastSeen := "never"
+		if t.LastSeenAt != nil {
+			lastSeen = t.LastSeenAt.Format(time.RFC3339)
+		}
 		title := fmt.Sprintf("Device Offline: %s", t.Hostname)
 		msg := fmt.Sprintf("Device %s at site '%s' is offline. Last seen at %s",
-			t.Hostname, t.Site, t.LastSeenAt.Format(time.RFC3339))
+			t.Hostname, t.Site, lastSeen)
 
 		inc, isNew, err := e.repo.UpsertIncident(ctx, rule.ID, t.DeviceID, rule.Severity, title, msg)
 		if err != nil {

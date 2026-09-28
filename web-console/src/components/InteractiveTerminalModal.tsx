@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { AlertCircle, Terminal, X } from 'lucide-react'
+import { AlertCircle, Terminal } from 'lucide-react'
 import { getStoredToken } from '../services/api'
+import { Modal } from './ui'
 import type { DeviceDTO } from '../types/api'
 
 interface InteractiveTerminalModalProps {
@@ -44,7 +45,7 @@ export const InteractiveTerminalModal: React.FC<InteractiveTerminalModalProps> =
     let ws: WebSocket
     try {
       ws = new WebSocket(wsUrl)
-    } catch (err: unknown) {
+    } catch {
       setStatus('error')
       setErrorMessage('Failed to open terminal connection.')
       return
@@ -141,69 +142,69 @@ export const InteractiveTerminalModal: React.FC<InteractiveTerminalModalProps> =
 
   if (!device) return null
 
+  const statusClass =
+    status === 'active' ? 'status-success' : status === 'connecting' ? 'status-running' : 'status-failed'
+
   return (
-    <div className="modal-backdrop" onClick={handleClose}>
-      <div
-        className="modal modal-wide"
-        onClick={(e) => e.stopPropagation()}
-        style={{ maxWidth: '900px' }}
-      >
-        <div className="modal-header">
-          <div>
-            <h2 className="modal-title">
-              <Terminal size={20} /> Live Interactive Terminal
-            </h2>
-            <p className="modal-subtitle">
-              {device.hostname} · {shell} shell ·{' '}
-              <span className="font-mono">{device.id.substring(0, 16)}</span>
-            </p>
+    <Modal
+      open={device !== null}
+      onClose={handleClose}
+      size="lg"
+      // The live shell owns every keystroke, including Escape. Closing it here
+      // would tear down the remote process on a stray keypress, so the operator
+      // uses the close button (or the endpoint dropping the session).
+      dismissible={false}
+      title={
+        <span className="modal-title-group">
+          <Terminal size={20} /> Live Interactive Terminal
+        </span>
+      }
+      description={
+        <>
+          {device.hostname} · {shell} shell ·{' '}
+          <span className="font-mono">{device.id.substring(0, 16)}</span>
+        </>
+      }
+    >
+      <div className="modal-body">
+        <div className="terminal-status-group">
+          <span className={`status-pill ${statusClass}`}>{status.toUpperCase()}</span>
+        </div>
+
+        {status === 'error' && (
+          <div className="notification-banner error" role="alert">
+            <AlertCircle size={18} />
+            <span>{errorMessage}</span>
           </div>
-          <div className="terminal-status-group">
-            <span className={`status-pill ${status === 'active' ? 'status-success' : status === 'connecting' ? 'status-running' : 'status-failed'}`}>
-              {status.toUpperCase()}
-            </span>
-            <button
-              type="button"
-              className="btn btn-icon"
-              onClick={handleClose}
-              title="Disconnect and Close"
-            >
-              <X size={18} />
-            </button>
+        )}
+
+        <div className="live-terminal">
+          {/* The output is appended by hand on every frame, so it is a live
+              region rather than a React subtree. */}
+          <div className="terminal-output" ref={outputRef} role="log" aria-live="polite" />
+          <div className="terminal-input-row">
+            <span className="terminal-prompt">$</span>
+            <input
+              ref={inputRef}
+              type="text"
+              className="terminal-input"
+              aria-label="Remote shell input"
+              placeholder={
+                status === 'active' ? 'Type a command and press Enter...' : 'Terminal not active'
+              }
+              disabled={status !== 'active'}
+              onKeyDown={handleSendInput}
+              spellCheck={false}
+              autoComplete="off"
+            />
           </div>
         </div>
 
-        <div className="modal-body">
-          {status === 'error' && (
-            <div className="notification-banner error">
-              <AlertCircle size={18} />
-              <span>{errorMessage}</span>
-            </div>
-          )}
-
-          <div className="live-terminal">
-            <div className="terminal-output" ref={outputRef} />
-            <div className="terminal-input-row">
-              <span className="terminal-prompt">$</span>
-              <input
-                ref={inputRef}
-                type="text"
-                className="terminal-input"
-                placeholder={status === 'active' ? 'Type a command and press Enter...' : 'Terminal not active'}
-                disabled={status !== 'active'}
-                onKeyDown={handleSendInput}
-                spellCheck={false}
-                autoComplete="off"
-              />
-            </div>
-          </div>
-
-          <p className="form-hint">
-            Interactive session streams bidirectionally over the agent's outbound WebSocket.
-            Closing this window terminates the shell process on the endpoint.
-          </p>
-        </div>
+        <p className="form-hint">
+          Interactive session streams bidirectionally over the agent's outbound WebSocket.
+          Closing this window terminates the shell process on the endpoint.
+        </p>
       </div>
-    </div>
+    </Modal>
   )
 }

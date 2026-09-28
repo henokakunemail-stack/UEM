@@ -1,5 +1,5 @@
 -- server/core/db/migrations/0013_asset_license_management.sql
--- Fase 14: Asset & License Management
+-- Phase 14: Asset & License Management
 
 CREATE TABLE IF NOT EXISTS hardware_assets (
     id TEXT PRIMARY KEY,

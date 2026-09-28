@@ -211,6 +211,20 @@ func (h *Handler) handleOperatorWS(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			break
 		}
+
+		// A mode change is handled by the relay, not treated as input. It has
+		// to bypass the view_only gate in both directions: an operator sitting
+		// in view-only must still be able to hand control back, otherwise the
+		// toggle is a one-way door. Forwarding it to the agent as well keeps
+		// the agent's own gate in step with the relay's.
+		if mode, isMode := parseModeMessage(msg); isMode {
+			if !h.relay.SetMode(sessionID, mode) {
+				continue
+			}
+			_ = relay.ForwardControlMessage(msgType, msg)
+			continue
+		}
+
 		if err := relay.ForwardOperatorInput(msgType, msg); err != nil {
 			break
 		}
@@ -229,7 +243,28 @@ func (h *Handler) handleAgentWS(w http.ResponseWriter, r *http.Request) {
 	// Authenticate BEFORE the upgrade. Once the socket is hijacked there is no
 	// second chance to reject the peer, and a knowledge of a session ID alone
 	// would otherwise be enough to inject screen frames into an operator's view.
-	if _, ok := devicemgmt.AuthenticateAgent(w, r, h.devices); !ok {
+	authenticatedDeviceID, ok := devicemgmt.AuthenticateAgent(w, r, h.devices)
+	if !ok {
+		return
+	}
+
+	// The device secret proves *which* agent is calling, not that this agent
+	// belongs to this session. Without the ownership check below, any enrolled
+	// device holding its own valid secret could attach to another device's
+	// session by guessing or leaking a session ID, and push frames into an
+	// operator's view of a third machine.
+	session, err := h.repo.GetSessionByID(r.Context(), sessionID)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, "session not found")
+		return
+	}
+	if session.DeviceID != authenticatedDeviceID {
+		log.Warn().
+			Str("session", sessionID).
+			Str("session_device", session.DeviceID).
+			Str("auth_device", authenticatedDeviceID).
+			Msg("rejected remote control agent attach: device does not own the session")
+		writeErr(w, http.StatusForbidden, "this device does not own the requested session")
 		return
 	}
 
@@ -262,6 +297,26 @@ func (h *Handler) handleAgentWS(w http.ResponseWriter, r *http.Request) {
 
 func writeErr(w http.ResponseWriter, code int, msg string) {
 	writeJSON(w, code, map[string]string{"error": msg})
+}
+
+// parseModeMessage reports whether a console message is a mode change, and to
+// which mode. A malformed message is not a mode change: it falls through to the
+// input path, where the agent's JSON decode drops it like any other bad frame.
+func parseModeMessage(msg []byte) (string, bool) {
+	var probe struct {
+		Type string `json:"type"`
+		Mode string `json:"mode"`
+	}
+	if err := json.Unmarshal(msg, &probe); err != nil {
+		return "", false
+	}
+	if probe.Type != "mode" {
+		return "", false
+	}
+	if probe.Mode != "full_control" && probe.Mode != "view_only" {
+		return "", false
+	}
+	return probe.Mode, true
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {

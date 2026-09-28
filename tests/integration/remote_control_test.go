@@ -87,11 +87,11 @@ func TestRemoteControl_SessionLifecycle(t *testing.T) {
 	if ended.Status != "ended" {
 		t.Fatalf("expected status ended, got: %s", ended.Status)
 	}
-	if ended.FramesTransacted != frames {
-		t.Fatalf("expected %d frames, got %d", frames, ended.FramesTransacted)
+	if ended.FramesTransmitted != frames {
+		t.Fatalf("expected %d frames, got %d", frames, ended.FramesTransmitted)
 	}
-	if ended.BytesTransacted != bytes {
-		t.Fatalf("expected %d bytes, got %d", bytes, ended.BytesTransacted)
+	if ended.BytesTransmitted != bytes {
+		t.Fatalf("expected %d bytes, got %d", bytes, ended.BytesTransmitted)
 	}
 	if ended.InputEventsCount != inputs {
 		t.Fatalf("expected %d inputs, got %d", inputs, ended.InputEventsCount)
@@ -167,8 +167,8 @@ func TestRemoteControl_RelayManager(t *testing.T) {
 	if ended.Status != "ended" {
 		t.Fatalf("expected status ended, got %s", ended.Status)
 	}
-	if ended.FramesTransacted != 1 {
-		t.Fatalf("expected 1 frame recorded, got %d", ended.FramesTransacted)
+	if ended.FramesTransmitted != 1 {
+		t.Fatalf("expected 1 frame recorded, got %d", ended.FramesTransmitted)
 	}
 	if ended.InputEventsCount != 0 {
 		t.Fatalf("expected 0 input events in view_only mode, got %d", ended.InputEventsCount)
@@ -181,20 +181,83 @@ func TestRemoteControl_PlatformCapturer(t *testing.T) {
 		t.Fatal("expected platform capturer to be created")
 	}
 
-	frame, width, height, err := capturer.CaptureScreen()
-	if err != nil {
-		t.Logf("Platform screen capture returned: %v (expected if running in headless CI/non-interactive desktop)", err)
-	} else {
+	caps := capturer.Capabilities()
+
+	// A capturer that claims capture support must actually produce a frame.
+	// This is the check that would have caught the previous stub platforms,
+	// which reported success while returning a solid-grey placeholder — the
+	// test below passed for them because it only asserted "does not error".
+	if caps.Capture {
+		frame, width, height, err := capturer.CaptureScreen()
+		if err != nil {
+			t.Fatalf("capabilities claim capture=true but CaptureScreen failed: %v", err)
+		}
 		if width <= 0 || height <= 0 {
-			t.Fatalf("invalid screen dimensions: %dx%d", width, height)
+			t.Fatalf("capabilities claim capture=true but got invalid dimensions: %dx%d", width, height)
 		}
 		if len(frame) == 0 {
-			t.Fatal("expected non-empty frame data")
+			t.Fatal("capabilities claim capture=true but frame data was empty")
+		}
+		// The console decodes these bytes as JPEG; a frame that is not a JPEG
+		// renders as a blank canvas with no error anywhere.
+		if len(frame) < 4 || frame[0] != 0xFF || frame[1] != 0xD8 {
+			t.Fatalf("frame is not JPEG-encoded (leading bytes % x)", frame[:min(4, len(frame))])
 		}
 		t.Logf("Screen captured: %dx%d, %d bytes JPEG", width, height, len(frame))
+	} else {
+		// The honest-failure contract: a platform with no backend must say so
+		// and must not hand back a plausible-looking image.
+		t.Logf("capture unavailable on this platform: %s", caps.Reason)
+		if caps.Reason == "" {
+			t.Error("capabilities report capture=false but give no reason for the operator")
+		}
+		if _, _, _, err := capturer.CaptureScreen(); err == nil {
+			t.Error("capabilities report capture=false but CaptureScreen returned no error")
+		}
 	}
 
-	// Test Input injection methods (should not crash)
-	_ = capturer.InjectMouseEvent("move", 100, 100, "", 0)
-	_ = capturer.InjectKeyboardEvent("up", "A", 65)
+	// Input injection must be safe to call, and must not report success for a
+	// platform that cannot do it.
+	_ = capturer.InjectMouseEvent(agentrc.InputEvent{Action: "move", X: 100, Y: 100})
+	_ = capturer.InjectKeyboardEvent(agentrc.InputEvent{Action: "down", Key: "A", Code: 65})
+	if err := capturer.ReleaseAllKeys(); err != nil {
+		t.Errorf("ReleaseAllKeys: %v", err)
+	}
+}
+
+// The mode gate has to work in both directions. Previously the relay treated a
+// mode change as ordinary input, so the view_only gate dropped it and an
+// operator who handed control back was stuck watching until the session was
+// restarted.
+func TestRemoteControl_RelayModeSwitch(t *testing.T) {
+	database, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+
+	repo := remotecontrol.NewRepository(database)
+	relayMgr := remotecontrol.NewRelayManager(repo)
+
+	// No session registered: both a valid mode and a bogus one must report
+	// false. SetMode is a lookup, not a create — an operator must not be able
+	// to conjure a relay by sending a mode change for a session that is gone.
+	if relayMgr.SetMode("does-not-exist", "view_only") {
+		t.Error("SetMode on an unknown session returned true")
+	}
+	if relayMgr.SetMode("does-not-exist", "not-a-mode") {
+		t.Error("SetMode accepted an invalid mode")
+	}
+
+	// Registering a real session, then switching it, must stick.
+	r := relayMgr.RegisterSession("live-session", "full_control")
+	if r == nil {
+		t.Fatal("expected relay to be created")
+	}
+	if !relayMgr.SetMode("live-session", "view_only") {
+		t.Error("SetMode on a registered session returned false")
+	}
+	if got := r.CurrentMode(); got != "view_only" {
+		t.Errorf("mode did not change: got %q, want view_only", got)
+	}
 }

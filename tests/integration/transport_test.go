@@ -36,7 +36,7 @@ import (
 	devicemgmt "github.com/henokakunemail-stack/Endpoint-Manager/server/modules/device-management"
 )
 
-func init() { logger.Init("disabled") }
+func init() { logger.Init("disabled", "") }
 
 type env struct {
 	db     *sqlx.DB
