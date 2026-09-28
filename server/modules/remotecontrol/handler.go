@@ -136,7 +136,27 @@ func (h *Handler) startSession(w http.ResponseWriter, r *http.Request) {
 		Payload: cmdPayload,
 	}
 	envBytes, _ := json.Marshal(env)
-	h.hub.SendTo(deviceID, envBytes)
+	// The return value was discarded, so a dropped dispatch produced a session
+	// that was announced as active and written to the database as active while
+	// no agent had ever been told about it. SendTo returns false when the
+	// device's 64-slot send queue is full, which happens on a busy link, and
+	// nothing retries it: the session just sat in history as ACTIVE forever
+	// next to a console showing an operator waiting for a desktop that never
+	// opened.
+	//
+	// A session the agent never received cannot be repaired, so it is closed
+	// where it stands rather than left claiming to be live. Ending it here also
+	// means history shows what actually happened instead of a row that only a
+	// human reading the logs could reinterpret.
+	if !h.hub.SendTo(deviceID, envBytes) {
+		h.relay.CloseRelay(session.ID)
+		_ = h.repo.EndSession(r.Context(), session.ID, 0, 0, 0)
+		_ = h.audit.Log(r.Context(), "user", operatorID, "remotecontrol.session_start_failed", session.ID,
+			map[string]string{"device_id": deviceID, "reason": "agent send failed"})
+		writeErr(w, http.StatusServiceUnavailable,
+			"the agent's connection could not accept the session; it may be busy or reconnecting")
+		return
+	}
 
 	_ = h.audit.Log(r.Context(), "user", operatorID, "remotecontrol.session_start", session.ID, map[string]string{
 		"device_id": deviceID,

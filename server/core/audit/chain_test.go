@@ -415,15 +415,20 @@ func runXProcHelper(t *testing.T) {
 
 	// A second pool over the same file, with several connections, is what makes
 	// this a separate writer rather than a second goroutine on the first.
+	//
+	// Opened with the same connection string production uses. A bare
+	// sqlx.Open plus "PRAGMA busy_timeout" after it would look equivalent and is
+	// not: the pragma applies to whichever single connection the pool happened
+	// to hand out, and the other three would come up with busy_timeout=0 and a
+	// deferred BEGIN, so the helper would fail with SQLITE_BUSY on its own
+	// misconfiguration rather than on anything the chain does. Asserted
+	// directly in TestEveryConnectionCarriesTheDatabaseSettings.
 	d, err := sqlx.Open("sqlite", dsn)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer d.Close()
 	d.SetMaxOpenConns(4)
-	if _, err := d.Exec(`PRAGMA busy_timeout=5000`); err != nil {
-		t.Fatal(err)
-	}
 	for i := 0; i < n; i++ {
 		if err := Log(context.Background(), d, "agent", "xproc-"+tag,
 			"xproc.action", fmt.Sprintf("%s-%d", tag, i), nil); err != nil {
@@ -434,6 +439,11 @@ func runXProcHelper(t *testing.T) {
 
 // dbFileOf recovers the on-disk path of an opened database, needed to let a
 // child process open the same file.
+//
+// It returns db.Open's connection string rather than the bare path, so the
+// child runs under the same settings production does. Handing it the path alone
+// would silently give the child a default-configured connection, and the test
+// would then be measuring the child's misconfiguration instead of the chain.
 func dbFileOf(t *testing.T, d *sqlx.DB) string {
 	t.Helper()
 	var name string
@@ -444,7 +454,7 @@ func dbFileOf(t *testing.T, d *sqlx.DB) string {
 	if name == "" {
 		t.Fatal("database has no on-disk path")
 	}
-	return name
+	return db.DSNForPath(name)
 }
 
 // The pool is opened up beyond the single connection db.Open configures on

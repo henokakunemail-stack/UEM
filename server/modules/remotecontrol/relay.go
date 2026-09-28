@@ -71,6 +71,35 @@ func (rm *RelayManager) GetRelay(sessionID string) *activeRelay {
 	return rm.relays[sessionID]
 }
 
+// startKeepalive pings one relay socket on a fixed period so the peer answers
+// with a pong, which is the only thing that refreshes the read deadline set in
+// AttachOperator and AttachAgent.
+//
+// Without it that deadline was an absolute kill switch rather than an idle
+// timeout. A pong is only ever sent in reply to a ping, so with no ping loop the
+// PongHandler was unreachable and every remote-control session died at exactly
+// operatorPongWait after attaching -- sixty seconds of live desktop, then an
+// abrupt close, with nothing in the logs to say why. The keepalive period is a
+// third of the deadline, so one lost pong does not end a session in use.
+//
+// The function returns when the ping fails or the relay closes; the caller's
+// read loop is still blocked and is what ends the session.
+func startKeepalive(ws *websocket.Conn, closeChan <-chan struct{}, period time.Duration) {
+	ticker := time.NewTicker(period)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-closeChan:
+			return
+		case <-ticker.C:
+			if err := ws.WriteControl(websocket.PingMessage, nil,
+				time.Now().Add(operatorWriteWait)); err != nil {
+				return
+			}
+		}
+	}
+}
+
 func (rm *RelayManager) AttachOperator(sessionID string, ws *websocket.Conn) (*activeRelay, bool) {
 	rm.relaysMu.Lock()
 	r, exists := rm.relays[sessionID]
@@ -90,10 +119,12 @@ func (rm *RelayManager) AttachOperator(sessionID string, ws *websocket.Conn) (*a
 
 	// A read deadline plus a pong handler keeps a half-open socket — a laptop
 	// that closed without a close frame — from holding the relay open forever.
+	// The ping loop below is what makes the pong handler reachable.
 	ws.SetReadDeadline(time.Now().Add(operatorPongWait))
 	ws.SetPongHandler(func(string) error {
 		return ws.SetReadDeadline(time.Now().Add(operatorPongWait))
 	})
+	go startKeepalive(ws, r.closeChan, operatorPongWait/3)
 
 	return r, true
 }
@@ -119,6 +150,7 @@ func (rm *RelayManager) AttachAgent(sessionID string, ws *websocket.Conn) (*acti
 	ws.SetPongHandler(func(string) error {
 		return ws.SetReadDeadline(time.Now().Add(agentPongWait))
 	})
+	go startKeepalive(ws, r.closeChan, agentPongWait/3)
 
 	return r, true
 }
@@ -131,7 +163,18 @@ func (rm *RelayManager) CloseRelay(sessionID string) {
 	}
 	rm.relaysMu.Unlock()
 
+	// The durable row is closed whether or not a relay object was ever
+	// registered. EndSession used to sit below the `r == nil` early return, so
+	// ending a session that never got as far as having a relay -- the operator
+	// closed the tab before the agent attached, or the dispatch failed
+	// outright -- left the row in 'active' with a NULL ended_at permanently.
+	// Nothing sweeps it, so it stayed in the device's session history as an
+	// ACTIVE session for the life of the installation, indistinguishable from
+	// one an operator has open right now.
 	if !exists || r == nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = rm.repo.EndSession(ctx, sessionID, 0, 0, 0)
 		return
 	}
 

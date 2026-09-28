@@ -5,11 +5,13 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -17,7 +19,6 @@ import (
 
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/auth"
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/rbac"
-	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/transport"
 	devicemgmt "github.com/henokakunemail-stack/Endpoint-Manager/server/modules/device-management"
 )
 
@@ -25,9 +26,24 @@ type Auditor interface {
 	Log(ctx context.Context, actorType, actorID, action, targetID string, details map[string]string) error
 }
 
+// TaskStatusPending is the state a task is created in, and the one the
+// reconnect path scans for. A task is only 'dispatched' once the command has
+// actually been written to a device's socket, which is what
+// Repository.MarkDispatched records.
+const TaskStatusPending = "pending"
+
+// HubDispatcher is the slice of the transport hub this module uses. Declared
+// as an interface rather than taking *transport.Hub, matching the six other
+// modules that talk to the hub: it keeps the dependency one-way and lets the
+// reconnect flush be tested without standing up a real WebSocket.
+type HubDispatcher interface {
+	Online(deviceID string) bool
+	SendTo(deviceID string, msg []byte) bool
+}
+
 type Handler struct {
 	repo       *Repository
-	hub        *transport.Hub
+	hub        HubDispatcher
 	deviceRepo *devicemgmt.Repository
 	auditor    Auditor
 	storageDir string
@@ -36,7 +52,7 @@ type Handler struct {
 
 func NewHandler(
 	repo *Repository,
-	hub *transport.Hub,
+	hub HubDispatcher,
 	deviceRepo *devicemgmt.Repository,
 	auditor Auditor,
 	storageDir string,
@@ -105,7 +121,11 @@ func (h *Handler) handleUploadRelease(w http.ResponseWriter, r *http.Request) {
 	defer file.Close()
 
 	relID := newID()
-	destPath := filepath.Join(h.storageDir, fmt.Sprintf("%s_%s_%s_%s", version, osName, arch, filepath.Base(header.Filename)))
+	destPath, err := releasePath(h.storageDir, version, osName, arch, header.Filename)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
 
 	destFile, err := os.Create(destPath)
 	if err != nil {
@@ -309,28 +329,17 @@ func (h *Handler) handleStartCampaign(w http.ResponseWriter, r *http.Request) {
 			DeviceID:      devID,
 			FromVersion:   fromVersion,
 			TargetVersion: campaign.TargetVersion,
-			Status:        "dispatched",
-			DispatchedAt:  &now,
+			// Pending, not dispatched: SendTask stamps it, and the reconnect
+			// path reads the pending set. See SendTask.
+			Status:       TaskStatusPending,
+			DispatchedAt: &now,
 		}
 		if err := h.repo.CreateUpdateTask(r.Context(), task); err != nil {
 			continue
 		}
 
 		if h.hub.Online(devID) {
-			payload := map[string]any{
-				"task_id":          task.ID,
-				"target_version":   campaign.TargetVersion,
-				"download_url":     fmt.Sprintf("/api/agent/releases/%s/download", rel.ID),
-				"sha256_checksum":  rel.SHA256Checksum,
-				"file_size":        rel.FileSize,
-			}
-			msg, _ := json.Marshal(map[string]any{
-				"type":    "command",
-				"id":      task.ID,
-				"command": "update.apply",
-				"payload": payload,
-			})
-			if h.hub.SendTo(devID, msg) {
+			if err := h.SendTask(r.Context(), task, rel); err == nil {
 				dispatchedCount++
 			}
 		}
@@ -383,7 +392,15 @@ func (h *Handler) handleDispatchDeviceUpdate(w http.ResponseWriter, r *http.Requ
 		DeviceID:      deviceID,
 		FromVersion:   fromVersion,
 		TargetVersion: req.TargetVersion,
-		Status:        "dispatched",
+		// Not 'dispatched'. The device is checked for liveness below, and
+		// stamping the row as sent before that check is what made "queued" a
+		// status word in the response and nothing more: the task sat in
+		// 'dispatched' with nothing to move it, because update.apply is only
+		// built here and in the campaign path, both behind hub.Online, and the
+		// offline sweeper only sweeps deployment_tasks. It is created pending
+		// and SendTask stamps it, so an offline device leaves a row that the
+		// reconnect path can actually find.
+		Status:        TaskStatusPending,
 		DispatchedAt:  &now,
 	}
 	if err := h.repo.CreateUpdateTask(r.Context(), task); err != nil {
@@ -392,28 +409,16 @@ func (h *Handler) handleDispatchDeviceUpdate(w http.ResponseWriter, r *http.Requ
 	}
 
 	if !h.hub.Online(deviceID) {
+		// Corrected to match the row: this is queued, and the row says pending.
 		writeJSON(w, http.StatusOK, map[string]any{
 			"status":  "queued",
 			"task_id": task.ID,
-			"message": "device is currently offline; update queued",
+			"message": "device is currently offline; the update will be sent when it reconnects",
 		})
 		return
 	}
 
-	payload := map[string]any{
-		"task_id":         task.ID,
-		"target_version":  req.TargetVersion,
-		"download_url":    fmt.Sprintf("/api/agent/releases/%s/download", rel.ID),
-		"sha256_checksum": rel.SHA256Checksum,
-		"file_size":       rel.FileSize,
-	}
-	msg, _ := json.Marshal(map[string]any{
-		"type":    "command",
-		"id":      task.ID,
-		"command": "update.apply",
-		"payload": payload,
-	})
-	if !h.hub.SendTo(deviceID, msg) {
+	if err := h.SendTask(r.Context(), task, rel); err != nil {
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "device connection busy"})
 		return
 	}
@@ -441,13 +446,123 @@ func (h *Handler) handleGetDeviceUpdateStatus(w http.ResponseWriter, r *http.Req
 	writeJSON(w, http.StatusOK, task)
 }
 
+// SendTask delivers one update command to a device and marks the task sent.
+//
+// The payload used to be built inline at each of the two call sites, which is
+// what let them drift: this one existed to also be reachable from the reconnect
+// path. Both orderings matter. The stamp goes first so a second caller -- a
+// reconnect racing the operator's Dispatch, or two reconnects at once -- cannot
+// send the same command twice, since the mark is conditional on the task still
+// being pending. The write goes second, so a task whose send failed stays
+// pending and is retried on the next reconnect rather than being silently lost.
+func (h *Handler) SendTask(ctx context.Context, task *DeviceUpdateTask, rel *AgentRelease) error {
+	if err := h.repo.MarkDispatched(ctx, task.ID); err != nil {
+		if errors.Is(err, ErrAlreadyDispatched) {
+			return nil // someone else sent it; not a failure
+		}
+		return err
+	}
+	payload := map[string]any{
+		"task_id":         task.ID,
+		"target_version":  task.TargetVersion,
+		"download_url":    fmt.Sprintf("/api/agent/releases/%s/download", rel.ID),
+		"sha256_checksum": rel.SHA256Checksum,
+		"file_size":       rel.FileSize,
+	}
+	msg, err := json.Marshal(map[string]any{
+		"type":    "command",
+		"id":      task.ID,
+		"command": "update.apply",
+		"payload": payload,
+	})
+	if err != nil {
+		return err
+	}
+	if !h.hub.SendTo(task.DeviceID, msg) {
+		// Hand the task back so the next reconnect picks it up. Without this the
+		// row says dispatched, the agent never got the command, and nothing would
+		// ever look at it again.
+		_ = h.repo.RequeueTask(ctx, task.ID)
+		return errors.New("device connection busy")
+	}
+	return nil
+}
+
+// FlushPendingUpdates sends the update tasks left waiting for a device that has
+// just come back online. It is the transport.UpdateQueue hook, called from the
+// agent websocket handler right after the device is marked online.
+//
+// This is what makes the word "queued" in handleDispatchDeviceUpdate's response
+// true. It was not: the task row said 'dispatched', nothing re-read it, and the
+// offline sweeper only covers deployment_tasks, so an update an operator
+// queued against a sleeping laptop was dropped silently and left the fleet's
+// version inventory claiming the device had been upgraded.
+//
+// A task whose release has since been deactivated is skipped rather than sent,
+// and the reason is recorded on the row: a queued update is a promise, and
+// quietly dropping it leaves the operator with a task that never resolves and
+// no explanation for it.
+func (h *Handler) FlushPendingUpdates(ctx context.Context, deviceID string) error {
+	tasks, err := h.repo.PendingTasksFor(ctx, deviceID)
+	if err != nil {
+		return err
+	}
+	if len(tasks) == 0 {
+		return nil
+	}
+
+	dev, err := h.deviceRepo.GetByID(ctx, deviceID)
+	if err != nil {
+		// The device row is gone (retired or deleted). Leave the tasks pending
+		// rather than failing them: a task with no device is an operator's to
+		// resolve, and guessing "failed" here would silently drop the intent.
+		log.Warn().Err(err).Str("device", deviceID).
+			Msg("cannot flush pending updates: device row unreadable")
+		return nil
+	}
+
+	arch := "amd64" // same default the two dispatch paths use
+	for _, task := range tasks {
+		rel, err := h.repo.GetActiveReleaseForDevice(ctx, task.TargetVersion, dev.OSName, arch)
+		if err != nil {
+			_ = h.repo.RecordTaskProgress(ctx, task.ID, "failed",
+				"no active release for "+task.TargetVersion+"/"+dev.OSName+"/"+arch+
+					" when the device reconnected; re-upload the release or re-queue a different version")
+			log.Warn().Err(err).Str("device", deviceID).Str("task_id", task.ID).
+				Msg("pending update has no active release")
+			continue
+		}
+		if err := h.SendTask(ctx, task, rel); err != nil {
+			log.Warn().Err(err).Str("device", deviceID).Str("task_id", task.ID).
+				Msg("send pending update")
+			continue
+		}
+		_ = h.auditor.Log(ctx, "system", deviceID, "agent_update.queued_flushed", deviceID,
+			map[string]string{"task_id": task.ID, "version": task.TargetVersion})
+	}
+	return nil
+}
+
 func (h *Handler) handleAgentReport(w http.ResponseWriter, r *http.Request) {
-	// Without this, any client that can reach the port could mark a rollout
-	// successful and overwrite devices.agent_version for any device ID.
-	if _, ok := devicemgmt.AuthenticateAgent(w, r, h.deviceRepo); !ok {
+	// Authentication alone is not enough, and a comment here used to claim it
+	// was. The device id in the URL is attacker-controlled: any client that
+	// could reach the port could name a device it does not own, and the code
+	// below would have marked that device's rollout successful and overwritten
+	// its agent_version. AuthenticateAgent proves who is asking; it says nothing
+	// about whose rollout this is, so the two are compared here.
+	authedID, ok := devicemgmt.AuthenticateAgent(w, r, h.deviceRepo)
+	if !ok {
 		return
 	}
 	deviceID := chi.URLParam(r, "id")
+	if deviceID != authedID {
+		// 404 rather than 403: the caller is a real enrolled agent, so telling
+		// it that the device exists but is not its own is more than it needs to
+		// know about the fleet.
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "device not found"})
+		return
+	}
+
 	var req struct {
 		TaskID        string `json:"task_id"`
 		Status        string `json:"status"` // 'downloading', 'verifying', 'swapping', 'success', 'rollback', 'failed'
@@ -457,6 +572,17 @@ func (h *Handler) handleAgentReport(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
 		return
+	}
+
+	// Scoped as well as the device, because the task id arrives in the body and
+	// is just as attacker-controlled as the one in the path. Otherwise an agent
+	// could advance any task in the fleet while its own device id checked out.
+	if req.TaskID != "" {
+		owner, err := h.repo.TaskDeviceID(r.Context(), req.TaskID)
+		if err != nil || owner != deviceID {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "task not found"})
+			return
+		}
 	}
 
 	if err := h.repo.RecordTaskProgress(r.Context(), req.TaskID, req.Status, req.ErrorMessage); err != nil {
@@ -477,4 +603,61 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	_ = json.NewEncoder(w).Encode(v)
+}
+
+// releasePath builds the on-disk name for an uploaded release, and refuses any
+// input that would place the file outside storageDir.
+//
+// version, os_name and arch are operator-supplied form fields, and they used to
+// be interpolated straight into filepath.Join. filepath.Join calls Clean, which
+// resolves "..", so a version of "..\..\startup" produced
+//
+//	Join("data/agent-releases", "..\..\startup_win_x64_update.exe")
+//	 = "data/startup_win_x64_update.exe"
+//
+// one directory up from storage, with the upload returning 201 as though it had
+// succeeded. On Windows a version like "..\..\Windows\System32" reaches a
+// system directory. This is a write outside the directory the operator granted,
+// and the write primitive it composes with is what gets shipped to every device
+// in the fleet.
+//
+// The real defence is not the sanitising: an upload endpoint is a write
+// primitive by design, and an admin who can upload a file can already upload
+// one. It is that the file lands where the code says it lands. The filename is
+// still built from the submitted version, because that is what the console
+// shows and what the download route later has to match, so instead of quietly
+// rewriting the name -- which would leave the database pointing at a file that
+// does not exist -- a hostile version is rejected while the operator is still
+// on the upload form and can retype it.
+//
+// headerFilename is reduced to its base name for the same reason: the multipart
+// filename is attacker-controlled too, and an absolute or traversing one would
+// otherwise reach the join from the other side.
+func releasePath(storageDir, version, osName, arch, headerFilename string) (string, error) {
+	cleanDir := filepath.Clean(storageDir)
+	for _, f := range []struct{ name, value string }{
+		{"version", version},
+		{"os_name", osName},
+		{"arch", arch},
+	} {
+		// Reject the separators and the relative segments rather than the whole
+		// field: a version string legitimately contains dots ("1.2.3") and a
+		// platform name may contain a dash. What it may never contain is a path.
+		if f.value == "" {
+			return "", fmt.Errorf("%s is required", f.name)
+		}
+		if strings.ContainsAny(f.value, `/\`) || f.value == ".." || f.value == "." {
+			return "", fmt.Errorf("%s must not contain a path", f.name)
+		}
+	}
+
+	name := fmt.Sprintf("%s_%s_%s_%s", version, osName, arch, filepath.Base(headerFilename))
+	// Belt and braces: the result is checked against the directory rather than
+	// assumed to be inside it, so a rule added above cannot silently regress
+	// into the same escape this exists to close.
+	full := filepath.Join(cleanDir, name)
+	if filepath.Dir(full) != cleanDir {
+		return "", fmt.Errorf("resolved filename escapes the release directory")
+	}
+	return full, nil
 }

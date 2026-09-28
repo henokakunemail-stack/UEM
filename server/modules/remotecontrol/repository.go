@@ -11,17 +11,17 @@ import (
 )
 
 type RemoteControlSession struct {
-	ID               string     `json:"id" db:"id"`
-	DeviceID         string     `json:"device_id" db:"device_id"`
-	OperatorID       string     `json:"operator_id" db:"operator_id"`
-	SessionMode      string     `json:"session_mode" db:"session_mode"` // 'full_control', 'view_only'
-	Status           string     `json:"status" db:"status"`             // 'active', 'ended', 'rejected'
-	FramesTransmitted int       `json:"frames_transmitted" db:"frames_transmitted"`
-	BytesTransmitted  int64     `json:"bytes_transmitted" db:"bytes_transmitted"`
-	InputEventsCount int        `json:"input_events_count" db:"input_events_count"`
-	StartedAt        time.Time  `json:"started_at" db:"started_at"`
-	EndedAt          *time.Time `json:"ended_at" db:"ended_at"`
-	CreatedAt        time.Time  `json:"created_at" db:"created_at"`
+	ID                string     `json:"id" db:"id"`
+	DeviceID          string     `json:"device_id" db:"device_id"`
+	OperatorID        string     `json:"operator_id" db:"operator_id"`
+	SessionMode       string     `json:"session_mode" db:"session_mode"` // 'full_control', 'view_only'
+	Status            string     `json:"status" db:"status"`             // 'active', 'ended', 'rejected'
+	FramesTransmitted int        `json:"frames_transmitted" db:"frames_transmitted"`
+	BytesTransmitted  int64      `json:"bytes_transmitted" db:"bytes_transmitted"`
+	InputEventsCount  int        `json:"input_events_count" db:"input_events_count"`
+	StartedAt         time.Time  `json:"started_at" db:"started_at"`
+	EndedAt           *time.Time `json:"ended_at" db:"ended_at"`
+	CreatedAt         time.Time  `json:"created_at" db:"created_at"`
 
 	// Joined
 	Hostname     string `json:"hostname,omitempty" db:"hostname"`

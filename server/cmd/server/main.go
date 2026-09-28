@@ -364,7 +364,6 @@ func buildServer(cfg config.Config, database *sqlx.DB) (*http.Server, func()) {
 
 	// Admin console auth (public endpoints).
 	loginH := auth.NewLoginHandler(database, jwtSvc)
-	defer loginH.Close()
 	loginH.Register(r)
 
 	// WebSocket handshakes cannot carry an Authorization header, so the console
@@ -394,7 +393,6 @@ func buildServer(cfg config.Config, database *sqlx.DB) (*http.Server, func()) {
 		WithInventory(invH).
 		WithTerminal(termRelay).
 		WithOriginChecker(checkOrigin)
-	defer wsH.Close()
 
 	r.Handle("/api/agent/connect", wsH)
 
@@ -462,6 +460,11 @@ func buildServer(cfg config.Config, database *sqlx.DB) (*http.Server, func()) {
 	updateRepo := agentupdate.NewRepository(database)
 	updateH := agentupdate.NewHandler(updateRepo, hub, deviceRepo, &auditAdapter{db: database}, "./data/agent-releases", jwtSvc.RequireAuth)
 	updateH.Register(r)
+
+	// Queued updates are delivered when the device reconnects, not when the
+	// operator presses Dispatch again. Wired here rather than at construction
+	// because the update handler is built below the agent websocket handler.
+	wsH.WithUpdateQueue(updateH)
 
 	// Phase 14: asset & license management.
 	assetRepo := assetlicense.NewRepository(database)
@@ -569,7 +572,23 @@ func buildServer(cfg config.Config, database *sqlx.DB) (*http.Server, func()) {
 		}
 	}()
 
+	// Cleanup runs at process shutdown, from run(), not at the end of this
+	// function. A defer here would fire the moment the router is wired -- at
+	// startup, before the first request -- and both of these own a background
+	// loop that has to keep running for the server's whole life:
+	//
+	//   - wsH.Close stops the heartbeat flusher. handleHeartbeat keeps appending
+	//     to its pending map, which nothing drains any more, so last_seen_at is
+	//     never written again and the map grows by one entry per device for the
+	//     life of the process.
+	//   - loginH.Close stops the login rate limiter's prune ticker, so every
+	//     source IP that ever failed a login stays resident forever.
+	//
+	// Both are silent: the API keeps answering 200 while the thing that makes
+	// those answers correct quietly stops happening.
 	cleanup := func() {
+		wsH.Close()
+		loginH.Close()
 		stopBackups()
 	}
 	return srv, cleanup

@@ -323,7 +323,19 @@ func (r *Repository) ListDeploymentTasks(ctx context.Context, deploymentID strin
 }
 
 // UpdateTaskProgress updates an ongoing or completed task.
-func (r *Repository) UpdateTaskProgress(ctx context.Context, report TaskProgressReport) error {
+//
+// deviceID is scoped into the WHERE clause rather than checked beforehand, so
+// the ownership test and the write are one statement. An agent that
+// authenticated as itself but named another device's task used to be able to
+// write to it: the WHERE matched on id alone, so any enrolled agent could mark
+// any task in the fleet success or failure and supply its own exit code and
+// output log. That is enough to make a deployment report green while nothing was
+// installed, and to overwrite the real result of an install still running.
+//
+// A task that does not exist and a task belonging to another device both match
+// no rows and both return ErrNotFound, so the answer never becomes a probe for
+// which task ids exist.
+func (r *Repository) UpdateTaskProgress(ctx context.Context, deviceID string, report TaskProgressReport) error {
 	now := time.Now().UTC()
 	var completedAt *time.Time
 	if report.Status == TaskStatusSuccess || report.Status == TaskStatusFailed {
@@ -333,10 +345,11 @@ func (r *Repository) UpdateTaskProgress(ctx context.Context, report TaskProgress
 	query := `
 		UPDATE deployment_tasks
 		SET status = ?, exit_code = ?, output_log = ?, error_message = ?, updated_at = ?, completed_at = COALESCE(?, completed_at)
-		WHERE id = ?`
+		WHERE id = ? AND device_id = ?`
 
 	res, err := r.db.ExecContext(ctx, query,
-		report.Status, report.ExitCode, report.OutputLog, report.ErrorMessage, now, completedAt, report.TaskID,
+		report.Status, report.ExitCode, report.OutputLog, report.ErrorMessage, now, completedAt,
+		report.TaskID, deviceID,
 	)
 	if err != nil {
 		return err

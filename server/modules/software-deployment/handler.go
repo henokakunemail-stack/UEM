@@ -431,7 +431,10 @@ func (h *Handler) createDeployment(w http.ResponseWriter, r *http.Request) {
 			envBytes, _ := json.Marshal(env)
 
 			if h.hub.SendTo(task.DeviceID, envBytes) {
-				_ = h.repo.UpdateTaskProgress(r.Context(), TaskProgressReport{
+				// task.DeviceID is the owner of this row, not the operator's
+				// device: the dispatch was aimed at it, so it is the only
+				// identity allowed to mark it dispatched.
+				_ = h.repo.UpdateTaskProgress(r.Context(), task.DeviceID, TaskProgressReport{
 					TaskID: task.ID,
 					Status: TaskStatusDispatched,
 				})
@@ -517,7 +520,11 @@ func (h *Handler) downloadPackage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) reportProgress(w http.ResponseWriter, r *http.Request) {
-	if _, ok := devicemgmt.AuthenticateAgent(w, r, h.devices); !ok {
+	// The authenticated device is the only device whose tasks this may write.
+	// The task id comes from the URL, so without folding the identity into the
+	// update itself, any enrolled agent could report progress for any other.
+	deviceID, ok := devicemgmt.AuthenticateAgent(w, r, h.devices)
+	if !ok {
 		return
 	}
 	taskID := chi.URLParam(r, "id")
@@ -528,7 +535,7 @@ func (h *Handler) reportProgress(w http.ResponseWriter, r *http.Request) {
 	}
 	rep.TaskID = taskID
 
-	if err := h.repo.UpdateTaskProgress(r.Context(), rep); err != nil {
+	if err := h.repo.UpdateTaskProgress(r.Context(), deviceID, rep); err != nil {
 		if errors.Is(err, ErrNotFound) {
 			writeErr(w, http.StatusNotFound, "task not found")
 			return

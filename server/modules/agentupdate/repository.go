@@ -4,12 +4,17 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"time"
 
 	"github.com/jmoiron/sqlx"
 )
+
+// ErrAlreadyDispatched means a task was already sent, so the caller lost the
+// race with another reconnect. It is not a failure: the work is done.
+var ErrAlreadyDispatched = errors.New("update task already dispatched")
 
 type AgentRelease struct {
 	ID             string    `db:"id" json:"id"`
@@ -261,6 +266,70 @@ func (r *Repository) GetLatestTaskForDevice(ctx context.Context, deviceID string
 		return nil, fmt.Errorf("get latest task for %s: %w", deviceID, err)
 	}
 	return &t, nil
+}
+
+// PendingTasksFor returns the update tasks still waiting to be sent to a device.
+//
+// It exists because "queued" used to be a status word in an HTTP response and
+// nothing more. handleDispatchDeviceUpdate inserted the row with status
+// 'dispatched' and stamped dispatched_at before it checked whether the device
+// was online, so an offline device got a row that claimed it had been sent. No
+// code re-reads those rows -- update.apply is only built at the two dispatch
+// sites, both behind hub.Online -- and the offline sweeper in
+// software-deployment only sweeps deployment_tasks, not this table. The result
+// was a task stuck in 'dispatched' forever: the upgrade silently never happened
+// and nothing in the console or the database said so.
+func (r *Repository) PendingTasksFor(ctx context.Context, deviceID string) ([]*DeviceUpdateTask, error) {
+	var tasks []*DeviceUpdateTask
+	err := r.db.SelectContext(ctx, &tasks, `
+		SELECT * FROM device_update_tasks
+		WHERE device_id = ? AND status = 'pending'
+		ORDER BY created_at ASC`, deviceID)
+	if err != nil {
+		return nil, fmt.Errorf("pending tasks for %s: %w", deviceID, err)
+	}
+	return tasks, nil
+}
+
+// MarkDispatched stamps a task as sent and moves it out of the pending set, so a
+// reconnect cannot send the same command twice.
+func (r *Repository) MarkDispatched(ctx context.Context, taskID string) error {
+	now := time.Now().UTC()
+	res, err := r.db.ExecContext(ctx, `
+		UPDATE device_update_tasks
+		SET status = 'dispatched', dispatched_at = ?, error_message = ''
+		WHERE id = ? AND status = 'pending'`, now, taskID)
+	if err != nil {
+		return err
+	}
+	// 0 rows means another reconnect beat this one to it, or the agent already
+	// reported progress. Either way the command has been sent once, not twice.
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrAlreadyDispatched
+	}
+	return nil
+}
+
+// RequeueTask puts a dispatched-but-undelivered task back into the pending set.
+// The dispatched_at stamp is cleared too, so a task that has never actually
+// reached a device does not carry a send time that says otherwise.
+func (r *Repository) RequeueTask(ctx context.Context, taskID string) error {
+	_, err := r.db.ExecContext(ctx, `
+		UPDATE device_update_tasks
+		SET status = 'pending', dispatched_at = NULL
+		WHERE id = ?`, taskID)
+	return err
+}
+
+// TaskDeviceID returns the device an update task belongs to, so the agent
+// report route can check the task against the device it authenticated as
+// instead of trusting a task id that arrived in the request body.
+func (r *Repository) TaskDeviceID(ctx context.Context, taskID string) (string, error) {
+	var deviceID string
+	err := r.db.GetContext(ctx, &deviceID,
+		`SELECT device_id FROM device_update_tasks WHERE id = ?`, taskID)
+	return deviceID, err
 }
 
 func (r *Repository) RecordTaskProgress(ctx context.Context, taskID, status, errMsg string) error {

@@ -351,6 +351,71 @@ func (r *Repository) UpdateDeviceRunResult(ctx context.Context, id, status strin
 	return err
 }
 
+// DeviceRunOwner returns the device a scheduled task device run belongs to.
+//
+// The agent result route needs it to check the run against the identity that
+// was authenticated. The run id arrives in the URL, so it is as
+// attacker-controlled as a device id in a path; an agent that authenticated as
+// itself could otherwise write a result for anyone's run.
+func (r *Repository) DeviceRunOwner(ctx context.Context, deviceRunID string) (string, error) {
+	var deviceID string
+	err := r.db.GetContext(ctx, &deviceID,
+		`SELECT device_id FROM scheduled_task_device_runs WHERE id = ?`, deviceRunID)
+	return deviceID, err
+}
+
+// SyncRunStatus recomputes a parent run's status from its device runs and
+// writes it when every device run has reached a terminal state.
+//
+// This is the scheduled-task counterpart of the rollup that
+// software-deployment already had, and it was missing in the same way. The
+// parent was only ever completed by CompleteRun, which TriggerSchedule calls on
+// exactly one branch: when the target resolved to zero devices. Once a run had
+// devices, the parent was written as 'running' by CreateRun and nothing ever
+// moved it -- not the agent result handler, not the scheduler poll. So a script
+// dispatched to five endpoints that all reported success left the operator
+// looking at a run stuck in 'running' with a NULL completed_at, forever, next
+// to five green device rows.
+//
+// The status reflects what actually happened, not merely that everything ended:
+// an all-failed run is 'failed', which is what an operator has to act on and
+// what the console renders differently.
+func (r *Repository) SyncRunStatus(ctx context.Context, deviceRunID string) error {
+	var runID string
+	if err := r.db.GetContext(ctx, &runID,
+		`SELECT run_id FROM scheduled_task_device_runs WHERE id = ?`, deviceRunID); err != nil {
+		return err
+	}
+
+	var counts struct {
+		Total     int `db:"total"`
+		Done      int `db:"done"`
+		Succeeded int `db:"succeeded"`
+	}
+	if err := r.db.GetContext(ctx, &counts, `
+		SELECT
+			COUNT(*) AS total,
+			COALESCE(SUM(CASE WHEN status IN ('success', 'failed') THEN 1 ELSE 0 END), 0) AS done,
+			COALESCE(SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END), 0) AS succeeded
+		FROM scheduled_task_device_runs
+		WHERE run_id = ?`, runID); err != nil {
+		return err
+	}
+
+	// Not all device runs are terminal yet. Leaving the parent in 'running' is
+	// the honest state: it is what the row means, and a device that never
+	// reports is exactly what the operator needs to see.
+	if counts.Total == 0 || counts.Total != counts.Done {
+		return nil
+	}
+
+	status := "completed"
+	if counts.Succeeded == 0 {
+		status = "failed"
+	}
+	return r.CompleteRun(ctx, runID, status)
+}
+
 func (r *Repository) CompleteRun(ctx context.Context, runID, status string) error {
 	now := time.Now().UTC()
 	_, err := r.db.ExecContext(ctx, `

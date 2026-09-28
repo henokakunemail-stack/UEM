@@ -51,10 +51,13 @@ func (r *TerminalRelay) Register(sessionID, deviceID, userID string, ws *websock
 // Unregister removes a session.
 func (r *TerminalRelay) Unregister(sessionID string) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
-	if sess, ok := r.sessions[sessionID]; ok {
-		sess.closed = true
-		delete(r.sessions, sessionID)
+	sess, ok := r.sessions[sessionID]
+	delete(r.sessions, sessionID)
+	r.mu.Unlock()
+	if ok {
+		// Outside r.mu, and under the session's own lock: closed is read by
+		// WriteToBrowser under writeMu, so it is written under writeMu too.
+		sess.markClosed()
 	}
 }
 
@@ -63,6 +66,28 @@ func (r *TerminalRelay) Get(sessionID string) *ActiveTerminalSession {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return r.sessions[sessionID]
+}
+
+// markClosed retires the session under the same lock that WriteToBrowser reads
+// it under.
+//
+// closed used to be assigned directly in Unregister, which holds r.mu, while
+// WriteToBrowser tests it while holding s.writeMu. The two are different locks,
+// so the field had no synchronisation at all between them: the agent-connection
+// goroutine calls AcceptTerminalData -> WriteToBrowser, and the browser handler
+// calls Unregister from its defer, and on a shell closing the operator has just
+// navigated away, which is exactly when the two run at once. Go's memory model
+// gives no ordering between the write and the read, so a caller could be handed
+// a stale false and write into a socket the handler is concurrently tearing
+// down.
+//
+// The pointer handed out by Get is likewise not invalidated by Unregister -- the
+// session is removed from the map but the object lives on for whoever already
+// holds it -- so marking closed is the only thing that stops a late write.
+func (s *ActiveTerminalSession) markClosed() {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	s.closed = true
 }
 
 // WriteToBrowser sends a terminal message to the browser WebSocket.

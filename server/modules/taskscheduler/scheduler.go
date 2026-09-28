@@ -91,9 +91,22 @@ func (s *Scheduler) TriggerSchedule(ctx context.Context, scheduleID, actorID str
 	// If no devices or all resolved, mark completed
 	if len(deviceIDs) == 0 {
 		_ = s.repo.CompleteRun(ctx, run.ID, "completed")
+		// The struct is what the operator's client receives, and it is built
+		// before the branch above runs. Stamping completed_at on it without
+		// also setting the status produced a response that said
+		// status="running" alongside a non-null completed_at -- a run that
+		// claims to still be executing and also to have finished. The
+		// persisted row was already correct, which is what made the two
+		// disagree: the API and the database told the operator different
+		// things about the same run.
+		run.Status = "completed"
+		run.CompletedAt = &now
+		return run, nil
 	}
 
-	run.CompletedAt = &now
+	// Otherwise the run is genuinely still executing, and the two fields have
+	// to agree about that: running with a null completed_at.
+	run.CompletedAt = nil
 	return run, nil
 }
 

@@ -31,6 +31,18 @@ type WSHandler struct {
 	terminal TerminalReceiver
 	// setCapabilities stores the capability list advertised in hello.
 	setCapabilities func(ctx context.Context, deviceID, capabilitiesJSON string) error
+	// updateQueue delivers agent update tasks that were queued while the device
+	// was offline. Optional: nil means queued updates wait for the next manual
+	// dispatch, which is the behaviour before this hook existed.
+	updateQueue UpdateQueue
+}
+
+// UpdateQueue delivers the update tasks left pending for a device. It is called
+// once, right after the device is marked online, so a task an operator queued
+// against a laptop that was asleep actually gets sent instead of sitting in the
+// database claiming to be 'dispatched' forever.
+type UpdateQueue interface {
+	FlushPendingUpdates(ctx context.Context, deviceID string) error
 }
 
 // TerminalReceiver relays interactive terminal data and closure events from an agent to the server.
@@ -69,6 +81,15 @@ func (h *WSHandler) WithInventory(r InventoryReceiver) *WSHandler {
 	if sc, ok := r.(capabilitiesSetter); ok {
 		h.setCapabilities = sc.SetCapabilities
 	}
+	return h
+}
+
+// WithUpdateQueue attaches the handler that delivers update tasks queued while
+// a device was offline. Without it, a queued update waits for the operator to
+// press Dispatch again -- the row is left in its pending state and nothing ever
+// re-reads it.
+func (h *WSHandler) WithUpdateQueue(q UpdateQueue) *WSHandler {
+	h.updateQueue = q
 	return h
 }
 
@@ -165,6 +186,19 @@ func (h *WSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Mark online as soon as the connection is authenticated.
 	_ = h.repo.UpdateStatus(r.Context(), deviceID, devicemgmt.StatusOnline, time.Now().UTC())
+
+	// Flush whatever was queued while this device was away. After the status
+	// update, not before: the queue flush reads the release and sends on this
+	// socket, and SendTask marks the row sent before the write, so a failure
+	// here leaves the task pending for the next reconnect rather than losing it.
+	// A flush error is logged and swallowed -- the connection is live either
+	// way, and returning would tear down a healthy agent over a delivery
+	// problem that the pending set already accounts for.
+	if h.updateQueue != nil {
+		if err := h.updateQueue.FlushPendingUpdates(r.Context(), deviceID); err != nil {
+			log.Warn().Err(err).Str("device", deviceID).Msg("flush pending agent updates")
+		}
+	}
 
 	// readLoop returns when the socket breaks. The deferred closure above then
 	// closes the send channel, waits for writePump to notice, closes the socket

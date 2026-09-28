@@ -27,9 +27,20 @@ type DeviceValidator interface {
 	GetByID(ctx context.Context, id string) (devicemgmt.Device, error)
 }
 
+// HubDispatcher is the slice of the agent WebSocket hub this module uses.
+//
+// Declared locally rather than taking *transport.Hub, matching the other six
+// modules that talk to the hub. It also makes the dropped-send path testable:
+// *transport.Hub is a concrete struct, and a send that comes back false is
+// exactly the case the operator must not be told is a live shell.
+type HubDispatcher interface {
+	Online(deviceID string) bool
+	SendTo(deviceID string, msg []byte) bool
+}
+
 type Handler struct {
 	repo           *Repository
-	hub            *transport.Hub
+	hub            HubDispatcher
 	relay          *TerminalRelay
 	audit          AuditLogger
 	jwtSvc         *auth.JWTService
@@ -40,7 +51,7 @@ type Handler struct {
 
 func NewHandler(
 	repo *Repository,
-	hub *transport.Hub,
+	hub HubDispatcher,
 	relay *TerminalRelay,
 	audit AuditLogger,
 	jwtSvc *auth.JWTService,
@@ -357,7 +368,33 @@ func (h *Handler) handleTerminalWS(w http.ResponseWriter, r *http.Request) {
 		Payload: cmdPayload,
 	}
 	openBytes, _ := json.Marshal(openEnv)
-	h.hub.SendTo(deviceID, openBytes)
+
+	// SendTo's result was discarded, so a command the agent never received was
+	// announced to the operator as an established session. SendTo returns false
+	// when the device's 64-slot queue is full -- a wedged agent whose write
+	// pump has stopped draining -- and hub.Online still reports true, which is
+	// why the gate above passed. Nothing retried it: after the agent
+	// reconnected its queue was empty again, but term.open had already been
+	// dropped, so the operator sat at a prompt for a shell that was never
+	// going to start, and every keystroke was dropped with the same result.
+	//
+	// The browser socket is already upgraded at this point, so an HTTP status
+	// is not available and the refusal has to travel over the WebSocket. The
+	// session is torn down here rather than left active, because there is
+	// nothing behind it.
+	if !h.hub.SendTo(deviceID, openBytes) {
+		_ = sess.WriteToBrowser("term.error", fmt.Sprintf(
+			"The agent on %s could not accept the terminal command; its connection is busy. "+
+				"Reconnect the device and try again.", deviceID))
+		h.relay.Unregister(sessionID)
+		_ = ws.Close()
+		_ = h.repo.CloseTerminalSession(r.Context(), sessionID)
+		_ = h.audit.Log(r.Context(), "user", claims.UserID, "terminal.open_failed", deviceID, map[string]string{
+			"session_id": sessionID,
+			"reason":     "agent send failed",
+		})
+		return
+	}
 
 	// Notify browser that session is opened
 	_ = sess.WriteToBrowser("term.open", fmt.Sprintf("Terminal session %s established with %s.", sessionID, deviceID))

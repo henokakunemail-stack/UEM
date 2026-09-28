@@ -96,13 +96,12 @@ func chainLockFor(db *sqlx.DB) *sync.Mutex {
 // which point the loser retries the whole transaction with a prev_hash it no
 // longer wants.
 //
-// The per-handle mutex on top of that is queueing, not correctness. db.Open
-// pins MaxOpenConns(1) and sets busy_timeout=5000, so without it, concurrent
-// in-process writers would block inside SQLite and could time out with
-// SQLITE_BUSY, which would drop an audit entry. Failing to record an audit
-// entry is worse than a slower one. The mutex makes them wait in Go instead,
-// where they cannot be refused. It is per handle, so one database's backlog
-// never blocks another's.
+// The per-handle mutex on top of that is queueing, not correctness. Concurrent
+// in-process writers otherwise block inside SQLite on the write lock and could
+// time out with SQLITE_BUSY, which would drop an audit entry. Failing to record
+// an audit entry is worse than a slower one. The mutex makes them wait in Go
+// instead, where they cannot be refused. It is per handle, so one database's
+// backlog never blocks another's.
 //
 // There is deliberately no cache of the previous hash. A cached tail is only
 // sound if every writer goes through this function, and that is a property of
@@ -118,18 +117,29 @@ func writeChained(ctx context.Context, db *sqlx.DB, e Entry) error {
 	l.Lock()
 	defer l.Unlock()
 
-	// A dedicated connection, because transaction control is issued by hand.
+	// A dedicated connection, because the transaction has to stay on one
+	// connection for the read-prev and the insert to be the same unit.
 	conn, err := db.Connx(ctx)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = conn.Close() }()
 
-	// Not BeginTxx: the driver emits its own "begin" on BeginTx, and a nested
-	// BEGIN IMMEDIATE is an error, which would cost the write lock this depends
-	// on. Raw statements also keep the transaction on this one connection
-	// instead of the pool, so an unrelated query cannot interleave into it.
-	if _, err := conn.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
+	// BeginTx, not a hand-issued "BEGIN IMMEDIATE". The connection is created
+	// from a DSN carrying _txlock=immediate, so the driver emits that exact
+	// statement itself -- which is what keeps the write lock, and it is the same
+	// guarantee the eleven other transaction sites get without asking. Issuing
+	// it by hand here would nest a second BEGIN inside the driver's transaction
+	// and fail, and it used to be written that way only because the pool held one
+	// connection and a second one could never be taken.
+	//
+	// This was also a deadlock. Connx blocks until the pool hands over a
+	// connection, and with the pool capped at one, any caller already holding
+	// that connection waited for itself. The pool is now wide enough for a
+	// reader to run alongside a writer, so a handler that reads and then audits
+	// no longer stalls the whole server.
+	tx, err := conn.BeginTxx(ctx, nil)
+	if err != nil {
 		return err
 	}
 	open := true
@@ -141,12 +151,13 @@ func writeChained(ctx context.Context, db *sqlx.DB, e Entry) error {
 			//
 			// Rolled back on a context detached from the caller's, because a
 			// cancelled request must still clean up, and cleanup must not inherit
-			// a request's deadline that has already expired.
-			_, _ = conn.ExecContext(context.WithoutCancel(ctx), "ROLLBACK")
+			// a request's deadline that has already expired -- which is exactly
+			// what database/sql's own Rollback does, on context.Background.
+			_ = tx.Rollback()
 		}
 	}()
 
-	prev, prevAt, err := tailHash(ctx, conn)
+	prev, prevAt, err := tailHash(ctx, tx)
 	if err != nil {
 		return err
 	}
@@ -167,7 +178,7 @@ func writeChained(ctx context.Context, db *sqlx.DB, e Entry) error {
 	row.PrevHash = prev
 	row.EntryHash = entryHashOf(row)
 
-	if _, err := conn.ExecContext(ctx, `
+	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO audit_logs (id, actor_type, actor_id, action, target_id, details,
 		                        created_at, prev_hash, entry_hash)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -175,7 +186,7 @@ func writeChained(ctx context.Context, db *sqlx.DB, e Entry) error {
 		nullDetails(row.Details), row.CreatedAt, row.PrevHash, row.EntryHash); err != nil {
 		return err
 	}
-	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
+	if err := tx.Commit(); err != nil {
 		return err
 	}
 	open = false
@@ -184,10 +195,10 @@ func writeChained(ctx context.Context, db *sqlx.DB, e Entry) error {
 
 // tailHash returns the newest chained entry's hash and the timestamp it belongs
 // to, or genesis when the table holds no chained entry.
-func tailHash(ctx context.Context, conn *sqlx.Conn) (string, time.Time, error) {
+func tailHash(ctx context.Context, q sqlx.QueryerContext) (string, time.Time, error) {
 	var last string
 	var at time.Time
-	err := conn.QueryRowxContext(ctx,
+	err := q.QueryRowxContext(ctx,
 		`SELECT entry_hash, created_at FROM audit_logs
 		  WHERE entry_hash <> '' ORDER BY created_at DESC, rowid DESC LIMIT 1`).Scan(&last, &at)
 	if errors.Is(err, sql.ErrNoRows) {

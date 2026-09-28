@@ -7,6 +7,7 @@ import (
 	"strconv"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/rs/zerolog/log"
 
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/auth"
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/rbac"
@@ -378,10 +379,25 @@ type taskResultReq struct {
 }
 
 func (h *Handler) reportTaskResult(w http.ResponseWriter, r *http.Request) {
-	if _, ok := devicemgmt.AuthenticateAgent(w, r, h.devices); !ok {
+	// AuthenticateAgent proves who is asking; it says nothing about whose run
+	// this is. The {id} in the path is attacker-controlled, and UpdateDeviceRunResult
+	// matched on it alone, so any enrolled agent could write a result -- status,
+	// exit code and output log -- for any other device's scheduled task, and the
+	// parent run would be rolled up from that. The comparison is the fix; the
+	// comment on the devices field describes why the endpoint is authenticated
+	// at all.
+	authedID, ok := devicemgmt.AuthenticateAgent(w, r, h.devices)
+	if !ok {
 		return
 	}
 	taskID := chi.URLParam(r, "id")
+	owner, err := h.repo.DeviceRunOwner(r.Context(), taskID)
+	if err != nil || owner != authedID {
+		// 404, not 403: the caller is a real enrolled agent, so it has no
+		// business learning which run ids exist in the fleet.
+		writeErr(w, http.StatusNotFound, "task not found")
+		return
+	}
 	var req taskResultReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid json")
@@ -399,6 +415,17 @@ func (h *Handler) reportTaskResult(w http.ResponseWriter, r *http.Request) {
 	if err := h.repo.UpdateDeviceRunResult(r.Context(), taskID, req.Status, req.ExitCode, req.OutputLog, req.ErrorMessage); err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
+	}
+
+	// Recompute the parent run. Without this the row CreateRun wrote as
+	// 'running' is never touched again on any path where the target had at
+	// least one device, so a run whose every endpoint reported stays 'running'
+	// with a NULL completed_at indefinitely. The device result is already
+	// recorded, so a failure here is a rollup problem and not a reason to fail
+	// the agent's report -- the agent cannot retry it and would only learn it
+	// as a spurious error.
+	if err := h.repo.SyncRunStatus(r.Context(), taskID); err != nil {
+		log.Warn().Err(err).Str("task_id", taskID).Msg("sync parent scheduled task run")
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "recorded"})

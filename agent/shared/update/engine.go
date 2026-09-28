@@ -156,14 +156,23 @@ func (e *Engine) ApplyUpdate(ctx context.Context, params UpdateParams) error {
 	}
 	_ = os.Chmod(currentExec, 0755)
 
-	// 4. Health verification: ensure file exists and is readable
-	info, err := os.Stat(currentExec)
-	if err != nil || info.Size() == 0 {
+	// 4. Health verification: the swapped-in file must be one the OS can load.
+	//
+	// This used to be os.Stat plus a non-zero size, which proves the rename
+	// landed and something non-empty is there. A text file renamed to .exe
+	// passes it, and so does any blob that happens to match the recorded
+	// checksum. Both were reported to the server as success, which rewrote the
+	// device's agent_version, so the fleet's inventory claimed the upgrade
+	// happened while the binary on disk could not start -- and the device only
+	// discovered that at its next restart, with the update as the last thing
+	// that touched it.
+	if err := verifySwappedBinary(currentExec); err != nil {
 		// Rollback
 		_ = os.Remove(currentExec)
 		_ = os.Rename(backupExec, currentExec)
-		_ = e.ReportProgress(ctx, params.TaskID, "rollback", params.TargetVersion, "healthcheck failed, rolled back")
-		return errors.New("post-swap healthcheck failed, rolled back to original binary")
+		msg := "healthcheck failed, rolled back: " + err.Error()
+		_ = e.ReportProgress(ctx, params.TaskID, "rollback", params.TargetVersion, msg)
+		return errors.New("post-swap healthcheck failed, rolled back to original binary: " + err.Error())
 	}
 
 	// 5. Report success
