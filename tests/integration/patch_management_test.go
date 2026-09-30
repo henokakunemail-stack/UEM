@@ -3,6 +3,7 @@ package integration
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
@@ -135,15 +136,32 @@ func TestPatchManagement_InstallJobLifecycle(t *testing.T) {
 		t.Fatalf("expected status dispatched, got %s", fetched.Status)
 	}
 
-	// Report install result
+	// Report install result.
+	//
+	// The device id is an argument, not something read out of the report. The
+	// UPDATE used to match on the job id alone, so any agent could complete or
+	// fail any other device's install job and have the fleet's patch state
+	// recomputed from a result it made up. The unit test that covers this is in
+	// server/modules/patch-management/report_authz_test.go; this line is here so
+	// the signature change is exercised by the integration suite too.
 	report := patchmgmt.PatchInstallReport{
 		JobID:          "job-patch-1",
 		Status:         patchmgmt.JobStatusCompleted,
 		RebootRequired: false,
 		OutputLog:      "Successfully installed curl-7.88.1",
 	}
-	if err := repo.UpdateInstallJobResult(ctx, report); err != nil {
+	if err := repo.UpdateInstallJobResult(ctx, job.DeviceID, report); err != nil {
 		t.Fatal("update install job result:", err)
+	}
+
+	// The same report from a different device must not land, or the scoping is
+	// cosmetic.
+	if err := repo.UpdateInstallJobResult(ctx, "dev-patch-9", patchmgmt.PatchInstallReport{
+		JobID:     "job-patch-1",
+		Status:    patchmgmt.JobStatusFailed,
+		OutputLog: "owned by someone else",
+	}); !errors.Is(err, patchmgmt.ErrNotFound) {
+		t.Errorf("another device's report returned %v, want ErrNotFound", err)
 	}
 
 	// Verify job updated

@@ -5,13 +5,20 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/go-chi/chi/v5"
+
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/audit"
+	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/httpguard"
 	"github.com/jmoiron/sqlx"
 	"github.com/rs/zerolog/log"
 )
 
 // chiRouter is the subset of *chi.Mux used by Register (see auth.login.go).
+// With is here so a route can carry middleware without the caller having to
+// wrap the handler itself; *chi.Mux has satisfied this since it is the same
+// method set it already declares.
 type chiRouter interface {
+	With(middlewares ...func(http.Handler) http.Handler) chi.Router
 	Post(pattern string, handlerFn http.HandlerFunc)
 	Get(pattern string, handlerFn http.HandlerFunc)
 }
@@ -28,12 +35,17 @@ func NewEnrollmentHandler(repo *Repository, db *sqlx.DB) *EnrollmentHandler {
 }
 
 // Register mounts the enrollment endpoint. Accepts *http.ServeMux or chi mux.
+//
+// The body cap is applied here rather than at the router because this is one of
+// only four routes reachable without credentials, and it decodes the body before
+// it checks the enrollment token. Uncapped, that is an unauthenticated way to
+// make the server buffer and parse an arbitrary number of bytes.
 func (h *EnrollmentHandler) Register(mux any) {
 	switch m := mux.(type) {
 	case *http.ServeMux:
-		m.HandleFunc("POST /api/agent/enroll", h.enroll)
+		m.Handle("POST /api/agent/enroll", httpguard.LimitJSONBody(http.HandlerFunc(h.enroll)))
 	case chiRouter:
-		m.Post("/api/agent/enroll", h.enroll)
+		m.With(httpguard.LimitJSONBody).Post("/api/agent/enroll", h.enroll)
 	default:
 		panic("device-management.EnrollmentHandler.Register: unsupported mux type")
 	}
@@ -58,6 +70,16 @@ type enrollResponse struct {
 func (h *EnrollmentHandler) enroll(w http.ResponseWriter, r *http.Request) {
 	var req enrollRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		// A body over the cap fails the decode, but the decode's own error is
+		// "http: request body too large" wrapped in a JSON syntax error, which
+		// reads as a malformed request and invites the caller to retry smaller
+		// forever. Say what actually happened.
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			writeErr(w, http.StatusRequestEntityTooLarge,
+				"request body exceeds the 1 MiB limit for enrollment")
+			return
+		}
 		writeErr(w, http.StatusBadRequest, "invalid request body")
 		return
 	}

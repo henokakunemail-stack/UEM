@@ -296,7 +296,7 @@ func (h *Handler) syncDeviceFilter(w http.ResponseWriter, r *http.Request) {
 
 	// Dispatch command via WebSocket
 	cmdPayload := map[string]any{
-		"policy_version": version,
+		"policy_version":  version,
 		"blocked_domains": patterns,
 	}
 	env := transport.Envelope{
@@ -354,10 +354,23 @@ type agentFilterReportReq struct {
 }
 
 func (h *Handler) agentReportFilterState(w http.ResponseWriter, r *http.Request) {
-	if _, ok := devicemgmt.AuthenticateAgent(w, r, h.devices); !ok {
+	authedID, ok := devicemgmt.AuthenticateAgent(w, r, h.devices)
+	if !ok {
 		return
 	}
-	deviceID := chi.URLParam(r, "id")
+	// The authenticated identity wins over the one in the path. AuthenticateAgent
+	// only proves the caller holds a valid device secret; the {id} segment is
+	// still attacker-controlled, and this is the fourth handler in the codebase
+	// where that distinction was dropped -- the other three are fixed in
+	// software-deployment, taskscheduler and patch-management. Using the path
+	// value here let any enrolled agent overwrite another device's filter state,
+	// which is the row the console reads to say whether an endpoint is enforcing
+	// web filtering.
+	deviceID := authedID
+	if pathID := chi.URLParam(r, "id"); pathID != "" && pathID != authedID {
+		writeErr(w, http.StatusNotFound, "device not found")
+		return
+	}
 	var req agentFilterReportReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid request body")

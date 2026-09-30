@@ -222,9 +222,9 @@ func (h *Handler) installPatches(w http.ResponseWriter, r *http.Request) {
 	})
 
 	writeJSON(w, http.StatusAccepted, map[string]any{
-		"status":  "dispatched",
-		"job_id":  jobID,
-		"job":     job,
+		"status": "dispatched",
+		"job_id": jobID,
+		"job":    job,
 	})
 }
 
@@ -317,7 +317,16 @@ func (h *Handler) reportInstallResult(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.repo.UpdateInstallJobResult(r.Context(), rep); err != nil {
+	if err := h.repo.UpdateInstallJobResult(r.Context(), deviceID, rep); err != nil {
+		// 404, not 500: the job is either gone or belongs to another device, and
+		// the two are deliberately indistinguishable so this endpoint cannot be
+		// used to enumerate which install jobs exist. A 500 here would also have
+		// told the agent its report was a server fault, which invites a retry
+		// loop against a refusal that will never succeed.
+		if errors.Is(err, ErrNotFound) {
+			writeErr(w, http.StatusNotFound, "install job not found")
+			return
+		}
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}

@@ -15,6 +15,7 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/audit"
+	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/httpguard"
 )
 
 // chiRouter is the subset of *chi.Mux used by Register. Declaring it as an
@@ -86,18 +87,22 @@ type loginRequest struct {
 // "METHOD /path/{jti}" pattern, so ServeMux can take the wildcard segment
 // without the pattern colliding with "GET /api/auth/sessions".
 func (h *LoginHandler) Register(mux any) {
+	// login and refresh are reachable without credentials and decode the body
+	// before they check anything, so they carry the same 1 MiB cap as
+	// enrollment. logout is behind RequireAuth already and reads no body.
+	limited := httpguard.LimitJSONBodyFunc
 	switch m := mux.(type) {
 	case *http.ServeMux:
-		m.HandleFunc("POST /api/auth/login", h.login)
-		m.HandleFunc("POST /api/auth/refresh", h.refresh)
+		m.HandleFunc("POST /api/auth/login", limited(h.login))
+		m.HandleFunc("POST /api/auth/refresh", limited(h.refresh))
 		m.Handle("POST /api/auth/logout", h.jwt.RequireAuth(http.HandlerFunc(h.logout)))
 		m.Handle("GET /api/auth/sessions", h.jwt.RequireAuth(http.HandlerFunc(h.listSessions)))
 		m.Handle("DELETE /api/auth/sessions/{jti}", h.jwt.RequireAuth(http.HandlerFunc(h.revokeSession)))
 		m.Handle("POST /api/auth/ws-ticket", h.jwt.RequireAuth(http.HandlerFunc(h.issueWSTicket)))
 
 	case chiRouter:
-		m.Post("/api/auth/login", h.login)
-		m.Post("/api/auth/refresh", h.refresh)
+		m.Post("/api/auth/login", limited(h.login))
+		m.Post("/api/auth/refresh", limited(h.refresh))
 		m.Post("/api/auth/logout", h.guarded(h.logout))
 		m.Get("/api/auth/sessions", h.guarded(h.listSessions))
 		m.Delete("/api/auth/sessions/{jti}", h.guarded(h.revokeSession))
@@ -118,6 +123,12 @@ func (h *LoginHandler) login(w http.ResponseWriter, r *http.Request) {
 
 	var req loginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			writeErr(w, http.StatusRequestEntityTooLarge,
+				"request body exceeds the 1 MiB limit for login")
+			return
+		}
 		writeErr(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
@@ -192,6 +203,12 @@ func (h *LoginHandler) refresh(w http.ResponseWriter, r *http.Request) {
 		RefreshToken string `json:"refresh_token"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.RefreshToken == "" {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			writeErr(w, http.StatusRequestEntityTooLarge,
+				"request body exceeds the 1 MiB limit for token refresh")
+			return
+		}
 		writeErr(w, http.StatusBadRequest, "refresh_token required")
 		return
 	}

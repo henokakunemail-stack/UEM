@@ -45,9 +45,9 @@ var validPackageTypes = map[string]map[string]bool{
 var typeExtensions = map[string][]string{
 	PkgTypeMSI: {".msi", ".msp"},
 	PkgTypeEXE: {".exe"},
-	"deb":     {".deb"},
-	"rpm":     {".rpm"},
-	"pkg":     {".pkg", ".mpkg"},
+	"deb":      {".deb"},
+	"rpm":      {".rpm"},
+	"pkg":      {".pkg", ".mpkg"},
 }
 
 // checkExtensionMatches verifies a declared package type against the uploaded
@@ -70,7 +70,6 @@ func checkExtensionMatches(osTarget, pkgType, fileName string) (string, bool) {
 		pkgType, filepath.Base(fileName), strings.Join(exts, ", "),
 		filepath.Base(fileName), pkgType), false
 }
-
 
 type AuditLogger interface {
 	Log(ctx context.Context, actorType, actorID, action, targetID string, details map[string]string) error
@@ -126,9 +125,31 @@ func (h *Handler) Register(r chi.Router) {
 	r.Post("/api/agent/tasks/{id}/progress", h.reportProgress)
 }
 
+// maxPackageBytes is the ceiling on an uploaded package.
+//
+// It is a var rather than a const only so the tests can exercise the refusal
+// without writing half a gigabyte to a temp dir. Nothing at runtime changes it.
+//
+// ponytail: 500 MB is still generous for a package upload. Lower it if the
+// fleet's real artifacts are smaller; nothing here depends on the value.
+var maxPackageBytes int64 = 500 << 20
+
 func (h *Handler) uploadPackage(w http.ResponseWriter, r *http.Request) {
-	// 500 MB max package size
-	if err := r.ParseMultipartForm(500 << 20); err != nil {
+	// The MaxBytesReader is the actual cap. ParseMultipartForm's argument is a
+	// memory threshold, not a limit -- it is the size at which the parser spills
+	// to disk, so passing 500 MB means "keep up to 500 MB in RAM", and a body of
+	// any size is accepted, with the excess written to a temp file. The upload
+	// route is authenticated, so this is a resource limit rather than a
+	// pre-authentication one, but it is the same shape: the stated intent was a
+	// limit and what was written was not one.
+	r.Body = http.MaxBytesReader(w, r.Body, maxPackageBytes+(1<<20)) // +1 MB of form fields
+	if err := r.ParseMultipartForm(8 << 20); err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			writeErr(w, http.StatusRequestEntityTooLarge,
+				fmt.Sprintf("package exceeds the %d MB limit", maxPackageBytes>>20))
+			return
+		}
 		writeErr(w, http.StatusBadRequest, "file too large or invalid multipart form")
 		return
 	}

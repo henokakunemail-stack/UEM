@@ -222,7 +222,16 @@ func (r *Repository) ListInstallJobs(ctx context.Context, deviceID string, limit
 	return rows, nil
 }
 
-func (r *Repository) UpdateInstallJobResult(ctx context.Context, rep PatchInstallReport) error {
+// UpdateInstallJobResult records an install outcome against the job named in the
+// report, and only for the device the report came from.
+//
+// The ownership check belongs in the WHERE clause rather than as a separate read:
+// a read-then-write leaves a window for another request to take the job in
+// between, and the two can be done in one statement here. Without the device_id
+// term this was a cross-device write -- any agent could complete, fail, or
+// overwrite the output log of any other agent's install job, and the audit
+// record would name the attacking device as the one that did it.
+func (r *Repository) UpdateInstallJobResult(ctx context.Context, deviceID string, rep PatchInstallReport) error {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
@@ -238,18 +247,27 @@ func (r *Repository) UpdateInstallJobResult(ctx context.Context, rep PatchInstal
 	query := `
 		UPDATE patch_install_jobs
 		SET status = ?, reboot_required = ?, output_log = ?, error_message = ?, completed_at = ?
-		WHERE id = ?
+		WHERE id = ? AND device_id = ?
 	`
-	if _, err := tx.ExecContext(ctx, query,
-		rep.Status, rebootReq, rep.OutputLog, rep.ErrorMessage, now, rep.JobID,
-	); err != nil {
+	res, err := tx.ExecContext(ctx, query,
+		rep.Status, rebootReq, rep.OutputLog, rep.ErrorMessage, now, rep.JobID, deviceID,
+	)
+	if err != nil {
 		return fmt.Errorf("update patch install job: %w", err)
+	}
+	// Zero rows means the job does not exist or belongs to another device. Both
+	// are refused identically, so a caller cannot use this endpoint to probe
+	// which job ids exist.
+	if n, err := res.RowsAffected(); err == nil && n == 0 {
+		return ErrNotFound
 	}
 
 	// If successful, update the installed_state of the patches in device_patches
 	if rep.Status == JobStatusCompleted {
 		var job PatchInstallJob
-		if err := tx.GetContext(ctx, &job, `SELECT device_id, patch_ids FROM patch_install_jobs WHERE id = ?`, rep.JobID); err == nil {
+		if err := tx.GetContext(ctx, &job,
+			`SELECT device_id, patch_ids FROM patch_install_jobs WHERE id = ? AND device_id = ?`,
+			rep.JobID, deviceID); err == nil {
 			var patchIDs []string
 			if json.Unmarshal([]byte(job.PatchIDs), &patchIDs) == nil {
 				for _, pid := range patchIDs {

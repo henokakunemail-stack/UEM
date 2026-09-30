@@ -1,8 +1,10 @@
 package integration
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"net/http"
 	"net/http/httptest"
@@ -176,16 +178,48 @@ func TestAgentUpdate_CampaignAndTasks(t *testing.T) {
 	}
 }
 
+// fakeExecutable builds a byte string that passes the post-swap health check on
+// the host running the test.
+//
+// The health check is OS-shaped by design: an update that installs a file the
+// OS cannot execute has bricked the agent, so verify.go checks for a PE "MZ"
+// header on Windows and an ELF magic on everything else. This fixture used to be
+// the literal string "UPGRADED_AGENT_BINARY_V2_WITH_SECURITY_PATCH", which is
+// neither, so the test passed only while the health check was the weaker
+// os.Stat the audit replaced.
+//
+// The payload carries both headers rather than branching on runtime.GOOS, so the
+// test says the same thing on every platform and does not need a build tag.
+// Nothing executes this file -- the engine swaps and stats it, it never runs it.
+func fakeExecutable(marker string) []byte {
+	// Little-endian uint32 0x80 is the PE header offset that e_lfanew points at
+	// in the block below, and the PE signature sits exactly there.
+	pe := make([]byte, 0x84)
+	copy(pe, "MZ")
+	binary.LittleEndian.PutUint32(pe[0x3c:0x40], 0x80)
+	copy(pe[0x80:], "PE\x00\x00")
+
+	elf := append([]byte{0x7f, 'E', 'L', 'F'}, make([]byte, 0x40)...)
+
+	body := []byte(marker)
+	out := make([]byte, 0, len(pe)+len(elf)+len(body))
+	out = append(out, pe...)
+	out = append(out, elf...)
+	return append(out, body...)
+}
+
 func TestAgentUpdate_EngineChecksumAndSwap(t *testing.T) {
 	tempDir := t.TempDir()
 
-	// Initial mock binary
+	// Initial mock binary. It gets replaced by the payload below, so it has to
+	// pass the health check too -- the check runs on whatever is in the path, not
+	// only on what was just written.
 	mockOriginalBin := filepath.Join(tempDir, "mock_agent.exe")
-	if err := os.WriteFile(mockOriginalBin, []byte("ORIGINAL_AGENT_BINARY_V1"), 0755); err != nil {
+	if err := os.WriteFile(mockOriginalBin, fakeExecutable("ORIGINAL_AGENT_BINARY_V1"), 0755); err != nil {
 		t.Fatal(err)
 	}
 
-	newBinaryContent := []byte("UPGRADED_AGENT_BINARY_V2_WITH_SECURITY_PATCH")
+	newBinaryContent := fakeExecutable("UPGRADED_AGENT_BINARY_V2_WITH_SECURITY_PATCH")
 	hasher := sha256.New()
 	hasher.Write(newBinaryContent)
 	validChecksum := hex.EncodeToString(hasher.Sum(nil))
@@ -229,17 +263,18 @@ func TestAgentUpdate_EngineChecksumAndSwap(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read current bin: %v", err)
 	}
-	if string(currentContent) != string(newBinaryContent) {
-		t.Fatalf("expected binary content to be upgraded, got: %s", string(currentContent))
+	if !bytes.Equal(currentContent, newBinaryContent) {
+		t.Fatalf("expected binary content to be upgraded, got: %q", string(currentContent))
 	}
 
-	// Verify backup file exists
+	// Verify backup file exists, and that it is the OLD binary -- a rollback that
+	// restores the new file is not a rollback.
 	backupContent, err := os.ReadFile(mockOriginalBin + ".old")
 	if err != nil {
 		t.Fatalf("read backup bin: %v", err)
 	}
-	if string(backupContent) != "ORIGINAL_AGENT_BINARY_V1" {
-		t.Fatalf("expected backup to have original content, got: %s", string(backupContent))
+	if !bytes.Equal(backupContent, fakeExecutable("ORIGINAL_AGENT_BINARY_V1")) {
+		t.Fatalf("expected backup to have original content, got: %q", string(backupContent))
 	}
 
 	// 2. Failure case: hash mismatch should abort and leave file intact
@@ -258,7 +293,7 @@ func TestAgentUpdate_EngineChecksumAndSwap(t *testing.T) {
 
 	// Content should still be V2 (not corrupted)
 	contentAfterBad, _ := os.ReadFile(mockOriginalBin)
-	if string(contentAfterBad) != string(newBinaryContent) {
-		t.Fatalf("binary modified despite hash mismatch: %s", string(contentAfterBad))
+	if !bytes.Equal(contentAfterBad, newBinaryContent) {
+		t.Fatalf("binary modified despite hash mismatch: %q", string(contentAfterBad))
 	}
 }

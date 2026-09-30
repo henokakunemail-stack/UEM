@@ -539,8 +539,16 @@ func buildServer(cfg config.Config, database *sqlx.DB) (*http.Server, func()) {
 	// Periodic online database backups. VACUUM INTO takes a consistent
 	// snapshot without stopping the server, so a failed backup is logged but
 	// never fatal.
+	//
+	// The cancel is owned by the cleanup closure below, not deferred here. A
+	// defer in this function fires when buildServer returns -- at startup, a few
+	// microseconds after the goroutine below is launched -- and StartBackupJob's
+	// first act is a 30-second settle delay that select's against ctx.Done(). The
+	// cancel always wins that race, so the job returned before taking a single
+	// snapshot, every boot, on the default configuration. Meanwhile the log line
+	// underneath printed "scheduled online database backups" with the directory
+	// and interval, so the safety net was reported as armed and was dead.
 	backupCtx, stopBackups := context.WithCancel(context.Background())
-	defer stopBackups()
 	go db.StartBackupJob(backupCtx, database, db.BackupConfig{
 		Dir:      cfg.BackupDir,
 		Interval: cfg.BackupInterval,
