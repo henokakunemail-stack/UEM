@@ -50,7 +50,6 @@ func (s *Scheduler) TriggerSchedule(ctx context.Context, scheduleID, actorID str
 		return nil, fmt.Errorf("create task run: %w", err)
 	}
 
-	now := time.Now().UTC()
 	for _, devID := range deviceIDs {
 		devRun, err := s.repo.CreateDeviceRun(ctx, run.ID, devID)
 		if err != nil {
@@ -59,7 +58,7 @@ func (s *Scheduler) TriggerSchedule(ctx context.Context, scheduleID, actorID str
 		}
 
 		if s.hub == nil || !s.hub.Online(devID) {
-			_ = s.repo.UpdateDeviceRunResult(ctx, devRun.ID, "failed", -1, "", "device is offline")
+			s.failDeviceRun(ctx, devRun.ID, "device is offline")
 			continue
 		}
 
@@ -79,35 +78,55 @@ func (s *Scheduler) TriggerSchedule(ctx context.Context, scheduleID, actorID str
 		}
 		envBytes, err := json.Marshal(env)
 		if err != nil {
-			_ = s.repo.UpdateDeviceRunResult(ctx, devRun.ID, "failed", -1, "", "encode error: "+err.Error())
+			s.failDeviceRun(ctx, devRun.ID, "encode error: "+err.Error())
 			continue
 		}
 
 		if !s.hub.SendTo(devID, envBytes) {
-			_ = s.repo.UpdateDeviceRunResult(ctx, devRun.ID, "failed", -1, "", "socket send failed")
+			s.failDeviceRun(ctx, devRun.ID, "socket send failed")
 		}
 	}
 
-	// If no devices or all resolved, mark completed
-	if len(deviceIDs) == 0 {
-		_ = s.repo.CompleteRun(ctx, run.ID, "completed")
-		// The struct is what the operator's client receives, and it is built
-		// before the branch above runs. Stamping completed_at on it without
-		// also setting the status produced a response that said
-		// status="running" alongside a non-null completed_at -- a run that
-		// claims to still be executing and also to have finished. The
-		// persisted row was already correct, which is what made the two
-		// disagree: the API and the database told the operator different
-		// things about the same run.
-		run.Status = "completed"
-		run.CompletedAt = &now
-		return run, nil
+	// The response has to be the row that was actually written, not a copy of the
+	// struct built before the dispatch loop. Hand-editing the struct was how a
+	// run ended up answering status="running" with a non-null completed_at, and
+	// it could not survive the rollup above: a run whose every device was
+	// offline is now 'failed' in the database, but the local struct had no idea
+	// that had happened and would have gone back to the client claiming to still
+	// be executing.
+	//
+	// Reading it back is also cheaper than the bug: one indexed lookup per trigger,
+	// against a loop that already did a write per device.
+	if len(deviceIDs) > 0 {
+		return s.repo.GetRunByID(ctx, run.ID)
 	}
 
-	// Otherwise the run is genuinely still executing, and the two fields have
-	// to agree about that: running with a null completed_at.
-	run.CompletedAt = nil
-	return run, nil
+	// No devices resolved. Nothing will ever report for this run, so it is
+	// finished here and now.
+	if err := s.repo.CompleteRun(ctx, run.ID, "completed"); err != nil {
+		return nil, fmt.Errorf("complete run with no targets: %w", err)
+	}
+	return s.repo.GetRunByID(ctx, run.ID)
+}
+
+// failDeviceRun records a device run that failed on the server's own side --
+// the device is offline, the command would not encode, or the socket refused it.
+// These are the paths where the device will never report a result, so if they
+// only wrote the device row the parent run stayed 'running' with a NULL
+// completed_at for good: SyncRunStatus is called from the agent result handler,
+// and an endpoint that never receives the command never calls it.
+//
+// An operator firing a script at a sleeping laptop got exactly that: every
+// device row read 'failed, device is offline' and the run above them still
+// claimed to be executing, forever, with no path to close it.
+func (s *Scheduler) failDeviceRun(ctx context.Context, deviceRunID, reason string) {
+	if err := s.repo.UpdateDeviceRunResult(ctx, deviceRunID, "failed", -1, "", reason); err != nil {
+		log.Error().Err(err).Str("device_run", deviceRunID).Msg("record device run failure")
+		return
+	}
+	if err := s.repo.SyncRunStatus(ctx, deviceRunID); err != nil {
+		log.Error().Err(err).Str("device_run", deviceRunID).Msg("roll up run status after a dispatch failure")
+	}
 }
 
 // StartBackgroundScheduler checks interval schedules periodically

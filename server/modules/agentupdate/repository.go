@@ -16,6 +16,14 @@ import (
 // race with another reconnect. It is not a failure: the work is done.
 var ErrAlreadyDispatched = errors.New("update task already dispatched")
 
+// ErrTaskAlreadyFinished means the row already reached a terminal status, so
+// a nonterminal report cannot move it. It is deliberately a separate value
+// from ErrAlreadyDispatched: that one says the work was already handed to the
+// device, this one says the work already finished. Callers that special-case
+// the first -- SendTask treats it as a success -- would otherwise report a
+// rejected status write as a completed send.
+var ErrTaskAlreadyFinished = errors.New("update task already reached a final status")
+
 type AgentRelease struct {
 	ID             string    `db:"id" json:"id"`
 	Version        string    `db:"version" json:"version"`
@@ -332,10 +340,31 @@ func (r *Repository) TaskDeviceID(ctx context.Context, taskID string) (string, e
 	return deviceID, err
 }
 
+// RecordTaskProgress writes one status report from an agent.
+//
+// The terminal guard is the point. Without it this was an unconditional
+// SET status = ?, so a report that arrived late or was retried after a
+// dropped socket moved a finished task back to 'downloading' or 'verifying'.
+// That is not cosmetic: handleAgentReport writes the device's new
+// agent_version on 'success', so the fleet inventory kept claiming the new
+// version while the console showed the update running again, and how long
+// that lasted depended on how many times the agent retried.
+//
+// Rejecting the regress is also the honest answer to the agent: the update
+// already finished, so telling it to continue would restart work the device
+// has no reason to redo. ErrTaskAlreadyFinished is its own value rather than
+// a reuse of ErrAlreadyDispatched because SendTask reads that one as
+// "someone else got there first, the work is done" and returns nil, so a
+// rejected status write would otherwise be logged as a successful send.
+//
+// A genuine terminal-to-terminal correction -- 'failed' followed by a
+// successful retry reported as 'success' -- is still allowed, because the
+// guard only blocks writes whose incoming status is nonterminal.
 func (r *Repository) RecordTaskProgress(ctx context.Context, taskID, status, errMsg string) error {
 	now := time.Now().UTC()
 	var completedAt *time.Time
-	if status == "success" || status == "failed" || status == "rollback" {
+	terminal := status == "success" || status == "failed" || status == "rollback"
+	if terminal {
 		completedAt = &now
 	}
 
@@ -344,13 +373,82 @@ func (r *Repository) RecordTaskProgress(ctx context.Context, taskID, status, err
 		SET status = ?, error_message = ?, completed_at = COALESCE(?, completed_at)
 		WHERE id = ?
 	`
-	_, err := r.db.ExecContext(ctx, query, status, errMsg, completedAt, taskID)
-	return err
+	args := []any{status, errMsg, completedAt, taskID}
+	if !terminal {
+		// Only a nonterminal report can regress a finished task. Terminal
+		// reports are left alone above so a later 'success' can still
+		// correct a task that had failed.
+		query += ` AND status NOT IN ('success', 'failed', 'rollback')`
+	}
+	res, err := r.db.ExecContext(ctx, query, args...)
+	if err != nil {
+		return err
+	}
+	if affected, err := res.RowsAffected(); err == nil && affected == 0 && !terminal {
+		return ErrTaskAlreadyFinished
+	}
+	return nil
 }
 
 func (r *Repository) UpdateDeviceAgentVersion(ctx context.Context, deviceID, version string) error {
 	now := time.Now().UTC()
 	_, err := r.db.ExecContext(ctx, `UPDATE devices SET agent_version = ?, updated_at = ? WHERE id = ?`, version, now, deviceID)
+	return err
+}
+
+// SyncCampaignStatus recomputes a rollout's status from its task rows and
+// writes it once every task has reached a terminal state.
+//
+// handleStartCampaign set 'in_progress' and nothing ever moved it again. The
+// agent update path wrote device_update_tasks.status and stopped there, so a
+// campaign finished its work -- every endpoint on the target version -- and
+// still read 'in_progress' for the life of the installation. The console's
+// "Active Campaigns" KPI counts exactly that status, so a completed rollout
+// kept inflating a number that was supposed to tell an operator how much work was
+// outstanding, and the Start button stayed available on a campaign that had
+// nothing left to dispatch.
+//
+// 'failed' when no task succeeded, matching the software-deployment and
+// task-scheduler rollups: a rollout that upgraded nothing must not read as a
+// success. A campaign with no tasks at all cannot be failed for that, so it
+// stays 'in_progress' and the operator can start it again against a fleet that
+// was offline at the time.
+func (r *Repository) SyncCampaignStatus(ctx context.Context, taskID string) error {
+	var campaignID *string
+	if err := r.db.GetContext(ctx, &campaignID,
+		`SELECT campaign_id FROM device_update_tasks WHERE id = ?`, taskID); err != nil {
+		return err
+	}
+	if campaignID == nil || *campaignID == "" {
+		// A one-off dispatch, not part of a rollout. Nothing to roll up.
+		return nil
+	}
+
+	var counts struct {
+		Total     int `db:"total"`
+		Done      int `db:"done"`
+		Succeeded int `db:"succeeded"`
+	}
+	if err := r.db.GetContext(ctx, &counts, `
+		SELECT
+			COUNT(*) AS total,
+			COALESCE(SUM(CASE WHEN status IN ('success', 'failed', 'rollback') THEN 1 ELSE 0 END), 0) AS done,
+			COALESCE(SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END), 0) AS succeeded
+		FROM device_update_tasks
+		WHERE campaign_id = ?`, *campaignID); err != nil {
+		return err
+	}
+	if counts.Total == 0 || counts.Total != counts.Done {
+		return nil
+	}
+
+	status := "completed"
+	if counts.Succeeded == 0 {
+		status = "failed"
+	}
+	now := time.Now().UTC()
+	_, err := r.db.ExecContext(ctx, `UPDATE update_campaigns SET status = ?, updated_at = ? WHERE id = ?`,
+		status, now, *campaignID)
 	return err
 }
 

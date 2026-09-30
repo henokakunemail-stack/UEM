@@ -585,15 +585,54 @@ func (h *Handler) handleAgentReport(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// A rejected regress is the guard working, not a fault: ErrTaskAlreadyFinished
+	// means this exact report already landed and the task had already finished
+	// when it did. Anything else is a real write failure and stays a warning.
 	if err := h.repo.RecordTaskProgress(r.Context(), req.TaskID, req.Status, req.ErrorMessage); err != nil {
-		log.Warn().Err(err).Str("task_id", req.TaskID).Msg("failed to update task progress")
+		if errors.Is(err, ErrTaskAlreadyFinished) {
+			log.Debug().Err(err).Str("task_id", req.TaskID).Str("status", req.Status).
+				Msg("ignored a progress report for a finished update task")
+		} else {
+			log.Warn().Err(err).Str("task_id", req.TaskID).Msg("failed to update task progress")
+		}
 	}
 
 	if req.Status == "success" && req.TargetVersion != "" {
-		_ = h.repo.UpdateDeviceAgentVersion(r.Context(), deviceID, req.TargetVersion)
+		// The device's own row and the task's status are the same event, and the
+		// version write used to be discarded. A failure there left the fleet
+		// inventory claiming the old version with nothing anywhere saying why,
+		// and the agent had already reported success, so nothing would ever
+		// look at it again.
+		//
+		// 500 is the retryable answer, and re-reporting does fix it:
+		// RecordTaskProgress permits a terminal-to-terminal write, so a second
+		// 'success' re-runs this block. The agent itself does not retry today
+		// (ApplyUpdate discards ReportProgress's error), so this mainly serves a
+		// supervisor or an operator re-sending the report.
+		//
+		// ponytail: the audit line is written after the version succeeds, so a
+		// 500 here means the completion was not logged. That is deliberate --
+		// a completion that did not happen should not appear in the audit trail.
+		if err := h.repo.UpdateDeviceAgentVersion(r.Context(), deviceID, req.TargetVersion); err != nil {
+			log.Error().Err(err).Str("device", deviceID).Str("version", req.TargetVersion).
+				Msg("update reported success but the device version could not be recorded")
+			writeJSON(w, http.StatusInternalServerError, map[string]string{
+				"error": "update recorded but the device version could not be saved; report again",
+			})
+			return
+		}
 		_ = h.auditor.Log(r.Context(), "device", deviceID, "agent_update.completed", deviceID, map[string]string{
 			"version": req.TargetVersion,
 		})
+	}
+
+	// The campaign rollup runs after the version write, not after the task
+	// write, so a 'success' that could not be recorded never counts toward a
+	// completed rollout.
+	if req.TaskID != "" {
+		if err := h.repo.SyncCampaignStatus(r.Context(), req.TaskID); err != nil {
+			log.Warn().Err(err).Str("task_id", req.TaskID).Msg("roll up campaign status")
+		}
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "recorded"})

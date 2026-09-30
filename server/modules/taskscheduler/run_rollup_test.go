@@ -48,6 +48,15 @@ type runFixture struct {
 
 func newRunFixture(t *testing.T, deviceIDs []string) *runFixture {
 	t.Helper()
+	return newRunFixtureWithHub(t, deviceIDs, stubHub{})
+}
+
+// newRunFixtureWithHub takes the hub as a parameter because which devices the
+// scheduler can reach is decided entirely by the hub, not the database: the
+// dispatch loop asks hub.Online and skips the rest. A fixture that hard-codes
+// an always-online hub can therefore never reach the offline branch.
+func newRunFixtureWithHub(t *testing.T, deviceIDs []string, hub Hub) *runFixture {
+	t.Helper()
 
 	database, err := db.Open(filepath.Join(t.TempDir(), "runs.db"))
 	if err != nil {
@@ -81,7 +90,7 @@ func newRunFixture(t *testing.T, deviceIDs []string) *runFixture {
 	}
 
 	repo := NewRepository(database)
-	run, err := NewScheduler(repo, stubHub{}).TriggerSchedule(context.Background(), "sched-1", "u1")
+	run, err := NewScheduler(repo, hub).TriggerSchedule(context.Background(), "sched-1", "u1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -359,5 +368,112 @@ func TestTheTriggerResponseAgreesWithTheDatabase(t *testing.T) {
 	if run.CompletedAt != nil && run.Status == "running" {
 		t.Errorf("status = \"running\" with completed_at = %v; a run cannot be both",
 			*run.CompletedAt)
+	}
+}
+
+// offlineHub reports every device as disconnected, which is what a fleet of
+// sleeping laptops looks like at 2am.
+type offlineHub struct{ stubHub }
+
+func (offlineHub) Online(string) bool { return false }
+
+// TestARunAgainstOnlyOfflineDevicesStillFinishes is the regression test for the
+// branch that had no way to close.
+//
+// The offline branch wrote 'failed, device is offline' to the device run and
+// moved on. SyncRunStatus is only ever called from reportTaskResult, and a
+// device that was never given the command cannot report. So the parent stayed
+// 'running' with a NULL completed_at permanently: an operator who ran a script
+// against a company whose machines were asleep saw 'running' forever, with
+// every device row already reading failed, and nothing that could ever move it.
+func TestARunAgainstOnlyOfflineDevicesStillFinishes(t *testing.T) {
+	f := newRunFixtureWithHub(t, []string{"d1", "d2", "d3"}, offlineHub{})
+
+	status, completedAt := f.parent(t)
+	if status != "failed" {
+		t.Errorf("parent status = %q with every device offline, want \"failed\": no "+
+			"endpoint can run the script, so nothing about this run succeeded",
+			status)
+	}
+	if completedAt == nil {
+		t.Error("completed_at is NULL on a run that can never progress; the run " +
+			"history keeps listing it as in progress forever")
+	}
+}
+
+// TestAMixedRunIsNotClosedEarly keeps the rollup honest in the other direction.
+// One device reachable and two asleep is still one outstanding device, so the
+// run must stay running until the reachable one reports back.
+func TestAMixedRunIsNotClosedEarly(t *testing.T) {
+	f := newRunFixtureWithHub(t, []string{"d1", "d2"}, oneOnlineHub{})
+
+	if status, _ := f.parent(t); status != "running" {
+		t.Errorf("parent status = %q with one device still executing, want \"running\"", status)
+	}
+	if rec := f.report(t, "d1", f.deviceRunFor(t, "d1"), "success"); rec.Code != http.StatusOK {
+		t.Fatalf("d1 -> %d %s", rec.Code, rec.Body.String())
+	}
+	if status, completedAt := f.parent(t); status != "completed" || completedAt == nil {
+		t.Errorf("parent = %q completed_at=%v after the last device reported, want "+
+			"\"completed\" with a timestamp", status, completedAt)
+	}
+}
+
+// oneOnlineHub reaches exactly the first device it is asked about, so a fixture
+// can mix reachable and unreachable endpoints in one run.
+type oneOnlineHub struct{ stubHub }
+
+func (oneOnlineHub) Online(deviceID string) bool { return deviceID == "d1" }
+
+// TestATriggerAgainstOfflineDevicesReportsTheFinishedRunNotARunningOne closes
+// the response side. The returned struct was hand-edited from a copy taken
+// before the dispatch loop, so even with the rollup in place it went back to the
+// operator saying 'running' while the row said 'failed' -- the same split the
+// completed_at bug produced, one branch over.
+func TestATriggerAgainstOfflineDevicesReportsTheFinishedRunNotARunningOne(t *testing.T) {
+	database, err := db.Open(filepath.Join(t.TempDir(), "offline-trigger.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+
+	now := time.Now().UTC()
+	if _, err := database.Exec(`
+		INSERT INTO script_templates (id, name, script_type, script_content, sha256_hash,
+			timeout_seconds, created_by, created_at, updated_at)
+		VALUES ('script-1','s','powershell','echo hi','abc',300,'u1',?,?)`, now, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`
+		INSERT INTO devices (id, hostname, os_name, os_version, agent_version, status,
+			device_secret_hash, enrolled_at, created_at, updated_at)
+		VALUES ('d1','d1','windows','11','1.0.0','offline','x',?,?,?)`, now, now, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`
+		INSERT INTO task_schedules (id, name, script_id, target_type, target_id,
+			schedule_type, schedule_expr, is_enabled, created_by, created_at, updated_at)
+		VALUES ('sched-z','s','script-1','all','','interval','60',1,'u1',?,?)`,
+		now, now); err != nil {
+		t.Fatal(err)
+	}
+
+	repo := NewRepository(database)
+	run, err := NewScheduler(repo, offlineHub{}).TriggerSchedule(context.Background(), "sched-z", "u1")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var dbStatus string
+	if err := database.Get(&dbStatus, `SELECT status FROM scheduled_task_runs WHERE id = ?`, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	if run.Status != dbStatus {
+		t.Errorf("response status = %q but the row says %q", run.Status, dbStatus)
+	}
+	if run.Status != "failed" {
+		t.Errorf("trigger response = %q, want \"failed\": the operator clicked run "+
+			"and was told nothing was running, while the run list said the opposite",
+			run.Status)
 	}
 }

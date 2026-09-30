@@ -104,14 +104,20 @@ try {
 
     # 5. Task Schedule RBAC & Creation
     Write-Host "`n4. Testing Task Schedule Management & RBAC..."
+    # An interval, not a cron expression. pollDueSchedules only ever evaluated
+    # schedule_type = 'interval', so a cron schedule was accepted, listed, shown
+    # in the console, and never fired -- with no log line and no error. An E2E
+    # script that only asserted the row existed was therefore blessing the
+    # broken behaviour. One minute is the smallest value the poll interval
+    # (30s) can actually honour, and step 10 waits for it to fire.
     $schedPayload = @{
         name = "Weekly DNS Flush All Fleet"
         description = "Automated weekly maintenance for all branch devices"
         script_id = $scriptId
         target_type = "all"
         target_id = ""
-        schedule_type = "cron"
-        schedule_expr = "0 3 * * 0"
+        schedule_type = "interval"
+        schedule_expr = "1"
         is_enabled = $true
     } | ConvertTo-Json
 
@@ -242,11 +248,38 @@ func main() {
     }
     Write-Host "  [PASS] All actions (script.create, schedule.create, schedule.trigger) recorded in audit logs" -ForegroundColor Green
 
+    # 11. The background scheduler fires an enabled interval on its own
+    Write-Host "`n10. Waiting for the Background Scheduler to Fire the Schedule..."
+    # This is the assertion the previous version of this script was missing. It
+    # triggered the schedule by hand through /trigger and counted the runs, which
+    # proved the endpoint works and said nothing at all about the ticker: a
+    # schedule_type the poll loop skipped, an interval in the wrong unit, or a
+    # disabled row would all have passed. Everything above is reachable by an
+    # operator clicking a button; this is the part that runs with nobody watching.
+    #
+    # The manual trigger above stamped last_run_at, so the schedule is not due
+    # until the one-minute interval has elapsed since then. The poll runs every
+    # 30s, so 90s of waiting covers at least two polls plus the interval itself.
+    $scheduleFired = $false
+    for ($i = 0; $i -lt 30; $i++) {
+        Start-Sleep -Seconds 3
+        $allRuns = Invoke-RestMethod -Uri "$base/api/schedules/runs?limit=50" -Headers $viewerHeaders
+        $unrequested = @($allRuns | Where-Object { $_.schedule_id -eq $schedId -and $_.id -ne $runId })
+        if ($unrequested.Count -gt 0) {
+            $scheduleFired = $true
+            Write-Host "  [PASS] Background scheduler fired the schedule on its own (Run ID: $($unrequested[0].id))" -ForegroundColor Green
+            break
+        }
+    }
+    if (-not $scheduleFired) {
+        throw "The enabled interval schedule never fired on its own within 90s. The background poll loop did not trigger it, so an operator who configured a schedule instead of triggering it by hand would never have seen the script run."
+    }
+
     Write-Host "`n=======================================================" -ForegroundColor Green
     Write-Host "FASE 10 E2E VERIFICATION PASSED WITH 100% SUCCESS!" -ForegroundColor Green
     Write-Host "All criteria met: Script Repository CRUD, SHA-256 Validation," -ForegroundColor Green
     Write-Host "Schedule Management, Target Resolution (All/Group/Device)," -ForegroundColor Green
-    Write-Host "Run Triggering, Agent Execution Reporting, and Audit Trail." -ForegroundColor Green
+    Write-Host "Run Triggering, Background Poll Firing, Agent Execution Reporting, and Audit Trail." -ForegroundColor Green
     Write-Host "=======================================================" -ForegroundColor Green
 
 } finally {

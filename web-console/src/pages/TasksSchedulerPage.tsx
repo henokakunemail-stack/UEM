@@ -19,16 +19,18 @@ import { ConfirmDialog } from '../components/ui/ConfirmDialog'
 import { Modal } from '../components/ui/Modal'
 import type { DeviceRunDTO, ScheduleDTO, ScriptDTO, TaskRunDTO } from '../types/api'
 
-// The server stores an interval trigger as a raw seconds count in the same
-// `schedule_expr` column a cron trigger uses. Render it in words so "Every
-// 3600s" becomes "Every 1h".
+// The server reads an interval trigger as a MINUTE count and multiplies it by
+// time.Minute, so `schedule_expr` holds minutes -- not seconds, which is what
+// this used to assume. An operator who typed the "3600" the field used to
+// suggest was asking for a task every 2400 hours, and the console rendered the
+// same number back as "Every 1h", so nothing on screen disagreed with anything
+// else and nothing fired on time either.
 function describeInterval(expr: string): string {
-  const secs = Number(expr)
-  if (!Number.isFinite(secs) || secs <= 0) return expr || '—'
-  if (secs % 86400 === 0) return `${secs / 86400}d`
-  if (secs % 3600 === 0) return `${secs / 3600}h`
-  if (secs % 60 === 0) return `${secs / 60}m`
-  return `${secs}s`
+  const mins = Number(expr)
+  if (!Number.isFinite(mins) || mins <= 0) return expr || '—'
+  if (mins % 1440 === 0) return `${mins / 1440}d`
+  if (mins % 60 === 0) return `${mins / 60}h`
+  return `${mins}m`
 }
 
 export type SchedulerTab = 'scripts' | 'schedules' | 'runs'
@@ -77,8 +79,10 @@ export const TasksSchedulerPage: React.FC<TasksSchedulerPageProps> = ({ activeTa
     schedule_type: 'interval',
     // The server stores both interval and cron triggers in one `schedule_expr`
     // column, parsed per `schedule_type`. There is no separate interval_seconds
-    // or cron_expr field on the wire.
-    schedule_expr: '3600',
+    // or cron_expr field on the wire. The interval branch reads MINUTES, so the
+    // default here is the hourly value the old "3600 seconds" placeholder was
+    // reaching for.
+    schedule_expr: '60',
     // A schedule created from this modal is active by definition. Without this
     // the server decodes a missing key as false, the scheduler skips the job
     // forever, and the operator sees a Paused row under an "activated" toast.
@@ -663,7 +667,7 @@ export const TasksSchedulerPage: React.FC<TasksSchedulerPageProps> = ({ activeTa
                   // Pre-fill the matching expression shape so the field
                   // below is never an interval number typed into a cron
                   // schedule (or vice versa).
-                  schedule_expr: e.target.value === 'cron' ? '0 0 * * *' : '3600',
+                  schedule_expr: e.target.value === 'cron' ? '0 0 * * *' : '60',
                 })
               }
             >
@@ -674,14 +678,14 @@ export const TasksSchedulerPage: React.FC<TasksSchedulerPageProps> = ({ activeTa
           </div>
           <div className="form-group">
             <label className="form-label" htmlFor="schedule-expr">
-              {newSchedule.schedule_type === 'cron' ? 'Cron Expression' : 'Interval (seconds)'}
+              {newSchedule.schedule_type === 'cron' ? 'Cron Expression' : 'Interval (minutes)'}
             </label>
             <input
               id="schedule-expr"
               type="text"
               className="form-input"
               required
-              placeholder={newSchedule.schedule_type === 'cron' ? '0 3 * * * (03:00 daily)' : '3600'}
+              placeholder={newSchedule.schedule_type === 'cron' ? '0 3 * * * (03:00 daily)' : '60'}
               value={newSchedule.schedule_expr}
               onChange={(e) =>
                 setNewSchedule({
