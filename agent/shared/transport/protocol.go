@@ -1,25 +1,25 @@
 package transport
 
-// Envelope mirrors the server-side wire protocol (server/core/transport/protocol.go).
-type Envelope struct {
-	Type    string `json:"type"`
-	ID      string `json:"id,omitempty"`
-	Command string `json:"command,omitempty"`
-	Payload any    `json:"payload,omitempty"`
-	Status  string `json:"status,omitempty"`
-	Result  any    `json:"result,omitempty"`
-}
+import "github.com/henokakunemail-stack/Endpoint-Manager/protocol"
+
+// The wire contract lives in one package, shared with the server. Aliasing keeps
+// every transport.Envelope / transport.TypeHello reference in the agent
+// compiling unchanged while making a divergence between the two sides a
+// compile error instead of a command the agent silently drops. The previous
+// copy of these declarations drifted: it carried no TS field and only two of
+// the four status values the server defines.
+type Envelope = protocol.Envelope
 
 const (
-	TypeHello            = "hello"
-	TypeHeartbeat        = "heartbeat"
-	TypeCommandResult    = "command_result"
-	TypeCommand          = "command"
-	TypeInventory        = "inventory"         // agent -> server: collection result
-	TypeInventoryCollect = "inventory.collect" // server -> agent: collect now
-	TypeTermData         = "term.data"         // Phase 5: interactive terminal data stream
-	TypeTermClose        = "term.close"        // Phase 5: interactive terminal session closed
+	TypeHello            = protocol.TypeHello
+	TypeHeartbeat        = protocol.TypeHeartbeat
+	TypeCommandResult    = protocol.TypeCommandResult
+	TypeCommand          = protocol.TypeCommand
+	TypeInventory        = protocol.TypeInventory
+	TypeInventoryCollect = protocol.TypeInventoryCollect
+	TypeTermData         = protocol.TypeTermData
+	TypeTermClose        = protocol.TypeTermClose
 
-	StatusDone   = "done"
-	StatusFailed = "failed"
+	StatusDone   = protocol.StatusDone
+	StatusFailed = protocol.StatusFailed
 )

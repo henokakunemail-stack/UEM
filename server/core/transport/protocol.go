@@ -1,36 +1,31 @@
 package transport
 
-// Wire protocol messages exchanged over the agent WebSocket.
-// Minimal in Phase 1; extended by later modules (inventory, patch, remote control).
+import "github.com/henokakunemail-stack/Endpoint-Manager/protocol"
 
-// Envelope is the generic message envelope. Type selects the concrete shape.
-type Envelope struct {
-	Type    string `json:"type"`
-	ID      string `json:"id,omitempty"`
-	Command string `json:"command,omitempty"`
-	Payload any    `json:"payload,omitempty"`
-	Status  string `json:"status,omitempty"`
-	Result  any    `json:"result,omitempty"`
-	TS      string `json:"ts,omitempty"`
-}
+// The wire contract lives in one package. These aliases keep every existing
+// transport.Envelope / transport.TypeHello reference in the server compiling
+// and reading the way it always has, while the definition itself can only be
+// changed in one place. A second declaration here would be a redeclaration
+// compile error rather than a silent runtime mismatch.
+type Envelope = protocol.Envelope
 
 const (
 	// agent -> server
-	TypeHello         = "hello"          // sent right after connect
-	TypeHeartbeat     = "heartbeat"      // periodic keep-alive
-	TypeCommandResult = "command_result" // reply to a server-issued command
-	TypeInventory     = "inventory"      // Phase 2: collection result
-	TypeTermData      = "term.data"      // Phase 5: interactive terminal data stream
-	TypeTermClose     = "term.close"     // Phase 5: interactive terminal closed by agent
+	TypeHello         = protocol.TypeHello
+	TypeHeartbeat     = protocol.TypeHeartbeat
+	TypeCommandResult = protocol.TypeCommandResult
+	TypeInventory     = protocol.TypeInventory
+	TypeTermData      = protocol.TypeTermData
+	TypeTermClose     = protocol.TypeTermClose
 
 	// server -> agent
-	TypeCommand          = "command"           // ask agent to run something
-	TypeInventoryCollect = "inventory.collect" // Phase 2: request collection now
+	TypeCommand          = protocol.TypeCommand
+	TypeInventoryCollect = protocol.TypeInventoryCollect
 )
 
 const (
-	StatusDone    = "done"
-	StatusFailed  = "failed"
-	StatusPending = "pending"
-	StatusSent    = "sent"
+	StatusDone    = protocol.StatusDone
+	StatusFailed  = protocol.StatusFailed
+	StatusPending = protocol.StatusPending
+	StatusSent    = protocol.StatusSent
 )
