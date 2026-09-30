@@ -14,12 +14,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/auth"
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/db"
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/rbac"
 	devicemgmt "github.com/henokakunemail-stack/Endpoint-Manager/server/modules/device-management"
 	softwaredeployment "github.com/henokakunemail-stack/Endpoint-Manager/server/modules/software-deployment"
-	"github.com/go-chi/chi/v5"
 	"github.com/jmoiron/sqlx"
 )
 
@@ -46,6 +46,7 @@ type mockHub struct {
 	onlineDevices map[string]bool
 	sentMessages  map[string][][]byte
 }
+
 func newMockHub() *mockHub {
 	return &mockHub{
 		onlineDevices: make(map[string]bool),
@@ -232,8 +233,8 @@ func TestE2ESoftwareDeployment(t *testing.T) {
 
 	var depResult struct {
 		Deployment     softwaredeployment.SoftwareDeployment `json:"deployment"`
-		TasksTotal     int                                    `json:"tasks_total"`
-		DispatchedLive int                                    `json:"dispatched_live"`
+		TasksTotal     int                                   `json:"tasks_total"`
+		DispatchedLive int                                   `json:"dispatched_live"`
 	}
 	if err := json.NewDecoder(depResp.Body).Decode(&depResult); err != nil {
 		t.Fatalf("decode deployment result: %v", err)

@@ -10,18 +10,18 @@ import (
 // keep the schema stable when a new fact is added; the cached columns keep the
 // dashboard filters and sorts fast without parsing JSON for every row.
 type DeviceInventory struct {
-	ID        string    `db:"id"`
-	DeviceID  string    `db:"device_id"`
-	HW        string    `db:"hw"`      // JSON: Hardware
-	Software  string    `db:"software"` // JSON: []Software
-	OSDetail  string    `db:"os_detail"`
+	ID       string `db:"id"`
+	DeviceID string `db:"device_id"`
+	HW       string `db:"hw"`       // JSON: Hardware
+	Software string `db:"software"` // JSON: []Software
+	OSDetail string `db:"os_detail"`
 	// Cached columns, populated from the JSON by the handler. NULL-able so a
 	// collection that failed partway through does not write a fake zero.
-	HWRAMBytes   *int64   `db:"hw_ram_bytes"`
-	HWDiskFreePct *float64 `db:"hw_disk_free_pct"`
-	HWCPUModel   *string  `db:"hw_cpu_model"`
-	CollectedAt  time.Time `db:"collected_at"`
-	UpdatedAt    time.Time `db:"updated_at"`
+	HWRAMBytes    *int64    `db:"hw_ram_bytes"`
+	HWDiskFreePct *float64  `db:"hw_disk_free_pct"`
+	HWCPUModel    *string   `db:"hw_cpu_model"`
+	CollectedAt   time.Time `db:"collected_at"`
+	UpdatedAt     time.Time `db:"updated_at"`
 }
 
 // StatusRetired marks a device that left the fleet. Its row is kept so audit

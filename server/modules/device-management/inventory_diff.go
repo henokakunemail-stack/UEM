@@ -28,7 +28,7 @@ type hwJSON struct {
 		NumberOfCores     int    `json:"number_of_cores"`
 		LogicalProcessors int    `json:"logical_processors"`
 	} `json:"cpu"`
-	RAMTotalBytes int64  `json:"ram_total_bytes"`
+	RAMTotalBytes int64 `json:"ram_total_bytes"`
 	Disks         []struct {
 		Name       string `json:"name"`
 		TotalBytes int64  `json:"total_bytes"`

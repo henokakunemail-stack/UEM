@@ -6,20 +6,20 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/audit"
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/auth"
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/rbac"
-	"github.com/go-chi/chi/v5"
 	"github.com/jmoiron/sqlx"
 )
 
 // Handler exposes the device-management HTTP API.
 type Handler struct {
-	repo     *Repository
+	repo      *Repository
 	inventory *inventoryRepository // Phase 2: filters the device list by group
-	db       *sqlx.DB
-	jwt      *auth.JWTService
-	ttl      time.Duration // enrollment token TTL
+	db        *sqlx.DB
+	jwt       *auth.JWTService
+	ttl       time.Duration // enrollment token TTL
 }
 
 func NewHandler(repo *Repository, db *sqlx.DB, jwt *auth.JWTService, enrollmentTTL time.Duration) *Handler {
@@ -52,7 +52,7 @@ type deviceDTO struct {
 	RetiredAt    *time.Time `json:"retired_at,omitempty"`
 	// Capabilities is decoded from its stored JSON so the console sees an array,
 	// not a stringified blob.
-	Capabilities []string   `json:"capabilities,omitempty"`
+	Capabilities []string `json:"capabilities,omitempty"`
 }
 
 func toDTO(d Device) deviceDTO {
@@ -148,7 +148,8 @@ type createEnrollTokenResp struct {
 
 // createEnrollToken pre-registers a device and returns a one-time enrollment token
 // the agent exchanges for a persistent secret. Only the token hash is stored.
-func (h *Handler) createEnrollToken(w http.ResponseWriter, r *http.Request) {	var req createEnrollTokenReq
+func (h *Handler) createEnrollToken(w http.ResponseWriter, r *http.Request) {
+	var req createEnrollTokenReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid request body")
 		return

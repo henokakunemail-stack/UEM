@@ -106,9 +106,9 @@ func (e *Evaluator) evalDiskLow(ctx context.Context, rule *AlertRule, res *EvalR
 }
 
 type offlineTarget struct {
-	DeviceID string  `db:"id"`
-	Hostname string  `db:"hostname"`
-	Site     string  `db:"site"`
+	DeviceID string `db:"id"`
+	Hostname string `db:"hostname"`
+	Site     string `db:"site"`
 	// status = 'offline' is the DEFAULT for a device that has an enrollment
 	// token but has never checked in, so last_seen_at is legitimately NULL for
 	// every one of those. This is a pointer rather than a COALESCE because

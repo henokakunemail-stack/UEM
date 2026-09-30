@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/rbac"
 	"github.com/go-chi/chi/v5"
+	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/rbac"
 )
 
 // Handler serves the dashboard metrics endpoints.

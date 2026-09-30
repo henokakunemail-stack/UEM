@@ -320,10 +320,10 @@ func TestE2EGroups(t *testing.T) {
 		t.Fatalf("read audit: %v", err)
 	}
 	want := map[string]bool{
-		"group.create":        true,
-		"group.members.add":   true,
+		"group.create":         true,
+		"group.members.add":    true,
 		"group.members.remove": true,
-		"group.delete":        true,
+		"group.delete":         true,
 	}
 	for _, a := range actions {
 		delete(want, a)
@@ -425,4 +425,3 @@ func invDo(t *testing.T, method, url, token string, body any) (int, string) {
 	}
 	return resp.StatusCode, buf.String()
 }
-

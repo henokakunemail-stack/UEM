@@ -351,9 +351,9 @@ func (h *Handler) handleStartCampaign(w http.ResponseWriter, r *http.Request) {
 	})
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"status":           "started",
-		"total_targets":    len(deviceIDs),
-		"dispatched_live":  dispatchedCount,
+		"status":          "started",
+		"total_targets":   len(deviceIDs),
+		"dispatched_live": dispatchedCount,
 	})
 }
 
@@ -400,8 +400,8 @@ func (h *Handler) handleDispatchDeviceUpdate(w http.ResponseWriter, r *http.Requ
 		// offline sweeper only sweeps deployment_tasks. It is created pending
 		// and SendTask stamps it, so an offline device leaves a row that the
 		// reconnect path can actually find.
-		Status:        TaskStatusPending,
-		DispatchedAt:  &now,
+		Status:       TaskStatusPending,
+		DispatchedAt: &now,
 	}
 	if err := h.repo.CreateUpdateTask(r.Context(), task); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})

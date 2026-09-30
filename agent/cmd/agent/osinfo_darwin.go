@@ -3,8 +3,8 @@
 package main
 
 import (
-	"github.com/henokakunemail-stack/Endpoint-Manager/agent/shared/osinfo"
 	macagent "github.com/henokakunemail-stack/Endpoint-Manager/agent/macos"
+	"github.com/henokakunemail-stack/Endpoint-Manager/agent/shared/osinfo"
 )
 
 // newOSInfoProvider returns the macOS implementation.

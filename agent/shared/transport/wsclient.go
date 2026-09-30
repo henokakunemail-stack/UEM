@@ -21,23 +21,23 @@ import (
 
 // Client is the persistent agent->server connection with automatic reconnect.
 type Client struct {
-	serverURL   string // e.g. "ws://localhost:8443"
-	deviceID    string
+	serverURL    string // e.g. "ws://localhost:8443"
+	deviceID     string
 	deviceSecret string
 
 	helloExtra any // extra fields merged into the hello message
 
-	mu       sync.Mutex
-	ws       *websocket.Conn
-	closed   bool
+	mu        sync.Mutex
+	ws        *websocket.Conn
+	closed    bool
 	onCommand func(ctx context.Context, command, id string, payload json.RawMessage) any
 	onCollect func(ctx context.Context)
 }
 
 func NewClient(serverURL, deviceID, deviceSecret string) *Client {
 	return &Client{
-		serverURL:   wsURL(serverURL),
-		deviceID:    deviceID,
+		serverURL:    wsURL(serverURL),
+		deviceID:     deviceID,
 		deviceSecret: deviceSecret,
 	}
 }
@@ -182,8 +182,8 @@ func (c *Client) connectAndServe(ctx context.Context, hello any) error {
 			select {
 			case <-ticker.C:
 				if err := c.send(Envelope{Type: TypeHeartbeat}); err != nil {
-				return
-			}
+					return
+				}
 			case <-ctx.Done():
 				return
 			}

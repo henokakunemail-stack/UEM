@@ -64,37 +64,37 @@ func TestAbandonOrphanedTasks(t *testing.T) {
 		wantReap bool
 	}{
 		{
-			name: "installing on an offline device is reaped",
+			name:   "installing on an offline device is reaped",
 			taskID: "t1", device: "dev-offline", status: "installing",
 			age: AbandonGrace + time.Minute, want: TaskStatusFailedLost, wantReap: true,
 		},
 		{
-			name: "downloading on an offline device is reaped",
+			name:   "downloading on an offline device is reaped",
 			taskID: "t2", device: "dev-offline", status: "downloading",
 			age: AbandonGrace + time.Minute, want: TaskStatusFailedLost, wantReap: true,
 		},
 		{
-			name: "dispatched on an offline device is reaped",
+			name:   "dispatched on an offline device is reaped",
 			taskID: "t3", device: "dev-offline", status: "dispatched",
 			age: AbandonGrace + time.Minute, want: TaskStatusFailedLost, wantReap: true,
 		},
 		{
-			name: "a live device's long install is never touched",
+			name:   "a live device's long install is never touched",
 			taskID: "t4", device: "dev-online", status: "installing",
 			age: AbandonGrace + time.Hour, want: "installing",
 		},
 		{
-			name: "an offline device that reported recently is given the grace window",
+			name:   "an offline device that reported recently is given the grace window",
 			taskID: "t5", device: "dev-offline", status: "installing",
 			age: time.Minute, want: "installing",
 		},
 		{
-			name: "a task that already finished is not overwritten",
+			name:   "a task that already finished is not overwritten",
 			taskID: "t6", device: "dev-offline", status: "success",
 			age: AbandonGrace + time.Hour, want: "success",
 		},
 		{
-			name: "a real installer failure is not relabelled",
+			name:   "a real installer failure is not relabelled",
 			taskID: "t7", device: "dev-offline", status: "failed",
 			age: AbandonGrace + time.Hour, want: "failed",
 		},

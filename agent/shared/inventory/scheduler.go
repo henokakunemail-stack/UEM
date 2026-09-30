@@ -21,7 +21,7 @@ type Scheduler struct {
 	period    time.Duration
 	// window spreads collections across this duration; offset is stable per
 	// device so the load stays even hour after hour.
-	window time.Duration
+	window   time.Duration
 	deviceID string
 }
 

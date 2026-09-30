@@ -9,11 +9,11 @@ import "testing"
 // server checked the two against each other.
 func TestCheckExtensionMatches(t *testing.T) {
 	cases := []struct {
-		name      string
-		osTarget  string
-		pkgType   string
-		fileName  string
-		wantOK    bool
+		name     string
+		osTarget string
+		pkgType  string
+		fileName string
+		wantOK   bool
 	}{
 		{name: "exe as exe", osTarget: OSTargetWindows, pkgType: PkgTypeEXE, fileName: "winrar-x64-723.exe", wantOK: true},
 		{name: "msi as msi", osTarget: OSTargetWindows, pkgType: PkgTypeMSI, fileName: "setup.msi", wantOK: true},

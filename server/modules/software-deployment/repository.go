@@ -143,7 +143,7 @@ type DeviceCheck struct {
 
 // DeviceCapability is one endpoint's answer to "can you run this command".
 type DeviceCapability struct {
-	ID    string `db:"id"`
+	ID     string `db:"id"`
 	OSName string `db:"os_name"`
 	// Capabilities is the raw JSON array the agent sent in its hello, or NULL on
 	// a device that has never reconnected with a build that advertises them.

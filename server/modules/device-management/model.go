@@ -26,13 +26,13 @@ type Device struct {
 	Site                *string    `db:"site"`
 	// RetiredAt is set when the device leaves the fleet. NULL means active.
 	// The row is kept so audit references stay resolvable; the secret is cleared.
-	RetiredAt           *time.Time `db:"retired_at"`
+	RetiredAt *time.Time `db:"retired_at"`
 	// Capabilities is the JSON array of command types the agent advertised in
 	// its hello message, so the server never sends a command it would drop.
 	// NULL until the agent first reconnects with a build that advertises them.
-	Capabilities        *string    `db:"capabilities"`
-	CreatedAt           time.Time  `db:"created_at"`
-	UpdatedAt           time.Time  `db:"updated_at"`
+	Capabilities *string   `db:"capabilities"`
+	CreatedAt    time.Time `db:"created_at"`
+	UpdatedAt    time.Time `db:"updated_at"`
 }
 
 const (

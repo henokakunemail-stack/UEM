@@ -4,9 +4,9 @@ package osinfo
 
 // Info describes the machine the agent runs on.
 type Info struct {
-	Name       string `json:"name"`        // windows|linux|macos
-	Version    string `json:"version"`     // OS version
-	Hostname   string `json:"hostname"`
+	Name         string `json:"name"`    // windows|linux|macos
+	Version      string `json:"version"` // OS version
+	Hostname     string `json:"hostname"`
 	AgentVersion string `json:"agent_version"`
 }
 

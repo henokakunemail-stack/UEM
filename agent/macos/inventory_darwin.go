@@ -51,12 +51,12 @@ func macSysctl(key string) (string, error) {
 // that we parse for chassis identity.
 type macHardwareJSON struct {
 	SPHardwareDataType []struct {
-		ModelName      string `json:"model_name"`
+		ModelName       string `json:"model_name"`
 		ModelIdentifier string `json:"model_identifier"`
-		SerialNumber   string `json:"serial_number"`
-		ProcessorName  string `json:"processor_name"`
-		TotalNumberCPUs int   `json:"total_number_of_cores"`
-		Memory         string `json:"memory"`
+		SerialNumber    string `json:"serial_number"`
+		ProcessorName   string `json:"processor_name"`
+		TotalNumberCPUs int    `json:"total_number_of_cores"`
+		Memory          string `json:"memory"`
 	} `json:"SPHardwareDataType"`
 }
 

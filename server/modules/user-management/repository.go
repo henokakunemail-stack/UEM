@@ -11,8 +11,8 @@ import (
 )
 
 var (
-	ErrNotFound      = errors.New("user not found")
-	ErrDuplicate     = errors.New("username already exists")
+	ErrNotFound  = errors.New("user not found")
+	ErrDuplicate = errors.New("username already exists")
 )
 
 type Repository struct {

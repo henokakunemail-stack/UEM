@@ -84,7 +84,7 @@ func TestCimRejectsBrokenOutput(t *testing.T) {
 		"",
 		"the rpc server is unavailable",
 		"[{\"TotalPhysicalMemory\":16905961472", // truncated array
-		"{\"SerialNumber\":\"ABCD123\"",        // truncated object
+		"{\"SerialNumber\":\"ABCD123\"",         // truncated object
 	}
 	for _, b := range broken {
 		if _, err := parseCIMRows([]byte(b)); err == nil {

@@ -33,8 +33,8 @@ type OSMetric struct {
 // Alert represents an operational warning or alert across the fleet.
 type Alert struct {
 	ID        string    `json:"id"`
-	Type      string    `json:"type"`      // low_disk, offline_long, hw_drift
-	Severity  string    `json:"severity"`  // warning, critical, info
+	Type      string    `json:"type"`     // low_disk, offline_long, hw_drift
+	Severity  string    `json:"severity"` // warning, critical, info
 	DeviceID  string    `json:"device_id"`
 	Hostname  string    `json:"hostname"`
 	Site      string    `json:"site"`

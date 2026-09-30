@@ -27,8 +27,8 @@ func TestAuthenticateAgent_RejectsMissingCredentials(t *testing.T) {
 
 	cases := map[string]http.Header{
 		"no headers at all": {},
-		"id without secret":  {"X-Device-Id": {"dev-1"}},
-		"secret without id":  {"X-Device-Secret": {"s3cret"}},
+		"id without secret": {"X-Device-Id": {"dev-1"}},
+		"secret without id": {"X-Device-Secret": {"s3cret"}},
 	}
 
 	for name, hdr := range cases {

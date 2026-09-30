@@ -15,10 +15,10 @@ const (
 	TypeHeartbeat        = "heartbeat"
 	TypeCommandResult    = "command_result"
 	TypeCommand          = "command"
-	TypeInventory        = "inventory"           // agent -> server: collection result
-	TypeInventoryCollect = "inventory.collect"   // server -> agent: collect now
-	TypeTermData         = "term.data"           // Phase 5: interactive terminal data stream
-	TypeTermClose        = "term.close"          // Phase 5: interactive terminal session closed
+	TypeInventory        = "inventory"         // agent -> server: collection result
+	TypeInventoryCollect = "inventory.collect" // server -> agent: collect now
+	TypeTermData         = "term.data"         // Phase 5: interactive terminal data stream
+	TypeTermClose        = "term.close"        // Phase 5: interactive terminal session closed
 
 	StatusDone   = "done"
 	StatusFailed = "failed"

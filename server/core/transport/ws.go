@@ -325,12 +325,12 @@ func (h *WSHandler) handleHello(ctx context.Context, c *Conn, env Envelope) {
 	// mixed-version fleet does not break the inventory on upgrade.
 	b, _ := json.Marshal(env.Payload)
 	var p struct {
-		AgentVersion  string   `json:"agent_version"`
-		Name          string   `json:"name"`
-		Version       string   `json:"version"`
-		Hostname      string   `json:"hostname"`
-		Capabilities  []string `json:"capabilities"`
-		OS            *struct {
+		AgentVersion string   `json:"agent_version"`
+		Name         string   `json:"name"`
+		Version      string   `json:"version"`
+		Hostname     string   `json:"hostname"`
+		Capabilities []string `json:"capabilities"`
+		OS           *struct {
 			Name    string `json:"name"`
 			Version string `json:"version"`
 		} `json:"os"`

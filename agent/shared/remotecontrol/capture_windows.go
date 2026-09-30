@@ -15,14 +15,14 @@ var (
 	user32 = syscall.NewLazyDLL("user32.dll")
 	gdi32  = syscall.NewLazyDLL("gdi32.dll")
 
-	procGetSystemMetrics    = user32.NewProc("GetSystemMetrics")
-	procGetDC               = user32.NewProc("GetDC")
-	procReleaseDC           = user32.NewProc("ReleaseDC")
-	procSetProcessDPIAware  = user32.NewProc("SetProcessDPIAware")
-	procSetCursorPos        = user32.NewProc("SetCursorPos")
-	procSendInput           = user32.NewProc("SendInput")
-	procMapVirtualKeyExW    = user32.NewProc("MapVirtualKeyExW")
-	procGetKeyboardLayout   = user32.NewProc("GetKeyboardLayout")
+	procGetSystemMetrics   = user32.NewProc("GetSystemMetrics")
+	procGetDC              = user32.NewProc("GetDC")
+	procReleaseDC          = user32.NewProc("ReleaseDC")
+	procSetProcessDPIAware = user32.NewProc("SetProcessDPIAware")
+	procSetCursorPos       = user32.NewProc("SetCursorPos")
+	procSendInput          = user32.NewProc("SendInput")
+	procMapVirtualKeyExW   = user32.NewProc("MapVirtualKeyExW")
+	procGetKeyboardLayout  = user32.NewProc("GetKeyboardLayout")
 
 	procCreateCompatibleDC     = gdi32.NewProc("CreateCompatibleDC")
 	procCreateCompatibleBitmap = gdi32.NewProc("CreateCompatibleBitmap")
@@ -73,19 +73,19 @@ type inputHeader struct {
 }
 
 type mouseInput struct {
-	Dx        int32
-	Dy        int32
-	MouseData uint32
-	DwFlags   uint32
-	Time      uint32
+	Dx          int32
+	Dy          int32
+	MouseData   uint32
+	DwFlags     uint32
+	Time        uint32
 	DwExtraInfo uintptr
 }
 
 type keyboardInput struct {
-	Vk         uint16
-	Scan       uint16
-	DwFlags    uint32
-	Time       uint32
+	Vk          uint16
+	Scan        uint16
+	DwFlags     uint32
+	Time        uint32
 	DwExtraInfo uintptr
 }
 
@@ -278,10 +278,10 @@ func isExtendedVK(vk uint16) bool {
 	switch {
 	case vk >= 0x21 && vk <= 0x2E, // arrows, Insert/Delete/Home/End, PgUp/PgDn
 		vk == 0x5B || vk == 0x5C, // LWin, RWin
-		vk == 0x5D,              // Apps
-		vk == 0x6F,              // numpad divide
-		vk == 0x9B,              // numpad enter (extended Enter)
-		vk == 0xA3, vk == 0xA5,  // RCtrl, RAlt
+		vk == 0x5D,               // Apps
+		vk == 0x6F,               // numpad divide
+		vk == 0x9B,               // numpad enter (extended Enter)
+		vk == 0xA3, vk == 0xA5,   // RCtrl, RAlt
 		vk >= 0xAD && vk <= 0xB4, // numpad operators
 		vk == 0xBA:
 		return true

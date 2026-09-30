@@ -3,8 +3,8 @@
 package main
 
 import (
-	"github.com/henokakunemail-stack/Endpoint-Manager/agent/shared/osinfo"
 	linagent "github.com/henokakunemail-stack/Endpoint-Manager/agent/linux"
+	"github.com/henokakunemail-stack/Endpoint-Manager/agent/shared/osinfo"
 )
 
 // newOSInfoProvider returns the Linux implementation.

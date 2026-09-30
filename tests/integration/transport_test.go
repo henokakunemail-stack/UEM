@@ -331,7 +331,10 @@ func postJSON(url string, body any) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-type httpError struct{ code int; body string }
+type httpError struct {
+	code int
+	body string
+}
 
 func (e *httpError) Error() string { return "HTTP " + itoa(e.code) + ": " + e.body }
 

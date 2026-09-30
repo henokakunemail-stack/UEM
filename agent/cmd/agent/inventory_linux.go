@@ -3,8 +3,8 @@
 package main
 
 import (
-	"github.com/henokakunemail-stack/Endpoint-Manager/agent/shared/inventory"
 	linuxagent "github.com/henokakunemail-stack/Endpoint-Manager/agent/linux"
+	"github.com/henokakunemail-stack/Endpoint-Manager/agent/shared/inventory"
 )
 
 // newInventoryCollector returns the Linux inventory collector.

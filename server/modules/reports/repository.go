@@ -17,16 +17,16 @@ func NewRepository(db *sqlx.DB) *Repository {
 }
 
 type DeviceInventoryRow struct {
-	ID           string    `json:"id" db:"id"`
-	Hostname     string    `json:"hostname" db:"hostname"`
-	OSName       string    `json:"os_name" db:"os_name"`
-	OSVersion    string    `json:"os_version" db:"os_version"`
-	AgentVersion string    `json:"agent_version" db:"agent_version"`
-	Site         string    `json:"site" db:"site"`
-	Status       string    `json:"status" db:"status"`
-	RAMBytes     *int64    `json:"ram_bytes" db:"hw_ram_bytes"`
-	DiskFreePct  *float64  `json:"disk_free_pct" db:"hw_disk_free_pct"`
-	CPUModel     *string   `json:"cpu_model" db:"hw_cpu_model"`
+	ID           string   `json:"id" db:"id"`
+	Hostname     string   `json:"hostname" db:"hostname"`
+	OSName       string   `json:"os_name" db:"os_name"`
+	OSVersion    string   `json:"os_version" db:"os_version"`
+	AgentVersion string   `json:"agent_version" db:"agent_version"`
+	Site         string   `json:"site" db:"site"`
+	Status       string   `json:"status" db:"status"`
+	RAMBytes     *int64   `json:"ram_bytes" db:"hw_ram_bytes"`
+	DiskFreePct  *float64 `json:"disk_free_pct" db:"hw_disk_free_pct"`
+	CPUModel     *string  `json:"cpu_model" db:"hw_cpu_model"`
 	// A device that has been issued an enrollment token but has never checked
 	// in has last_seen_at = NULL, and that is not the same fact as "seen at
 	// 0001-01-01". So this stays a pointer and the exporter nils it out, the
