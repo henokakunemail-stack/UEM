@@ -82,7 +82,7 @@ func (h *Handler) exportInventory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, rows)
+	writeJSON(w, rows)
 }
 
 func (h *Handler) exportPatches(w http.ResponseWriter, r *http.Request) {
@@ -113,7 +113,7 @@ func (h *Handler) exportPatches(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, rows)
+	writeJSON(w, rows)
 }
 
 func (h *Handler) exportDeployments(w http.ResponseWriter, r *http.Request) {
@@ -153,7 +153,7 @@ func (h *Handler) exportDeployments(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, rows)
+	writeJSON(w, rows)
 }
 
 func (h *Handler) exportAudit(w http.ResponseWriter, r *http.Request) {
@@ -197,11 +197,14 @@ func (h *Handler) exportAudit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, rows)
+	writeJSON(w, rows)
 }
 
-func writeJSON(w http.ResponseWriter, status int, data any) {
+// writeJSON answers 200. Every report endpoint here is a successful read; the
+// failure paths return early with their own status rather than going through
+// this helper, so a status parameter would only ever be 200.
+func writeJSON(w http.ResponseWriter, data any) {
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
+	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(data)
 }

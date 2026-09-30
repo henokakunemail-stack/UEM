@@ -274,9 +274,10 @@ func TestE2ESoftwareDeployment(t *testing.T) {
 	// Find dev-win-1 task and report progress
 	var task1, task2 softwaredeployment.DeploymentTask
 	for _, tsk := range tasks {
-		if tsk.DeviceID == "dev-win-1" {
+		switch tsk.DeviceID {
+		case "dev-win-1":
 			task1 = tsk
-		} else if tsk.DeviceID == "dev-win-2" {
+		case "dev-win-2":
 			task2 = tsk
 		}
 	}

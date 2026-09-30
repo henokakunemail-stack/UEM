@@ -48,10 +48,6 @@ type offlineHub struct{}
 func (offlineHub) Online(string) bool         { return false }
 func (offlineHub) SendTo(string, []byte) bool { return false }
 
-// testCtx is the context used by inventory tests. gofmt's t.Context would do,
-// but this keeps the file buildable on older toolchains too.
-func testCtx() context.Context { return context.Background() }
-
 // TestDiffInventoryNoChange checks that an identical snapshot produces no
 // audit-worthy change: the common case, which must stay out of the audit trail.
 func TestDiffInventoryNoChange(t *testing.T) {

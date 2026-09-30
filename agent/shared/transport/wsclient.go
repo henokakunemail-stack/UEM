@@ -42,6 +42,12 @@ func NewClient(serverURL, deviceID, deviceSecret string) *Client {
 	}
 }
 
+// DefaultHeartbeat is the agent heartbeat cadence when the caller does not
+// choose one. It is deliberately shorter than the server's AGENT_OFFLINE_AFTER
+// default (90s) so a healthy device is seen well inside the window that would
+// otherwise mark it offline.
+const DefaultHeartbeat = 20 * time.Second
+
 // wsURL normalises an http(s):// server base URL to ws(s):// so callers can use
 // the same "-server" value for both the REST enrollment call and the socket.
 func wsURL(serverURL string) string {
@@ -77,7 +83,14 @@ func (c *Client) Close() {
 
 // Run connects and stays connected until ctx is done. Between failed attempts it
 // backs off with jitter so 500 agents never retry in lockstep after an outage.
-func (c *Client) Run(ctx context.Context, hello any) error {
+//
+// heartbeat sets the TypeHeartbeat cadence; pass DefaultHeartbeat to keep the
+// standard interval. It is a parameter rather than a field because it is fixed
+// for the life of the connection, and a setter would race the heartbeat loop.
+func (c *Client) Run(ctx context.Context, hello any, heartbeat time.Duration) error {
+	if heartbeat <= 0 {
+		heartbeat = DefaultHeartbeat
+	}
 	backoff := time.Second
 	const maxBackoff = 60 * time.Second
 
@@ -86,7 +99,7 @@ func (c *Client) Run(ctx context.Context, hello any) error {
 			return ctx.Err()
 		}
 		connStart := time.Now()
-		err := c.connectAndServe(ctx, hello)
+		err := c.connectAndServe(ctx, hello, heartbeat)
 		if c.isClosed() {
 			// Graceful shutdown requested via Close(): do not reconnect.
 			return nil
@@ -125,7 +138,7 @@ func (c *Client) isClosed() bool {
 	return c.closed
 }
 
-func (c *Client) connectAndServe(ctx context.Context, hello any) error {
+func (c *Client) connectAndServe(ctx context.Context, hello any, heartbeat time.Duration) error {
 	header := http.Header{}
 	header.Set("X-Device-Id", c.deviceID)
 	header.Set("X-Device-Secret", c.deviceSecret)
@@ -149,7 +162,7 @@ func (c *Client) connectAndServe(ctx context.Context, hello any) error {
 	// Hello carries the OS facts plus anything SetHelloExtra added (capabilities).
 	// The merge keeps the server-side hello handler unchanged: it decodes known
 	// fields and ignores the rest.
-	var helloPayload any = hello
+	helloPayload := hello
 	if c.helloExtra != nil {
 		helloPayload = mergeHello(hello, c.helloExtra)
 	}
@@ -176,7 +189,7 @@ func (c *Client) connectAndServe(ctx context.Context, hello any) error {
 	heartbeatDone.Add(1)
 	go func() {
 		defer heartbeatDone.Done()
-		ticker := time.NewTicker(20 * time.Second)
+		ticker := time.NewTicker(heartbeat)
 		defer ticker.Stop()
 		for {
 			select {

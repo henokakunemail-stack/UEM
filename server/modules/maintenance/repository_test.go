@@ -244,13 +244,13 @@ func TestEmptyListsMarshalAsArray(t *testing.T) {
 	if _, err := repo.ResolveTargets(ctx, "bogus", ""); err == nil {
 		t.Fatal("want error for unsupported target_type")
 	}
-	if _, err := repo.GetJob(ctx, "nope"); err != ErrNotFound {
+	if _, err := repo.GetJob(ctx, "nope"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("want ErrNotFound, got %v", err)
 	}
-	if _, err := repo.GetTask(ctx, "nope"); err != ErrNotFound {
+	if _, err := repo.GetTask(ctx, "nope"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("want ErrNotFound, got %v", err)
 	}
-	if err := repo.RecordStep(ctx, StepReport{TaskID: "nope", Step: "s", Status: TaskStatusCompleted}); err != ErrNotFound {
+	if err := repo.RecordStep(ctx, StepReport{TaskID: "nope", Step: "s", Status: TaskStatusCompleted}); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("want ErrNotFound, got %v", err)
 	}
 	if err := repo.RecordStep(ctx, StepReport{Step: "s", Status: TaskStatusCompleted}); err == nil {

@@ -2,6 +2,7 @@ package enrollment
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -63,7 +64,7 @@ func TestLoadSave(t *testing.T) {
 	p := filepath.Join(tmpDir, "creds.json")
 
 	_, err := Load(p)
-	if err != ErrNotEnrolled {
+	if !errors.Is(err, ErrNotEnrolled) {
 		t.Fatalf("expected ErrNotEnrolled, got %v", err)
 	}
 

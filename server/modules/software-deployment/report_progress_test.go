@@ -65,7 +65,7 @@ func newProgressFixture(t *testing.T) (*Handler, *chi.Mux, *sqlx.DB) {
 
 func reportAs(t *testing.T, r *chi.Mux, deviceID, secret, taskID, body string) int {
 	t.Helper()
-	req := httptest.NewRequest("POST", "/api/agent/tasks/"+taskID+"/progress", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/api/agent/tasks/"+taskID+"/progress", strings.NewReader(body))
 	req.Header.Set("X-Device-Id", deviceID)
 	req.Header.Set("X-Device-Secret", secret)
 	rec := httptest.NewRecorder()

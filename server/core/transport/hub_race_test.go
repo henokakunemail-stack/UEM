@@ -11,9 +11,11 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-// dialAgent returns a client socket and the server side of it, for tests that
-// need a real *websocket.Conn because the Hub stores one.
-func dialAgent(t *testing.T) (client *websocket.Conn, server *websocket.Conn) {
+// dialAgent returns the server side of a real agent connection, for tests that
+// need a genuine *websocket.Conn because the Hub stores one. Every call site
+// wants only that side, so the client socket is dialled and closed by cleanup
+// rather than returned.
+func dialAgent(t *testing.T) (server *websocket.Conn) {
 	t.Helper()
 	got := make(chan *websocket.Conn, 1)
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -31,7 +33,7 @@ func dialAgent(t *testing.T) (client *websocket.Conn, server *websocket.Conn) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = cl.Close() })
-	return cl, <-got
+	return <-got
 }
 
 // TestSendOnAConnBeingTornDownNeverPanics is the regression test for the only
@@ -50,7 +52,7 @@ func dialAgent(t *testing.T) (client *websocket.Conn, server *websocket.Conn) {
 // made the panic probabilistic. This test asserts the stronger property: the
 // send channel is never closed, so there is nothing to panic on.
 func TestSendOnAConnBeingTornDownNeverPanics(t *testing.T) {
-	_, server := dialAgent(t)
+	server := dialAgent(t)
 	hub := NewHub()
 	c := hub.Register("dev-1", server)
 
@@ -114,7 +116,7 @@ func TestSendOnAConnBeingTornDownNeverPanics(t *testing.T) {
 // cheaply, instead of leaving a one-in-two crash for whoever hits a reconnect
 // while a command is in flight.
 func TestSendIsNotClosed(t *testing.T) {
-	_, server := dialAgent(t)
+	server := dialAgent(t)
 	hub := NewHub()
 	c := hub.Register("dev-1", server)
 
@@ -137,7 +139,7 @@ func TestSendIsNotClosed(t *testing.T) {
 // queue to drain, because a wedged peer means the queue is exactly what is not
 // happening.
 func TestWritePumpStopsWhenTheConnectionIsTornDown(t *testing.T) {
-	_, server := dialAgent(t)
+	server := dialAgent(t)
 	hub := NewHub()
 	c := hub.Register("dev-1", server)
 
@@ -156,7 +158,7 @@ func TestWritePumpStopsWhenTheConnectionIsTornDown(t *testing.T) {
 // TestWritePumpStillDeliversWhatWasQueuedFirst: the new select must not drop
 // messages that were already accepted before shutdown.
 func TestWritePumpStillDeliversWhatWasQueuedFirst(t *testing.T) {
-	_, server := dialAgent(t)
+	server := dialAgent(t)
 	hub := NewHub()
 	c := hub.Register("dev-1", server)
 
@@ -187,8 +189,8 @@ func TestWritePumpStillDeliversWhatWasQueuedFirst(t *testing.T) {
 // then closes the socket. A test that started a writePump on its own would hang
 // forever and prove nothing, because nothing in it would ever call closeSend.
 func TestSupersededConnectionStopsWithoutRacingItsPump(t *testing.T) {
-	_, firstServer := dialAgent(t)
-	_, secondServer := dialAgent(t)
+	firstServer := dialAgent(t)
+	secondServer := dialAgent(t)
 	hub := NewHub()
 
 	first := hub.Register("dev-1", firstServer)

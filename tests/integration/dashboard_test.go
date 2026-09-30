@@ -94,7 +94,7 @@ func TestE2EDashboardAPI(t *testing.T) {
 	}
 
 	// 2. Authenticated request as viewer to /api/dashboard/summary
-	req, _ := http.NewRequest("GET", srv.URL+"/api/dashboard/summary", nil)
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/api/dashboard/summary", nil)
 	req.Header.Set("Authorization", "Bearer "+viewerToken)
 	resp, err = http.DefaultClient.Do(req)
 	if err != nil {
@@ -126,7 +126,7 @@ func TestE2EDashboardAPI(t *testing.T) {
 	}
 
 	// 3. Authenticated request to /api/dashboard/sites
-	req, _ = http.NewRequest("GET", srv.URL+"/api/dashboard/sites", nil)
+	req, _ = http.NewRequest(http.MethodGet, srv.URL+"/api/dashboard/sites", nil)
 	req.Header.Set("Authorization", "Bearer "+viewerToken)
 	resp, err = http.DefaultClient.Do(req)
 	if err != nil {
@@ -145,7 +145,7 @@ func TestE2EDashboardAPI(t *testing.T) {
 	}
 
 	// 4. Authenticated request to /api/dashboard/alerts
-	req, _ = http.NewRequest("GET", srv.URL+"/api/dashboard/alerts", nil)
+	req, _ = http.NewRequest(http.MethodGet, srv.URL+"/api/dashboard/alerts", nil)
 	req.Header.Set("Authorization", "Bearer "+viewerToken)
 	resp, err = http.DefaultClient.Do(req)
 	if err != nil {

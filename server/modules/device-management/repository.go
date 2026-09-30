@@ -3,6 +3,7 @@ package devicemanagement
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
@@ -37,7 +38,7 @@ func (r *Repository) Create(ctx context.Context, d Device) error {
 func (r *Repository) GetByID(ctx context.Context, id string) (Device, error) {
 	var d Device
 	err := r.db.GetContext(ctx, &d, `SELECT * FROM devices WHERE id = ?`, id)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return Device{}, ErrNotFound
 	}
 	if err != nil {
@@ -155,7 +156,7 @@ func (r *Repository) ConsumeEnrollmentToken(ctx context.Context, tokenHash, secr
 func (r *Repository) findByEnrollmentTokenHash(ctx context.Context, tokenHash string) (Device, error) {
 	var d Device
 	err := r.db.GetContext(ctx, &d, `SELECT * FROM devices WHERE enrollment_token_hash = ?`, tokenHash)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return Device{}, ErrNotFound
 	}
 	if err != nil {
@@ -169,7 +170,7 @@ func (r *Repository) findByEnrollmentTokenHash(ctx context.Context, tokenHash st
 func (r *Repository) FindBySecretHash(ctx context.Context, secretHash string) (Device, error) {
 	var d Device
 	err := r.db.GetContext(ctx, &d, `SELECT * FROM devices WHERE device_secret_hash = ?`, secretHash)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return Device{}, ErrNotFound
 	}
 	if err != nil {

@@ -660,13 +660,31 @@ func runOfflineSweep(d *sqlx.DB, hub *transport.Hub, threshold time.Duration) {
 	ticker := time.NewTicker(15 * time.Second)
 	defer ticker.Stop()
 	for range ticker.C {
+		// The staleness cutoff is part of the one SELECT, deliberately. Filtering
+		// per device instead would be 10,000 extra round trips every 15 seconds
+		// on a large fleet, which is the cost the batched write below exists to
+		// avoid.
+		//
+		// This also had a correctness bug: the sweep used to flip every
+		// socket-less device offline regardless of age, so a device that was
+		// merely mid-reconnect was marked down, and AGENT_OFFLINE_AFTER only
+		// ever set the read deadline.
+		//
+		// A device with a NULL last_seen_at has never reported, so there is no
+		// staleness to judge; enrollment decides its initial state, and guessing
+		// here would flip a freshly enrolled device offline on the first tick.
+		now := time.Now().UTC()
 		var ids []string
-		err := d.Select(&ids, `SELECT id FROM devices WHERE status = 'online'`)
+		err := d.Select(&ids,
+			`SELECT id FROM devices
+			 WHERE status = 'online'
+			   AND last_seen_at IS NOT NULL
+			   AND last_seen_at < ?`,
+			now.Add(-threshold))
 		if err != nil {
-			log.Debug().Err(err).Msg("offline sweep: list online devices")
+			log.Debug().Err(err).Msg("offline sweep: list stale devices")
 			continue
 		}
-		now := time.Now().UTC()
 
 		// Collect first, then write in ONE transaction. A per-device UPDATE
 		// would mean 10,000 separate write transactions every sweep on a large

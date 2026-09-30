@@ -30,9 +30,11 @@ func TestCheckExtensionMatches(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			msg, ok := checkExtensionMatches(tc.osTarget, tc.pkgType, tc.fileName)
+			// tc.osTarget is not passed: the check is not platform-aware, so
+			// naming the OS in each case documents intent rather than input.
+			msg, ok := checkExtensionMatches(tc.pkgType, tc.fileName)
 			if ok != tc.wantOK {
-				t.Fatalf("checkExtensionMatches(%q, %q, %q) ok = %v, want %v (msg %q)",
+				t.Fatalf("checkExtensionMatches(%s, %q, %q) ok = %v, want %v (msg %q)",
 					tc.osTarget, tc.pkgType, tc.fileName, ok, tc.wantOK, msg)
 			}
 			// A rejection has to say why, in terms the operator can act on.

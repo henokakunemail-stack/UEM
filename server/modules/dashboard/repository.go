@@ -3,6 +3,7 @@ package dashboard
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"math"
 	"time"
@@ -37,7 +38,7 @@ func (r *Repository) GetSummary(ctx context.Context) (Summary, error) {
 			COALESCE(SUM(CASE WHEN retired_at IS NULL AND status = 'offline' THEN 1 ELSE 0 END), 0) as offline,
 			COALESCE(SUM(CASE WHEN retired_at IS NOT NULL THEN 1 ELSE 0 END), 0) as retired
 		FROM devices`
-	if err := r.db.GetContext(ctx, &c, queryCounts); err != nil && err != sql.ErrNoRows {
+	if err := r.db.GetContext(ctx, &c, queryCounts); err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return s, fmt.Errorf("dashboard count devices: %w", err)
 	}
 

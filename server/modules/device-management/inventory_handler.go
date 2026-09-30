@@ -12,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jmoiron/sqlx"
 
+	"github.com/henokakunemail-stack/Endpoint-Manager/protocol"
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/audit"
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/auth"
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/rbac"
@@ -81,12 +82,6 @@ func (h *inventoryHandler) Register(r chi.Router) { h.routes(r) }
 func (h *inventoryHandler) WithAuth(mw func(http.Handler) http.Handler) *inventoryHandler {
 	h.authMW = mw
 	return h
-}
-
-// auth authenticates the console user before any inventory route. It is set by
-// WithAuth; when unset it is a no-op, which is only acceptable in tests.
-var authMW = func(next http.Handler) http.Handler {
-	return next
 }
 
 // paginateLimit clamps the requested page size to a sane bound.
@@ -288,7 +283,7 @@ func (h *inventoryHandler) collectNow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	env, _ := json.Marshal(map[string]any{
-		"type": "inventory.collect", "id": NewID(), "ts": nowUTC().Format(time.RFC3339),
+		"type": protocol.TypeInventoryCollect, "id": NewID(), "ts": nowUTC().Format(time.RFC3339),
 	})
 	if !h.hub.SendTo(deviceID, env) {
 		writeJSON(w, http.StatusConflict, map[string]string{

@@ -64,7 +64,7 @@ func (s *JWTService) parseAccess(rawToken string) (Claims, error) {
 		return Claims{}, ErrWrongTokenKind
 	}
 	if c.Kind == "" {
-		if c.IssuedAt == nil || !c.IssuedAt.Time.After(legacyKindFloor) {
+		if c.IssuedAt == nil || !c.IssuedAt.After(legacyKindFloor) {
 			return Claims{}, ErrLegacyTokenExpired
 		}
 	}

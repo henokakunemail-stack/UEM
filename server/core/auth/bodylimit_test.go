@@ -44,7 +44,7 @@ func (c *countingReader) Read(p []byte) (int, error) {
 // purpose, and a test that reads the constant it is testing cannot.
 const capProbe = 1 << 20
 
-func newAuthRouter(t *testing.T) (*chi.Mux, *LoginHandler) {
+func newAuthRouter(t *testing.T) *chi.Mux {
 	t.Helper()
 	d, err := db.Open(filepath.Join(t.TempDir(), "bodylimit.db"))
 	if err != nil {
@@ -58,7 +58,7 @@ func newAuthRouter(t *testing.T) (*chi.Mux, *LoginHandler) {
 
 	r := chi.NewRouter()
 	h.Register(r)
-	return r, h
+	return r
 }
 
 // oversizedLoginBody is valid JSON whose password field is `total` bytes long,
@@ -80,7 +80,7 @@ func oversizedLoginBody(total int) []byte {
 }
 
 func TestLoginRejectsAnOversizedBodyWithoutReadingIt(t *testing.T) {
-	r, _ := newAuthRouter(t)
+	r := newAuthRouter(t)
 
 	const bodySize = 8 << 20
 	cr := &countingReader{src: bytes.NewReader(oversizedLoginBody(bodySize))}
@@ -106,7 +106,7 @@ func TestLoginRejectsAnOversizedBodyWithoutReadingIt(t *testing.T) {
 }
 
 func TestRefreshRejectsAnOversizedBodyWithoutReadingIt(t *testing.T) {
-	r, _ := newAuthRouter(t)
+	r := newAuthRouter(t)
 
 	const bodySize = 8 << 20
 	const prefix = `{"refresh_token":"`
@@ -132,7 +132,7 @@ func TestRefreshRejectsAnOversizedBodyWithoutReadingIt(t *testing.T) {
 // broke real logins would be worse than no cap, and the natural way to break it
 // by accident is to reject on ContentLength instead of on bytes actually read.
 func TestASmallLoginBodyIsReadInFull(t *testing.T) {
-	r, _ := newAuthRouter(t)
+	r := newAuthRouter(t)
 
 	const body = `{"username":"admin","password":"short"}`
 	cr := &countingReader{src: bytes.NewReader([]byte(body))}
@@ -161,7 +161,7 @@ func TestASmallLoginBodyIsReadInFull(t *testing.T) {
 // route that did read a body, so the cap stays on the two routes that decode an
 // anonymous caller's body and nowhere else.
 func TestTheBodyCapDoesNotReachTheAuthenticatedRoutes(t *testing.T) {
-	r, _ := newAuthRouter(t)
+	r := newAuthRouter(t)
 
 	// No Authorization header: RequireAuth answers first, so this never reaches
 	// any body handling. It asserts the routes exist and are guarded, not that

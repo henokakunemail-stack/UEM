@@ -193,11 +193,3 @@ func hwModelValue(m *hwModel) string {
 	}
 	return m.Vendor + "|" + m.Product + "|" + m.SerialNumber
 }
-
-// decodeJSON is a helper for tests that need to parse an inventory section.
-func decodeJSON(s string, v any) error {
-	if s == "" {
-		return nil
-	}
-	return json.Unmarshal([]byte(s), v)
-}

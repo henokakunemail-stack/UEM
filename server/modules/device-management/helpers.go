@@ -1,13 +1,6 @@
 package devicemanagement
 
-import (
-	"context"
-	"time"
-)
-
-// backgroundCtx is used for inventory writes that outlive a single request, such
-// as an agent's report arriving over the WebSocket read loop.
-func backgroundCtx() context.Context { return context.Background() }
+import "time"
 
 func nowUTC() time.Time { return time.Now().UTC() }
 

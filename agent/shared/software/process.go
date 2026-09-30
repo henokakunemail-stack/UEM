@@ -120,7 +120,10 @@ func runProcess(ctx context.Context, name string, args []string) runResult {
 	out := capture.String()
 	switch {
 	case timedOut:
-		return runResult{exitCode: -1, output: out, err: fmt.Errorf("%w after %s", ErrTimeout, ctx.Err())}
+		// Two %w verbs: a caller matching ErrTimeout gets the sentinel, and one
+		// inspecting the context gets context.Canceled or DeadlineExceeded.
+		// Before, ctx.Err() was formatted as text and was unrecoverable.
+		return runResult{exitCode: -1, output: out, err: fmt.Errorf("%w after %w", ErrTimeout, ctx.Err())}
 	case waitErr == nil:
 		return runResult{exitCode: 0, output: out}
 	}

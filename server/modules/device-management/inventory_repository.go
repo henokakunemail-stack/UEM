@@ -3,6 +3,7 @@ package devicemanagement
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
@@ -26,7 +27,7 @@ func (r *inventoryRepository) getDevice(ctx context.Context, id string) (Device,
 	var d Device
 	err := r.db.GetContext(ctx, &d,
 		`SELECT * FROM devices WHERE id = ? AND retired_at IS NULL`, id)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return Device{}, ErrNotFound
 	}
 	if err != nil {
@@ -67,7 +68,7 @@ func (r *inventoryRepository) getInventory(ctx context.Context, deviceID string)
 	var inv DeviceInventory
 	err := r.db.GetContext(ctx, &inv,
 		`SELECT * FROM device_inventory WHERE device_id = ?`, deviceID)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return DeviceInventory{}, ErrNotFound
 	}
 	if err != nil {
@@ -141,7 +142,7 @@ func (r *inventoryRepository) createGroup(ctx context.Context, g DeviceGroup) er
 func (r *inventoryRepository) getGroup(ctx context.Context, id string) (DeviceGroup, error) {
 	var g DeviceGroup
 	err := r.db.GetContext(ctx, &g, `SELECT * FROM device_groups WHERE id = ?`, id)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return DeviceGroup{}, ErrNotFound
 	}
 	if err != nil {

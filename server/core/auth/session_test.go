@@ -688,7 +688,7 @@ func TestListSessionsOnlyShowsCallersOwn(t *testing.T) {
 		}
 		// The list is scoped to the caller, so user_id on the wire is both
 		// redundant and a leak if the query is ever widened.
-		if strings.Contains(string(row.JTI), "user-") {
+		if strings.Contains(row.JTI, "user-") {
 			t.Errorf("jti %q looks like a user id", row.JTI)
 		}
 	}

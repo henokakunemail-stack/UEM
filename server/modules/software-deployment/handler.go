@@ -53,7 +53,12 @@ var typeExtensions = map[string][]string{
 // checkExtensionMatches verifies a declared package type against the uploaded
 // file name. It returns a human-readable reason so the operator can correct the
 // type in the form instead of guessing from a failed task.
-func checkExtensionMatches(osTarget, pkgType, fileName string) (string, bool) {
+//
+// There is no OS dimension to this check: typeExtensions is keyed by package
+// type alone, because an extension like .msi or .deb is already unambiguous
+// about its platform. osTarget used to be a parameter here and was never read,
+// which made it look like the check was platform-aware when it was not.
+func checkExtensionMatches(pkgType, fileName string) (string, bool) {
 	exts, policed := typeExtensions[pkgType]
 	if !policed {
 		return "", true
@@ -183,7 +188,7 @@ func (h *Handler) uploadPackage(w http.ResponseWriter, r *http.Request) {
 	// 'msi' reached msiexec, which exits 1620 ("could not be opened") and
 	// leaves the operator with a failed task and no clue why. Catch it at
 	// upload, where the file name and the type are both still in hand.
-	if msg, ok := checkExtensionMatches(osTarget, pkgType, header.Filename); !ok {
+	if msg, ok := checkExtensionMatches(pkgType, header.Filename); !ok {
 		writeErr(w, http.StatusBadRequest, msg)
 		return
 	}

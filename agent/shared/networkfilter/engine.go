@@ -105,7 +105,7 @@ func (e *Engine) ApplyBlockedDomains(domains []string) (int, error) {
 			parts := strings.Split(domain, "/")
 			cleanDomain := parts[0]
 
-			sb.WriteString(fmt.Sprintf("0.0.0.0 %s\n", cleanDomain))
+			fmt.Fprintf(&sb, "0.0.0.0 %s\n", cleanDomain)
 			appliedCount++
 		}
 		sb.WriteString(MarkerEnd + "\n")
@@ -175,7 +175,7 @@ func (e *Engine) ReportFilterState(ctx context.Context, version, status string, 
 		return fmt.Errorf("marshal filter report: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", reportURL, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, reportURL, bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("create filter report request: %w", err)
 	}

@@ -2,6 +2,7 @@ package unit
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -65,11 +66,11 @@ func TestDeviceEnrollmentFlow(t *testing.T) {
 	}
 
 	// Step 4: replaying the one-time token must fail — it was consumed.
-	if err := repo.ConsumeEnrollmentToken(ctx, devicemgmt.HashToken(plain), devicemgmt.HashToken("x")); err != devicemgmt.ErrNotFound {
+	if err := repo.ConsumeEnrollmentToken(ctx, devicemgmt.HashToken(plain), devicemgmt.HashToken("x")); !errors.Is(err, devicemgmt.ErrNotFound) {
 		t.Fatalf("replay of consumed token: expected ErrNotFound, got %v", err)
 	}
 	// And an unknown token must fail too.
-	if err := repo.ConsumeEnrollmentToken(ctx, devicemgmt.HashToken("bogus"), devicemgmt.HashToken("x")); err != devicemgmt.ErrNotFound {
+	if err := repo.ConsumeEnrollmentToken(ctx, devicemgmt.HashToken("bogus"), devicemgmt.HashToken("x")); !errors.Is(err, devicemgmt.ErrNotFound) {
 		t.Fatalf("unknown token: expected ErrNotFound, got %v", err)
 	}
 }
@@ -108,7 +109,7 @@ func TestDeviceStatusTransitions(t *testing.T) {
 		t.Fatalf("expected 0 offline, got %d", len(offline))
 	}
 
-	if err := repo.UpdateStatus(ctx, "nonexistent", devicemgmt.StatusOnline, frozenNow()); err != devicemgmt.ErrNotFound {
+	if err := repo.UpdateStatus(ctx, "nonexistent", devicemgmt.StatusOnline, frozenNow()); !errors.Is(err, devicemgmt.ErrNotFound) {
 		t.Fatalf("update nonexistent: expected ErrNotFound, got %v", err)
 	}
 }

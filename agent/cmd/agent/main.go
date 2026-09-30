@@ -9,6 +9,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -79,7 +80,7 @@ func runAgent(serverURL, enrollToken, credsPath string, heartbeatSecs int) {
 
 	creds, err := enrollment.Load(credsPath)
 	if enrollToken != "" {
-		if err != nil && err != enrollment.ErrNotEnrolled {
+		if err != nil && !errors.Is(err, enrollment.ErrNotEnrolled) {
 			log.Fatal().Err(err).Msg("load existing credentials")
 		}
 		log.Info().Msg("enrolling with provided token")
@@ -448,7 +449,11 @@ func runAgent(serverURL, enrollToken, credsPath string, heartbeatSecs int) {
 		client.Close()
 	}()
 
-	if err := client.Run(ctx, info); err != nil && ctx.Err() == nil {
+	heartbeat := time.Duration(heartbeatSecs) * time.Second
+	if heartbeat <= 0 {
+		heartbeat = transport.DefaultHeartbeat
+	}
+	if err := client.Run(ctx, info, heartbeat); err != nil && ctx.Err() == nil {
 		log.Error().Err(err).Msg("transport ended")
 	}
 	log.Info().Msg("agent stopped")

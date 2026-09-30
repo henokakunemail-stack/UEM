@@ -1,6 +1,6 @@
 # Enterprise Endpoint Management Platform
 
-[![Go Version](https://img.shields.io/badge/Go-1.24%2B-blue.svg)](https://golang.org)
+[![Go Version](https://img.shields.io/badge/Go-1.26%2B-blue.svg)](https://golang.org)
 [![Pure Go](https://img.shields.io/badge/CGO-Disabled%20(Zero%20CGO)-success.svg)](https://golang.org)
 [![Web Console](https://img.shields.io/badge/Frontend-React%2019%20%2B%20TypeScript%20%2B%20Vite-blueviolet.svg)](web-console)
 [![Architecture](https://img.shields.io/badge/Architecture-Single--Binary%20Embedded-orange.svg)](#single-binary-delivery)
@@ -39,11 +39,11 @@ Enterprise-grade, central endpoint management and security compliance platform a
 
 ---
 
-## 📦 Complete Enterprise Capabilities (Phases 1 - 14)
+## 📦 Complete Enterprise Capabilities (Phases 1 - 15)
 
 | Phase | Module | Core Functionality |
 |---|---|---|
-| **Phase 1** | **Core & Transport** | WebSocket TLS server/client, JWT authentication, RBAC authorization, tamper-evident audit trail |
+| **Phase 1** | **Core & Transport** | WebSocket TLS server/client, JWT authentication, RBAC authorization, revocable sessions, single-use WebSocket tickets, tamper-evident audit trail |
 | **Phase 2** | **Device Management** | Automated hardware inventory (CPU, RAM, Disks, NICs, Battery), dynamic groups, enrollment |
 | **Phase 3** | **Executive Dashboard** | Real-time fleet health KPIs, OS breakdown, storage capacity alerts, branch distribution charts |
 | **Phase 4** | **Software Deployment** | Silent software rollouts (MSI, EXE, PKG, DEB, RPM), batching, pre/post install verification |
@@ -57,6 +57,7 @@ Enterprise-grade, central endpoint management and security compliance platform a
 | **Phase 12** | **Network & Web Filter** | Pure-Go DNS sinkholing (0.0.0.0), atomic hosts file manipulation with automatic local DNS cache flush |
 | **Phase 13** | **Agent Self-Update** | Autonomous in-place binary upgrades, SHA-256 pre-execution validation, phased canary wave rollouts |
 | **Phase 14** | **IT Asset & License Management** | Hardware Asset Management (HAM) with configurable currency valuation, Software Asset Management (SAM) live seat reconciliation |
+| **Phase 15** | **Device Maintenance** | Server-defined maintenance jobs (disk cleanup, temp purge, cache clearing) with per-device step progress and fleet-wide progress reporting |
 
 ---
 
@@ -65,17 +66,22 @@ Enterprise-grade, central endpoint management and security compliance platform a
 ```
 .
 ├── agent/                          # Outbound agent source code (Pure Go)
-│   ├── cmd/agent/                  # Multi-platform agent entrypoint & inventory collector
-│   └── shared/                     # Modular shared agent subsystems
-│       ├── enrollment/             # TLS token device enrollment
-│       ├── inventory/              # OS hardware spec collection
-│       ├── networkfilter/          # DNS sinkhole & hosts policy engine
-│       ├── patch/                  # OS patch scanning & silent installation
-│       ├── remotecontrol/          # Remote desktop capture & mouse/keyboard replay
-│       ├── remoteexec/             # Shell command execution & interactive terminal
-│       ├── software/               # Software installer runner
-│       ├── transport/              # Outbound WebSocket client with keepalive
-│       └── update/                 # Autonomous agent binary self-updater
+│   ├── cmd/agent/                  # Multi-platform agent entrypoint; per-OS shims that
+│   │                               # delegate to the collector package for that platform
+│   ├── shared/                     # Modular shared agent subsystems
+│   │   ├── enrollment/             # TLS token device enrollment
+│   │   ├── inventory/              # OS hardware spec collection + staggered scheduler
+│   │   ├── maintenance/            # Disk cleanup, temp purge, cache maintenance
+│   │   ├── networkfilter/          # DNS sinkhole & hosts policy engine
+│   │   ├── osinfo/                 # OS name/version/hostname collection
+│   │   ├── patch/                  # OS patch scanning & silent installation
+│   │   ├── remotecontrol/          # Remote desktop capture & mouse/keyboard replay
+│   │   ├── remoteexec/             # Shell command execution & interactive terminal
+│   │   ├── service/                # OS service registration (systemd, launchd, Windows SCM)
+│   │   ├── software/               # Software installer & uninstaller runner
+│   │   ├── transport/              # Outbound WebSocket client with keepalive
+│   │   └── update/                 # Autonomous agent binary self-updater
+│   ├── windows/  linux/  macos/    # Per-OS inventory collectors and OS info
 ├── deploy/                         # Production Ubuntu deployment automation
 │   ├── install-ubuntu.sh           # One-click Ubuntu server setup script
 │   ├── nginx-endpoint.conf.template# Parameterized Nginx reverse proxy (HTTPS + WebSocket)
@@ -83,28 +89,58 @@ Enterprise-grade, central endpoint management and security compliance platform a
 │   └── README-UBUNTU-DEPLOY.md     # Step-by-step production server setup guide
 ├── docs/                           # Architecture specifications & audit reports
 │   ├── architecture/               # Phase 0 through Phase 14 technical blueprints
+│   ├── installation/               # Server deployment guides (Linux, Windows, specs)
 │   └── readiness-reports/          # Verification scorecards and production audits
-├── scripts/                        # Automated PowerShell E2E test suites for all 14 phases
+├── packaging/                      # Agent & server installers
+│   ├── windows/                    # NSIS installers + build scripts
+│   ├── linux/                      # .deb package and Zenity/KDialog GUI installer
+│   └── darwin/                     # Apple .pkg installer and GUI uninstaller
+├── protocol/                       # The agent<->server wire contract, declared once
+│                                   # and aliased by both transport packages
+├── scripts/                        # Automated PowerShell E2E test suites
 ├── server/                         # Central management server source code (Pure Go)
 │   ├── cmd/server/                 # Server entrypoint with embedded Web Console
 │   │   ├── dist/                   # Production React build embedded at compile time
 │   │   ├── main.go                 # HTTP server, routing, TLS, and graceful shutdown
 │   │   └── web_embed.go            # Go embed.FS declaration
 │   ├── core/                       # Core system foundations
-│   │   ├── audit/                  # Immutable audit logging service
-│   │   ├── auth/                   # JWT creation, validation, and query token handler
-│   │   ├── db/                     # SQLite WAL engine & sequential migrations (0001-0013)
+│   │   ├── audit/                  # Tamper-evident audit logging service
+│   │   ├── auth/                   # JWT, session store, login, rate limiting, origin policy
+│   │   ├── config/                 # Environment-driven runtime configuration
+│   │   ├── db/                     # SQLite WAL engine & sequential migrations (0001-0017)
+│   │   ├── httpguard/              # Request body size limits
+│   │   ├── logger/                 # zerolog setup and in-memory log tail
 │   │   ├── rbac/                   # Role-Based Access Control context utilities
-│   │   └── transport/              # Hub WebSocket manager & agent dispatch
-│   └── modules/                    # Enterprise business logic modules (Phases 3-14)
-├── tests/integration/              # Go integration test suites
-└── web-console/                    # Modern React 19 + TypeScript + Vite Web Console
-    ├── src/
-    │   ├── components/             # Reusable UI widgets, charts, and interactive modals
-    │   ├── context/                # Authentication & Session React contexts
-    │   ├── pages/                  # 12 Operational views for all enterprise phases
-    │   └── services/               # Typed REST API client & report download helpers
-    └── package.json
+│   │   ├── transport/              # Hub WebSocket manager & agent dispatch
+│   │   └── wsticket/               # Single-use WebSocket handshake tickets
+│   └── modules/                    # Enterprise business logic modules (Phases 3-15)
+│       ├── agentupdate/            # Phase 13: agent self-update & rollout campaigns
+│       ├── alerting/               # Phase 9: rule evaluation, incidents, webhooks
+│       ├── assetlicense/           # Phase 14: hardware assets & software licenses
+│       ├── dashboard/              # Phase 3: executive fleet metrics
+│       ├── device-management/      # Phases 1-2: enrollment, inventory, groups, lifecycle
+│       ├── maintenance/            # Phase 15: device maintenance jobs & steps
+│       ├── networkfilter/          # Phase 12: DNS/web filter policies
+│       ├── patch-management/       # Phase 6: patch scanning & install jobs
+│       ├── remote-exec/            # Phase 5: command execution & terminal relay
+│       ├── remotecontrol/          # Phase 11: screen capture & input relay
+│       ├── reports/                # Phase 8: streaming CSV/JSON exports
+│       ├── software-deployment/    # Phase 4 (+15): package repository & rollouts
+│       ├── taskscheduler/          # Phase 10: script repository & scheduled jobs
+│       └── user-management/        # Phase 7: console users & role assignment
+├── tests/                          # Go integration and unit test suites
+├── web-console/                    # Modern React 19 + TypeScript + Vite Web Console
+│   ├── src/
+│   │   ├── components/             # Reusable UI widgets, charts, and interactive modals
+│   │   ├── context/                # Authentication, theme & toast React contexts
+│   │   ├── hooks/                  # Permission and shared hooks
+│   │   ├── pages/                  # 16 operational views for all enterprise phases
+│   │   ├── services/               # Typed REST API client & report download helpers
+│   │   └── types/                  # Shared DTO types mirroring the server responses
+│   ├── package.json
+│   └── vite.config.ts              # Builds straight into server/cmd/server/dist
+├── Dockerfile.server               # Container build for the management server
+├── go.mod, go.sum, LICENSE, SECURITY.md, CONTRIBUTING.md
 ```
 
 ---
@@ -181,6 +217,28 @@ plain console-free service binary. See
 [`docs/installation/server-windows.md`](docs/installation/server-windows.md)
 for the full procedure.
 
+### Container
+
+[`Dockerfile.server`](Dockerfile.server) builds the same single binary into a
+distroless image, with the console embedded at image build time and no root
+user. The database lives on a volume, so it survives a container replacement:
+
+```bash
+docker build -f Dockerfile.server -t endpoint-mgmt-server .
+
+docker volume create endpoint-mgmt-data
+
+docker run -d --name endpoint-mgmt \
+  -p 8443:8443 \
+  -e JWT_SECRET="$(openssl rand -hex 32)" \
+  -e ADMIN_PASSWORD='change-me-before-first-boot' \
+  -v endpoint-mgmt-data:/data \
+  endpoint-mgmt-server
+```
+
+`JWT_SECRET` has no default and the server refuses to start without it. Set it
+to the same value on every restart, or every issued token is invalidated.
+
 ### Full guides
 
 | Guide | Covers |
@@ -193,30 +251,39 @@ for the full procedure.
 
 ## 🧪 Verification & Automated Testing
 
-Run all Go integration test suites across all modules:
+Run all Go tests — unit, integration and per-package — the same way CI does:
+```bash
+CGO_ENABLED=0 go test -count=1 ./...
+```
+
+The integration suites alone:
 ```bash
 CGO_ENABLED=0 go test -v ./tests/integration/...
 ```
 
-Run PowerShell end-to-end verification scripts:
+Run PowerShell end-to-end verification scripts against a running server and a
+real agent. These are Windows-only and are deliberately **not** part of CI — they
+need a live desktop, a real install, and a real endpoint, so they are a
+before-release check rather than a per-commit one:
+
 ```powershell
-# E2E Patch Management
-.\scripts\e2e-patch-management.ps1
+# Core and device lifecycle
+.\scripts\e2e-live.ps1           # Phase 1: core, transport, auth
+.\scripts\e2e-inventory.ps1      # Phase 2: hardware inventory
 
-# E2E Remote Terminal & Execution
-.\scripts\e2e-remote-exec.ps1
-
-# E2E Task Scheduler
-.\scripts\e2e-task-scheduler.ps1
-
-# E2E Network & Web Filter
-.\scripts\e2e-network-filter.ps1
-
-# E2E Agent Self-Update
-.\scripts\e2e-agent-update.ps1
-
-# E2E IT Asset & Software License Management
-.\scripts\e2e-asset-license.ps1
+# Operational modules
+.\scripts\e2e-dashboard.ps1            # Phase 3: dashboard & console
+.\scripts\e2e-software-deployment.ps1  # Phase 4: software rollouts
+.\scripts\e2e-remote-exec.ps1          # Phase 5: execution & live terminal
+.\scripts\e2e-patch-management.ps1     # Phase 6: patch scan & install
+.\scripts\e2e-user-management.ps1      # Phase 7: users & RBAC
+.\scripts\e2e-reports.ps1              # Phase 8: CSV/JSON exports
+.\scripts\e2e-alerting.ps1             # Phase 9: rules & incidents
+.\scripts\e2e-task-scheduler.ps1       # Phase 10: scripts & schedules
+.\scripts\e2e-remote-control.ps1       # Phase 11: screen capture & input
+.\scripts\e2e-network-filter.ps1       # Phase 12: DNS/web filter policies
+.\scripts\e2e-agent-update.ps1         # Phase 13: agent self-update rollouts
+.\scripts\e2e-asset-license.ps1        # Phase 14: assets & license seats
 ```
 
 ---

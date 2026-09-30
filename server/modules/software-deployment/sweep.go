@@ -3,6 +3,7 @@ package softwaredeployment
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"time"
 )
 
@@ -73,7 +74,7 @@ func (r *Repository) AbandonOrphanedTasks(ctx context.Context, grace time.Durati
 	var deploymentIDs []string
 	if err := r.db.SelectContext(ctx, &deploymentIDs, `
 		SELECT DISTINCT deployment_id FROM deployment_tasks
-		WHERE status = ? AND updated_at >= ?`, TaskStatusFailedLost, now); err != nil && err != sql.ErrNoRows {
+		WHERE status = ? AND updated_at >= ?`, TaskStatusFailedLost, now); err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return n, err
 	}
 	for _, id := range deploymentIDs {

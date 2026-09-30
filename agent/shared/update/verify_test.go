@@ -58,7 +58,7 @@ func (s *blobServer) all() []string {
 
 // runApply writes `content` as the release, runs a full ApplyUpdate against a
 // throwaway "current" binary, and returns the outcome plus the server's view.
-func runApply(t *testing.T, content string) (err error, srv *blobServer) {
+func runApply(t *testing.T, content string) (srv *blobServer, err error) {
 	t.Helper()
 
 	srv = &blobServer{content: content}
@@ -76,12 +76,12 @@ func runApply(t *testing.T, content string) (err error, srv *blobServer) {
 
 	e := NewEngine(ts.URL, "dev-1", "secret")
 	e.SetExecutablePath(execPath)
-	return e.ApplyUpdate(context.Background(), UpdateParams{
+	return srv, e.ApplyUpdate(context.Background(), UpdateParams{
 		TaskID:         "task-1",
 		TargetVersion:  "2.0.0",
 		DownloadURL:    "/blob",
 		SHA256Checksum: hex.EncodeToString(sum[:]),
-	}), srv
+	})
 }
 
 // TestAnUnbootableReleaseIsNotReportedAsASuccessfulUpdate is the regression test
@@ -97,7 +97,7 @@ func runApply(t *testing.T, content string) (err error, srv *blobServer) {
 // it works fine until the machine restarts, and then it cannot start. The last
 // thing the audit trail shows for that device is a successful upgrade.
 func TestAnUnbootableReleaseIsNotReportedAsASuccessfulUpdate(t *testing.T) {
-	err, srv := runApply(t, "this is not a program; it will not boot\n")
+	srv, err := runApply(t, "this is not a program; it will not boot\n")
 	if err == nil {
 		t.Fatal("ApplyUpdate reported success for a file that is not a program")
 	}

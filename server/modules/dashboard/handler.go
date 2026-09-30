@@ -40,7 +40,7 @@ func (h *Handler) Register(r chi.Router) {
 func (h *Handler) getSummary(w http.ResponseWriter, r *http.Request) {
 	s, err := h.repo.GetSummary(r.Context())
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
+		writeErr(w, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, s)
@@ -49,7 +49,7 @@ func (h *Handler) getSummary(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) getSites(w http.ResponseWriter, r *http.Request) {
 	sites, err := h.repo.GetSiteMetrics(r.Context())
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
+		writeErr(w, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, sites)
@@ -58,7 +58,7 @@ func (h *Handler) getSites(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) getOS(w http.ResponseWriter, r *http.Request) {
 	osMetrics, err := h.repo.GetOSMetrics(r.Context())
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
+		writeErr(w, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, osMetrics)
@@ -67,7 +67,7 @@ func (h *Handler) getOS(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) getAlerts(w http.ResponseWriter, r *http.Request) {
 	alerts, err := h.repo.GetAlerts(r.Context())
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
+		writeErr(w, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, alerts)
@@ -82,7 +82,7 @@ func (h *Handler) getActivity(w http.ResponseWriter, r *http.Request) {
 	}
 	activity, err := h.repo.GetRecentActivity(r.Context(), limit)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
+		writeErr(w, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, activity)
@@ -94,6 +94,10 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
-func writeErr(w http.ResponseWriter, code int, msg string) {
-	writeJSON(w, code, map[string]string{"error": msg})
+// writeErr answers with 500. Every error path in this handler is an internal
+// one: the dashboard has no client-input validation to reject, it only reads.
+// The status is fixed rather than parameterized so that adding a genuinely
+// different failure here is a visible change instead of a silent default.
+func writeErr(w http.ResponseWriter, msg string) {
+	writeJSON(w, http.StatusInternalServerError, map[string]string{"error": msg})
 }

@@ -123,7 +123,7 @@ func (e *env) loginAs(username, password string) *httptest.ResponseRecorder {
 
 	body, _ := json.Marshal(map[string]string{"username": username, "password": password})
 	rec := httptest.NewRecorder()
-	r.ServeHTTP(rec, httptest.NewRequest("POST", "/api/auth/login", strings.NewReader(string(body))))
+	r.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(string(body))))
 	return rec
 }
 

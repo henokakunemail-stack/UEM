@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"time"
 
@@ -127,7 +128,7 @@ func (h *WSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	dev, err := h.repo.FindBySecretHash(r.Context(), devicemgmt.HashToken(secret))
-	if err == devicemgmt.ErrNotFound {
+	if errors.Is(err, devicemgmt.ErrNotFound) {
 		http.Error(w, "invalid device credentials", http.StatusUnauthorized)
 		return
 	}
@@ -179,7 +180,7 @@ func (h *WSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// device wrongly "online" until the OS notices — minutes or longer.
 	ws.SetReadLimit(1 << 20) // 1 MiB; larger frames are protocol errors
 	_ = ws.SetReadDeadline(time.Now().Add(h.readDeadline()))
-	go h.pingLoop(c, ws)
+	go h.pingLoop(c)
 	go c.writePump(done)
 
 	_ = audit.Log(r.Context(), h.db, "agent", deviceID, "agent.connect", deviceID, nil)
@@ -220,7 +221,7 @@ func (h *WSHandler) readDeadline() time.Duration {
 
 // pingLoop sends websocket pings so a silently broken connection is detected
 // within roughly one period instead of relying on TCP keepalive.
-func (h *WSHandler) pingLoop(c *Conn, ws *websocket.Conn) {
+func (h *WSHandler) pingLoop(c *Conn) {
 	ticker := time.NewTicker(15 * time.Second)
 	defer ticker.Stop()
 	for range ticker.C {

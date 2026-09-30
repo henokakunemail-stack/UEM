@@ -226,7 +226,7 @@ func TestDashboardHTTPHandlers(t *testing.T) {
 	seedDevice(t, d, "d1", "PC-HQ-01", "windows", "hq", "online", &now, nil)
 
 	// 1. GET /api/dashboard/summary
-	req := httptest.NewRequest("GET", "/api/dashboard/summary", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/dashboard/summary", nil)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
@@ -241,7 +241,7 @@ func TestDashboardHTTPHandlers(t *testing.T) {
 	}
 
 	// 2. GET /api/dashboard/sites
-	req = httptest.NewRequest("GET", "/api/dashboard/sites", nil)
+	req = httptest.NewRequest(http.MethodGet, "/api/dashboard/sites", nil)
 	w = httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
@@ -249,7 +249,7 @@ func TestDashboardHTTPHandlers(t *testing.T) {
 	}
 
 	// 3. GET /api/dashboard/os
-	req = httptest.NewRequest("GET", "/api/dashboard/os", nil)
+	req = httptest.NewRequest(http.MethodGet, "/api/dashboard/os", nil)
 	w = httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
@@ -257,7 +257,7 @@ func TestDashboardHTTPHandlers(t *testing.T) {
 	}
 
 	// 4. GET /api/dashboard/alerts
-	req = httptest.NewRequest("GET", "/api/dashboard/alerts", nil)
+	req = httptest.NewRequest(http.MethodGet, "/api/dashboard/alerts", nil)
 	w = httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
@@ -265,7 +265,7 @@ func TestDashboardHTTPHandlers(t *testing.T) {
 	}
 
 	// 5. GET /api/dashboard/activity
-	req = httptest.NewRequest("GET", "/api/dashboard/activity?limit=5", nil)
+	req = httptest.NewRequest(http.MethodGet, "/api/dashboard/activity?limit=5", nil)
 	w = httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {

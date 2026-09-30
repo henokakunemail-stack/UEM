@@ -136,7 +136,7 @@ func TestUploadReleaseRejectsAHopefulVersionAndWritesNothing(t *testing.T) {
 	_, _ = fw.Write([]byte("PAYLOAD"))
 	_ = mw.Close()
 
-	req := httptest.NewRequest("POST", "/api/agent-updates/releases", body)
+	req := httptest.NewRequest(http.MethodPost, "/api/agent-updates/releases", body)
 	req.Header.Set("Content-Type", mw.FormDataContentType())
 	rec := httptest.NewRecorder()
 	h.handleUploadRelease(rec, req)

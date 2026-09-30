@@ -27,8 +27,9 @@ Thank you for your interest in improving this project!
 
 #### Prerequisites
 
-- Go 1.24+ (the `go.mod` declares `go 1.26.8`)
-- Node.js 20+ for the web console (`web-console/`)
+- **Go 1.26.8+** — the version `go.mod` requires. An older toolchain will
+  refuse to build the module.
+- **Node.js 20+** for the web console (`web-console/`)
 - SQLite development headers are **not** required — this project uses
   `modernc.org/sqlite` (pure Go)
 
@@ -45,16 +46,22 @@ CGO_ENABLED=0 go build ./...
 
 # Run all tests
 CGO_ENABLED=0 go test -count=1 ./...
+```
 
-# Cross-compile agents
-./scripts/build-all-agents.sh   # if present, or manual GOOS/GOARCH
+Cross-compile the agent for a target with `GOOS`/`GOARCH`. There is no
+build-all script; the exact commands are in the
+[README](README.md#3-build-agent-executables-all-5-target-architectures):
+
+```bash
+CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o agent-linux-arm64 ./agent/cmd/agent
 ```
 
 #### Coding Standards
 
-- **Go**: `gofmt` / `gofumpt`, `golangci-lint` (if configured), meaningful
-  variable names, error wrapping with `%w`
-- **TypeScript/React**: `eslint`, `prettier`, functional components + hooks
+- **Go**: `gofmt` and `goimports`, enforced by
+  [`.golangci.yml`](.golangci.yml); meaningful variable names; error wrapping
+  with `%w`
+- **TypeScript/React**: `oxlint` (`npm run lint`), functional components + hooks
 - **Commits**: Conventional Commits (`feat:`, `fix:`, `chore:`, `docs:`,
   `refactor:`, `test:`)
 - **Tests**: Table-driven where applicable; `*_test.go` in the same package;
@@ -62,9 +69,10 @@ CGO_ENABLED=0 go test -count=1 ./...
 
 #### Pull Request Checklist
 
-- [ ] `go build ./...` passes
-- [ ] `go vet ./...` passes
-- [ ] `go test -count=1 ./...` passes
+- [ ] `CGO_ENABLED=0 go build ./...` passes
+- [ ] `CGO_ENABLED=0 go vet ./...` passes
+- [ ] `CGO_ENABLED=0 go test -count=1 ./...` passes
+- [ ] `golangci-lint run` is clean
 - [ ] Frontend: `npm run lint && npm run build` (if web-console changed)
 - [ ] New code has tests (unit or integration)
 - [ ] Documentation updated (README, docs/, or code comments)
@@ -81,24 +89,35 @@ vulnerabilities.
 ```
 .
 ├── agent/                    # Outbound agent (Pure Go, 5 targets)
-│   ├── cmd/agent/            # Entrypoint, inventory, OS info
-│   └── shared/               # Subsystems: enrollment, inventory, networkfilter,
-│                             # patch, remotecontrol, remoteexec, software,
-│                             # transport, update
+│   ├── cmd/agent/            # Entrypoint; per-OS shims delegating to collectors
+│   ├── shared/               # enrollment, inventory, maintenance, networkfilter,
+│                             # osinfo, patch, remotecontrol, remoteexec, service,
+│                             # software, transport, update
+│   └── windows/ linux/ macos/# Per-OS inventory collectors and OS info
 ├── deploy/                   # Ubuntu/Debian server install bundle
 │   ├── install-ubuntu.sh     # Parameterized installer
 │   ├── nginx-endpoint.conf.template
 │   └── endpoint-mgmt.service
 ├── docs/                     # Architecture specs, installation guides,
-│   └── readiness-reports/    # Phase 0-14 audit scorecards
-├── packaging/                # Agent installers (NSIS, pkg, deb) — TBD
+│   ├── architecture/         #   phase plans 0-14
+│   ├── installation/         #   Linux, Windows, hardware specs
+│   └── readiness-reports/    #   Phase 0-14 audit scorecards
+├── packaging/                # Agent and server installers — implemented
+│   ├── windows/              #   NSIS agent + server installers, build scripts
+│   ├── linux/                #   .deb package, Zenity/KDialog GUI installer
+│   └── darwin/               #   Apple .pkg installer, GUI uninstaller
+├── protocol/                 # Agent<->server wire contract, defined once
 ├── scripts/                  # E2E PowerShell test suites
 ├── server/                   # Central management server (Pure Go)
 │   ├── cmd/server/           # Entrypoint, embedded web console
-│   ├── core/                 # Auth, DB, RBAC, transport, config, audit
-│   └── modules/              # Business logic (Phases 3-14)
+│   ├── core/                 # audit, auth, config, db, httpguard, logger,
+│   │                         # rbac, transport, wsticket
+│   └── modules/              # Business logic (Phases 3-15)
 ├── tests/                    # Integration + unit test suites
 ├── web-console/              # React 19 + TypeScript + Vite SPA
+├── Dockerfile.server         # Container image build for the server
+├── start-server.ps1          # Local Windows start helper
+├── progress.md               # Session handoff notes (not committed)
 └── LICENSE, SECURITY.md, CONTRIBUTING.md
 ```
 

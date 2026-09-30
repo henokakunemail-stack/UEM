@@ -337,8 +337,15 @@ func TestHashIsStableForSameInput(t *testing.T) {
 		ActorType: "user", ActorID: "u1", Action: "auth.login", TargetID: "t1",
 		Details: `{"a":1}`, CreatedAt: time.Date(2026, 1, 2, 3, 4, 5, 6, time.UTC),
 	}
-	if entryHashOf(e) != entryHashOf(e) {
-		t.Fatal("hash not deterministic")
+	// Determinism means two independently built but identical entries hash the
+	// same, not that one call equals itself.
+	same := Entry{
+		PrevHash:  "0000000000000000000000000000000000000000000000000000000000000000",
+		ActorType: "user", ActorID: "u1", Action: "auth.login", TargetID: "t1",
+		Details: `{"a":1}`, CreatedAt: time.Date(2026, 1, 2, 3, 4, 5, 6, time.UTC),
+	}
+	if got, want := entryHashOf(same), entryHashOf(e); got != want {
+		t.Fatalf("hash not deterministic: %q != %q", got, want)
 	}
 	// Every field must be covered.
 	mutations := map[string]func(e *Entry){
