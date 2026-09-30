@@ -12,7 +12,8 @@ import (
 )
 
 const winScanScript = `
-$ErrorActionPreference = 'SilentlyContinue'
+$ErrorActionPreference = 'Stop'
+$payload = $null
 try {
     $session = New-Object -ComObject Microsoft.Update.Session
     $searcher = $session.CreateUpdateSearcher()
@@ -40,9 +41,9 @@ try {
                 elseif ($catName -match "Definition") { $cat = "definition" }
                 else { $cat = "updates" }
             }
-            $pid = if ($kb -ne "") { $kb } else { $u.Identity.UpdateID }
+            $patchIdent = if ($kb -ne "") { $kb } else { $u.Identity.UpdateID }
             $list += [PSCustomObject]@{
-                patch_id        = [string]$pid
+                patch_id        = [string]$patchIdent
                 title           = [string]$u.Title
                 description     = [string]$u.Description
                 severity        = [string]$sev
@@ -54,23 +55,34 @@ try {
             }
         }
     }
-    if ($list.Count -eq 0) {
-        Write-Output "[]"
-    } else {
-        $list | ConvertTo-Json -Compress
-    }
+    $payload = [PSCustomObject]@{ ok = $true; error = ""; patches = @($list) }
 } catch {
-    Write-Output "[]"
+    $payload = [PSCustomObject]@{ ok = $false; error = [string]$_.Exception.Message; patches = @() }
 }
+# -InputObject keeps a single-element array from collapsing into a bare object.
+ConvertTo-Json -InputObject $payload -Compress
 `
 
 func scanOS(ctx context.Context) ([]PatchItem, error) {
+	return runScanScript(ctx, winScanScript)
+}
+
+// scanEnvelope is the result document the scan script emits on both the success
+// and the failure path, so a broken scan is never indistinguishable from an
+// up-to-date device.
+type scanEnvelope struct {
+	OK      bool        `json:"ok"`
+	Error   string      `json:"error"`
+	Patches []PatchItem `json:"patches"`
+}
+
+func runScanScript(ctx context.Context, script string) ([]PatchItem, error) {
 	ctxTimeout, cancel := context.WithTimeout(ctx, 3*time.Minute)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctxTimeout, "powershell.exe",
 		"-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
-		"-Command", winScanScript)
+		"-Command", script)
 
 	out, err := cmd.Output()
 	if err != nil {
@@ -78,22 +90,34 @@ func scanOS(ctx context.Context) ([]PatchItem, error) {
 	}
 
 	trimmed := strings.TrimSpace(string(out))
-	if trimmed == "" || trimmed == "[]" {
+	if trimmed == "" {
+		return nil, fmt.Errorf("windows update scan: script produced no output")
+	}
+
+	// Tolerate the pipeline form of ConvertTo-Json, which collapses a
+	// single-element array into a bare object; -InputObject on the script side
+	// avoids this, but a hand-run or older agent may still emit it.
+	if strings.HasPrefix(trimmed, "[") {
+		var items []PatchItem
+		if err := json.Unmarshal([]byte(trimmed), &items); err != nil {
+			return nil, fmt.Errorf("unmarshal patches list: %w", err)
+		}
+		return items, nil
+	}
+
+	var env scanEnvelope
+	if err := json.Unmarshal([]byte(trimmed), &env); err != nil {
+		return nil, fmt.Errorf("unmarshal scan envelope: %w", err)
+	}
+	if !env.OK {
+		reason := env.Error
+		if reason == "" {
+			reason = "no reason reported"
+		}
+		return nil, fmt.Errorf("windows update scan failed: %s", reason)
+	}
+	if env.Patches == nil {
 		return []PatchItem{}, nil
 	}
-
-	// Output might be single object or array
-	if strings.HasPrefix(trimmed, "{") {
-		var single PatchItem
-		if err := json.Unmarshal([]byte(trimmed), &single); err != nil {
-			return nil, fmt.Errorf("unmarshal single patch: %w", err)
-		}
-		return []PatchItem{single}, nil
-	}
-
-	var items []PatchItem
-	if err := json.Unmarshal([]byte(trimmed), &items); err != nil {
-		return nil, fmt.Errorf("unmarshal patches list: %w", err)
-	}
-	return items, nil
+	return env.Patches, nil
 }
