@@ -23,10 +23,18 @@ jobs:
           cache: true
 
       - name: golangci-lint
+        # v2.11.2 is the version the repository's .golangci.yml targets: a
+        # config written for the v2 schema is rejected outright by an older v2
+        # binary rather than degraded, so the version has to be pinned rather
+        # than tracked.
         uses: golangci/golangci-lint-action@v6
         with:
-          version: v2.0
+          version: v2.11.2
           args: --timeout=5m
+        env:
+          # The repository is CGO_ENABLED=0 by design; an inherited value would
+          # make the linter probe a C toolchain the runner may not have.
+          CGO_ENABLED: "0"
 
       - name: Go build
         run: CGO_ENABLED=0 go build ./...
@@ -36,6 +44,60 @@ jobs:
 
       - name: Go test
         run: CGO_ENABLED=0 go test -count=1 ./...
+
+  windows-test:
+    name: Windows native tests
+    # The windows build tag means ubuntu-latest never compiles the real Windows
+    # code - it builds the _other.go stubs instead. Everything guarded by
+    # //go:build windows (screen capture via BitBlt, WMI inventory, the SCM
+    # service handler, the patch installer) was therefore untested in CI no
+    # matter how green the pipeline looked.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Go test
+        run: go test -count=1 ./...
+
+  windows-e2e:
+    name: E2E (${{ matrix.script }})
+    needs: windows-test
+    # Each script builds a server and an agent, runs them, and asserts over
+    # real HTTP and WebSocket. They are independent: every script binds its own
+    # port in the 18443-18456 range, so the matrix runs fully parallel.
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        script:
+          - e2e-live
+          - e2e-inventory
+          - e2e-dashboard
+          - e2e-software-deployment
+          - e2e-remote-exec
+          - e2e-user-management
+          - e2e-reports
+          - e2e-alerting
+          - e2e-task-scheduler
+          - e2e-network-filter
+          - e2e-patch-management
+          - e2e-asset-license
+          - e2e-remote-control
+          - e2e-agent-update
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Run E2E
+        shell: pwsh
+        run: ./scripts/${{ matrix.script }}.ps1
 
   cross-compile:
     name: Cross-compile agents
@@ -116,14 +178,14 @@ jobs:
           fi
           for asset in $(grep -oE '/assets/[A-Za-z0-9._-]+' "$DIST/index.html" | sort -u); do
             if [ ! -f "$DIST$asset" ]; then
-              echo "::error::index.html references $asset but it does not exist — the Go embed would serve a broken console"
+              echo "::error::index.html references $asset but it does not exist - the Go embed would serve a broken console"
               exit 1
             fi
           done
           js_count=$(ls "$DIST/assets" | grep -c '\.js$')
           css_count=$(ls "$DIST/assets" | grep -c '\.css$')
           if [ "$js_count" -ne 1 ] || [ "$css_count" -ne 1 ]; then
-            echo "::error::expected exactly 1 js and 1 css in $DIST/assets, found $js_count js and $css_count css — stale bundles from a previous build"
+            echo "::error::expected exactly 1 js and 1 css in $DIST/assets, found $js_count js and $css_count css - stale bundles from a previous build"
             exit 1
           fi
           echo "embed output verified: $(ls "$DIST/assets" | tr '\n' ' ')"
@@ -132,13 +194,20 @@ jobs:
     name: Docker smoke test
     runs-on: ubuntu-latest
     needs: [lint-test, cross-compile, frontend]
-    if: always() && github.event_name == 'pull_request'
+    # always() so a failure upstream produces this job's own diagnostic instead
+    # of skipping it - otherwise the skipped job hides which stage broke first.
+    # Runs on pull requests and on the default branch: a Dockerfile or embed
+    # change that breaks the image should fail on main, not wait for the next
+    # pull request to rediscover it.
+    if: >-
+      always()
+      && (github.event_name == 'pull_request'
+      || github.ref == format('refs/heads/{0}', github.event.repository.default_branch))
     steps:
       - uses: actions/checkout@v4
 
       - name: Build server image
-        run: |
-          docker build -t endpoint-mgmt-test -f Dockerfile.server .
+        run: docker build -t endpoint-mgmt-test -f Dockerfile.server .
 
       - name: Start server
         run: |
@@ -148,12 +217,15 @@ jobs:
             -e DB_PATH=/data/endpoint-mgmt.db \
             -e JWT_SECRET=$(openssl rand -hex 32) \
             -e ADMIN_PASSWORD=test12345 \
-            -v $(pwd)/testdata:/data \
+            -v em-smoke-data:/data \
             endpoint-mgmt-test
 
       - name: Wait for health
+        # The image carries no shell and no curl, so the wait is done by the
+        # runner against the published port, not inside the container.
         run: |
-          for i in {1..30}; do
+          set -euo pipefail
+          for i in $(seq 1 30); do
             if curl -sf http://localhost:8443/healthz >/dev/null; then
               echo "healthy"
               exit 0
@@ -166,4 +238,108 @@ jobs:
 
       - name: Cleanup
         if: always()
-        run: docker rm -f em-server || true
+        run: |
+          docker rm -f em-server || true
+          docker volume rm em-smoke-data || true
+
+  release:
+    name: Build & sign installers
+    runs-on: windows-latest
+    # Release-only. On a pull request this would need the signing secrets, and
+    # GitHub withholds them from forked pull requests anyway, so it would only
+    # ever fail for the wrong reason.
+    if: github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    needs: [lint-test, windows-test, windows-e2e, cross-compile, frontend, docker-smoke]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: web-console/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+        working-directory: web-console
+
+      - name: Build the web console
+        # Vite writes into server/cmd/server/dist, which is the go:embed source,
+        # so this has to run before the server binary is compiled or the
+        # installer ships a server serving a stale console.
+        run: npm run build
+        working-directory: web-console
+
+      - name: Install NSIS
+        run: choco install nsis --no-progress -y
+
+      - name: Build the agent installer
+        shell: pwsh
+        run: ./packaging/windows/build.ps1 -Version "${{ github.run_number }}"
+
+      - name: Build the server installer
+        shell: pwsh
+        run: ./packaging/windows/build-server.ps1 -Version "${{ github.run_number }}"
+
+      - name: Restore the signing certificate
+        # The certificate never exists in the repository or in an artifact. It is
+        # base64 in a repository secret and is materialised here, then deleted
+        # unconditionally below so a failed step does not leave it on the
+        # runner.
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $secret = $env:WINDOWS_CERTIFICATE
+          if (-not $secret) {
+            Write-Output "::error::WINDOWS_CERTIFICATE is not set; an unsigned installer must never be published"
+            exit 1
+          }
+          if (-not $env:WINDOWS_CERTIFICATE_PASSWORD) {
+            Write-Output "::error::WINDOWS_CERTIFICATE_PASSWORD is not set"
+            exit 1
+          }
+          $path = Join-Path $env:RUNNER_TEMP "publisher.pfx"
+          [IO.File]::WriteAllBytes($path, [Convert]::FromBase64String($secret))
+          Write-Host "Signing certificate restored."
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+
+      - name: Sign and verify the installers
+        shell: pwsh
+        run: |
+          ./packaging/windows/sign.ps1 `
+            -Files `
+              packaging/windows/EndpointAgent-Setup.exe,
+              packaging/windows/EndpointServer-Setup.exe,
+              agent-windows-amd64.exe,
+              server-windows-amd64.exe `
+            -CertPath "${{ runner.temp }}\publisher.pfx" `
+            -CertPassword $env:WINDOWS_CERTIFICATE_PASSWORD `
+            -TimestampUrl "http://timestamp.digicert.com"
+        env:
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+
+      - name: Delete the signing certificate
+        # if: always() so the certificate is removed on a failed signing step
+        # too. Without it, a red build leaves a usable .pfx on a runner, and
+        # hosted runners are shared.
+        if: always()
+        shell: pwsh
+        run: Remove-Item -Force -ErrorAction SilentlyContinue "${{ runner.temp }}\publisher.pfx"
+
+      - name: Upload the signed installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: signed-installers
+          retention-days: 30
+          path: |
+            packaging/windows/EndpointAgent-Setup.exe
+            packaging/windows/EndpointServer-Setup.exe

@@ -1,0 +1,46 @@
+# Dependency updates. The repository has two dependency surfaces: the Go module
+# (pinned in go.mod) and the web console (pinned in web-console/package-lock.json).
+#
+# Both are security-relevant here rather than merely maintenance. The agent
+# reaches a fleet over the network and verifies binaries by SHA-256, so a
+# compromised or broken update to the SQLite driver or the WebSocket library is a
+# fleet-wide problem, not a local one. Grouped pull requests keep the weekly
+# noise down; the security feed is not grouped, because those want a human
+# reading each one.
+
+version: 2
+
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      go-direct:
+        dependency-type: direct
+      go-indirect:
+        dependency-type: indirect
+
+  - package-ecosystem: npm
+    directory: /web-console
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      npm-production:
+        dependency-type: production
+      npm-development:
+        dependency-type: development
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      actions:
+        patterns:
+          - "*"

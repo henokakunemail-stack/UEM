@@ -1,0 +1,55 @@
+# syntax=docker/dockerfile:1
+# Multi-stage build for the management server: Go compiles the binary with the
+# React console embedded, the runtime stage is that binary on a distroless base.
+#
+# The CI docker-smoke job builds this file, so it has to work from a bare
+# checkout with no host state. Everything it needs comes from the repository.
+
+# --- build -------------------------------------------------------------------
+# Pinned to the toolchain go.mod requires. A floating 1.26 tag would let the
+# image build on a patch release CI has not seen.
+FROM golang:1.26.8 AS build
+
+WORKDIR /src
+
+# Dependencies first, so a source-only change reuses the module cache layer.
+COPY go.mod go.sum ./
+RUN go mod download
+
+# server/ has to be in place before the frontend build, because Vite writes its
+# output into server/cmd/server/dist — the directory //go:embed captures.
+COPY server/ ./server/
+COPY web-console/ ./web-console/
+
+# node_modules is excluded by .dockerignore, so this installs for this image's
+# platform rather than reusing a Windows tree from the host.
+RUN cd web-console && npm ci && npm run build
+
+# CGO_ENABLED=0 is a project invariant, not an optimisation: the binary has to
+# run on a distroless base, and the SQLite driver is the pure-Go modernc one.
+ENV CGO_ENABLED=0
+RUN go build -trimpath -ldflags="-s -w" -o /out/server ./server/cmd/server
+
+# The data directory has to exist and belong to the runtime user before the
+# image is finalised. distroless has no shell, so create it here rather than
+# relying on an entrypoint wrapper.
+RUN mkdir -p /out/data && chown 65532:65532 /out/data
+
+# --- runtime -----------------------------------------------------------------
+FROM gcr.io/distroless/static-debian12:nonroot
+
+COPY --from=build /out/server /server
+# Copied with the nonroot uid already set, so an unmounted /data is writable.
+# A host bind mount still arrives with the host's ownership — that is a docker
+# property, not something an image can override.
+COPY --from=build --chown=65532:65532 /out/data /data
+
+EXPOSE 8443
+
+ENV HTTP_ADDR=0.0.0.0:8443 \
+    DB_PATH=/data/endpoint-mgmt.db \
+    LOG_LEVEL=info
+
+VOLUME ["/data"]
+
+ENTRYPOINT ["/server"]

@@ -17,6 +17,13 @@ deploy/*-linux-*
 web-console/dist/
 web-console/node_modules/
 
+# server/cmd/server/dist is NOT ignored, and that is deliberate. //go:embed
+# captures it at compile time, and the Go CI job runs `go build ./...` without
+# installing npm first — so the compiled console has to be in the repository or
+# that job has nothing to embed. The cost is a content-hashed filename changing
+# on every build, which is why the frontend job asserts the bundle in dist is
+# the one index.html actually references.
+
 # Local runtime data (server state must never be committed)
 data/
 *.db
