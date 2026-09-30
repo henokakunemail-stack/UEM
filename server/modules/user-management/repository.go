@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jmoiron/sqlx"
@@ -91,6 +92,14 @@ func (r *Repository) List(ctx context.Context, limit int) ([]User, error) {
 	return users, nil
 }
 
+// ErrNoFields is returned when an update names no column to change.
+//
+// Without it the query below degenerates to "SET updated_at = ?", which matches
+// a row, touches nothing, and reports success. The console then shows the edit
+// as saved while nothing changed -- a silent no-op that is indistinguishable, to
+// the operator, from a working one.
+var ErrNoFields = errors.New("no fields to update")
+
 func (r *Repository) Update(ctx context.Context, id string, req UpdateUserRequest) error {
 	now := time.Now().UTC()
 	setClauses := "updated_at = ?"
@@ -111,6 +120,10 @@ func (r *Repository) Update(ctx context.Context, id string, req UpdateUserReques
 		}
 		setClauses += ", is_active = ?"
 		args = append(args, isActive)
+	}
+
+	if len(args) == 1 {
+		return ErrNoFields
 	}
 
 	args = append(args, id)
@@ -162,21 +175,19 @@ func (r *Repository) UpdateLastLogin(ctx context.Context, id string) error {
 	return err
 }
 
+// isUniqueViolation reports whether err is the database refusing a duplicate
+// username.
+//
+// The sql.ErrNoRows test that used to lead this list was wrong and not merely
+// useless: ErrNoRows means "the query matched nothing", which is what every
+// successful lookup returns nothing for, and no driver raises it from a failed
+// INSERT. A branch that can never be taken was carrying the illusion that this
+// function had been thought about. strings.Contains does the job the two
+// hand-rolled substring loops were doing, and the exact-message comparison was
+// redundant with it.
 func isUniqueViolation(err error) bool {
-	return err != nil && (errors.Is(err, sql.ErrNoRows) ||
-		fmt.Sprintf("%v", err) == "UNIQUE constraint failed: users.username" ||
-		contains(err.Error(), "UNIQUE constraint"))
-}
-
-func contains(s, sub string) bool {
-	return len(s) >= len(sub) && (s == sub || len(s) > 0 && containsSubstr(s, sub))
-}
-
-func containsSubstr(s, sub string) bool {
-	for i := 0; i <= len(s)-len(sub); i++ {
-		if s[i:i+len(sub)] == sub {
-			return true
-		}
+	if err == nil {
+		return false
 	}
-	return false
+	return strings.Contains(err.Error(), "UNIQUE constraint")
 }

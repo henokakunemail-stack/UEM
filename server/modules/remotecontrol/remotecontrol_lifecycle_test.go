@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -16,6 +17,7 @@ import (
 	_ "modernc.org/sqlite"
 
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/auth"
+	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/db"
 	devicemgmt "github.com/henokakunemail-stack/Endpoint-Manager/server/modules/device-management"
 )
 
@@ -40,7 +42,16 @@ func (nullAuditor) Log(context.Context, string, string, string, string, map[stri
 
 func rcFixture(t *testing.T) (*Handler, *sqlx.DB, *busyHub) {
 	t.Helper()
-	database, err := sqlx.Open("sqlite", ":memory:")
+	// A real file with the production DSN, for the same reason as
+	// terminal_dispatch_test.go: ":memory:" hands every connection in the pool
+	// its own private database, and this fixture dials a WebSocket, so the
+	// handler runs on whichever connection the pool gives it rather than the one
+	// these CREATE TABLEs ran on. That fixture was observed failing
+	// intermittently with "no such table"; this one has not been seen to fail,
+	// so this is preventive, not a fix for something seen. db.DSNForPath keeps
+	// busy_timeout in play, which is what turns the resulting write contention
+	// into a wait rather than SQLITE_BUSY.
+	database, err := sqlx.Open("sqlite", db.DSNForPath(filepath.Join(t.TempDir(), "remotecontrol.db")))
 	if err != nil {
 		t.Fatal(err)
 	}

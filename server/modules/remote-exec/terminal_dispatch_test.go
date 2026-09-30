@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -15,6 +16,7 @@ import (
 	_ "modernc.org/sqlite"
 
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/auth"
+	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/db"
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/rbac"
 	devicemgmt "github.com/henokakunemail-stack/Endpoint-Manager/server/modules/device-management"
 )
@@ -56,7 +58,24 @@ func (staticRoleReader) RoleFor(context.Context, string) (string, string, error)
 func terminalFixture(t *testing.T, accepts bool) (*Handler, *sqlx.DB, *recordingAudit, string) {
 	t.Helper()
 
-	database, err := sqlx.Open("sqlite", ":memory:")
+	// A real file, not ":memory:", and the production DSN -- busy_timeout, WAL
+	// and foreign keys included.
+	//
+	// Two failures lived here, and both came from this one line. ":memory:"
+	// gives every connection in a pool its own private database, so the
+	// WebSocket goroutine below, which takes a different connection from the
+	// pool than the one this fixture wrote its tables on, saw an empty database
+	// and failed with "no such table: terminal_sessions". Pointing at a file
+	// without the production DSN traded that for SQLITE_BUSY: the session
+	// writer and the fixture's inserts contend for the write lock, and only
+	// busy_timeout makes that a wait rather than an error. Both showed up as an
+	// intermittent failure, and both were the fixture, not the code under test.
+	//
+	// db.Open is deliberately not used here: it runs all 17 migrations, and
+	// these fixtures create their own narrow tables instead, so the
+	// CREATE TABLE statements below would collide with the ones the migrations
+	// already made.
+	database, err := sqlx.Open("sqlite", db.DSNForPath(filepath.Join(t.TempDir(), "terminal.db")))
 	if err != nil {
 		t.Fatal(err)
 	}

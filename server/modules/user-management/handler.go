@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/rs/zerolog/log"
 
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/auth"
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/rbac"
@@ -19,15 +20,48 @@ type AuditLogger interface {
 
 type Handler struct {
 	repo           *Repository
+	sessions       SessionRevoker
 	audit          AuditLogger
 	authMiddleware func(http.Handler) http.Handler
 }
 
-func NewHandler(repo *Repository, audit AuditLogger, authMiddleware func(http.Handler) http.Handler) *Handler {
+// SessionRevoker is the slice of auth.SessionStore this module needs.
+//
+// It is an interface because auth imports nothing from here but this package
+// should stay testable without a live session table, and because the type that
+// matters is the behaviour ("withdraw every session a user holds"), not the
+// concrete store. A nil SessionRevoker is legal and means "revoke nothing",
+// which is what the tests that are not about sessions pass.
+type SessionRevoker interface {
+	RevokeAllForUser(ctx context.Context, userID string) error
+}
+
+func NewHandler(repo *Repository, sessions SessionRevoker, audit AuditLogger, authMiddleware func(http.Handler) http.Handler) *Handler {
 	return &Handler{
 		repo:           repo,
+		sessions:       sessions,
 		audit:          audit,
 		authMiddleware: authMiddleware,
+	}
+}
+
+// revokeSessions withdraws every session a user holds.
+//
+// This is the half of account control that does not happen by itself. Writing
+// is_active = 0 stops the next login; it does not reach a console that is
+// already signed in, because the access token it is holding verifies on its
+// signature alone and RequireAuth reads no row. Without this call, deactivating
+// someone revokes their future but not their present, and a technician who was
+// dismissed keeps admin-grade API access until their token expires on its own.
+func (h *Handler) revokeSessions(r *http.Request, userID string) {
+	if h.sessions == nil {
+		return
+	}
+	if err := h.sessions.RevokeAllForUser(r.Context(), userID); err != nil {
+		// The column is already written, so the account is closed to new logins
+		// either way. Losing the revocation is still worth shouting about: it is
+		// the difference between "signed out now" and "signed out in an hour".
+		log.Error().Err(err).Str("user_id", userID).Msg("revoke all sessions failed")
 	}
 }
 
@@ -159,6 +193,13 @@ func (h *Handler) updateUser(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusNotFound, "user not found")
 			return
 		}
+		if errors.Is(err, ErrNoFields) {
+			// Not a server fault: the payload simply carried nothing to change.
+			// 400 says so, where 200 would tell the operator an edit was saved
+			// that never touched a column.
+			writeErr(w, http.StatusBadRequest, "no fields to update: send role, display_name or is_active")
+			return
+		}
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -205,6 +246,11 @@ func (h *Handler) resetPassword(w http.ResponseWriter, r *http.Request) {
 	actorID := auth.UserIDFromContext(r.Context())
 	_ = h.audit.Log(r.Context(), "user", actorID, "user.reset_password", id, map[string]string{})
 
+	// An admin resetting a password is usually doing it because the credential
+	// leaked. Leaving the thief's session live would make the reset cosmetic:
+	// the new password protects the next login, not the session already open.
+	h.revokeSessions(r, id)
+
 	writeJSON(w, http.StatusOK, map[string]string{"status": "password reset successfully"})
 }
 
@@ -250,6 +296,15 @@ func (h *Handler) changeSelfPassword(w http.ResponseWriter, r *http.Request) {
 
 	_ = h.audit.Log(r.Context(), "user", userID, "user.change_password", userID, map[string]string{})
 
+	// Deliberately no revokeSessions here, and the asymmetry with resetPassword
+	// above is the point. An admin resetting somebody else's password is
+	// usually reacting to a leak, so every session that user holds is suspect
+	// and has to go. A user changing their own password has just proved they
+	// know the current one; the likely reason is routine rotation or a shared
+	// machine, and withdrawing the session they are making the request on would
+	// sign them out mid-keystroke for no security gain. If that trade-off is
+	// wrong for a given deployment it is a one-line change, not a redesign.
+
 	writeJSON(w, http.StatusOK, map[string]string{"status": "password changed successfully"})
 }
 
@@ -272,6 +327,12 @@ func (h *Handler) deactivateUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_ = h.audit.Log(r.Context(), "user", actorID, "user.deactivate", id, map[string]string{})
+
+	// Ordering matters and is not a detail: the flag is what stops the next
+	// login, this is what ends the current one. Doing it the other way round
+	// would leave a window where the sessions are gone but the account is still
+	// open, which is a smaller version of the bug this closes.
+	h.revokeSessions(r, id)
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "user deactivated successfully"})
 }

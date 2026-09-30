@@ -363,7 +363,14 @@ func buildServer(cfg config.Config, database *sqlx.DB) (*http.Server, func()) {
 		})
 
 	// Admin console auth (public endpoints).
+	// One store, shared. It is the same table the login handler writes, the
+	// WebSocket ticket issuer reads, and user-management revokes against, so a
+	// second instance would be a second source of truth about the same sessions
+	// rather than a second connection.
+	sessionStore := auth.NewSessionStore(database, cfg.RefreshTokenTTL)
+
 	loginH := auth.NewLoginHandler(database, jwtSvc)
+	loginH.WithSessionStore(sessionStore)
 	loginH.Register(r)
 
 	// WebSocket handshakes cannot carry an Authorization header, so the console
@@ -373,7 +380,7 @@ func buildServer(cfg config.Config, database *sqlx.DB) (*http.Server, func()) {
 	// package rather than from their own fields.
 	auth.SetWebSocketTicketIssuer(
 		wsticket.NewStore(database, wsticket.DefaultMaxLive),
-		auth.NewSessionStore(database, cfg.RefreshTokenTTL),
+		sessionStore,
 	)
 
 	// Agent endpoints (authenticated by per-device secret, not JWT).
@@ -423,7 +430,7 @@ func buildServer(cfg config.Config, database *sqlx.DB) (*http.Server, func()) {
 
 	// Phase 7: user management & lifecycle.
 	userRepo := usermgmt.NewRepository(database)
-	userH := usermgmt.NewHandler(userRepo, &auditAdapter{db: database}, jwtSvc.RequireAuth)
+	userH := usermgmt.NewHandler(userRepo, sessionStore, &auditAdapter{db: database}, jwtSvc.RequireAuth)
 	userH.Register(r)
 
 	// Phase 8: reports & export engine.
