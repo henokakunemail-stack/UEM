@@ -187,6 +187,10 @@ func TestRemoteControl_PlatformCapturer(t *testing.T) {
 	// This is the check that would have caught the previous stub platforms,
 	// which reported success while returning a solid-grey placeholder — the
 	// test below passed for them because it only asserted "does not error".
+	// When the host has no interactive window station — a CI runner, a service
+	// session, a container — GetDC returns null and the capturer reports
+	// Capture: false, so the else branch below is the correct path. What used to
+	// fail here was the capturer claiming a capability its host cannot deliver.
 	if caps.Capture {
 		frame, width, height, err := capturer.CaptureScreen()
 		if err != nil {

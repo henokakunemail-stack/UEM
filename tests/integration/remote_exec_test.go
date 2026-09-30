@@ -3,6 +3,7 @@ package integration
 import (
 	"bytes"
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -197,10 +198,12 @@ func TestRemoteExecution_RepositoryOperations(t *testing.T) {
 		t.Errorf("enriched fields mismatch: operator=%s, host=%s", got.OperatorName, got.Hostname)
 	}
 
-	// Update Execution Result
+	// Update Execution Result. The device id is the execution's own, because
+	// the update is scoped to it: reporting a result for an execution this
+	// device does not own now matches no rows.
 	exitCode := 0
 	output := "Hello E2E\n"
-	err = repo.UpdateExecutionResult(context.Background(), remoteexec.ExecResultReport{
+	err = repo.UpdateExecutionResult(context.Background(), exec.DeviceID, remoteexec.ExecResultReport{
 		ExecutionID: execID,
 		Status:      remoteexec.ExecStatusCompleted,
 		ExitCode:    &exitCode,
@@ -208,6 +211,15 @@ func TestRemoteExecution_RepositoryOperations(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("update execution result: %v", err)
+	}
+
+	// The scoping is a claim about ownership, so assert it rather than assuming
+	// it: another device's report for this execution must be refused.
+	if err := repo.UpdateExecutionResult(context.Background(), "some-other-device", remoteexec.ExecResultReport{
+		ExecutionID: execID,
+		Status:      remoteexec.ExecStatusFailed,
+	}); !errors.Is(err, remoteexec.ErrNotFound) {
+		t.Errorf("another device's report was accepted: err = %v, want ErrNotFound", err)
 	}
 
 	// Verify completion

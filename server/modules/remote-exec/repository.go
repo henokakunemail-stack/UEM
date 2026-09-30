@@ -80,16 +80,27 @@ func (r *Repository) ListExecutions(ctx context.Context, deviceID string, limit 
 	return rows, nil
 }
 
-func (r *Repository) UpdateExecutionResult(ctx context.Context, report ExecResultReport) error {
+func (r *Repository) UpdateExecutionResult(ctx context.Context, deviceID string, report ExecResultReport) error {
 	now := time.Now().UTC()
 	query := `
 		UPDATE remote_executions
 		SET status = ?, exit_code = ?, output = ?, error_message = ?, completed_at = ?
-		WHERE id = ?`
-	_, err := r.db.ExecContext(ctx, query,
-		report.Status, report.ExitCode, report.Output, report.ErrorMessage, now, report.ExecutionID,
+		WHERE id = ? AND device_id = ?`
+	res, err := r.db.ExecContext(ctx, query,
+		report.Status, report.ExitCode, report.Output, report.ErrorMessage, now,
+		report.ExecutionID, deviceID,
 	)
-	return err
+	if err != nil {
+		return err
+	}
+	// No rows means either that no such execution exists or that it belongs to
+	// another device. Both answer the same way, so this cannot be used to
+	// enumerate which execution ids the fleet has.
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 func (r *Repository) CreateTerminalSession(ctx context.Context, s *TerminalSession) error {

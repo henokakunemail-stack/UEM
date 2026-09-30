@@ -45,12 +45,6 @@ func (a *recordingAudit) Log(_ context.Context, _, _, action, _ string, _ map[st
 	return nil
 }
 
-type staticRoleReader struct{}
-
-func (staticRoleReader) RoleFor(context.Context, string) (string, string, error) {
-	return "tech", rbac.RoleTechnician, nil
-}
-
 // terminalFixture builds a handler over a real database holding one device, a
 // hub that is online, and an access token for the handshake. accepts controls
 // only whether the device's queue takes the command; the device is always

@@ -176,7 +176,7 @@ func (h *Handler) executeCommand(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !h.hub.SendTo(deviceID, envBytes) {
-		_ = h.repo.UpdateExecutionResult(r.Context(), ExecResultReport{
+		_ = h.repo.UpdateExecutionResult(r.Context(), deviceID, ExecResultReport{
 			ExecutionID:  execID,
 			Status:       ExecStatusFailed,
 			ErrorMessage: strPtr("device connection busy or closed during dispatch"),
@@ -247,7 +247,14 @@ func (h *Handler) reportExecutionResult(w http.ResponseWriter, r *http.Request) 
 	}
 	rep.ExecutionID = execID
 
-	if err := h.repo.UpdateExecutionResult(r.Context(), rep); err != nil {
+	if err := h.repo.UpdateExecutionResult(r.Context(), dev.ID, rep); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			// Either no such execution, or one this device does not own. The two
+			// are deliberately indistinguishable: a difference would let an
+			// agent enumerate which execution ids exist.
+			writeErr(w, http.StatusNotFound, "execution not found")
+			return
+		}
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
