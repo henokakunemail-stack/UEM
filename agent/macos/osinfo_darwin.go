@@ -11,8 +11,6 @@ import (
 	"github.com/henokakunemail-stack/Endpoint-Manager/agent/shared/osinfo"
 )
 
-const agentVersion = "0.1.0"
-
 // Provider implements osinfo.Provider for macOS via `sw_vers`.
 type Provider struct{}
 
@@ -26,7 +24,7 @@ func (Provider) Collect() (osinfo.Info, error) {
 	product, build := swVers()
 	return osinfo.Info{
 		Name: "macos", Version: fmt.Sprintf("%s (%s)", product, build),
-		Hostname: hostname, AgentVersion: agentVersion,
+		Hostname: hostname, AgentVersion: osinfo.Version,
 	}, nil
 }
 

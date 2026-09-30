@@ -10,9 +10,6 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// agentVersion is bumped with each agent release.
-const agentVersion = "0.1.0"
-
 // Provider implements osinfo.Provider for Windows.
 type Provider struct{}
 
@@ -28,13 +25,13 @@ func (Provider) Collect() (osinfo.Info, error) {
 	v := windows.RtlGetVersion()
 	if v == nil {
 		return osinfo.Info{
-			Name: "windows", Version: "unknown", Hostname: hostname, AgentVersion: agentVersion,
+			Name: "windows", Version: "unknown", Hostname: hostname, AgentVersion: osinfo.Version,
 		}, nil
 	}
 	return osinfo.Info{
 		Name:         "windows",
 		Version:      fmt.Sprintf("%d.%d.%d", v.MajorVersion, v.MinorVersion, v.BuildNumber),
 		Hostname:     hostname,
-		AgentVersion: agentVersion,
+		AgentVersion: osinfo.Version,
 	}, nil
 }

@@ -26,7 +26,7 @@ go build -o $serverExe ./server/cmd/server
 if ($LASTEXITCODE -ne 0) { throw "Server compilation failed" }
 
 # Build agent with unique version string
-go build -ldflags "-X main.agentVersion=0.3.0-dash-e2e" -o $agentExe ./agent/cmd/agent
+go build -ldflags "-X github.com/henokakunemail-stack/Endpoint-Manager/agent/shared/osinfo.Version=0.3.0-dash-e2e" -o $agentExe ./agent/cmd/agent
 if ($LASTEXITCODE -ne 0) { throw "Agent compilation failed" }
 Pop-Location
 

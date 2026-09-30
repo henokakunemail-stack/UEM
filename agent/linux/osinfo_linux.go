@@ -10,8 +10,6 @@ import (
 	"github.com/henokakunemail-stack/Endpoint-Manager/agent/shared/osinfo"
 )
 
-const agentVersion = "0.1.0"
-
 // Provider implements osinfo.Provider for Linux via /etc/os-release.
 type Provider struct{}
 
@@ -24,7 +22,7 @@ func (Provider) Collect() (osinfo.Info, error) {
 	}
 	version := parseOSRelease()
 	return osinfo.Info{
-		Name: "linux", Version: version, Hostname: hostname, AgentVersion: agentVersion,
+		Name: "linux", Version: version, Hostname: hostname, AgentVersion: osinfo.Version,
 	}, nil
 }
 

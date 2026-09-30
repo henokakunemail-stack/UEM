@@ -9,7 +9,7 @@
 # Build (run once, from the repo root):
 #   $env:CGO_ENABLED='0'
 #   go build -o "$env:TEMP/emserver.exe" ./server/cmd/server
-#   go build -ldflags '-X main.agentVersion=0.2.0-e2e' -o "$env:TEMP/emagent-rel.exe" ./agent/cmd/agent
+#   go build -ldflags '-X github.com/henokakunemail-stack/Endpoint-Manager/agent/shared/osinfo.Version=0.2.0-e2e' -o "$env:TEMP/emagent-rel.exe" ./agent/cmd/agent
 #
 # Note on the ldflags: Windows Defender quarantines an agent binary built plain
 # `go build -o .../emagent.exe` as a false positive, which makes the run fail at

@@ -4,6 +4,7 @@ package remotecontrol
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"image"
 	"image/jpeg"
@@ -132,10 +133,53 @@ func NewPlatformCapturer() ScreenCapturer {
 	return &WindowsCapturer{held: make(map[uint16]bool)}
 }
 
+// Capabilities reports what this host can actually do, not what Windows can do
+// in general. The input paths go through SendInput, which is present on every
+// supported version, so neither of those is a stub here.
+//
+// Capture is probed with a real 1x1 BitBlt rather than assumed. Probing GetDC
+// is not enough: on a host with no interactive window station GetDC still
+// returns a valid handle and real screen metrics, and only the blit itself
+// fails with ERROR_INVALID_HANDLE. A 1x1 blit costs microseconds and is the
+// only test that tells the truth, so Capabilities never claims a capability
+// the host cannot deliver.
 func (c *WindowsCapturer) Capabilities() Capabilities {
-	// Both input paths go through SendInput, which is available on every Windows
-	// version this agent supports, so neither is a stub here.
-	return Capabilities{Capture: true, Mouse: true, Keyboard: true}
+	caps := Capabilities{Mouse: true, Keyboard: true}
+	if err := c.probeCapture(); err != nil {
+		caps.Reason = "screen capture is unavailable on this host: " + err.Error()
+		return caps
+	}
+	caps.Capture = true
+	return caps
+}
+
+// probeCapture performs a 1x1 blit and reports why it failed, if it did.
+func (c *WindowsCapturer) probeCapture() error {
+	hdcScreen, _, _ := procGetDC.Call(0)
+	if hdcScreen == 0 {
+		return errors.New("GetDC(NULL) returned a null screen device context")
+	}
+	defer procReleaseDC.Call(0, hdcScreen)
+
+	hdcMem, _, _ := procCreateCompatibleDC.Call(hdcScreen)
+	if hdcMem == 0 {
+		return errors.New("CreateCompatibleDC failed")
+	}
+	defer procDeleteDC.Call(hdcMem)
+
+	hBitmap, _, _ := procCreateCompatibleBitmap.Call(hdcScreen, 1, 1)
+	if hBitmap == 0 {
+		return errors.New("CreateCompatibleBitmap failed")
+	}
+	defer procDeleteObject.Call(hBitmap)
+
+	old, _, _ := procSelectObject.Call(hdcMem, hBitmap)
+	defer procSelectObject.Call(hdcMem, old)
+
+	if ret, _, callErr := procBitBlt.Call(hdcMem, 0, 0, 1, 1, hdcScreen, 0, 0, uintptr(SRCCOPY)); ret == 0 {
+		return fmt.Errorf("BitBlt failed: %w", callErr)
+	}
+	return nil
 }
 
 func (c *WindowsCapturer) CaptureScreen() ([]byte, int, int, error) {
@@ -168,9 +212,17 @@ func (c *WindowsCapturer) CaptureScreen() ([]byte, int, int, error) {
 	hOld, _, _ := procSelectObject.Call(hdcMem, hBitmap)
 	defer procSelectObject.Call(hdcMem, hOld)
 
-	ret, _, _ := procBitBlt.Call(hdcMem, 0, 0, uintptr(width), uintptr(height), hdcScreen, 0, 0, uintptr(SRCCOPY))
+	ret, _, callErr := procBitBlt.Call(hdcMem, 0, 0, uintptr(width), uintptr(height), hdcScreen, 0, 0, uintptr(SRCCOPY))
 	if ret == 0 {
-		return nil, 0, 0, fmt.Errorf("bitblt failed")
+		// The Win32 code is kept deliberately. A non-interactive window station
+		// (a service, a CI runner, a container) makes BitBlt fail with a code
+		// that no amount of code change will fix, and without it this error is
+		// indistinguishable from a genuine capture bug. A failed LazyProc call
+		// returns that code as its error, so wrapping it prints it.
+		if callErr == nil {
+			callErr = errors.New("unknown win32 error")
+		}
+		return nil, 0, 0, fmt.Errorf("bitblt failed on a %dx%d blit: %w", width, height, callErr)
 	}
 
 	var bi bitmapInfoHeader
