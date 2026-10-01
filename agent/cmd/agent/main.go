@@ -299,9 +299,21 @@ func runAgent(serverURL, enrollToken, credsPath string, heartbeatSecs int) {
 
 	dispatcher.Register("rc.start", func(ctx context.Context, command, id string, payload json.RawMessage) any {
 		var cfg remotecontrol.SessionConfig
-		_ = json.Unmarshal(payload, &cfg)
+		// A payload that does not decode is not a session to start. Discarding
+		// the error and carrying on produced a session with no id, which dialed
+		// the relay's root path and then failed to attach: the console waited on
+		// a desktop that could never arrive, with nothing on either side saying
+		// why. The server cannot do anything with a refusal either, so the reason
+		// goes into the log where an operator looking at the agent can find it.
+		if err := json.Unmarshal(payload, &cfg); err != nil {
+			log.Error().Err(err).Str("session", id).Msg("decode rc.start payload")
+			return map[string]string{"status": "rejected", "error": "invalid remote control request"}
+		}
 		if cfg.SessionID == "" {
 			cfg.SessionID = id
+		}
+		if cfg.RelayURL == "" {
+			return map[string]string{"status": "rejected", "error": "remote control request carried no relay url"}
 		}
 
 		rcMu.Lock()
@@ -319,6 +331,11 @@ func runAgent(serverURL, enrollToken, credsPath string, heartbeatSecs int) {
 		go func() {
 			if err := session.Start(context.Background()); err != nil {
 				log.Error().Err(err).Str("session", cfg.SessionID).Msg("remote control session failed")
+				// Tell the console why the desktop is not coming. Without it the
+				// operator watches a relay that is open and connected and has
+				// nothing else to go on, which is the state this whole path was
+				// supposed to rule out.
+				session.SendNotice("connect_failed", err.Error())
 			}
 		}()
 
@@ -326,12 +343,23 @@ func runAgent(serverURL, enrollToken, credsPath string, heartbeatSecs int) {
 	})
 
 	dispatcher.Register("rc.stop", func(ctx context.Context, command, id string, payload json.RawMessage) any {
+		var p struct {
+			SessionID string `json:"session_id"`
+		}
+		_ = json.Unmarshal(payload, &p)
+		if p.SessionID == "" {
+			p.SessionID = id
+		}
+
 		rcMu.Lock()
-		if activeRCSession != nil {
+		defer rcMu.Unlock()
+		// Only the session named by the command is stopped. Stopping whichever
+		// session happened to be active would tear down a live desktop because a
+		// stop for a session that had already ended arrived late.
+		if activeRCSession != nil && activeRCSession.ID() == p.SessionID {
 			activeRCSession.Stop()
 			activeRCSession = nil
 		}
-		rcMu.Unlock()
 		return map[string]string{"status": "stopped"}
 	})
 

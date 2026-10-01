@@ -245,7 +245,16 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
       if (msg.type === 'hello') {
         setCapabilities(msg.capabilities ?? null)
         if (msg.mode) setMode(msg.mode)
-      } else if (msg.type === 'unsupported') {
+      } else if (msg.type === 'unsupported' || msg.type === 'connect_failed' || msg.type === 'capture_failed') {
+        // The agent has already said, in as many words, why the desktop is not
+        // coming. Recording the reason and stopping here means the console
+        // shows that sentence instead of the generic stall message, which is
+        // the only thing the operator could act on. The three types are the
+        // three moments it can happen: capture is impossible on this platform,
+        // the relay socket never came up, or the stream started and then
+        // stopped being able to blit.
+        setAwaitingFirstFrame(false)
+        setCapabilities({ capture: false, mouse: false, keyboard: false, reason: msg.reason ?? '' })
         setStatus('error')
         setErrorMessage(
           msg.reason ||
@@ -288,12 +297,14 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
   useEffect(() => {
     if (!awaitingFirstFrame) return
     const timer = window.setTimeout(() => {
-      if (!hasPaintedRef.current) {
-        setStatus('stalled')
-        setErrorMessage(
-          'Connected to the relay, but the endpoint sent no screen frames. The agent may still be starting its capture backend, or remote control is unavailable on that platform.'
-        )
-      }
+      // The agent may have already said why, in which case that sentence is the
+      // diagnosis and this one is noise. Overwriting it rehid the real reason
+      // behind eight seconds of "the endpoint sent no frames".
+      if (hasPaintedRef.current || statusRef.current === 'error') return
+      setStatus('stalled')
+      setErrorMessage(
+        'Connected to the relay, but the endpoint sent no screen frames. The agent may still be starting its capture backend, or remote control is unavailable on that platform.'
+      )
     }, STALL_AFTER_MS)
     return () => window.clearTimeout(timer)
   }, [awaitingFirstFrame])

@@ -168,10 +168,40 @@ func (h *Handler) startSession(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) stopSession(w http.ResponseWriter, r *http.Request) {
 	sessionID := chi.URLParam(r, "sessionId")
+	deviceID := chi.URLParam(r, "id")
+
+	// Closing the relay is not enough. The agent's capture loop is a 10 fps
+	// ticker that only stops when the socket it writes to fails or when it is
+	// told to, and nothing told it: the server had no rc.stop dispatch at all,
+	// so ending a session from the console severed the operator's side and left
+	// the endpoint capturing and encoding a desktop into a closed socket for as
+	// long as the agent kept running -- the CPU and the disk-free bandwidth of a
+	// full-screen JPEG encode, ten times a second, for an operator who had
+	// already left.
+	//
+	// The device id comes from the path, which is authenticated, and the relay
+	// itself is closed unconditionally below, so a session id that does not
+	// belong to this device still cannot be used to stop another device's
+	// capture: the stop is addressed to a device, not to a session.
+	if h.hub != nil {
+		env := transport.Envelope{
+			Type:    transport.TypeCommand,
+			ID:      sessionID,
+			Command: "rc.stop",
+			Payload: map[string]any{"session_id": sessionID},
+		}
+		envBytes, err := json.Marshal(env)
+		if err == nil {
+			h.hub.SendTo(deviceID, envBytes)
+		}
+	}
+
 	h.relay.CloseRelay(sessionID)
 
 	operatorID := auth.UserIDFromContext(r.Context())
-	_ = h.audit.Log(r.Context(), "user", operatorID, "remotecontrol.session_stop", sessionID, nil)
+	_ = h.audit.Log(r.Context(), "user", operatorID, "remotecontrol.session_stop", sessionID, map[string]string{
+		"device_id": deviceID,
+	})
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ended"})
 }

@@ -8,13 +8,21 @@ import (
 	"fmt"
 	"image"
 	"image/jpeg"
+	"sync"
 	"syscall"
 	"unsafe"
 )
 
 var (
-	user32 = syscall.NewLazyDLL("user32.dll")
-	gdi32  = syscall.NewLazyDLL("gdi32.dll")
+	user32   = syscall.NewLazyDLL("user32.dll")
+	gdi32    = syscall.NewLazyDLL("gdi32.dll")
+	kernel32 = syscall.NewLazyDLL("kernel32.dll")
+
+	procGetCurrentThreadID = kernel32.NewProc("GetCurrentThreadId")
+
+	procOpenInputDesktop = user32.NewProc("OpenInputDesktop")
+	procSetThreadDesktop = user32.NewProc("SetThreadDesktop")
+	procCloseDesktop     = user32.NewProc("CloseDesktop")
 
 	procGetSystemMetrics   = user32.NewProc("GetSystemMetrics")
 	procGetDC              = user32.NewProc("GetDC")
@@ -66,6 +74,11 @@ const (
 	// which is what makes a non-US operator's own layout produce the right
 	// character on the endpoint instead of a US one.
 	VK_PACKET = 0xE7
+
+	// desktopAll is the access mask OpenInputDesktop asks for. Read/write on the
+	// object list is the documented mask for this call; the specific values
+	// matter only in that they must be non-zero.
+	desktopAll = 0x01FF
 )
 
 type inputHeader struct {
@@ -115,6 +128,14 @@ type bitmapInfoHeader struct {
 }
 
 type WindowsCapturer struct {
+	// mu guards held. The capturer is one object shared by the capability probe,
+	// the capture loop and the input loop, which run on three different
+	// goroutines, and InjectKeyboardEvent writes here from the relay's read
+	// goroutine while ReleaseAllKeys iterates from Stop. Without the lock that
+	// is a concurrent map write, which is a runtime throw, not a lost update --
+	// and it only shows up under load, in production, on the machine being
+	// administered.
+	mu   sync.Mutex
 	held map[uint16]bool
 }
 
@@ -130,7 +151,57 @@ func NewPlatformCapturer() ScreenCapturer {
 	// it returns 0 and changes nothing.
 	_, _, _ = procSetProcessDPIAware.Call()
 
+	// Attach before the first probe, not after it: a process launched without
+	// a desktop has nothing to blit from, so probeCapture would report the
+	// capability as missing when the fix is a single call away.
+	_ = attachToInputDesktop()
+
 	return &WindowsCapturer{held: make(map[uint16]bool)}
+}
+
+// attachToInputDesktop gives the calling thread a desktop to draw from.
+//
+// A process started without a desktop -- an agent launched by a scheduled task
+// or a service, or any session-0 process -- still inherits the interactive
+// window station, so GetDC(NULL) returns a real handle and GetSystemMetrics
+// reports the real resolution. Only the blit fails, with ERROR_INVALID_HANDLE.
+// The capture therefore reported the host as unable to capture when the host was
+// in fact a normal desktop that this process had simply never been attached to.
+//
+// OpenInputDesktop followed by SetThreadDesktop is the documented repair, and it
+// is what .NET's CopyFromScreen also needs: in the same process context
+// CopyFromScreen failed with the identical error, which is what ruled out a
+// Go-specific defect and pointed at the missing attachment.
+//
+// A thread can only be attached once, and only before it has created any
+// windows, so the attach is recorded per thread: CaptureScreen runs on the
+// streaming goroutine, not on the one that built the capturer, and attaching
+// only the constructor's thread would leave the capture goroutine with the same
+// empty desktop it started with.
+//
+// A failure is not fatal here. An already-attached thread, a host with no
+// interactive desktop, and a locked workstation all refuse the call, and in
+// each of those the blit below is what decides whether streaming is possible --
+// so the caller inspects the blit, not this error.
+var attachedThreads sync.Map
+
+func attachToInputDesktop() error {
+	tid, _, _ := procGetCurrentThreadID.Call()
+	if _, done := attachedThreads.Load(tid); done {
+		return nil
+	}
+
+	hDesktop, _, callErr := procOpenInputDesktop.Call(0, 0, desktopAll)
+	if hDesktop == 0 {
+		return fmt.Errorf("open input desktop: %w", callErr)
+	}
+	defer procCloseDesktop.Call(hDesktop)
+
+	if ret, _, callErr := procSetThreadDesktop.Call(hDesktop); ret == 0 {
+		return fmt.Errorf("set thread desktop: %w", callErr)
+	}
+	attachedThreads.Store(tid, true)
+	return nil
 }
 
 // Capabilities reports what this host can actually do, not what Windows can do
@@ -155,6 +226,12 @@ func (c *WindowsCapturer) Capabilities() Capabilities {
 
 // probeCapture performs a 1x1 blit and reports why it failed, if it did.
 func (c *WindowsCapturer) probeCapture() error {
+	// The probe is the thing that decides whether the console is told the host
+	// can capture, so it has to run on an attached thread. Probing from a
+	// thread with no desktop reported a perfectly capable machine as unable to
+	// capture, and the operator was shown a dead session with no reason.
+	_ = attachToInputDesktop()
+
 	hdcScreen, _, _ := procGetDC.Call(0)
 	if hdcScreen == 0 {
 		return errors.New("GetDC(NULL) returned a null screen device context")
@@ -183,6 +260,12 @@ func (c *WindowsCapturer) probeCapture() error {
 }
 
 func (c *WindowsCapturer) CaptureScreen() ([]byte, int, int, error) {
+	// This runs on the streaming goroutine, which inherited no desktop of its
+	// own, so it attaches before asking for a screen DC. Without this the blit
+	// below fails with ERROR_INVALID_HANDLE and the operator gets an empty
+	// desktop with no explanation.
+	_ = attachToInputDesktop()
+
 	w, _, _ := procGetSystemMetrics.Call(uintptr(SM_CXSCREEN))
 	h, _, _ := procGetSystemMetrics.Call(uintptr(SM_CYSCREEN))
 	width := int(w)
@@ -373,16 +456,31 @@ func (c *WindowsCapturer) InjectKeyboardEvent(e InputEvent) error {
 	ki := keyboardInput{Vk: vk, Scan: scan, DwFlags: flags}
 	c.sendInput(input{Header: inputHeader{Type: INPUT_KEYBOARD}, Union: inputUnion{Ki: ki}})
 
+	c.mu.Lock()
 	if e.Action == "up" {
 		delete(c.held, vk)
 	} else {
 		c.held[vk] = true
 	}
+	c.mu.Unlock()
 	return nil
 }
 
 func (c *WindowsCapturer) ReleaseAllKeys() error {
+	// The set is copied under the lock and the sends happen outside it:
+	// SendInput is a syscall that can block, and holding the lock across it
+	// would serialise every keystroke behind a stuck input queue. The copy is
+	// what makes it safe -- a key that goes up while this runs is simply
+	// released twice, which the input layer discards.
+	c.mu.Lock()
+	pending := make([]uint16, 0, len(c.held))
 	for vk := range c.held {
+		pending = append(pending, vk)
+	}
+	c.held = make(map[uint16]bool)
+	c.mu.Unlock()
+
+	for _, vk := range pending {
 		scan := uint16(0)
 		if ret, _, _ := procMapVirtualKeyExW.Call(uintptr(vk), uintptr(MAPVK_VK_TO_VSC_EX), 0); ret != 0 {
 			scan = uint16(ret)
@@ -396,7 +494,6 @@ func (c *WindowsCapturer) ReleaseAllKeys() error {
 		}
 		ki := keyboardInput{Vk: vk, Scan: scan, DwFlags: flags}
 		c.sendInput(input{Header: inputHeader{Type: INPUT_KEYBOARD}, Union: inputUnion{Ki: ki}})
-		delete(c.held, vk)
 	}
 	return nil
 }

@@ -163,6 +163,10 @@ func (s *Session) Stop() {
 	})
 }
 
+// ID reports the session this object represents, so a stop command can name the
+// session it means instead of whatever happened to be running.
+func (s *Session) ID() string { return s.config.SessionID }
+
 func (s *Session) currentMode() string {
 	s.modeMu.RLock()
 	defer s.modeMu.RUnlock()
@@ -192,6 +196,22 @@ func (s *Session) sendControl(v map[string]any) error {
 		return fmt.Errorf("session not connected")
 	}
 	return s.conn.WriteMessage(websocket.TextMessage, b)
+}
+
+// SendNotice pushes a one-way control message to the console, for the cases
+// where the failure happens before or instead of the frame stream.
+//
+// The stream loop already says "unsupported" when capture is impossible, but a
+// dial that never completes and a socket that drops during the handshake have no
+// frame to hide behind: the console would sit on an open relay showing nothing,
+// which is the exact state this module is supposed to rule out. notice is the
+// message type the console keys on; detail is the sentence it puts in front of
+// the operator.
+func (s *Session) SendNotice(notice, detail string) {
+	_ = s.sendControl(map[string]any{
+		"type":   notice,
+		"reason": detail,
+	})
 }
 
 func (s *Session) readInputLoop() {
@@ -252,6 +272,10 @@ func (s *Session) streamFramesLoop() {
 		return
 	}
 
+	// captureFailures counts consecutive blit failures so a repeat is reported
+	// once rather than on every tick.
+	captureFailures := 0
+
 	for {
 		select {
 		case <-s.stopChan:
@@ -259,9 +283,19 @@ func (s *Session) streamFramesLoop() {
 		case <-ticker.C:
 			frameData, width, height, err := s.capturer.CaptureScreen()
 			if err != nil {
+				// A single blit can fail on a moment when the desktop is being
+				// switched, and the next tick recovers. Looping forever in silence
+				// is the other outcome: the relay stays open, the console stays
+				// black, and nothing anywhere says the endpoint is in a state
+				// where it cannot be captured. Three in a row is not a blip.
+				captureFailures++
+				if captureFailures == 3 {
+					s.SendNotice("capture_failed", err.Error())
+				}
 				log.Debug().Err(err).Msg("capture screen error")
 				continue
 			}
+			captureFailures = 0
 			if len(frameData) == 0 {
 				continue
 			}
