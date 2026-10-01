@@ -375,7 +375,34 @@ type taskResultReq struct {
 	Status       string `json:"status"`
 	ExitCode     int    `json:"exit_code"`
 	OutputLog    string `json:"output_log"`
+	Output       string `json:"output"`
 	ErrorMessage string `json:"error_message"`
+}
+
+// normalizeTaskStatus maps the agent's vocabulary onto this module's.
+//
+// The executor in agent/shared/remoteexec is shared by two features, so it
+// reports in its own words: "completed", "failed", "timeout". This table's
+// terminal set is ('success', 'failed'), so a "completed" report landed as a
+// nonterminal status. The device row then read 'completed', which is not in
+// that set either, and SyncRunStatus counted it as still running -- so the run
+// stayed 'running' with a NULL completed_at forever, on exactly the path that
+// had just worked. Nothing in the console renders "completed" on this table,
+// so the operator saw a row in a state no code path could ever close.
+func normalizeTaskStatus(status string, exitCode int) string {
+	switch status {
+	case "completed":
+		return "success"
+	case "failed", "timeout":
+		return "failed"
+	case "success", "":
+		if exitCode == 0 {
+			return "success"
+		}
+		return "failed"
+	default:
+		return status
+	}
 }
 
 func (h *Handler) reportTaskResult(w http.ResponseWriter, r *http.Request) {
@@ -404,13 +431,10 @@ func (h *Handler) reportTaskResult(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Status == "" {
-		if req.ExitCode == 0 {
-			req.Status = "success"
-		} else {
-			req.Status = "failed"
-		}
+	if req.OutputLog == "" {
+		req.OutputLog = req.Output
 	}
+	req.Status = normalizeTaskStatus(req.Status, req.ExitCode)
 
 	if err := h.repo.UpdateDeviceRunResult(r.Context(), taskID, req.Status, req.ExitCode, req.OutputLog, req.ErrorMessage); err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())

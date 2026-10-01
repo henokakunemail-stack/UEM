@@ -104,7 +104,14 @@ func (f *runFixture) handler() *Handler {
 // report posts a result as the given device, exactly as the agent would.
 func (f *runFixture) report(t *testing.T, deviceID, deviceRunID, status string) *httptest.ResponseRecorder {
 	t.Helper()
-	body := `{"status":"` + status + `","exit_code":0,"output_log":"done"}`
+	return f.reportRaw(t, deviceID, deviceRunID,
+		`{"status":"`+status+`","exit_code":0,"output_log":"done"}`)
+}
+
+// reportRaw posts a body verbatim, so a test can use the agent's own wire
+// format instead of this module's.
+func (f *runFixture) reportRaw(t *testing.T, deviceID, deviceRunID, body string) *httptest.ResponseRecorder {
+	t.Helper()
 	req := httptest.NewRequest(http.MethodPost,
 		"/api/agent/schedules/tasks/"+deviceRunID+"/result", strings.NewReader(body))
 	req.Header.Set("X-Device-Id", deviceID)
@@ -368,6 +375,73 @@ func TestTheTriggerResponseAgreesWithTheDatabase(t *testing.T) {
 	if run.CompletedAt != nil && run.Status == "running" {
 		t.Errorf("status = \"running\" with completed_at = %v; a run cannot be both",
 			*run.CompletedAt)
+	}
+}
+
+// TestAReportInTheExecutorsVocabularyClosesTheRun is the regression test for two
+// mismatches that only a live agent could surface.
+//
+// The task scheduler dispatches "exec.run", which the agent handles in
+// agent/shared/remoteexec -- the same executor remote-exec uses. It reports in
+// its own words: status "completed", output under the key "output". This
+// handler expected status in {success, failed} and the key "output_log", so a
+// successful run wrote a device row reading "completed" and dropped the script
+// output on the floor. "completed" is not in SyncRunStatus's terminal set, so
+// the parent stayed 'running' with a NULL completed_at forever -- on the one
+// path that had just demonstrably worked.
+//
+// Every test above posts the module's own vocabulary, which is why the whole
+// suite was green while the feature did not work against a real agent.
+func TestAReportInTheExecutorsVocabularyClosesTheRun(t *testing.T) {
+	f := newRunFixture(t, []string{"d1"})
+
+	rec := f.reportRaw(t, "d1", f.deviceRunFor(t, "d1"),
+		`{"status":"completed","exit_code":0,"output":"live-agent-ok"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("report -> %d %s", rec.Code, rec.Body.String())
+	}
+
+	var status, output string
+	if err := f.db.Get(&status,
+		`SELECT status FROM scheduled_task_device_runs WHERE id = ?`,
+		f.deviceRunFor(t, "d1")); err != nil {
+		t.Fatal(err)
+	}
+	if status != "success" {
+		t.Errorf("device run status = %q, want \"success\": \"completed\" is not in "+
+			"the terminal set, so the rollup counts this run as still executing",
+			status)
+	}
+	if err := f.db.Get(&output,
+		`SELECT COALESCE(output_log, '') FROM scheduled_task_device_runs WHERE id = ?`,
+		f.deviceRunFor(t, "d1")); err != nil {
+		t.Fatal(err)
+	}
+	if output != "live-agent-ok" {
+		t.Errorf("output_log = %q, want \"live-agent-ok\": the agent sends the key "+
+			"\"output\" and this handler only ever read \"output_log\", so the "+
+			"script's actual output was silently discarded", output)
+	}
+
+	parentStatus, completedAt := f.parent(t)
+	if parentStatus != "completed" || completedAt == nil {
+		t.Errorf("parent = %q completed_at=%v, want \"completed\" with a timestamp",
+			parentStatus, completedAt)
+	}
+}
+
+// TestATimedOutReportIsRecordedAsFailed: "timeout" is the executor's word, and it
+// has to reach this table as a failure rather than a status nothing rolls up.
+func TestATimedOutReportIsRecordedAsFailed(t *testing.T) {
+	f := newRunFixture(t, []string{"d1"})
+
+	if rec := f.reportRaw(t, "d1", f.deviceRunFor(t, "d1"),
+		`{"status":"timeout","exit_code":-1,"error_message":"deadline exceeded"}`); rec.Code != http.StatusOK {
+		t.Fatalf("report -> %d %s", rec.Code, rec.Body.String())
+	}
+
+	if status, _ := f.parent(t); status != "failed" {
+		t.Errorf("parent status = %q after the device timed out, want \"failed\"", status)
 	}
 }
 

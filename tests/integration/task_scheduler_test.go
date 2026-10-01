@@ -41,10 +41,22 @@ func TestTaskScheduler_Lifecycle(t *testing.T) {
 	}
 	t.Logf("Script created: %s (SHA256: %s...)", script.Name, script.SHA256Hash[:12])
 
-	// Verify List
+	// Verify List. Migration 0018 seeds starter scripts, so the table is not
+	// empty on a migrated database; what matters is that the script just
+	// created is in the list.
 	scripts, err := repo.ListScripts(ctx)
-	if err != nil || len(scripts) != 1 {
-		t.Fatalf("expected 1 script, got: %d", len(scripts))
+	if err != nil {
+		t.Fatalf("list scripts: %v", err)
+	}
+	found := false
+	for _, s := range scripts {
+		if s.ID == script.ID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("created script %s missing from list of %d", script.ID, len(scripts))
 	}
 
 	// 2. Seed Mock Devices
