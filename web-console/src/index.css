@@ -1874,15 +1874,9 @@ body {
   color: var(--text-dim);
 }
 
-/* Login Page */
-.login-screen {
-  min-height: 100vh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 1.5rem;
-  background: radial-gradient(circle at 50% 20%, #1e293b 0%, #0b0f17 80%);
-}
+/* .login-screen is styled by styles/redesign.css. A copy used to live here and
+   was emitted after the @import, so it won the cascade and pinned the page
+   background to hardcoded navy in light mode. */
 
 .login-card {
   width: 100%;
