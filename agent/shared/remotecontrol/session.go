@@ -153,6 +153,14 @@ func (s *Session) Start(ctx context.Context) error {
 		"os":           runtime.GOOS,
 		"capabilities": s.capturer.Capabilities(),
 	}); err != nil {
+		// The dial succeeded, so this socket is now open and owned by nobody:
+		// the goroutines below were never started, so nothing else will close
+		// it. Returning without this leaks one connection per retry, and the
+		// relay sees a stream of sessions that connect and vanish.
+		s.mu.Lock()
+		_ = conn.Close()
+		s.conn = nil
+		s.mu.Unlock()
 		return fmt.Errorf("send rc hello: %w", err)
 	}
 
@@ -168,13 +176,19 @@ func (s *Session) Stop() {
 		// the operator is holding Ctrl must not leave it held on the endpoint.
 		_ = s.capturer.ReleaseAllKeys()
 
+		// The close frame is a write like any other and has to take the same
+		// lock. gorilla/websocket permits exactly one concurrent writer: two
+		// interleave their frame headers and corrupt both, so an operator
+		// clicking "End session" while a frame was in flight could splice a
+		// close opcode into the middle of a payload. The session then neither
+		// ends nor updates, with no error on either side.
 		s.mu.Lock()
 		conn := s.conn
-		s.mu.Unlock()
 		if conn != nil {
 			_ = conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, "session closed by agent"))
 			_ = conn.Close()
 		}
+		s.mu.Unlock()
 		close(s.stopChan)
 	})
 }
@@ -308,8 +322,15 @@ func (s *Session) streamFramesLoop() {
 				// is the other outcome: the relay stays open, the console stays
 				// black, and nothing anywhere says the endpoint is in a state
 				// where it cannot be captured. Three in a row is not a blip.
+				//
+				// Every third failure reports, not just the third ever. The
+				// counter is only reset by a success, so `== 3` fired once for
+				// the whole session and a capture that was broken from the start
+				// and stayed broken told the console exactly one time -- long
+				// enough ago that an operator watching later saw a silent black
+				// canvas. A persistent fault keeps saying so.
 				captureFailures++
-				if captureFailures == 3 {
+				if captureFailures%3 == 0 {
 					s.SendNotice("capture_failed", err.Error())
 				}
 				log.Debug().Err(err).Msg("capture screen error")
@@ -347,6 +368,12 @@ func (s *Session) streamFramesLoop() {
 			if err != nil {
 				return
 			}
+
+			// Only now is the baseline safe to advance. Doing it before the
+			// write marks the region as delivered on a frame that never left
+			// the agent, and the console then shows the old image there until
+			// the session ends, with nothing in any log to explain it.
+			damage.Acknowledge(rects)
 		}
 	}
 }

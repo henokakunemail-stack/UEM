@@ -168,6 +168,9 @@ func (h *Handler) handleListLicenses(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	for i := range list {
+		redactLicenseKey(list[i], r)
+	}
 	writeJSON(w, http.StatusOK, list)
 }
 
@@ -178,7 +181,29 @@ func (h *Handler) handleGetLicense(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "license not found"})
 		return
 	}
+	redactLicenseKey(l, r)
 	writeJSON(w, http.StatusOK, l)
+}
+
+// redactLicenseKey blanks the product key on the way out to a viewer.
+//
+// Both read routes are RoleViewer (handler.go:48-49) and both serialise
+// SoftwareLicense as-is, so any viewer could collect every product key in the
+// estate and try them against the vendor's portal. That is a redeemable
+// credential, not a field the console reads: AssetLicensePage lists software
+// title, publisher, type, seats and compliance, and never sends license_key on
+// create. Nothing in the UI needs it.
+//
+// Admin keeps the real value, so the technician who manages the estate can
+// still copy it out of the detail view.
+//
+// ponytail: a dedicated DTO would be the shape if the console ever started
+// editing a key in place. Until then this is one assignment.
+func redactLicenseKey(l *SoftwareLicense, r *http.Request) {
+	if rbac.RoleFromContext(r.Context()) == rbac.RoleAdmin {
+		return
+	}
+	l.LicenseKey = ""
 }
 
 func (h *Handler) handleCreateLicense(w http.ResponseWriter, r *http.Request) {

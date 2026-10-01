@@ -59,3 +59,11 @@ type roleKey struct{}
 func WithRole(ctx context.Context, role string) context.Context {
 	return context.WithValue(ctx, roleKey{}, role)
 }
+
+// RoleFromContext reads back the role WithRole stored, or "" when there is
+// none. RequireRole reads the same key, so a handler branching on this sees
+// exactly the role its gate decided on rather than a second source of truth.
+func RoleFromContext(ctx context.Context) string {
+	role, _ := ctx.Value(roleKey{}).(string)
+	return role
+}

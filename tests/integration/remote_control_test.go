@@ -202,12 +202,35 @@ func TestRemoteControl_PlatformCapturer(t *testing.T) {
 		if len(frame) == 0 {
 			t.Fatal("capabilities claim capture=true but frame data was empty")
 		}
-		// The console decodes these bytes as JPEG; a frame that is not a JPEG
-		// renders as a blank canvas with no error anywhere.
-		if len(frame) < 4 || frame[0] != 0xFF || frame[1] != 0xD8 {
-			t.Fatalf("frame is not JPEG-encoded (leading bytes % x)", frame[:min(4, len(frame))])
+		// CaptureScreen returns raw BGRA, not JPEG. Encoding here is what made it
+		// a polled screenshot: the encode cost a full pass over every pixel on
+		// every tick whether or not anything changed. Damage.Diff reads these
+		// bytes directly and EncodeFrame does the encoding per rectangle.
+		//
+		// The length is the whole contract here: a short buffer means the change
+		// detector slices past the end of it.
+		want := width * height * 4
+		if len(frame) != want {
+			t.Fatalf("BGRA frame is %d bytes, want %d for %dx%d", len(frame), want, width, height)
 		}
-		t.Logf("Screen captured: %dx%d, %d bytes JPEG", width, height, len(frame))
+		t.Logf("Screen captured: %dx%d, %d bytes BGRA", width, height, len(frame))
+
+		// The JPEG the console actually receives is produced by EncodeFrame from
+		// these bytes, so the encoding is checked there rather than here.
+		payload, err := agentrc.EncodeFrame(frame, width, height, []agentrc.Rect{{X: 0, Y: 0, W: width, H: height}})
+		if err != nil {
+			t.Fatalf("EncodeFrame on a captured frame: %v", err)
+		}
+		_, _, rects, jpegs, err := agentrc.DecodeFrame(payload)
+		if err != nil {
+			t.Fatalf("DecodeFrame: %v", err)
+		}
+		if len(rects) != 1 || len(jpegs) != 1 {
+			t.Fatalf("round trip produced %d rects and %d bodies, want 1 and 1", len(rects), len(jpegs))
+		}
+		if len(jpegs[0]) < 4 || jpegs[0][0] != 0xFF || jpegs[0][1] != 0xD8 {
+			t.Fatalf("encoded body is not JPEG (leading bytes % x)", jpegs[0][:min(4, len(jpegs[0]))])
+		}
 	} else {
 		// The honest-failure contract: a platform with no backend must say so
 		// and must not hand back a plausible-looking image.

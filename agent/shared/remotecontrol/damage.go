@@ -138,9 +138,21 @@ func (d *Damage) Diff(pixels []byte) []Rect {
 	}
 
 	rects := d.merge()
-	d.acknowledge(rects)
+	// The baseline is not advanced here. Advancing it inside Diff means a
+	// failure between this return and the socket write -- an EncodeFrame error,
+	// a dropped connection -- leaves the region marked as already sent, so it
+	// is never re-sent and the console keeps the stale image for the rest of
+	// the session with nothing logged. Acknowledge is called by the caller once
+	// the write has returned nil instead.
 	return rects
 }
+
+// Acknowledge advances the baseline over the rectangles that have been written.
+//
+// Called only after the frame is on the wire. Anything that fails before that
+// leaves the baseline where it was, so the next tick rediffs the same region
+// and resends it, which is the only outcome an operator can recover from.
+func (d *Damage) Acknowledge(rects []Rect) { d.acknowledge(rects) }
 
 // tileDiffers reports whether any pixel in a tile changed. Pixels are compared
 // eight bytes at a time because a pixel is four and the frame is a power of two
@@ -244,9 +256,23 @@ func (d *Damage) merge() []Rect {
 func (d *Damage) acknowledge(rects []Rect) {
 	rowBytes := d.width * 4
 	for _, r := range rects {
-		for y := r.Y; y < r.Y+r.H; y++ {
+		// Clamp to the frame. A rectangle is derived from the tile grid, so it
+		// should always be in range -- but acknowledge is the one function here
+		// that indexes d.previous directly, and a resolution change between the
+		// diff and the write would make an out-of-range rectangle a panic on the
+		// streaming goroutine rather than a dropped frame. Clamping degrades to
+		// a smaller update, which the next tick corrects.
+		if r.X < 0 || r.Y < 0 || r.W <= 0 || r.H <= 0 {
+			continue
+		}
+		x1 := min(r.X+r.W, d.width)
+		y1 := min(r.Y+r.H, d.height)
+		if x1 <= r.X || y1 <= r.Y {
+			continue
+		}
+		for y := r.Y; y < y1; y++ {
 			off := y*rowBytes + r.X*4
-			n := r.W * 4
+			n := (x1 - r.X) * 4
 			copy(d.previous[off:off+n], d.current[off:off+n])
 		}
 	}

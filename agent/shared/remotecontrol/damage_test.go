@@ -90,21 +90,89 @@ func TestASmallChangeCostsFarLessThanTheWholeScreen(t *testing.T) {
 	t.Logf("full frame %d bytes, one-pixel change %d bytes (%.1fx smaller)", len(full), len(small), float64(len(full))/float64(len(small)))
 }
 
+// A frame that never reaches the console must be resent. Diff used to advance
+// the baseline before the caller had written anything, so an encode failure or a
+// dropped socket marked the region as delivered anyway: the console kept the
+// previous image there for the rest of the session, and nothing anywhere said so.
+//
+// The test is the shape of that failure: diff, do not acknowledge, diff again.
+// The second diff has to report the same region, because the console still has
+// the old pixels.
+func TestARegionThatWasNeverSentIsResentOnTheNextTick(t *testing.T) {
+	const w, h = 256, 256
+	d := NewDamage()
+	d.SetSize(w, h)
+	d.Acknowledge(d.Diff(solidFrame(w, h, 0, 0, 0, 0xFF)))
+
+	changed := solidFrame(w, h, 0, 0, 0, 0xFF)
+	changed[0] ^= 0xFF
+
+	first := d.Diff(changed)
+	if len(first) == 0 {
+		t.Fatal("the change was not detected")
+	}
+
+	// The caller now fails to encode or to write, so it does not acknowledge.
+	second := d.Diff(changed)
+	if len(second) == 0 {
+		t.Fatal("the change was dropped after an unsent frame; the console would keep the old pixels for the rest of the session")
+	}
+	if second[0] != first[0] {
+		t.Errorf("the resent rectangle moved: first %+v, then %+v", first[0], second[0])
+	}
+
+	// Once it is acknowledged, it settles: an unchanged desktop must stop
+	// producing rectangles, or a static screen costs bandwidth forever.
+	d.Acknowledge(second)
+	if again := d.Diff(changed); len(again) != 0 {
+		t.Errorf("an acknowledged region is still being resent: %+v", again)
+	}
+}
+
+// An out-of-range rectangle must be dropped, not indexed. acknowledge is the
+// only place that writes d.previous directly, so an unclamped rectangle is a
+// panic on the streaming goroutine rather than a dropped frame.
+func TestAnOutOfRangeRectangleIsDroppedNotIndexed(t *testing.T) {
+	const w, h = 256, 256
+	d := NewDamage()
+	d.SetSize(w, h)
+	d.Acknowledge(d.Diff(solidFrame(w, h, 0, 0, 0, 0xFF)))
+
+	// None of these may panic. A partial rectangle has to be clamped, not
+	// rejected, so a resolution change mid-frame degrades to a smaller update
+	// that the next tick corrects.
+	d.Acknowledge([]Rect{
+		{X: -10, Y: 0, W: 32, H: 32},
+		{X: 0, Y: -10, W: 32, H: 32},
+		{X: w, Y: 0, W: 32, H: 32},
+		{X: 0, Y: h, W: 32, H: 32},
+		{X: w - 8, Y: h - 8, W: 64, H: 64},
+		{X: 10, Y: 10, W: 0, H: 0},
+		{X: 10, Y: 10, W: -5, H: -5},
+	})
+
+	if rects := d.Diff(solidFrame(w, h, 0, 0, 0, 0xFF)); len(rects) != 0 {
+		t.Errorf("the clamped acknowledgements moved the baseline: %+v", rects)
+	}
+}
+
 // A tile damaged in two consecutive frames has to be sent in both. The console
-// only ever holds what it was last sent, so acknowledging the change while still
-// comparing against a pre-change baseline would let the second frame omit the
-// second change and leave the operator looking at a mixture of two states.
+// only ever holds what it was last sent, so a change that is acknowledged as
+// delivered before it is written leaves the operator looking at a mixture of two
+// states.
 func TestATileDamagedTwiceIsSentTwice(t *testing.T) {
 	const w, h = 256, 256
 	d := NewDamage()
 	d.SetSize(w, h)
 	base := solidFrame(w, h, 0, 0, 0, 0xFF)
-	d.Diff(base)
+	d.Acknowledge(d.Diff(base))
 
 	first := append([]byte(nil), base...)
 	first[0] ^= 0xFF
 	if rects := d.Diff(first); len(rects) == 0 {
 		t.Fatal("the first change was not detected")
+	} else {
+		d.Acknowledge(rects)
 	}
 
 	second := append([]byte(nil), first...)
