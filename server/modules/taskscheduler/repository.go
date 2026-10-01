@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/jmoiron/sqlx"
@@ -220,6 +221,31 @@ func (r *Repository) GetScheduleByID(ctx context.Context, id string) (*TaskSched
 	return &s, nil
 }
 
+// nextRunAt is when an interval schedule will fire next, or nil when the
+// schedule has no computable next fire.
+//
+// The column existed in the schema and was selected on every read, but nothing
+// ever wrote it, so the console's "Next run" column showed an em dash for every
+// schedule in the installation. The poller does not use it either -- it compares
+// last_run_at against the interval -- so this is for the operator, not for
+// scheduling, and a nil is an honest "not an interval schedule" rather than a
+// bug.
+//
+// The expression is minutes as a plain integer. That is the only form
+// isRunnableScheduleType admits, so there is no cron to compute here; add the
+// parser when there is a cron to compute.
+func nextRunAt(s *TaskSchedule, from time.Time) *time.Time {
+	if !s.IsEnabled || s.ScheduleType != "interval" {
+		return nil
+	}
+	minutes, err := strconv.Atoi(s.ScheduleExpr)
+	if err != nil || minutes <= 0 {
+		return nil
+	}
+	next := from.UTC().Add(time.Duration(minutes) * time.Minute)
+	return &next
+}
+
 func (r *Repository) CreateSchedule(ctx context.Context, s *TaskSchedule) error {
 	now := time.Now().UTC()
 	if s.ID == "" {
@@ -227,14 +253,17 @@ func (r *Repository) CreateSchedule(ctx context.Context, s *TaskSchedule) error 
 	}
 	s.CreatedAt = now
 	s.UpdatedAt = now
+	s.NextRunAt = nextRunAt(s, now)
 
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO task_schedules (
 			id, name, description, script_id, target_type, target_id,
-			schedule_type, schedule_expr, is_enabled, created_by, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			schedule_type, schedule_expr, is_enabled, next_run_at, created_by,
+			created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, s.ID, s.Name, s.Description, s.ScriptID, s.TargetType, s.TargetID,
-		s.ScheduleType, s.ScheduleExpr, s.IsEnabled, s.CreatedBy, s.CreatedAt, s.UpdatedAt)
+		s.ScheduleType, s.ScheduleExpr, s.IsEnabled, s.NextRunAt, s.CreatedBy,
+		s.CreatedAt, s.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf("create schedule: %w", err)
 	}
@@ -243,13 +272,19 @@ func (r *Repository) CreateSchedule(ctx context.Context, s *TaskSchedule) error 
 
 func (r *Repository) UpdateSchedule(ctx context.Context, s *TaskSchedule) error {
 	s.UpdatedAt = time.Now().UTC()
+	// Recomputed from the new expression, not carried over: changing a schedule
+	// from every 60 minutes to every 5 has to move the column, and turning it
+	// off has to clear it.
+	s.NextRunAt = nextRunAt(s, s.UpdatedAt)
+
 	res, err := r.db.ExecContext(ctx, `
 		UPDATE task_schedules SET
 			name = ?, description = ?, script_id = ?, target_type = ?, target_id = ?,
-			schedule_type = ?, schedule_expr = ?, is_enabled = ?, updated_at = ?
+			schedule_type = ?, schedule_expr = ?, is_enabled = ?, next_run_at = ?,
+			updated_at = ?
 		WHERE id = ?
 	`, s.Name, s.Description, s.ScriptID, s.TargetType, s.TargetID,
-		s.ScheduleType, s.ScheduleExpr, s.IsEnabled, s.UpdatedAt, s.ID)
+		s.ScheduleType, s.ScheduleExpr, s.IsEnabled, s.NextRunAt, s.UpdatedAt, s.ID)
 	if err != nil {
 		return fmt.Errorf("update schedule: %w", err)
 	}
@@ -303,20 +338,36 @@ func (r *Repository) GetTargetDeviceIDs(ctx context.Context, targetType, targetI
 
 // --- Run Tracking ---
 
-func (r *Repository) CreateRun(ctx context.Context, scheduleID, scriptID string) (*ScheduledTaskRun, error) {
+// CreateRun records a new run of the schedule and moves the schedule's own
+// run timestamps forward.
+//
+// next_run_at moves with last_run_at because leaving it would promise a fire
+// time that has already passed: a schedule created at 09:00 for every 60
+// minutes would still read "10:00" after the 10:00 run dispatched, while the
+// real next one was 11:00. The poller reads neither column, so nothing would
+// break -- the operator would simply be told a stale time, which is worse than
+// the em dash it replaced.
+//
+// The schedule is passed in rather than looked up: the caller already resolved
+// it to dispatch the run, and re-reading it here would be a second query on a
+// path that already read it.
+func (r *Repository) CreateRun(ctx context.Context, schedule *TaskSchedule, scriptID string) (*ScheduledTaskRun, error) {
 	now := time.Now().UTC()
 	runID := NewID()
 
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO scheduled_task_runs (id, schedule_id, script_id, status, triggered_at)
 		VALUES (?, ?, ?, 'running', ?)
-	`, runID, scheduleID, scriptID, now)
+	`, runID, schedule.ID, scriptID, now)
 	if err != nil {
 		return nil, fmt.Errorf("create run: %w", err)
 	}
 
-	// Update schedule last_run_at
-	_, _ = r.db.ExecContext(ctx, `UPDATE task_schedules SET last_run_at = ? WHERE id = ?`, now, scheduleID)
+	if _, err := r.db.ExecContext(ctx, `
+		UPDATE task_schedules SET last_run_at = ?, next_run_at = ? WHERE id = ?`,
+		now, nextRunAt(schedule, now), schedule.ID); err != nil {
+		return nil, fmt.Errorf("record schedule run time: %w", err)
+	}
 
 	return r.GetRunByID(ctx, runID)
 }
@@ -386,7 +437,13 @@ func (r *Repository) SyncRunStatus(ctx context.Context, deviceRunID string) erro
 		`SELECT run_id FROM scheduled_task_device_runs WHERE id = ?`, deviceRunID); err != nil {
 		return err
 	}
+	return r.rollupRunByID(ctx, runID)
+}
 
+// rollupRunByID is the rollup itself, keyed by parent, so the orphan sweeper
+// can call it directly: a reaped device run has to be rolled up like a reported
+// one, and by then the only id it has left is the parent's.
+func (r *Repository) rollupRunByID(ctx context.Context, runID string) error {
 	var counts struct {
 		Total     int `db:"total"`
 		Done      int `db:"done"`

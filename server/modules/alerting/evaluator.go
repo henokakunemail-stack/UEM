@@ -243,14 +243,31 @@ func (e *Evaluator) dispatchWebhook(rule *AlertRule, inc *AlertIncident) {
 	}(rule.WebhookURL, payload)
 }
 
-// StartBackgroundEvaluator starts a periodic evaluation loop.
-func (e *Evaluator) StartBackgroundEvaluator(interval time.Duration) {
+// StartBackgroundEvaluator runs EvaluateAll on a ticker until ctx is cancelled.
+//
+// The context is not decoration. This used to be `for range ticker.C` with no
+// way out and no ticker.Stop(), so it could not be shut down at shutdown and a
+// second evaluator could be started beside a running one -- every rule then
+// evaluated twice per tick, and every incident written twice. main.go's cleanup
+// closure could not stop it because there was nothing to call.
+func (e *Evaluator) StartBackgroundEvaluator(ctx context.Context, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	go func() {
-		for range ticker.C {
-			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-			_, _ = e.EvaluateAll(ctx)
-			cancel()
+		// Inside the goroutine, not in a defer here. This function returns as
+		// soon as the goroutine is launched, so a defer on this line stopped the
+		// ticker immediately -- and a stopped ticker never fires again, so the
+		// evaluator silently evaluated nothing for the life of the process,
+		// while still looking alive and correctly stoppable.
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				evalCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+				_, _ = e.EvaluateAll(evalCtx)
+				cancel()
+			}
 		}
 	}()
 }

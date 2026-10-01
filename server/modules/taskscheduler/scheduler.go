@@ -45,7 +45,7 @@ func (s *Scheduler) TriggerSchedule(ctx context.Context, scheduleID, actorID str
 		return nil, fmt.Errorf("resolve targets: %w", err)
 	}
 
-	run, err := s.repo.CreateRun(ctx, scheduleID, script.ID)
+	run, err := s.repo.CreateRun(ctx, schedule, script.ID)
 	if err != nil {
 		return nil, fmt.Errorf("create task run: %w", err)
 	}
@@ -129,14 +129,32 @@ func (s *Scheduler) failDeviceRun(ctx context.Context, deviceRunID, reason strin
 	}
 }
 
-// StartBackgroundScheduler checks interval schedules periodically
-func (s *Scheduler) StartBackgroundScheduler(pollInterval time.Duration) {
+// StartBackgroundScheduler checks interval schedules periodically until ctx is
+// cancelled.
+//
+// The context is not decoration. This used to be `for range ticker.C` with no
+// way out and no ticker.Stop(), so it could not be stopped at shutdown, and a
+// second poller could be started beside a running one -- every due interval
+// schedule would then be dispatched twice per tick, producing two runs and two
+// executions of the same script. main.go's cleanup closure had nothing to call.
+func (s *Scheduler) StartBackgroundScheduler(ctx context.Context, pollInterval time.Duration) {
 	ticker := time.NewTicker(pollInterval)
 	go func() {
-		for range ticker.C {
-			ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
-			s.pollDueSchedules(ctx)
-			cancel()
+		// Inside the goroutine. This function returns as soon as the goroutine
+		// is launched, so a defer on this line stopped the ticker immediately --
+		// and a stopped ticker never delivers, so no schedule was ever polled
+		// and no scheduled task ever ran, while the log and the enabled flag
+		// both said otherwise.
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				pollCtx, cancel := context.WithTimeout(ctx, 1*time.Minute)
+				s.pollDueSchedules(pollCtx)
+				cancel()
+			}
 		}
 	}()
 }

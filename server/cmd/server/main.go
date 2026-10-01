@@ -438,19 +438,28 @@ func buildServer(cfg config.Config, database *sqlx.DB) (*http.Server, func()) {
 	reportsH := reports.NewHandler(reportsRepo, jwtSvc.RequireAuth)
 	reportsH.Register(r)
 
+	// Background loops that run for the life of the process. The cancel is owned
+	// by the cleanup closure at the end of this function; see the note there.
+	bgCtx, stopBackground := context.WithCancel(context.Background())
+
 	// Phase 9: alerting & notification engine.
 	alertRepo := alerting.NewRepository(database)
 	alertEval := alerting.NewEvaluator(database, alertRepo)
 	alertH := alerting.NewHandler(alertRepo, alertEval, &auditAdapter{db: database}, jwtSvc.RequireAuth)
 	alertH.Register(r)
-	alertEval.StartBackgroundEvaluator(30 * time.Second)
+	alertEval.StartBackgroundEvaluator(bgCtx, 30*time.Second)
 
 	// Phase 10: task scheduler & script repository.
 	schedRepo := taskscheduler.NewRepository(database)
 	schedulerSvc := taskscheduler.NewScheduler(schedRepo, hub)
 	schedH := taskscheduler.NewHandler(schedRepo, schedulerSvc, &auditAdapter{db: database}, jwtSvc.RequireAuth, deviceRepo)
 	schedH.Register(r)
-	schedulerSvc.StartBackgroundScheduler(30 * time.Second)
+	schedulerSvc.StartBackgroundScheduler(bgCtx, 30*time.Second)
+
+	// Scheduled-task device runs stranded by an agent that vanished mid-script.
+	// SyncRunStatus only runs from the agent result handler, so a device run
+	// that never reports leaves its parent at 'running' forever.
+	go schedRepo.StartSweep(bgCtx, taskscheduler.SweepInterval, taskscheduler.AbandonGrace)
 
 	// Phase 11: remote control & screen capture relay.
 	rcRepo := remotecontrol.NewRepository(database)
@@ -599,12 +608,20 @@ func buildServer(cfg config.Config, database *sqlx.DB) (*http.Server, func()) {
 	//   - loginH.Close stops the login rate limiter's prune ticker, so every
 	//     source IP that ever failed a login stays resident forever.
 	//
+	//   - stopBackground stops the alert evaluator and the task scheduler
+	//     poller. Both were started with their own context.Background() and a
+	//     bare `for range ticker.C`, so neither could be stopped. While the API
+	//     kept answering 200 the alert rules kept being evaluated and the due
+	//     interval schedules kept being dispatched, in a process that was on its
+	//     way down.
+	//
 	// Both are silent: the API keeps answering 200 while the thing that makes
 	// those answers correct quietly stops happening.
 	cleanup := func() {
 		wsH.Close()
 		loginH.Close()
 		stopBackups()
+		stopBackground()
 	}
 	return srv, cleanup
 }
