@@ -151,6 +151,20 @@ func (r *inventoryRepository) getGroup(ctx context.Context, id string) (DeviceGr
 	return g, nil
 }
 
+// getGroupByName exists so a duplicate name is reported as a conflict rather
+// than surfacing as a UNIQUE constraint violation from the INSERT.
+func (r *inventoryRepository) getGroupByName(ctx context.Context, name string) (DeviceGroup, error) {
+	var g DeviceGroup
+	err := r.db.GetContext(ctx, &g, `SELECT * FROM device_groups WHERE name = ?`, name)
+	if errors.Is(err, sql.ErrNoRows) {
+		return DeviceGroup{}, ErrNotFound
+	}
+	if err != nil {
+		return DeviceGroup{}, fmt.Errorf("get group by name %q: %w", name, err)
+	}
+	return g, nil
+}
+
 // listGroups returns all groups with their member counts in one query.
 func (r *inventoryRepository) listGroups(ctx context.Context) ([]GroupMemberCount, error) {
 	groups := []GroupMemberCount{}
@@ -166,9 +180,51 @@ func (r *inventoryRepository) listGroups(ctx context.Context) ([]GroupMemberCoun
 	return groups, nil
 }
 
+// groupUsers are the tables that can name a group as their target. Deleting a
+// group that any of these still points at would leave the record describing a
+// run against a target that no longer resolves, so the run would reach nobody
+// and still look successful in the history.
+var groupUsers = []struct{ table, label string }{
+	{"software_deployments", "a software deployment"},
+	{"task_schedules", "a scheduled task"},
+	{"filter_policies", "a filter policy"},
+	{"update_campaigns", "an update campaign"},
+	{"maintenance_jobs", "a maintenance job"},
+}
+
+// groupInUse returns the first feature still targeting this group, or an empty
+// string when nothing references it. The five tables are checked in a fixed
+// order so the message names the same feature every time for the same group.
+func (r *inventoryRepository) groupInUse(ctx context.Context, id string) (string, error) {
+	for _, u := range groupUsers {
+		var n int
+		if err := r.db.GetContext(ctx, &n,
+			`SELECT COUNT(*) FROM `+u.table+
+				` WHERE target_type = 'group' AND target_id = ?`, id); err != nil {
+			return "", fmt.Errorf("check %s for group %s: %w", u.table, id, err)
+		}
+		if n > 0 {
+			return u.label, nil
+		}
+	}
+	return "", nil
+}
+
 // deleteGroup removes the group and its memberships. Devices themselves are
-// untouched — membership is a property of the group, not the device.
+// untouched — membership is a property of the group, not the device. A group a
+// deployment or schedule still points at is refused: removing it would turn
+// that run into a no-op that reports success.
 func (r *inventoryRepository) deleteGroup(ctx context.Context, id string) error {
+	// Before the transaction, so the check is not held under the write lock and
+	// a refusal costs nothing.
+	label, err := r.groupInUse(ctx, id)
+	if err != nil {
+		return err
+	}
+	if label != "" {
+		return fmt.Errorf("%w by %s", ErrGroupInUse, label)
+	}
+
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("delete group: %w", err)

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -344,14 +345,26 @@ func (h *inventoryHandler) createGroup(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	if req.Name == "" {
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
 		writeErr(w, http.StatusBadRequest, "name is required")
+		return
+	}
+	// Names are UNIQUE in the schema, and the group picker renders them, so two
+	// groups that display identically would be indistinguishable to whoever
+	// retargets a run. 409 names the clash; 500 would report a server fault for
+	// what is a duplicate submission.
+	if _, err := h.repo.getGroupByName(r.Context(), name); err == nil {
+		writeErr(w, http.StatusConflict, "a group named "+name+" already exists")
+		return
+	} else if !errors.Is(err, ErrNotFound) {
+		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	g := DeviceGroup{
 		ID:          NewID(),
-		Name:        req.Name,
-		Description: req.Description,
+		Name:        name,
+		Description: strings.TrimSpace(req.Description),
 		CreatedAt:   nowUTC(),
 		UpdatedAt:   nowUTC(),
 	}
@@ -369,6 +382,13 @@ func (h *inventoryHandler) deleteGroup(w http.ResponseWriter, r *http.Request) {
 	if err := h.repo.deleteGroup(r.Context(), groupID); err != nil {
 		if errors.Is(err, ErrNotFound) {
 			writeErr(w, http.StatusNotFound, "group not found")
+			return
+		}
+		// 409, not 500: nothing is wrong with the server, the group is simply
+		// still the target of something. The message names the blocker so the
+		// operator knows what to retarget first.
+		if errors.Is(err, ErrGroupInUse) {
+			writeErr(w, http.StatusConflict, err.Error())
 			return
 		}
 		writeErr(w, http.StatusInternalServerError, err.Error())

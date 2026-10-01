@@ -245,13 +245,22 @@ export const api = {
   },
 
   // Device Management APIs
-  async getDevices(limit = 20, offset = 0, status = '', site = ''): Promise<DeviceListResponse> {
+  // groupId is optional and last so every existing call site keeps working. The
+  // server routes it to the group listing (device-management/handler.go:79).
+  async getDevices(
+    limit = 20,
+    offset = 0,
+    status = '',
+    site = '',
+    groupId = ''
+  ): Promise<DeviceListResponse> {
     const params = new URLSearchParams({
       limit: limit.toString(),
       offset: offset.toString(),
     })
     if (status) params.append('status', status)
     if (site) params.append('site', site)
+    if (groupId) params.append('group_id', groupId)
     return request<DeviceListResponse>(`/api/devices?${params.toString()}`)
   },
 
@@ -731,6 +740,50 @@ export const api = {
   async getDeviceGroups(): Promise<DeviceGroupDTO[]> {
     const res = await request<{ groups: DeviceGroupDTO[]; count: number }>('/api/groups')
     return res.groups || []
+  },
+
+  // Group administration. All four routes already exist on the server
+  // (device-management/inventory_handler.go:216-221); this is the first caller.
+  //
+  // deleteGroup rejects with 409 when a deployment, schedule, filter policy,
+  // update campaign or maintenance job still targets the group. That surfaces
+  // as a thrown Error carrying the server's message, which names the blocker.
+  async createDeviceGroup(name: string, description: string): Promise<DeviceGroupDTO> {
+    return request<DeviceGroupDTO>('/api/groups', {
+      method: 'POST',
+      body: JSON.stringify({ name, description }),
+    })
+  },
+
+  async deleteDeviceGroup(id: string): Promise<void> {
+    await request<{ status: string }>(`/api/groups/${id}`, { method: 'DELETE' })
+  },
+
+  // Returns how many memberships were actually created. Re-adding a device the
+  // group already holds is a no-op on the server (PRIMARY KEY), so the count
+  // can be lower than the number of ids sent — the caller reports the real
+  // number rather than claiming every selection landed.
+  async addGroupMembers(groupId: string, deviceIds: string[]): Promise<number> {
+    const res = await request<{ added: number }>(`/api/groups/${groupId}/members`, {
+      method: 'POST',
+      body: JSON.stringify({ device_ids: deviceIds }),
+    })
+    return res.added
+  },
+
+  async removeGroupMember(groupId: string, deviceId: string): Promise<void> {
+    await request<{ status: string }>(`/api/groups/${groupId}/members/${deviceId}`, {
+      method: 'DELETE',
+    })
+  },
+
+  // The Devices tab filters by group through the same ?group_id= parameter the
+  // list endpoint already accepts (device-management/handler.go:74), so no
+  // second listing route is needed.
+  async getGroupDevices(groupId: string, limit = 50, offset = 0): Promise<DeviceListResponse> {
+    return request<DeviceListResponse>(
+      `/api/groups/${groupId}/devices?limit=${limit}&offset=${offset}`
+    )
   },
 
   // User Management APIs (Phase 7)

@@ -18,6 +18,10 @@ export type DeviceStatus = (typeof DEVICE_STATUSES)[number]
 export const PAGE_SIZES = [10, 25, 50] as const
 export type PageSize = (typeof PAGE_SIZES)[number]
 
+/** Which panel of the Devices page is showing. */
+export const DEVICE_TABS = ['devices', 'groups'] as const
+export type DeviceTab = (typeof DEVICE_TABS)[number]
+
 /** Upper bound on the page number. Beyond this the offset overflows into
  *  values a server would reject, and no one paginates that far by hand. */
 export const MAX_PAGE = 100_000
@@ -31,6 +35,9 @@ export interface DevicesQuery {
   q: string
   /** Stable device id from ?device_id=; opens the detail modal on arrival. */
   deviceId: string | null
+  tab: DeviceTab
+  /** Group id from ?group=; filters the Devices table to that group. */
+  group: string
 }
 
 function parsePage(raw: string | null): number {
@@ -54,6 +61,10 @@ export function parseDevicesQuery(params: URLSearchParams): DevicesQuery {
   const site = (params.get('site') ?? '').slice(0, 128)
   const q = (params.get('q') ?? '').slice(0, 128)
   const deviceId = params.get('device_id')
+  const rawTab = params.get('tab') ?? ''
+  const tab = (DEVICE_TABS as readonly string[]).includes(rawTab)
+    ? (rawTab as DeviceTab)
+    : 'devices'
 
   return {
     status,
@@ -63,6 +74,11 @@ export function parseDevicesQuery(params: URLSearchParams): DevicesQuery {
     // A device id is a UUID; anything longer than 64 is not one, and passing
     // junk into the path is how a 500 gets logged against a real endpoint.
     deviceId: deviceId && deviceId.length <= 64 ? deviceId : null,
+    tab,
+    // Group ids are 32 hex characters from devicemanagement.NewID. The length
+    // cap is the same trust boundary as deviceId: the value is forwarded into
+    // a query string, so junk must not survive parsing.
+    group: (params.get('group') ?? '').slice(0, 64),
   }
 }
 
@@ -74,6 +90,8 @@ export function buildDevicesQuery(next: Partial<DevicesQuery>): string {
   if (next.page && next.page > 1) params.set('page', String(next.page))
   if (next.q) params.set('q', next.q)
   if (next.deviceId) params.set('device_id', next.deviceId)
+  if (next.tab && next.tab !== 'devices') params.set('tab', next.tab)
+  if (next.group) params.set('group', next.group)
   const qs = params.toString()
   return qs ? `?${qs}` : ''
 }

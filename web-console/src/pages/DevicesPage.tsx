@@ -9,11 +9,13 @@ import {
   ChevronRight,
   Filter,
   Laptop,
+  Layers,
   Monitor,
   RefreshCw,
   Search,
   Terminal,
   TerminalSquare,
+  Users,
 } from 'lucide-react'
 import { DeviceDetailModal } from '../components/DeviceDetailModal'
 import { ConfirmDialog } from '../components/ui/ConfirmDialog'
@@ -21,9 +23,11 @@ import { DataTable } from '../components/ui/DataTable'
 import { usePermission } from '../hooks/usePermission'
 import { useToast } from '../context/ToastContext'
 import { api } from '../services/api'
-import type { DeviceDTO, DeviceListResponse } from '../types/api'
+import type { DeviceDTO, DeviceGroupDTO, DeviceListResponse } from '../types/api'
 import { PAGE_SIZES, buildDevicesQuery, parseDevicesQuery } from './devicesQuery'
 import type { DeviceStatus } from './devicesQuery'
+import { DeviceGroupsPanel } from './DeviceGroupsPanel'
+import { GroupMembersModal } from './GroupMembersModal'
 
 export const DevicesPage: React.FC<{
   onOpenExec?: (device: DeviceDTO) => void
@@ -53,8 +57,31 @@ export const DevicesPage: React.FC<{
   )
   const toast = useToast()
 
-  const { status, site, page, q, deviceId } = query
+  const { status, site, page, q, deviceId, tab, group } = query
   const offset = (page - 1) * pageSize
+
+  // Group administration. `selected` is the multi-select for the "add to group"
+  // action, so it lives here rather than in the panel: the checkboxes are on the
+  // Devices table and the action is on the same toolbar.
+  const [groups, setGroups] = useState<DeviceGroupDTO[]>([])
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [membersGroup, setMembersGroup] = useState<DeviceGroupDTO | null>(null)
+  const [assignTarget, setAssignTarget] = useState<DeviceGroupDTO | null>(null)
+  const [assigning, setAssigning] = useState(false)
+
+  const loadGroups = useCallback(async () => {
+    try {
+      setGroups(await api.getDeviceGroups())
+    } catch {
+      // The group filter degrades to "no group" rather than blocking the device
+      // list: a technician who cannot read groups should still see endpoints.
+      setGroups([])
+    }
+  }, [])
+
+  useEffect(() => {
+    loadGroups()
+  }, [loadGroups])
 
   const setQuery = useCallback(
     (next: Partial<typeof query>) => {
@@ -66,7 +93,7 @@ export const DevicesPage: React.FC<{
   const fetchDevices = useCallback(async () => {
     setLoading(true)
     try {
-      const res = await api.getDevices(pageSize, offset, status, site)
+      const res = await api.getDevices(pageSize, offset, status, site, group)
       setData(res)
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to fetch devices'
@@ -74,7 +101,46 @@ export const DevicesPage: React.FC<{
     } finally {
       setLoading(false)
     }
-  }, [offset, pageSize, site, status])
+  }, [group, offset, pageSize, site, status])
+
+  const toggleDevice = (id: string) =>
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+
+  // A selection made before switching to the Groups tab, or before changing the
+  // group filter, refers to rows the operator can no longer see. Leaving it
+  // checked would make "add to group" act on invisible devices.
+  useEffect(() => {
+    setSelected(new Set())
+  }, [group, tab])
+
+  const confirmAssign = async () => {
+    if (!assignTarget || selected.size === 0) return
+    setAssigning(true)
+    try {
+      const added = await api.addGroupMembers(assignTarget.id, [...selected])
+      toast.success(
+        added === selected.size
+          ? `Added ${added} device(s) to "${assignTarget.name}"`
+          : `Added ${added} of ${selected.size} selected; the rest were already members`,
+        'Devices Added'
+      )
+      setSelected(new Set())
+      setAssignTarget(null)
+      await loadGroups()
+    } catch (err: unknown) {
+      toast.error(
+        err instanceof Error ? err.message : 'Failed to add devices to group',
+        'Add Failed'
+      )
+    } finally {
+      setAssigning(false)
+    }
+  }
 
   useEffect(() => {
     fetchDevices()
@@ -189,6 +255,31 @@ export const DevicesPage: React.FC<{
         </div>
       </div>
 
+      {/* Devices / Groups. The tab lives in the URL so a group view is a
+          shareable link and the browser back button steps between them. */}
+      <div className="btn-group" role="tablist" aria-label="Devices sections">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === 'devices'}
+          className={`btn ${tab === 'devices' ? 'btn-primary' : 'btn-secondary'}`}
+          onClick={() => setQuery({ tab: 'devices', group: '' })}
+        >
+          <Laptop size={16} />
+          <span>Devices</span>
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === 'groups'}
+          className={`btn ${tab === 'groups' ? 'btn-primary' : 'btn-secondary'}`}
+          onClick={() => setQuery({ tab: 'groups', group: '' })}
+        >
+          <Layers size={16} />
+          <span>Groups</span>
+        </button>
+      </div>
+
       {actionMsg && (
         <div className={`notification-banner ${actionMsg.type}`} role="status">
           {actionMsg.type === 'success' ? <CheckCircle2 size={18} /> : <AlertCircle size={18} />}
@@ -204,6 +295,19 @@ export const DevicesPage: React.FC<{
         </div>
       )}
 
+      {tab === 'groups' ? (
+        <DeviceGroupsPanel
+          onViewDevices={(groupId) => setQuery({ tab: 'devices', group: groupId, page: 1 })}
+          onManageMembers={(groupId) => {
+            const g = groups.find((x) => x.id === groupId)
+            // A group that was deleted in another tab still has to open: the
+            // members modal takes the name from the caller, so a missing entry
+            // falls back to the id rather than rendering "undefined".
+            setMembersGroup(g ?? { id: groupId, name: groupId, description: '', created_at: '', updated_at: '', member_count: 0 })
+          }}
+        />
+      ) : (
+        <>
       {/* Filter / Search Bar */}
       <div className="filter-bar">
         <div className="search-wrap">
@@ -245,6 +349,20 @@ export const DevicesPage: React.FC<{
           </select>
 
           <select
+            value={group}
+            onChange={(e) => setQuery({ group: e.target.value, page: 1 })}
+            className="select-input"
+            aria-label="Filter by group"
+          >
+            <option value="">All Groups</option>
+            {groups.map((g) => (
+              <option key={g.id} value={g.id}>
+                {g.name} ({g.member_count})
+              </option>
+            ))}
+          </select>
+
+          <select
             value={pageSize}
             onChange={(e) => {
               setPageSize(Number(e.target.value) as (typeof PAGE_SIZES)[number])
@@ -262,6 +380,65 @@ export const DevicesPage: React.FC<{
         </div>
       </div>
 
+      {/* Selection bar. Only rendered when something is checked, so the page is
+          unchanged for the common case of reading the fleet without editing it. */}
+      {canRetire && selected.size > 0 && (
+        <div className="filter-bar" role="region" aria-label="Selection actions">
+          <span className="filter-hint" style={{ margin: 0 }}>
+            {selected.size} endpoint{selected.size === 1 ? '' : 's'} selected
+          </span>
+          <div className="filter-group">
+            <Layers size={16} className="filter-icon" aria-hidden="true" />
+            <select
+              className="select-input"
+              value={assignTarget?.id ?? ''}
+              onChange={(e) => {
+                const g = groups.find((x) => x.id === e.target.value)
+                setAssignTarget(g ?? null)
+              }}
+              aria-label="Target group for the selection"
+            >
+              <option value="">Choose a group...</option>
+              {groups.map((g) => (
+                <option key={g.id} value={g.id}>
+                  {g.name} ({g.member_count})
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={confirmAssign}
+              disabled={!assignTarget || assigning}
+            >
+              {assigning ? (
+                <RefreshCw size={16} className="spinning" />
+              ) : (
+                <Users size={16} />
+              )}
+              <span>{assigning ? 'Adding...' : 'Add to group'}</span>
+            </button>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => {
+                setSelected(new Set())
+                setAssignTarget(null)
+              }}
+            >
+              <span>Clear</span>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {groups.length === 0 && canRetire && tab === 'devices' && (
+        <p className="filter-hint">
+          No groups exist yet. Create one on the Groups tab to target a set of devices with a
+          single run.
+        </p>
+      )}
+
       {/* The text filter runs on the current page only — the server has no
           search endpoint, so this narrows 10–50 rows, not the fleet. */}
       {q && (
@@ -276,6 +453,7 @@ export const DevicesPage: React.FC<{
         <DataTable label="Fleet endpoints">
           <thead>
             <tr>
+              {canRetire && <th style={{ width: 36 }}>Select</th>}
               <th>Status</th>
               <th>Hostname &amp; Identity</th>
               <th>Operating System</th>
@@ -288,7 +466,7 @@ export const DevicesPage: React.FC<{
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={7} className="text-center py-8">
+                <td colSpan={canRetire ? 8 : 7} className="text-center py-8">
                   <div className="table-loader">
                     <RefreshCw size={24} className="spinning" />
                     <span>Loading fleet records...</span>
@@ -297,10 +475,14 @@ export const DevicesPage: React.FC<{
               </tr>
             ) : filteredItems.length === 0 ? (
               <tr>
-                <td colSpan={7} className="text-center py-8">
+                <td colSpan={canRetire ? 8 : 7} className="text-center py-8">
                   <div className="empty-state">
                     <Laptop size={32} />
-                    <p>No endpoints match the current filters</p>
+                    <p>
+                      {group
+                        ? 'No endpoints in this group match the current filters'
+                        : 'No endpoints match the current filters'}
+                    </p>
                   </div>
                 </td>
               </tr>
@@ -309,6 +491,16 @@ export const DevicesPage: React.FC<{
                 const isRetired = Boolean(d.retired_at)
                 return (
                   <tr key={d.id} className="device-row">
+                    {canRetire && (
+                      <td data-label="Select">
+                        <input
+                          type="checkbox"
+                          checked={selected.has(d.id)}
+                          onChange={() => toggleDevice(d.id)}
+                          aria-label={`Select ${d.hostname}`}
+                        />
+                      </td>
+                    )}
                     <td data-label="Status">
                       <span className={`status-pill ${isRetired ? 'retired' : d.status}`}>
                         <span className="dot"></span>
@@ -455,6 +647,8 @@ export const DevicesPage: React.FC<{
           </div>
         </div>
       </div>
+        </>
+      )}
 
       <ConfirmDialog
         open={Boolean(retireTarget)}
@@ -480,6 +674,16 @@ export const DevicesPage: React.FC<{
             // reopen the same modal.
             if (deviceId) setQuery({ deviceId: null })
           }}
+        />
+      )}
+
+      {membersGroup && (
+        <GroupMembersModal
+          open
+          groupId={membersGroup.id}
+          groupName={membersGroup.name}
+          onClose={() => setMembersGroup(null)}
+          onChanged={loadGroups}
         />
       )}
     </div>
