@@ -338,9 +338,18 @@ export const TasksSchedulerPage: React.FC<TasksSchedulerPageProps> = ({ activeTa
                         <span className="badge-target">{sch.target_type}</span>
                       </td>
                       <td>
-                        {sch.schedule_type === 'cron'
-                          ? `Cron: ${sch.schedule_expr}`
-                          : `Every ${describeInterval(sch.schedule_expr)}`}
+                        {/* A schedule_type the server refuses to create can still
+                            exist in a database written before the check. It is
+                            shown as never-run rather than described as an
+                            interval, because describing "0 0 * * *" as an
+                            interval tells the operator it is firing. */}
+                        {sch.schedule_type === 'interval' ? (
+                          `Every ${describeInterval(sch.schedule_expr)}`
+                        ) : (
+                          <span className="text-muted">
+                            {sch.schedule_type} is not a trigger this server runs
+                          </span>
+                        )}
                       </td>
                       <td>
                         <span className={`status-pill ${sch.is_enabled ? 'online' : 'offline'}`}>
@@ -664,36 +673,30 @@ export const TasksSchedulerPage: React.FC<TasksSchedulerPageProps> = ({ activeTa
                 setNewSchedule({
                   ...newSchedule,
                   schedule_type: e.target.value,
-                  // Pre-fill the matching expression shape so the field
-                  // below is never an interval number typed into a cron
-                  // schedule (or vice versa).
-                  schedule_expr: e.target.value === 'cron' ? '0 0 * * *' : '60',
+                  // Pre-fill the expression shape so the field below is never
+                  // left holding whatever the previous trigger wanted.
+                  schedule_expr: '60',
                 })
               }
             >
               <option value="interval">Fixed Interval</option>
-              <option value="cron">Cron Expression</option>
-              <option value="once">Run Once</option>
             </select>
           </div>
           <div className="form-group">
             <label className="form-label" htmlFor="schedule-expr">
-              {newSchedule.schedule_type === 'cron' ? 'Cron Expression' : 'Interval (minutes)'}
+              Interval (minutes)
             </label>
             <input
               id="schedule-expr"
               type="text"
               className="form-input"
               required
-              placeholder={newSchedule.schedule_type === 'cron' ? '0 3 * * * (03:00 daily)' : '60'}
+              placeholder="60"
               value={newSchedule.schedule_expr}
               onChange={(e) =>
                 setNewSchedule({
                   ...newSchedule,
-                  schedule_expr:
-                    newSchedule.schedule_type === 'interval'
-                      ? String(Number(e.target.value) || 0)
-                      : e.target.value,
+                  schedule_expr: String(Number(e.target.value) || 0),
                 })
               }
             />

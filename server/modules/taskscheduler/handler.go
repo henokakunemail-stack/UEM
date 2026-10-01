@@ -208,6 +208,28 @@ type createScheduleReq struct {
 	IsEnabled    bool   `json:"is_enabled"`
 }
 
+// isRunnableScheduleType reports whether the scheduler actually fires a schedule
+// of this type.
+//
+// pollDueSchedules (scheduler.go:156) has exactly one branch, `interval`, so
+// every other value stored in the column is a schedule that is listed in the
+// console as enabled and will never run once. That is a worse failure than a
+// missing feature: an operator watching a schedule that looks armed, on a script
+// that silently never executes.
+//
+// cron and once are rejected rather than implemented here. Until the scheduler
+// has a branch for them, accepting them is a promise the server cannot keep, and
+// the 400 says so in the operator's own terms rather than leaving a schedule
+// that looks armed. Widening this list is the change that adds a trigger:
+// implement it in pollDueSchedules, then add the value here and to the console
+// dropdown in the same commit.
+//
+// Set in the console's schedule form as well. Two lists, one of which is the
+// whitelist, is the alternative to editing the dropdown whenever a trigger ships.
+var runnableScheduleTypes = map[string]bool{"interval": true}
+
+func isRunnableScheduleType(v string) bool { return runnableScheduleTypes[v] }
+
 func (h *Handler) createSchedule(w http.ResponseWriter, r *http.Request) {
 	var req createScheduleReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -216,6 +238,10 @@ func (h *Handler) createSchedule(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Name == "" || req.ScriptID == "" || req.TargetType == "" || req.ScheduleType == "" {
 		writeErr(w, http.StatusBadRequest, "name, script_id, target_type, and schedule_type are required")
+		return
+	}
+	if !isRunnableScheduleType(req.ScheduleType) {
+		writeErr(w, http.StatusBadRequest, "schedule_type must be interval: "+strconv.Quote(req.ScheduleType)+" is a trigger the scheduler does not run")
 		return
 	}
 
@@ -266,6 +292,10 @@ func (h *Handler) updateSchedule(w http.ResponseWriter, r *http.Request) {
 	var req createScheduleReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid json")
+		return
+	}
+	if req.ScheduleType != "" && !isRunnableScheduleType(req.ScheduleType) {
+		writeErr(w, http.StatusBadRequest, "schedule_type must be interval: "+strconv.Quote(req.ScheduleType)+" is a trigger the scheduler does not run")
 		return
 	}
 
