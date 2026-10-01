@@ -391,27 +391,30 @@ func runAgent(serverURL, enrollToken, credsPath string, heartbeatSecs int) {
 
 	dispatcher.Register("maintenance.run", func(ctx context.Context, command, id string, payload json.RawMessage) any {
 		var params maintenance.StepRequest
-		_ = json.Unmarshal(payload, &params)
-		if params.TaskID == "" {
-			params.TaskID = id
+		if err := json.Unmarshal(payload, &params); err != nil {
+			log.Error().Err(err).Msg("decode maintenance.run payload")
+			return map[string]string{"error": "invalid maintenance request"}
 		}
 
 		// Cheap first gate so the immediate command_result reply is honest.
 		// Engine.Run re-checks; do not rely on this one.
 		if !maintenance.Allowed(params.TaskType) {
-			log.Warn().Str("task_id", params.TaskID).Str("task_type", params.TaskType).
+			log.Warn().Str("task_id", id).Str("task_type", params.TaskType).
 				Msg("rejecting maintenance task with unknown task type")
 			return map[string]string{"error": "unsupported task type"}
 		}
 
 		go func() {
 			defer guardAgentGoroutine("maintenance.run")
-			if err := maintEngine.Run(context.Background(), payload); err != nil {
-				log.Error().Err(err).Str("task_id", params.TaskID).Msg("maintenance task failed")
+			// id, not the locally patched params: Run resolves the fallback
+			// itself, and passing the raw payload alone left the task_id out
+			// of it whenever the server omitted one.
+			if err := maintEngine.Run(context.Background(), payload, id); err != nil {
+				log.Error().Err(err).Str("task_id", id).Msg("maintenance task failed")
 			}
 		}()
 
-		return map[string]string{"status": "dispatched", "task_id": params.TaskID}
+		return map[string]string{"status": "dispatched", "task_id": id}
 	})
 
 	client.SetCommandHandler(dispatcher.Handle)

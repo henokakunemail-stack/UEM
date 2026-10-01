@@ -65,7 +65,7 @@ func darwinCleanupTemp(ctx context.Context) (stepOutcome, error) {
 		}
 		before, scanErr := dirSize(r.path, r.minAge)
 		if scanErr != nil {
-			out.output = appendLog(out.output, stepOutcome{
+			out = appendLog(out, stepOutcome{
 				output:   fmt.Sprintf("scan %s: %v", r.path, scanErr),
 				exitCode: 0,
 			})
@@ -73,12 +73,12 @@ func darwinCleanupTemp(ctx context.Context) (stepOutcome, error) {
 		n, err := removeOldFiles(r.path, r.minAge, func(string) bool { return true })
 		after, _ := dirSize(r.path, r.minAge)
 		out.bytesFreed += freedBytes(before, after)
-		out.output = appendLog(out.output, stepOutcome{
+		out = appendLog(out, stepOutcome{
 			output:   fmt.Sprintf("removed %d files from %s (age > %s)", n, r.path, r.minAge),
 			exitCode: 0,
 		})
 		if err != nil {
-			out.output = appendLog(out.output, stepOutcome{output: err.Error(), exitCode: 0})
+			out = appendLog(out, stepOutcome{output: err.Error(), exitCode: 0})
 		}
 	}
 	return out, nil
@@ -94,7 +94,7 @@ func darwinDiskCheck(ctx context.Context) (stepOutcome, error) {
 		volumes = append(volumes, darwinDataVolume)
 	}
 	for _, vol := range volumes {
-		out.output = appendLog(out.output, run(ctx, "/usr/sbin/diskutil", "verifyVolume", vol))
+		out = appendLog(out, run(ctx, "/usr/sbin/diskutil", "verifyVolume", vol))
 	}
 	return out, nil
 }
@@ -119,9 +119,9 @@ func darwinLogMaintenance(ctx context.Context) (stepOutcome, error) {
 	// logged but does not fail the step: on a managed Mac the agent is often
 	// not entitled to erase the log, and that is worth recording, not reddening.
 	erase := run(ctx, "/usr/bin/log", "erase", "--keep", darwinLogKeepWindow)
-	out.output = appendLog(out.output, erase)
+	out = appendLog(out, erase)
 	if erase.exitCode != 0 {
-		out.output = appendLog(out.output, stepOutcome{
+		out = appendLog(out, stepOutcome{
 			output:   "unified log erase did not complete (insufficient entitlement?); retained",
 			exitCode: 0,
 		})
@@ -137,12 +137,12 @@ func darwinLogMaintenance(ctx context.Context) (stepOutcome, error) {
 	})
 	after, _ := dirSize(crashDir, darwinCrashMinAge)
 	out.bytesFreed += freedBytes(before, after)
-	out.output = appendLog(out.output, stepOutcome{
+	out = appendLog(out, stepOutcome{
 		output:   fmt.Sprintf("removed %d crash reports from %s (age > %s)", n, crashDir, darwinCrashMinAge),
 		exitCode: 0,
 	})
 	if err != nil {
-		out.output = appendLog(out.output, stepOutcome{output: err.Error(), exitCode: 0})
+		out = appendLog(out, stepOutcome{output: err.Error(), exitCode: 0})
 	}
 	return out, nil
 }
@@ -152,12 +152,12 @@ func darwinServiceCleanup(ctx context.Context) (stepOutcome, error) {
 	// unload and no remove anywhere in this file.
 	out := run(ctx, "/bin/launchctl", "list")
 	if orphan := countOrphanedLaunchAgents(out.output); orphan > 0 {
-		out.output = appendLog(out.output, stepOutcome{
+		out = appendLog(out, stepOutcome{
 			output:   fmt.Sprintf("%d launchd entries have no running process (last exit %s); review manually", orphan, "see listing above"),
 			exitCode: 0,
 		})
 	} else {
-		out.output = appendLog(out.output, stepOutcome{
+		out = appendLog(out, stepOutcome{
 			output:   "no launchd entry without a process; nothing to report",
 			exitCode: 0,
 		})

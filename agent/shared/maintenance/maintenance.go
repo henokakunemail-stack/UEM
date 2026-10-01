@@ -67,6 +67,17 @@ var fullScanSteps = []string{
 	TaskCleanupTemp, TaskMemoryHygiene, TaskLogMaintenance, TaskDiskCheck,
 }
 
+// stepsFor mirrors the server's StepsForTaskType. Every task type is its own
+// single step except full_scan, which expands into the four steps above. Run
+// walks this list; reportBusy reads its first element to name the step it
+// reports a rejection against.
+func stepsFor(taskType string) []string {
+	if taskType == TaskFullScan {
+		return fullScanSteps
+	}
+	return []string{taskType}
+}
+
 // StepRequest is the WebSocket command payload for "maintenance.run".
 type StepRequest struct {
 	TaskID   string `json:"task_id"`
@@ -131,10 +142,18 @@ func Capabilities() []string { return []string{"maintenance.run"} }
 // Run executes one maintenance task and reports every step over HTTP. The
 // socket command_result reply is not the result channel: it is one-shot and
 // keyed to the command id, and a four-step full_scan outlives it.
-func (e *Engine) Run(ctx context.Context, raw json.RawMessage) error {
+//
+// id is the envelope id. The server puts task_id in the payload, but a command
+// whose payload omits it still names the task it belongs to, and losing that
+// leaves the server row dispatched forever — so the fallback is resolved here,
+// once, rather than in each command handler.
+func (e *Engine) Run(ctx context.Context, raw json.RawMessage, id string) error {
 	var params StepRequest
 	if err := json.Unmarshal(raw, &params); err != nil {
 		return fmt.Errorf("decode maintenance request: %w", err)
+	}
+	if params.TaskID == "" {
+		params.TaskID = id
 	}
 	if params.TaskID == "" {
 		return errors.New("maintenance request is missing task_id")
@@ -147,14 +166,16 @@ func (e *Engine) Run(ctx context.Context, raw json.RawMessage) error {
 	}
 
 	if !e.mu.TryLock() {
+		// The server already marked this task 'dispatched' and is waiting for
+		// a report. A local log line gives that row no path to a terminal
+		// state, so the rejection is posted the same way a step is — as a
+		// failed report for the step this task would have run.
+		e.reportBusy(ctx, params.TaskID, params.TaskType)
 		return errors.New("another maintenance task is already running on this device")
 	}
 	defer e.mu.Unlock()
 
-	steps := []string{params.TaskType}
-	if params.TaskType == TaskFullScan {
-		steps = fullScanSteps
-	}
+	steps := stepsFor(params.TaskType)
 
 	exec := e.runStep
 	if exec == nil {
@@ -167,12 +188,33 @@ func (e *Engine) Run(ctx context.Context, raw json.RawMessage) error {
 		cancel()
 
 		status := statusCompleted
-		if err != nil {
+		switch {
+		case err != nil:
 			status = statusFailed
 			out.output = strings.TrimSpace(out.output + "\n" + err.Error())
 			if out.exitCode == 0 {
 				out.exitCode = 1
 			}
+		case out.exitCode != 0:
+			// A step that returns (stepOutcome, nil) with a non-zero exit
+			// code is telling us it did not finish, and it is telling us so
+			// in the only channel available: the code. Two shapes need this.
+			// disk_check runs chkdsk and defrag, which print "Access is
+			// denied ... elevated mode" rather than raising, so the Go error
+			// path never fires. cleanup_temp marks a refused root itself, and
+			// used to do it with exitCode 0, which reported a completed sweep
+			// that had cleaned nothing.
+			//
+			// memory_hygiene and log_maintenance deliberately record a refused
+			// subprocess in the transcript and stay green: they still did the
+			// correct thing on a machine they could not fully act on, and
+			// reddening every endpoint for that teaches operators to ignore
+			// the alert. Those steps do not set a non-zero code on themselves.
+			status = statusFailed
+			err = fmt.Errorf("step did not complete (exit %d); "+
+				"install the agent as a Windows Service so it runs elevated",
+				out.exitCode)
+			out.output = strings.TrimSpace(out.output + "\n" + err.Error())
 		}
 
 		last := i == len(steps)-1
@@ -213,6 +255,40 @@ func (e *Engine) Run(ctx context.Context, raw json.RawMessage) error {
 	return nil
 }
 
+// reportBusy closes a task the engine refused to start. A rejection reason the
+// server never sees is the same defect as a step that is never reported: the
+// job keeps counting a dispatched task as in flight forever. The report is
+// deliberately a failure rather than a skip — 'skipped' is server-set for an
+// offline target, and RecordStep rejects an agent that claims it.
+func (e *Engine) reportBusy(ctx context.Context, taskID, taskType string) {
+	code := 1
+	reason := "another maintenance task is already running on this device"
+	logText := "not started: " + reason
+	// The reported step has to be one the task could have produced. For every
+	// single-step task that is the task type itself, but full_scan is a
+	// composite: the server resolves a step against the task's step sequence,
+	// where "full_scan" is absent, and rejects the report as a step that does
+	// not belong. That rejection is what strands the row: the agent logged
+	// nothing, the server stored nothing, and the job counted a dispatched task
+	// for ever. Reporting the first step of the sequence is what the server
+	// accepts, and it is the step the task would have started with anyway.
+	step := taskType
+	if steps := stepsFor(taskType); len(steps) > 0 {
+		step = steps[0]
+	}
+	if err := e.report(ctx, StepReport{
+		TaskID:       taskID,
+		Step:         step,
+		Status:       statusFailed,
+		ExitCode:     &code,
+		OutputLog:    &logText,
+		ErrorMessage: &reason,
+	}); err != nil {
+		log.Error().Err(err).Str("task_id", taskID).
+			Msg("report rejected maintenance task")
+	}
+}
+
 func (e *Engine) report(ctx context.Context, rep StepReport) error {
 	url := e.serverBase + "/api/agent/maintenance/tasks/" + rep.TaskID + "/result"
 	body, err := json.Marshal(rep)
@@ -240,6 +316,19 @@ func (e *Engine) report(ctx context.Context, rep StepReport) error {
 	return nil
 }
 
+// subprocessTimeout is the per-command ceiling inside one step. The step
+// timeout is the budget for the whole step, which several commands share, so a
+// single one of them would otherwise be able to consume all of it and leave the
+// console showing no progress at all. Clear-RecycleBin is the usual culprit: it
+// sits on a full recycle bin long enough to matter, which was measured at over
+// 20 seconds here and grows with the bin.
+//
+// A command that hits this ceiling is killed and its partial output is kept
+// with a non-zero exit code, recorded in the step's transcript rather than
+// raised as a step failure: a recycle bin that would not empty is a lesser
+// outcome than a sweep that never finishes.
+const subprocessTimeout = 90 * time.Second
+
 // run is argv-only. It never accepts a shell string, and nothing from a server
 // payload is ever concatenated into one: every call site passes a compile-time
 // name and literal arguments.
@@ -247,8 +336,10 @@ func run(ctx context.Context, name string, args ...string) stepOutcome {
 	if path, err := exec.LookPath(name); err == nil {
 		name = path
 	}
+	runCtx, cancel := context.WithTimeout(ctx, subprocessTimeout)
+	defer cancel()
 	var buf bytes.Buffer
-	cmd := exec.CommandContext(ctx, name, args...)
+	cmd := exec.CommandContext(runCtx, name, args...)
 	cmd.Stdout = &buf
 	cmd.Stderr = &buf
 	err := cmd.Run()
@@ -258,6 +349,13 @@ func run(ctx context.Context, name string, args ...string) stepOutcome {
 		var ee *exec.ExitError
 		if errors.As(err, &ee) {
 			code = ee.ExitCode()
+		}
+		// Exceeded the budget rather than exiting: say so in the transcript,
+		// because "exit 1" and "gave up after 90s" are different things for
+		// whoever reads the maintenance log.
+		if runCtx.Err() != nil {
+			buf.WriteString("\ncommand exceeded the " +
+				subprocessTimeout.String() + " limit and was stopped")
 		}
 	}
 	return stepOutcome{output: buf.String(), exitCode: code}
@@ -416,16 +514,37 @@ func truncate(s string, max int) string {
 	return s[:max]
 }
 
-// appendLog concatenates a subprocess transcript onto an accumulated step
-// output without dropping what is already there.
-func appendLog(dst string, out stepOutcome) string {
-	if out.output == "" {
-		return dst
+// appendLog folds a subprocess outcome into an accumulating step outcome:
+// the transcript is appended to the text and a non-zero subprocess exit code
+// is carried into the step's own exit code.
+//
+// Folding the code here rather than at each call site is deliberate. Every
+// caller used to keep only the text: `chkdsk /scan` on a non-elevated agent
+// exits non-zero and prints "Access Denied ... You have to invoke this utility
+// running in elevated mode", and the step still reported exit 0. A disk check
+// that scanned nothing then looked identical to one that found a clean volume,
+// which is the exact failure an operator cannot afford to be unable to see.
+//
+// The code only ever moves away from 0, so a later successful subprocess cannot
+// paper over an earlier failure, and the first non-zero code is the one kept.
+func appendLog(acc stepOutcome, out stepOutcome) stepOutcome {
+	if out.output != "" {
+		if acc.output == "" {
+			acc.output = out.output
+		} else {
+			acc.output += "\n" + out.output
+		}
 	}
-	if dst == "" {
-		return out.output
+	if out.exitCode != 0 && acc.exitCode == 0 {
+		acc.exitCode = out.exitCode
 	}
-	return dst + "\n" + out.output
+	if out.bytesFreed != 0 {
+		acc.bytesFreed += out.bytesFreed
+	}
+	if out.rebootNeeded {
+		acc.rebootNeeded = true
+	}
+	return acc
 }
 
 // assertDistinctMirrors fails the build if a copy-paste typo makes two mirrors

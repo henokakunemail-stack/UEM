@@ -61,7 +61,7 @@ func linuxCleanupTemp(ctx context.Context) (stepOutcome, error) {
 		}
 		before, scanErr := dirSize(r.path, r.minAge)
 		if scanErr != nil {
-			out.output = appendLog(out.output, stepOutcome{
+			out = appendLog(out, stepOutcome{
 				output:   fmt.Sprintf("scan %s: %v", r.path, scanErr),
 				exitCode: 0,
 			})
@@ -69,12 +69,12 @@ func linuxCleanupTemp(ctx context.Context) (stepOutcome, error) {
 		n, err := removeOldFiles(r.path, r.minAge, func(string) bool { return true })
 		after, _ := dirSize(r.path, r.minAge)
 		out.bytesFreed += freedBytes(before, after)
-		out.output = appendLog(out.output, stepOutcome{
+		out = appendLog(out, stepOutcome{
 			output:   fmt.Sprintf("removed %d files from %s (age > %s)", n, r.path, r.minAge),
 			exitCode: 0,
 		})
 		if err != nil {
-			out.output = appendLog(out.output, stepOutcome{output: err.Error(), exitCode: 0})
+			out = appendLog(out, stepOutcome{output: err.Error(), exitCode: 0})
 		}
 	}
 
@@ -88,7 +88,7 @@ func linuxCleanupTemp(ctx context.Context) (stepOutcome, error) {
 		{"pacman", "-Scc", "--noconfirm"},
 	} {
 		if p, err := exec.LookPath(pm[0]); err == nil {
-			out.output = appendLog(out.output, run(ctx, p, pm[1:]...))
+			out = appendLog(out, run(ctx, p, pm[1:]...))
 		}
 	}
 	// A package cache clean moves bytes out of the local disk, but that happens
@@ -117,9 +117,9 @@ func linuxMemoryHygiene(ctx context.Context) (stepOutcome, error) {
 	// sync first: drop_caches drops clean page cache, and a dirty page that has
 	// not reached the disk yet is a data-loss bug, not a memory win.
 	if p, err := exec.LookPath("sync"); err == nil {
-		out.output = appendLog(out.output, run(ctx, p))
+		out = appendLog(out, run(ctx, p))
 	} else {
-		out.output = appendLog(out.output, run(ctx, "/bin/sync"))
+		out = appendLog(out, run(ctx, "/bin/sync"))
 	}
 
 	// "3" drops the page cache, dentries and inodes. Writing this needs root;
@@ -128,17 +128,17 @@ func linuxMemoryHygiene(ctx context.Context) (stepOutcome, error) {
 	// os.WriteFile only applies perm when it has to create the file, and this
 	// path always exists, so the 0644 here is documentation, not a chmod.
 	if err := os.WriteFile(dropCachesPath, []byte("3\n"), 0o644); err != nil {
-		out.output = appendLog(out.output, stepOutcome{
+		out = appendLog(out, stepOutcome{
 			output:   fmt.Sprintf("write %s: %v (needs root; page cache kept)", dropCachesPath, err),
 			exitCode: 0,
 		})
 	} else {
-		out.output = appendLog(out.output, stepOutcome{output: "dropped page cache, dentries and inodes", exitCode: 0})
+		out = appendLog(out, stepOutcome{output: "dropped page cache, dentries and inodes", exitCode: 0})
 	}
 
 	// zramctl --reset-all reclaims the compressed swap devices' backing pages.
 	if p, err := exec.LookPath("zramctl"); err == nil {
-		out.output = appendLog(out.output, run(ctx, p, "--reset-all"))
+		out = appendLog(out, run(ctx, p, "--reset-all"))
 	}
 	return out, nil
 }
@@ -150,7 +150,7 @@ func linuxLogMaintenance(ctx context.Context) (stepOutcome, error) {
 	// has one. There is no -f / --force: forcing a rotation during business
 	// hours discards the logs an incident investigation needs.
 	if p, err := exec.LookPath("journalctl"); err == nil {
-		out.output = appendLog(out.output, run(ctx, p, "--vacuum-size=50M"))
+		out = appendLog(out, run(ctx, p, "--vacuum-size=50M"))
 	}
 	// No logrotate -f. Rotated logs are the only ones this step touches.
 
@@ -159,7 +159,7 @@ func linuxLogMaintenance(ctx context.Context) (stepOutcome, error) {
 	const varLog = "/var/log"
 	before, scanErr := dirSize(varLog, linuxRotatedLogAge)
 	if scanErr != nil {
-		out.output = appendLog(out.output, stepOutcome{
+		out = appendLog(out, stepOutcome{
 			output:   fmt.Sprintf("scan %s: %v", varLog, scanErr),
 			exitCode: 0,
 		})
@@ -169,12 +169,12 @@ func linuxLogMaintenance(ctx context.Context) (stepOutcome, error) {
 	})
 	after, _ := dirSize(varLog, linuxRotatedLogAge)
 	out.bytesFreed += freedBytes(before, after)
-	out.output = appendLog(out.output, stepOutcome{
+	out = appendLog(out, stepOutcome{
 		output:   fmt.Sprintf("removed %d rotated logs from %s (age > %s)", n, varLog, linuxRotatedLogAge),
 		exitCode: 0,
 	})
 	if err != nil {
-		out.output = appendLog(out.output, stepOutcome{output: err.Error(), exitCode: 0})
+		out = appendLog(out, stepOutcome{output: err.Error(), exitCode: 0})
 	}
 	return out, nil
 }
@@ -185,18 +185,18 @@ func linuxServiceCleanup(ctx context.Context) (stepOutcome, error) {
 	out := stepOutcome{}
 
 	units := run(ctx, "systemctl", "list-units", "--type=service", "--all", "--no-legend", "--no-pager", "--plain")
-	out.output = appendLog(out.output, units)
+	out = appendLog(out, units)
 	if failed := countFailedUnits(units.output); failed > 0 {
-		out.output = appendLog(out.output, stepOutcome{
+		out = appendLog(out, stepOutcome{
 			output:   fmt.Sprintf("%d service units are in the failed state; review manually", failed),
 			exitCode: 0,
 		})
 	}
 
 	timers := run(ctx, "systemctl", "list-timers", "--all", "--no-legend", "--no-pager")
-	out.output = appendLog(out.output, timers)
+	out = appendLog(out, timers)
 	if units.exitCode == 0 && timers.exitCode == 0 {
-		out.output = appendLog(out.output, stepOutcome{output: "read-only service inventory collected; no unit was modified", exitCode: 0})
+		out = appendLog(out, stepOutcome{output: "read-only service inventory collected; no unit was modified", exitCode: 0})
 	}
 	return out, nil
 }

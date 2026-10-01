@@ -20,6 +20,12 @@ type ExecPayload struct {
 	Shell       string `json:"shell"`
 	Command     string `json:"command"`
 	TimeoutSec  int    `json:"timeout_sec"`
+	// ReportURL is where the outcome goes. It cannot be derived from the
+	// execution id: two different features dispatch the same "exec.run"
+	// command, each with its own table and its own result endpoint. The task
+	// scheduler sends this pointing at its own route, and remote-exec leaves
+	// it empty and takes the default below.
+	ReportURL string `json:"report_url,omitempty"`
 }
 
 type ExecReport struct {
@@ -46,14 +52,21 @@ func ToHTTPURL(serverURL string) string {
 }
 
 // ReportResult posts the command execution outcome back to the server.
-func ReportResult(ctx context.Context, serverURL, deviceID, deviceSecret string, rep ExecReport) error {
+//
+// reportPath is the route the caller asked for, or empty for the remote-exec
+// default. See ExecPayload.ReportURL for why the destination cannot be guessed
+// from the execution id alone.
+func ReportResult(ctx context.Context, serverURL, deviceID, deviceSecret, reportPath string, rep ExecReport) error {
 	apiBase := ToHTTPURL(serverURL)
 	b, err := json.Marshal(rep)
 	if err != nil {
 		return err
 	}
 
-	reqURL := fmt.Sprintf("%s/api/agent/executions/%s/result", apiBase, rep.ExecutionID)
+	if reportPath == "" {
+		reportPath = "/api/agent/executions/" + rep.ExecutionID + "/result"
+	}
+	reqURL := apiBase + reportPath
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL, bytes.NewReader(b))
 	if err != nil {
 		return err
@@ -137,5 +150,5 @@ func ExecuteAndReport(ctx context.Context, serverURL, deviceID, deviceSecret str
 	reportCtx, reportCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer reportCancel()
 
-	return ReportResult(reportCtx, serverURL, deviceID, deviceSecret, rep)
+	return ReportResult(reportCtx, serverURL, deviceID, deviceSecret, payload.ReportURL, rep)
 }

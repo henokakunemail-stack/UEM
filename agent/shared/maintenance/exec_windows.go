@@ -4,7 +4,9 @@ package maintenance
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -62,54 +64,83 @@ func windowsCleanupTemp(ctx context.Context) (stepOutcome, error) {
 		`C:\Windows\Temp`,
 		winUpdateCache,
 	}
+	// deniedRoots collects the roots the process could not read or write. Every
+	// one of them is a case where the sweep removed nothing, and on Windows they
+	// are all the same root cause: the agent is not elevated. Tracking the roots
+	// themselves rather than counting refusals is what keeps the summary honest
+	// — one root refused at both the scan and the delete pass is still one root,
+	// and counting refusals printed "5 of 3 cleanup roots" here.
+	denied := map[string]bool{}
 	for _, root := range roots {
 		before, beforeErr := dirSize(root, winTempMinAge)
 		if beforeErr != nil {
 			// A root that is absent is normal (SoftwareDistribution\Download does
 			// not exist until the first update). A root that exists and cannot
-			// be walked is worth logging, not worth failing the sweep over.
-			out.output = appendLog(out.output, stepOutcome{
-				output:   fmt.Sprintf("scan %s: %v", root, beforeErr),
-				exitCode: 0,
-			})
+			// be walked is a privilege problem, and it is worth failing over:
+			// the transcript used to say "scan ...: Access is denied" and still
+			// exit 0, which reported a completed sweep that had cleaned nothing.
+			if !errors.Is(beforeErr, fs.ErrNotExist) {
+				denied[root] = true
+				out = appendLog(out, stepOutcome{
+					output:   fmt.Sprintf("scan %s: %v", root, beforeErr),
+					exitCode: 1,
+				})
+			}
 		}
 		n, err := removeOldFiles(root, winTempMinAge, func(string) bool { return true })
 		after, _ := dirSize(root, winTempMinAge)
 		out.bytesFreed += freedBytes(before, after)
-		out.output = appendLog(out.output, stepOutcome{
+		out = appendLog(out, stepOutcome{
 			output:   fmt.Sprintf("removed %d files from %s (age > %s)", n, root, winTempMinAge),
 			exitCode: 0,
 		})
 		if err != nil {
-			out.output = appendLog(out.output, stepOutcome{
+			// Same rule as the scan: a delete that was refused for want of
+			// privilege left the files in place, so the step is not clean.
+			denied[root] = true
+			out = appendLog(out, stepOutcome{
 				output:   fmt.Sprintf("delete pass on %s: %v", root, err),
-				exitCode: 0,
+				exitCode: 1,
 			})
 		}
 	}
+	deniedRoots := len(denied)
 
 	// Recycle Bin. Clear-RecycleBin is a literal cmdlet invocation; -ErrorAction
 	// SilentlyContinue keeps an empty bin from reddening the sweep.
-	out.output = appendLog(out.output, run(ctx, "powershell.exe",
+	out = appendLog(out, run(ctx, "powershell.exe",
 		"-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command",
 		"Clear-RecycleBin -Force -ErrorAction SilentlyContinue"))
 
 	// Component store cleanup. Dism.exe is absent on Windows Home, so it is
 	// LookPath-guarded rather than treated as a failure.
 	if p, err := exec.LookPath("Dism.exe"); err == nil {
-		out.output = appendLog(out.output, run(ctx, p, "/Online", "/Cleanup-Image", "/StartComponentCleanup"))
+		out = appendLog(out, run(ctx, p, "/Online", "/Cleanup-Image", "/StartComponentCleanup"))
 	} else {
-		out.output = appendLog(out.output, stepOutcome{output: "Dism.exe not present; component store cleanup skipped", exitCode: 0})
+		out = appendLog(out, stepOutcome{output: "Dism.exe not present; component store cleanup skipped", exitCode: 0})
 	}
 
 	// A file left in the Windows Update cache was almost certainly locked by
 	// an update still in flight, which means the machine has work pending.
 	if survivors, err := countFiles(winUpdateCache, winTempMinAge); err == nil && survivors > 0 {
 		out.rebootNeeded = true
-		out.output = appendLog(out.output, stepOutcome{
+		out = appendLog(out, stepOutcome{
 			output:   fmt.Sprintf("%d update-cache files survived the delete pass; a reboot is likely pending", survivors),
 			exitCode: 0,
 		})
+	}
+	// The single explanation the console needs. DISM prints its own "elevated
+	// permissions are required" line, but that arrives as a subprocess exit
+	// code among several and reads as one more failure in a long transcript.
+	// Here it is stated as the step's reason, next to the status it explains.
+	//
+	// The count is of distinct roots, not of refusals: one root can be refused
+	// at the scan and again at the delete pass, and counting both made this
+	// print "5 of 3 cleanup roots" on a three-root machine.
+	if deniedRoots > 0 {
+		out.output = strings.TrimSpace(out.output + "\n" + fmt.Sprintf(
+			"all %d cleanup roots were refused; install the agent as a Windows "+
+				"Service so it runs elevated", deniedRoots))
 	}
 	return out, nil
 }
@@ -142,12 +173,16 @@ func windowsDiskCheck(ctx context.Context) (stepOutcome, error) {
 		// chkdsk /scan is the online scan. Plain `chkdsk` on a live volume would
 		// offer to schedule itself for the next reboot, which takes the machine
 		// offline at a moment nobody chose.
-		out.output = appendLog(out.output, run(ctx, "chkdsk.exe", vol, "/scan"))
+		out = appendLog(out, run(ctx, "chkdsk.exe", vol, "/scan"))
 		// defrag /L is the online optimization pass for SSDs and HDD alike.
-		out.output = appendLog(out.output, run(ctx, "defrag.exe", vol, "/L"))
+		out = appendLog(out, run(ctx, "defrag.exe", vol, "/L"))
 	}
 	// disk_check reports 0 bytes freed by design: chkdsk /scan and defrag /L
 	// change no file sizes. A fabricated number here would be worse than none.
+	//
+	// A non-zero exitCode here is the volume refusing the scan for want of
+	// elevation, not a corrupt filesystem. appendLog carries it up so the step
+	// reads as failed rather than as a clean volume nobody looked at.
 	return out, nil
 }
 
@@ -176,12 +211,12 @@ func windowsLogMaintenance(ctx context.Context) (stepOutcome, error) {
 	})
 	after, _ := dirSize(winMinidump, winMinidumpAge)
 	out.bytesFreed += freedBytes(before, after)
-	out.output = appendLog(out.output, stepOutcome{
+	out = appendLog(out, stepOutcome{
 		output:   fmt.Sprintf("removed %d crash dumps from %s (age > %s)", n, winMinidump, winMinidumpAge),
 		exitCode: 0,
 	})
 	if err != nil {
-		out.output = appendLog(out.output, stepOutcome{output: err.Error(), exitCode: 0})
+		out = appendLog(out, stepOutcome{output: err.Error(), exitCode: 0})
 	}
 
 	// MEMORY.DMP is a single file, matched by exact name because it has no
@@ -189,13 +224,13 @@ func windowsLogMaintenance(ctx context.Context) (stepOutcome, error) {
 	if info, err := os.Stat(winMemoryDump); err == nil && time.Since(info.ModTime()) >= winLogMinAge {
 		size := info.Size()
 		if err := os.Remove(winMemoryDump); err != nil {
-			out.output = appendLog(out.output, stepOutcome{
+			out = appendLog(out, stepOutcome{
 				output:   fmt.Sprintf("remove %s: %v", winMemoryDump, err),
 				exitCode: 0,
 			})
 		} else {
 			out.bytesFreed += size
-			out.output = appendLog(out.output, stepOutcome{
+			out = appendLog(out, stepOutcome{
 				output:   fmt.Sprintf("removed %s (%d bytes)", winMemoryDump, size),
 				exitCode: 0,
 			})
@@ -211,12 +246,12 @@ func windowsLogMaintenance(ctx context.Context) (stepOutcome, error) {
 	})
 	after, _ = dirSize(winCBSCab, winCBSAge)
 	out.bytesFreed += freedBytes(before, after)
-	out.output = appendLog(out.output, stepOutcome{
+	out = appendLog(out, stepOutcome{
 		output:   fmt.Sprintf("removed %d CBS archives from %s (age > %s)", n, winCBSCab, winCBSAge),
 		exitCode: 0,
 	})
 	if err != nil {
-		out.output = appendLog(out.output, stepOutcome{output: err.Error(), exitCode: 0})
+		out = appendLog(out, stepOutcome{output: err.Error(), exitCode: 0})
 	}
 
 	// Windows Error Reporting archives. Only ReportArchive holds closed-out
@@ -225,12 +260,12 @@ func windowsLogMaintenance(ctx context.Context) (stepOutcome, error) {
 	dirs, err := removeEmptyDirs(winWERArchive, winLogMinAge)
 	after, _ = dirSize(winWERArchive, winLogMinAge)
 	out.bytesFreed += freedBytes(before, after)
-	out.output = appendLog(out.output, stepOutcome{
+	out = appendLog(out, stepOutcome{
 		output:   fmt.Sprintf("removed %d empty WER archive directories under %s", dirs, winWERArchive),
 		exitCode: 0,
 	})
 	if err != nil {
-		out.output = appendLog(out.output, stepOutcome{output: err.Error(), exitCode: 0})
+		out = appendLog(out, stepOutcome{output: err.Error(), exitCode: 0})
 	}
 	return out, nil
 }
@@ -243,18 +278,18 @@ func windowsServiceCleanup(ctx context.Context) (stepOutcome, error) {
 	out := stepOutcome{}
 
 	services := run(ctx, "sc.exe", "query", "state=", "all")
-	out.output = appendLog(out.output, services)
+	out = appendLog(out, services)
 	if stopped := countStoppedServices(services.output); stopped > 0 {
-		out.output = appendLog(out.output, stepOutcome{
+		out = appendLog(out, stepOutcome{
 			output:   fmt.Sprintf("%d services are in a stopped state; review manually", stopped),
 			exitCode: 0,
 		})
 	}
 
 	tasks := run(ctx, "schtasks.exe", "/query", "/fo", "CSV", "/nh")
-	out.output = appendLog(out.output, tasks)
+	out = appendLog(out, tasks)
 	if n := countScheduledTasks(tasks.output); n > 0 {
-		out.output = appendLog(out.output, stepOutcome{
+		out = appendLog(out, stepOutcome{
 			output:   fmt.Sprintf("%d scheduled tasks registered", n),
 			exitCode: 0,
 		})
@@ -269,12 +304,12 @@ func windowsServiceCleanup(ctx context.Context) (stepOutcome, error) {
 	// property, and it is why this is not os.RemoveAll.
 	staging := os.TempDir()
 	dirs, err := removeEmptyDirs(staging, winEmptyDirAge)
-	out.output = appendLog(out.output, stepOutcome{
+	out = appendLog(out, stepOutcome{
 		output:   fmt.Sprintf("removed %d empty deployment staging directories under %s (age > %s)", dirs, staging, winEmptyDirAge),
 		exitCode: 0,
 	})
 	if err != nil {
-		out.output = appendLog(out.output, stepOutcome{output: err.Error(), exitCode: 0})
+		out = appendLog(out, stepOutcome{output: err.Error(), exitCode: 0})
 	}
 	// service_cleanup reports 0 bytes freed: it deletes no files, and any file
 	// removal here would be a change of scope, not a cleanup.

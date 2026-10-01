@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -125,7 +126,10 @@ func TestRunRejectsBeforeAnyWork(t *testing.T) {
 		`{"task_id":"","task_type":"full_scan"}`,
 		`not json`,
 	} {
-		if err := e.Run(t.Context(), json.RawMessage(raw)); err == nil {
+		// An empty envelope id: the fallback that fills a missing task_id from
+		// the command id is covered on its own below, and reusing it here
+		// would turn this case into a valid request.
+		if err := e.Run(t.Context(), json.RawMessage(raw), ""); err == nil {
 			t.Errorf("Run(%s) accepted a request it must reject", raw)
 		}
 	}
@@ -146,8 +150,79 @@ func TestRunAllowsOnlyOneTaskAtATime(t *testing.T) {
 
 	// task_type is valid here, so this reaches the TryLock and must fail there
 	// rather than starting a second privileged sweep.
-	if err := e.Run(t.Context(), json.RawMessage(`{"task_id":"t1","task_type":"disk_check"}`)); err == nil {
+	if err := e.Run(t.Context(), json.RawMessage(`{"task_id":"t1","task_type":"disk_check"}`), "t1"); err == nil {
 		t.Fatal("second concurrent maintenance task was not rejected")
+	}
+}
+
+// TestABusyEngineReportsTheRejection is the reason Run posts its own failure.
+// Without it the server row stays 'dispatched' for ever: the task is counted
+// in flight, the job never closes, and the console shows a running sweep on a
+// device that is waiting for nothing.
+func TestABusyEngineReportsTheRejection(t *testing.T) {
+	cs := newCaptureServer(t)
+	e := engineFor(cs, "dev-42", "s3cret")
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	if err := e.Run(t.Context(),
+		json.RawMessage(`{"task_id":"t1","task_type":"disk_check"}`), "t1"); err == nil {
+		t.Fatal("second concurrent maintenance task was not rejected")
+	}
+
+	if len(cs.reports) != 1 {
+		t.Fatalf("posted %d reports on rejection, want 1", len(cs.reports))
+	}
+	rep := cs.reports[0]
+	if rep.TaskID != "t1" {
+		t.Errorf("rejection report task_id = %q, want t1", rep.TaskID)
+	}
+	if rep.Status != srv.TaskStatusFailed {
+		t.Errorf("rejection report status = %q, want %q", rep.Status, srv.TaskStatusFailed)
+	}
+	// The step must belong to the task type or the server rejects the report
+	// as a step it could never have produced, and the row strands again.
+	if rep.Step != TaskDiskCheck {
+		t.Errorf("rejection report step = %q, want %q", rep.Step, TaskDiskCheck)
+	}
+}
+
+// TestABusyFullScanReportsItsFirstStep is the case the single-step busy test
+// above cannot catch. disk_check is its own step, so reporting the task type
+// happens to name a step the server accepts. full_scan is composite: the
+// server resolves a reported step against the task's step sequence, in which
+// "full_scan" does not appear, and RecordStep rejects it with "step does not
+// belong to task type". The agent's report then never lands, the row stays
+// dispatched, and the job counts a sweep as in flight for ever. Verified live:
+// a full_scan dispatched onto an already-busy agent sat at 'dispatched' for
+// 12 minutes with no transcript and no failure.
+func TestABusyFullScanReportsItsFirstStep(t *testing.T) {
+	cs := newCaptureServer(t)
+	e := engineFor(cs, "dev-42", "s3cret")
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	if err := e.Run(t.Context(),
+		json.RawMessage(`{"task_id":"t2","task_type":"full_scan"}`), "t2"); err == nil {
+		t.Fatal("second concurrent maintenance task was not rejected")
+	}
+	if len(cs.reports) != 1 {
+		t.Fatalf("posted %d reports on rejection, want 1", len(cs.reports))
+	}
+	rep := cs.reports[0]
+	if rep.Status != srv.TaskStatusFailed {
+		t.Errorf("rejection report status = %q, want %q", rep.Status, srv.TaskStatusFailed)
+	}
+	if rep.Step != fullScanSteps[0] {
+		t.Errorf("rejection report step = %q, want %q: the server resolves a "+
+			"step against the task's own sequence and %q is not in it, so the "+
+			"report is rejected and the row strands",
+			rep.Step, fullScanSteps[0], TaskFullScan)
+	}
+	// The same check the server makes, run locally so the failure names the
+	// rule rather than a 400 from the live endpoint.
+	if got := srv.StepIndex(TaskFullScan, rep.Step); got < 0 {
+		t.Errorf("server StepIndex(%q, %q) = %d, want >= 0", TaskFullScan, rep.Step, got)
 	}
 }
 
@@ -397,7 +472,7 @@ func TestFullScanReportsRunningUntilLastStep(t *testing.T) {
 	}
 
 	raw := json.RawMessage(`{"task_id":"t-1","task_type":"full_scan"}`)
-	if err := e.Run(t.Context(), raw); err != nil {
+	if err := e.Run(t.Context(), raw, "t-1"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 
@@ -420,6 +495,203 @@ func TestFullScanReportsRunningUntilLastStep(t *testing.T) {
 		if got.Status != want {
 			t.Errorf("report %d (%s) status = %q, want %q", i, step, got.Status, want)
 		}
+	}
+}
+
+// TestAMissingTaskIDFallsBackToTheCommandID is the other half of the stranded-row
+// fix. The server puts task_id in the payload, but the envelope id is the same
+// value; when the payload omits it the report has to go out under the id the
+// command arrived with, or the server finds no task to update.
+func TestAMissingTaskIDFallsBackToTheCommandID(t *testing.T) {
+	cs := newCaptureServer(t)
+	e := engineFor(cs, "dev-42", "s3cret")
+	e.runStep = func(_ context.Context, step string) (stepOutcome, error) {
+		return stepOutcome{output: "ok", exitCode: 0}, nil
+	}
+
+	if err := e.Run(t.Context(),
+		json.RawMessage(`{"task_type":"memory_hygiene"}`), "env-id-9"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(cs.reports) != 1 {
+		t.Fatalf("posted %d reports, want 1", len(cs.reports))
+	}
+	if got := cs.reports[0].TaskID; got != "env-id-9" {
+		t.Errorf("report task_id = %q, want env-id-9", got)
+	}
+}
+
+// TestAppendLogCarriesAFailedSubprocess is the regression test for the defect
+// that made an unelevated disk_check look clean. `chkdsk /scan` on an agent
+// without elevation exits non-zero and prints "Access Denied ... You have to
+// invoke this utility running in elevated mode", but appendLog used to return
+// only the text, so the step reported exit 0 and the operator saw a green sweep
+// that had scanned nothing at all.
+func TestAppendLogCarriesAFailedSubprocess(t *testing.T) {
+	acc := stepOutcome{output: "C:\nD:"}
+	acc = appendLog(acc, stepOutcome{
+		output:   "Access Denied as you do not have sufficient privileges.",
+		exitCode: 2,
+	})
+
+	if acc.exitCode == 0 {
+		t.Fatal("a failed subprocess was folded in and the step still reports exit 0")
+	}
+	if !strings.Contains(acc.output, "Access Denied") {
+		t.Errorf("transcript lost, output = %q", acc.output)
+	}
+	if !strings.Contains(acc.output, "D:") {
+		t.Errorf("accumulated text lost, output = %q", acc.output)
+	}
+}
+
+// TestAppendLogKeepsTheFirstFailure guards the merge rule: a later success must
+// not paper over an earlier failure, and the first non-zero code is the one the
+// operator sees.
+func TestAppendLogKeepsTheFirstFailure(t *testing.T) {
+	acc := stepOutcome{}
+	acc = appendLog(acc, stepOutcome{output: "first", exitCode: 3})
+	acc = appendLog(acc, stepOutcome{output: "second", exitCode: 0})
+
+	if acc.exitCode != 3 {
+		t.Errorf("exitCode = %d, want 3 (the first failure, not the later success)", acc.exitCode)
+	}
+	if strings.Count(acc.output, "\n") != 1 {
+		t.Errorf("both transcripts should be present, got %q", acc.output)
+	}
+}
+
+// TestAppendLogSumsBytesFreed keeps the byte total additive across the
+// subprocesses folded into one step.
+func TestAppendLogSumsBytesFreed(t *testing.T) {
+	acc := stepOutcome{}
+	acc = appendLog(acc, stepOutcome{output: "a", bytesFreed: 100})
+	acc = appendLog(acc, stepOutcome{output: "b", bytesFreed: 250})
+
+	if acc.bytesFreed != 350 {
+		t.Errorf("bytesFreed = %d, want 350", acc.bytesFreed)
+	}
+}
+
+// TestAppendLogSticksARebootRequest covers the one flag that must not be
+// cleared by any later subprocess in the same step.
+func TestAppendLogSticksARebootRequest(t *testing.T) {
+	acc := stepOutcome{}
+	acc = appendLog(acc, stepOutcome{output: "a", rebootNeeded: true})
+	acc = appendLog(acc, stepOutcome{output: "b"})
+
+	if !acc.rebootNeeded {
+		t.Error("rebootNeeded was cleared by a later clean subprocess")
+	}
+}
+
+// TestAFailedDiskCheckStepIsNotReportedClean covers the half of the unelevated
+// disk_check defect that appendLog alone cannot fix. appendLog carries the exit
+// code up, but the step handler still returns (stepOutcome, nil): chkdsk and
+// defrag print their refusal instead of raising, so nothing in the Go error path
+// fires. Without the disk_check branch in Run the step posted "completed" with
+// a transcript that said the volume was never scanned.
+func TestAFailedDiskCheckStepIsNotReportedClean(t *testing.T) {
+	cs := newCaptureServer(t)
+	e := engineFor(cs, "dev-42", "s3cret")
+	e.runStep = func(_ context.Context, step string) (stepOutcome, error) {
+		return stepOutcome{
+			output:   "Access Denied as you do not have sufficient privileges.",
+			exitCode: 3,
+		}, nil
+	}
+
+	raw := json.RawMessage(`{"task_id":"t-9","task_type":"disk_check"}`)
+	if err := e.Run(t.Context(), raw, "t-9"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(cs.reports) != 1 {
+		t.Fatalf("posted %d reports, want 1", len(cs.reports))
+	}
+	got := cs.reports[0]
+	if got.Status != srv.TaskStatusFailed {
+		t.Errorf("status = %q, want %q: an unelevated agent scanned nothing "+
+			"and the operator must not see a clean disk", got.Status, srv.TaskStatusFailed)
+	}
+	if got.ExitCode == nil || *got.ExitCode == 0 {
+		t.Errorf("exit_code = %v, want a non-zero code", got.ExitCode)
+	}
+	if got.ErrorMessage == nil || *got.ErrorMessage == "" {
+		t.Error("error_message is empty: the reason has to reach the console")
+	}
+}
+
+// TestAStepThatDeclinesToFailStaysGreen is the guard on the other side of the
+// non-zero-exit branch. memory_hygiene and log_maintenance hit a refused
+// subprocess on every unprivileged agent, record it in the transcript, and
+// deliberately leave their own exit code at zero because the machine was not
+// left in a worse state. Reddening them would teach operators to ignore the
+// alert, which is what those steps go out of their way to avoid.
+func TestAStepThatDeclinesToFailStaysGreen(t *testing.T) {
+	cs := newCaptureServer(t)
+	e := engineFor(cs, "dev-42", "s3cret")
+	e.runStep = func(_ context.Context, step string) (stepOutcome, error) {
+		// The real no-op shape: the transcript says it could not act, the
+		// step's own code says the step is fine.
+		return stepOutcome{
+			output:   "EmptyStandbyList.exe not installed; standby list not trimmed (no-op)",
+			exitCode: 0,
+		}, nil
+	}
+
+	raw := json.RawMessage(`{"task_id":"t-10","task_type":"memory_hygiene"}`)
+	if err := e.Run(t.Context(), raw, "t-10"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(cs.reports) != 1 {
+		t.Fatalf("posted %d reports, want 1", len(cs.reports))
+	}
+	if got := cs.reports[0].Status; got != srv.TaskStatusCompleted {
+		t.Errorf("status = %q, want %q: a step that records a refusal in its "+
+			"transcript but does not set a code on itself did the correct thing",
+			got, srv.TaskStatusCompleted)
+	}
+}
+
+// TestCleanupTempRefusedRootsAreNotGreen is the regression test for the false
+// green in the screenshot: cleanup_temp logged "scan C:\Windows\Temp: Access is
+// denied" and "delete pass on ...: Access is denied" for every root, then
+// reported status=completed. A sweep that removed nothing is not a completed
+// sweep.
+func TestCleanupTempRefusedRootsAreNotGreen(t *testing.T) {
+	cs := newCaptureServer(t)
+	e := engineFor(cs, "dev-42", "s3cret")
+	e.runStep = func(_ context.Context, step string) (stepOutcome, error) {
+		// What windowsCleanupTemp now returns on an unelevated agent: the
+		// per-root lines carry a non-zero code, and the Go error is still nil.
+		return stepOutcome{
+			output: "scan C:\\Windows\\Temp: open C:\\Windows\\Temp: Access is denied.\n" +
+				"removed 0 files from C:\\Windows\\Temp (age > 24h0m0s)\n" +
+				"delete pass on C:\\Windows\\Temp: The process cannot access the file " +
+				"because it is being used by another process.\n" +
+				"3 of 3 cleanup roots were refused; install the agent as a Windows " +
+				"Service so it runs elevated",
+			exitCode: 1,
+		}, nil
+	}
+
+	raw := json.RawMessage(`{"task_id":"t-11","task_type":"cleanup_temp"}`)
+	if err := e.Run(t.Context(), raw, "t-11"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(cs.reports) != 1 {
+		t.Fatalf("posted %d reports, want 1", len(cs.reports))
+	}
+	got := cs.reports[0]
+	if got.Status != srv.TaskStatusFailed {
+		t.Errorf("status = %q, want %q: every root was refused and the sweep "+
+			"removed nothing", got.Status, srv.TaskStatusFailed)
+	}
+	if got.ExitCode == nil || *got.ExitCode == 0 {
+		t.Errorf("exit_code = %v, want non-zero", got.ExitCode)
+	}
+	if got.ErrorMessage == nil || *got.ErrorMessage == "" {
+		t.Error("error_message is empty: the console needs the reason")
 	}
 }
 
