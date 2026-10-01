@@ -3,11 +3,8 @@
 package remotecontrol
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
-	"image"
-	"image/jpeg"
 	"sync"
 	"syscall"
 	"unsafe"
@@ -316,6 +313,14 @@ func (c *WindowsCapturer) CaptureScreen() ([]byte, int, int, error) {
 	bi.BiBitCount = 32
 	bi.BiCompression = BI_RGB
 
+	// The DIB is read as 32-bit BGRA and handed back as it is. Converting it to
+	// RGBA and encoding it here is what made this a polled screenshot: the
+	// conversion is a full pass over 8MB and the encode is another, both spent
+	// on the whole desktop whether or not anything on it changed, and the result
+	// is a blob the change detection cannot look inside.
+	//
+	// Damage.Diff works on these bytes directly, and only the rectangles it
+	// decides to send get converted and encoded.
 	rawPixels := make([]byte, width*height*4)
 
 	ret, _, _ = procGetDIBits.Call(
@@ -331,27 +336,7 @@ func (c *WindowsCapturer) CaptureScreen() ([]byte, int, int, error) {
 		return nil, 0, 0, fmt.Errorf("getdibits failed")
 	}
 
-	// Win32 DIB is BGRA, convert to RGBA in place.
-	for i := 0; i < len(rawPixels); i += 4 {
-		b := rawPixels[i]
-		r := rawPixels[i+2]
-		rawPixels[i] = r
-		rawPixels[i+2] = b
-		rawPixels[i+3] = 0xFF
-	}
-
-	img := &image.RGBA{
-		Pix:    rawPixels,
-		Stride: width * 4,
-		Rect:   image.Rect(0, 0, width, height),
-	}
-
-	var jpegBuf bytes.Buffer
-	if err := jpeg.Encode(&jpegBuf, img, &jpeg.Options{Quality: 60}); err != nil {
-		return nil, 0, 0, fmt.Errorf("encode jpeg: %w", err)
-	}
-
-	return jpegBuf.Bytes(), width, height, nil
+	return rawPixels, width, height, nil
 }
 
 func (c *WindowsCapturer) InjectMouseEvent(e InputEvent) error {

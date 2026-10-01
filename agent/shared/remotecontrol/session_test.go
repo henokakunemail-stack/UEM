@@ -28,7 +28,14 @@ func (f *fakeCapturer) CaptureScreen() ([]byte, int, int, error) {
 	if f.captureErr != nil {
 		return nil, 0, 0, f.captureErr
 	}
-	return []byte{0xFF, 0xD8, 0xFF}, 8, 4, nil
+	const w, h = 8, 4
+	// BGRA pixels, 4 bytes each, row by row -- what GetDIBits produces and
+	// what the damage diff expects to compare.
+	pixels := make([]byte, w*h*4)
+	for i := range pixels {
+		pixels[i] = byte(i)
+	}
+	return pixels, w, h, nil
 }
 
 func (f *fakeCapturer) InjectMouseEvent(e InputEvent) error {
@@ -137,10 +144,11 @@ func TestAFailedProbeIsReportedVerbatim(t *testing.T) {
 	}
 }
 
-// The frame header the console parses is 4 bytes: width and height, big endian.
-// A capturer that returns nothing must not produce a header at all, because the
-// console reads those four bytes unconditionally and would paint garbage.
-func TestAFrameCarriesItsDimensionsInTheHeader(t *testing.T) {
+// The console parses a 6-byte frame header: version, rectangle count, width,
+// height. The capturer's contract underneath it is raw pixels, so what has to
+// hold is that a capture is exactly width*height*4 bytes -- a short buffer would
+// have the diff reading past the end of a frame it believes is a whole desktop.
+func TestACaptureIsRawPixelsSizedToTheDesktop(t *testing.T) {
 	c := &fakeCapturer{capture: true}
 	data, w, h, err := c.CaptureScreen()
 	if err != nil {
@@ -149,8 +157,8 @@ func TestAFrameCarriesItsDimensionsInTheHeader(t *testing.T) {
 	if w != 8 || h != 4 {
 		t.Fatalf("dimensions = %dx%d, want 8x4", w, h)
 	}
-	if len(data) == 0 {
-		t.Fatal("capture returned no bytes")
+	if want := w * h * 4; len(data) != want {
+		t.Fatalf("capture returned %d bytes, want %d", len(data), want)
 	}
 }
 

@@ -2,11 +2,7 @@
 
 package remotecontrol
 
-import (
-	"bytes"
-	"image/jpeg"
-	"testing"
-)
+import "testing"
 
 // The capability probe and the real capture have to agree. They used to disagree
 // in the only direction that matters: the probe ran on a thread with no desktop
@@ -36,26 +32,24 @@ func TestTheProbeAndTheCaptureAgreeOnThisHost(t *testing.T) {
 	}
 }
 
-// A frame that is not a decodable JPEG is not a frame. The console hands the
-// payload straight to createImageBitmap as image/jpeg, so anything that is not
-// a real JPEG is a blank canvas with a nonzero byte count behind it -- exactly
-// the failure the operator cannot tell from a black desktop.
-func TestACapturedFrameIsARealJPEG(t *testing.T) {
+// A capture is raw pixels now, not an encoded image, and the length is the
+// whole contract. Diffing has to happen before any encoding -- a JPEG of a
+// desktop that changed in one corner differs across the whole image, because
+// the encoder's block boundaries moved, so an encoded frame is useless as a
+// diff baseline. A short buffer here is a rect that lands in the wrong place on
+// the console, and an over-long one is memory nobody asked for.
+func TestACapturedFrameIsRawPixelsSizedToTheDesktop(t *testing.T) {
 	c := NewPlatformCapturer()
 	if caps := c.Capabilities(); !caps.Capture {
 		t.Skipf("this host cannot be captured: %s", caps.Reason)
 	}
 
-	data, _, _, err := c.CaptureScreen()
+	data, w, h, err := c.CaptureScreen()
 	if err != nil {
 		t.Fatalf("CaptureScreen: %v", err)
 	}
-
-	if !bytes.HasPrefix(data, []byte{0xFF, 0xD8}) {
-		t.Fatalf("frame does not start with the JPEG SOI marker: % X", data[:min(4, len(data))])
-	}
-	if _, err := jpeg.Decode(bytes.NewReader(data)); err != nil {
-		t.Fatalf("frame is not a decodable JPEG: %v", err)
+	if want := w * h * 4; len(data) != want {
+		t.Fatalf("capture returned %d bytes for a %dx%d desktop, want %d", len(data), w, h, want)
 	}
 }
 

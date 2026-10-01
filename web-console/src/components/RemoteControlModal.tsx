@@ -38,6 +38,27 @@ type SessionStatus =
  *  in, because everything looks fine and nothing is happening. */
 const STALL_AFTER_MS = 8000
 
+/** Layout version of a binary screen update. This must equal `frameVersion` in
+ *  agent/shared/remotecontrol/damage.go. The agent and the console are compiled
+ *  separately, so nothing but this byte makes a renamed field fail loudly
+ *  instead of producing a corrupted canvas. */
+const FRAME_VERSION = 1
+
+/** version | rectangle count | uint16 width | uint16 height */
+const FRAME_HEADER_BYTES = 6
+
+/** Per rectangle: uint16 x, y, w, h, uint32 jpeg length, then the JPEG. */
+const FRAME_RECT_HEADER_BYTES = 12
+
+interface FrameRect {
+  x: number
+  y: number
+  w: number
+  h: number
+  size: number
+  body: Blob
+}
+
 /** Mouse moves are coalesced to one send per frame. A raw mousemove stream
  *  crosses the relay at display rate and crowds out the keystrokes queued
  *  behind it; the last position in a frame is the only one that matters. */
@@ -73,6 +94,10 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
   const lastFpsTimeRef = useRef<number>(0)
   const hasPaintedRef = useRef<boolean>(false)
   const lastFrameAtRef = useRef<number>(0)
+  // Serialises the async decode-and-paint of each update. The canvas
+  // accumulates rectangles, so an older update landing after a newer one would
+  // leave the desktop showing a mixture of two states.
+  const paintQueueRef = useRef<Promise<void>>(Promise.resolve())
 
   // Kept in a ref, not state: the socket must be able to read the current mode
   // without the effect that owns the socket re-running when the mode changes.
@@ -145,9 +170,50 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
           }
 
           const buffer = event.data as ArrayBuffer
-          if (buffer.byteLength < 4) return
+          if (buffer.byteLength < FRAME_HEADER_BYTES) return
 
-          hasPaintedRef.current = false
+          const view = new DataView(buffer)
+          const version = view.getUint8(0)
+          if (version !== FRAME_VERSION) {
+            // The agent and the console are compiled separately, so a renamed
+            // field is not a compile error -- it is a corrupted canvas at run
+            // time. Refusing the layout is the only safe reading.
+            setAwaitingFirstFrame(false)
+            setStatus('error')
+            setErrorMessage(
+              `The endpoint sent screen layout version ${version}, but this console speaks version ${FRAME_VERSION}. The agent and the console are different builds.`
+            )
+            ws.close()
+            return
+          }
+          const rectCount = view.getUint8(1)
+          const width = view.getUint16(2)
+          const height = view.getUint16(4)
+
+          // Collect every rectangle before painting any of them. A truncated
+          // frame that painted its first half would leave the desktop showing
+          // some of this update and none of the rest, which is exactly the
+          // torn, half-updated screen the damage stream exists to avoid.
+          const rects: FrameRect[] = []
+          let pos = FRAME_HEADER_BYTES
+          for (let i = 0; i < rectCount; i++) {
+            if (pos + FRAME_RECT_HEADER_BYTES > buffer.byteLength) return
+            const rect = {
+              x: view.getUint16(pos),
+              y: view.getUint16(pos + 2),
+              w: view.getUint16(pos + 4),
+              h: view.getUint16(pos + 6),
+              size: view.getUint32(pos + 8),
+            }
+            pos += FRAME_RECT_HEADER_BYTES
+            if (pos + rect.size > buffer.byteLength) return
+            rects.push({
+              ...rect,
+              body: new Blob([buffer.slice(pos, pos + rect.size)], { type: 'image/jpeg' }),
+            })
+            pos += rect.size
+          }
+
           lastFrameAtRef.current = performance.now()
           setAwaitingFirstFrame(false)
           // A frame is the only proof the desktop is live, so it is what moves
@@ -170,40 +236,50 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
             lastFpsTimeRef.current = now
           }
 
-          const view = new DataView(buffer)
-          const width = view.getUint16(0)
-          const height = view.getUint16(2)
-          setResolution({ width, height })
-
           const canvas = canvasRef.current
           if (!canvas) return
           if (canvas.width !== width || canvas.height !== height) {
+            // Assigning the size clears the canvas, which is the correct thing
+            // to do here: the endpoint's resolution changed, so nothing already
+            // on it lines up with what the agent is about to send. This is the
+            // only place the desktop is wiped between updates.
             canvas.width = width
             canvas.height = height
+            setResolution({ width, height })
           }
-          const ctx = canvas.getContext('2d')
-          if (!ctx) return
+          hasPaintedRef.current = false
 
-          // createImageBitmap is async and off the main thread, unlike the old
-          // Blob -> objectURL -> Image path, which decoded a ~100KB JPEG on the
-          // UI thread for every frame and made input feel sluggish under load.
-          createImageBitmap(new Blob([buffer.slice(4)], { type: 'image/jpeg' }))
-            .then((bitmap) => {
+          // Paint in arrival order. The rectangles accumulate into one canvas,
+          // so two updates racing each other would land the wrong one on top and
+          // leave the desktop showing a mixture of two states. Chaining the work
+          // is what keeps them in order without dropping any.
+          paintQueueRef.current = paintQueueRef.current
+            .then(async () => {
+              // A resolution change clears the canvas and every rectangle in
+              // this update was measured against the old one, so painting it
+              // would put desktop content at the wrong coordinates. The next
+              // update is 100ms away and carries the whole screen.
+              if (canvas.width !== width || canvas.height !== height) return
+              const ctx = canvas.getContext('2d')
+              if (!ctx) return
+              // createImageBitmap is async and off the main thread, unlike the
+              // old Blob -> objectURL -> Image path, which decoded a ~100KB
+              // JPEG on the UI thread for every frame and made input feel
+              // sluggish under load.
+              const bitmaps = await Promise.all(rects.map((r) => createImageBitmap(r.body)))
               if (isCancelled) {
-                bitmap.close()
+                bitmaps.forEach((b) => b.close())
                 return
               }
-              // Frames can decode out of order when several are in flight. The
-              // sequence number in the bitmap's own lifetime is not available,
-              // so guard on the canvas still existing and drop the paint if the
-              // session ended mid-decode rather than drawing into a dead canvas.
-              ctx.drawImage(bitmap, 0, 0)
+              for (let i = 0; i < bitmaps.length; i++) {
+                ctx.drawImage(bitmaps[i], rects[i].x, rects[i].y)
+                bitmaps[i].close()
+              }
               hasPaintedRef.current = true
-              bitmap.close()
             })
             .catch(() => {
               // A truncated JPEG is not worth failing the session over; the
-              // next frame arrives in 100ms.
+              // next update arrives in 100ms.
             })
         }
 
@@ -506,7 +582,9 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
                 {resolution.width}x{resolution.height}
               </span>
             )}
-            <span>{fps} FPS</span>
+            <span title="Screen updates per second. An update carries only the rectangles that changed, so a still desktop sends none — that is the point, not a stall.">
+              {fps} upd/s
+            </span>
             <span>{formatMB(bytesReceived)}</span>
             {capabilities && (
               <span

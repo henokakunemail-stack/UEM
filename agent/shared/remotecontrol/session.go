@@ -58,13 +58,18 @@ type InputEvent struct {
 	Mode string `json:"mode,omitempty"`
 }
 
-// Frame rate the agent captures at. The relay is a pipe, so a higher value only
-// costs bandwidth and CPU; 10 fps is the point where a desktop still reads as
-// live rather than as a slideshow.
-const captureInterval = 100 * time.Millisecond
-
+// ScreenCapturer produces a frame, not an encoded image.
+//
+// The return is raw BGRA pixels rather than a JPEG because the change detection
+// has to happen before any encoding. Diffing encoded frames is possible and
+// useless: a JPEG of a desktop that changed in one corner differs across the
+// whole image because the encoder's block boundaries moved, so every frame
+// looks wholly damaged and the transmission stays full-screen. Diffing pixels
+// finds the corner.
 type ScreenCapturer interface {
 	Capabilities() Capabilities
+	// CaptureScreen returns one frame as BGRA pixels, 4 bytes per pixel, row by
+	// row, with no padding between rows.
 	CaptureScreen() ([]byte, int, int, error)
 	InjectMouseEvent(e InputEvent) error
 	InjectKeyboardEvent(e InputEvent) error
@@ -73,6 +78,17 @@ type ScreenCapturer interface {
 	// a held Ctrl or Win key is a workstation-wide problem, not a cosmetic one.
 	ReleaseAllKeys() error
 }
+
+// Frame rate the agent captures at.
+//
+// This is the rate at which the endpoint is sampled, not the rate at which the
+// operator sees something change. An unchanged frame produces no rectangles and
+// no network traffic at all, so the visible frame rate on a mostly-static
+// desktop is far below this while the cost stays the same as before. 10 fps is
+// the point where a cursor movement or a scroll still reads as continuous; a
+// higher rate only adds blits on the endpoint, which is CPU the endpoint's owner
+// is paying for and cannot see the benefit of.
+const captureInterval = 100 * time.Millisecond
 
 type Session struct {
 	config    SessionConfig
@@ -272,16 +288,20 @@ func (s *Session) streamFramesLoop() {
 		return
 	}
 
+	damage := NewDamage()
 	// captureFailures counts consecutive blit failures so a repeat is reported
 	// once rather than on every tick.
 	captureFailures := 0
+	// idleTicks counts consecutive frames that found nothing to send. It is only
+	// used for the report below.
+	idleTicks := 0
 
 	for {
 		select {
 		case <-s.stopChan:
 			return
 		case <-ticker.C:
-			frameData, width, height, err := s.capturer.CaptureScreen()
+			pixels, width, height, err := s.capturer.CaptureScreen()
 			if err != nil {
 				// A single blit can fail on a moment when the desktop is being
 				// switched, and the next tick recovers. Looping forever in silence
@@ -296,19 +316,30 @@ func (s *Session) streamFramesLoop() {
 				continue
 			}
 			captureFailures = 0
-			if len(frameData) == 0 {
+			if len(pixels) == 0 {
 				continue
 			}
 
-			// Frame header: width (2 bytes) + height (2 bytes), big endian, then
-			// the encoded frame. The header is what lets the console resize its
-			// canvas to the endpoint's real resolution instead of a fixed guess.
-			payload := make([]byte, 4+len(frameData))
-			payload[0] = byte(width >> 8)
-			payload[1] = byte(width)
-			payload[2] = byte(height >> 8)
-			payload[3] = byte(height)
-			copy(payload[4:], frameData)
+			damage.SetSize(width, height)
+			rects := damage.Diff(pixels)
+			if len(rects) == 0 {
+				// Nothing on the endpoint moved. Sending an empty frame would
+				// cost a websocket message and a console repaint for no visible
+				// change, which on a static desktop is the overwhelming majority
+				// of ticks.
+				idleTicks++
+				continue
+			}
+			if idleTicks > 0 {
+				log.Debug().Int("idle_ticks", idleTicks).Msg("remote control desktop was static")
+				idleTicks = 0
+			}
+
+			payload, err := EncodeFrame(pixels, width, height, rects)
+			if err != nil {
+				log.Error().Err(err).Msg("encode remote control frame")
+				continue
+			}
 
 			s.mu.Lock()
 			err = s.conn.WriteMessage(websocket.BinaryMessage, payload)
