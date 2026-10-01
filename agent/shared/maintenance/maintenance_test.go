@@ -695,6 +695,65 @@ func TestCleanupTempRefusedRootsAreNotGreen(t *testing.T) {
 	}
 }
 
+// TestAFullScanWhoseFirstStepFailsDoesNotEndGreen is the regression test for
+// the worst defect in this feature: only the last step posted a terminal
+// status, so a full_scan whose first step refused every root still ended
+// 'completed' the moment disk_check succeeded — a sweep that freed nothing
+// rendered as a clean success.
+//
+// The verdict has to survive to the final report, because that is the only
+// one the server does not absorb (repository.go:567).
+func TestAFullScanWhoseFirstStepFailsDoesNotEndGreen(t *testing.T) {
+	cs := newCaptureServer(t)
+	e := engineFor(cs, "dev-42", "s3cret")
+
+	e.runStep = func(_ context.Context, step string) (stepOutcome, error) {
+		if step == TaskCleanupTemp {
+			// Unelevated agent: every root refused, code 1, no Go error.
+			return stepOutcome{output: "all 3 cleanup roots were refused", exitCode: 1}, nil
+		}
+		return stepOutcome{output: "ok: " + step, exitCode: 0, bytesFreed: 7}, nil
+	}
+
+	raw := json.RawMessage(`{"task_id":"t-12","task_type":"full_scan"}`)
+	if err := e.Run(t.Context(), raw, "t-12"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(cs.reports) != len(fullScanSteps) {
+		t.Fatalf("posted %d reports, want %d", len(cs.reports), len(fullScanSteps))
+	}
+
+	// The intermediate reports still carry 'running': they must, or the
+	// server closes the task early and drops the steps that follow.
+	for i := 0; i < len(fullScanSteps)-1; i++ {
+		if cs.reports[i].Status != srv.TaskStatusRunning {
+			t.Errorf("report %d (%s) status = %q, want %q",
+				i, fullScanSteps[i], cs.reports[i].Status, srv.TaskStatusRunning)
+		}
+	}
+
+	final := cs.reports[len(cs.reports)-1]
+	if final.Status != srv.TaskStatusFailed {
+		t.Errorf("final status = %q, want %q: step 1 refused every root, so the "+
+			"run failed even though the last step succeeded",
+			final.Status, srv.TaskStatusFailed)
+	}
+	if final.ExitCode == nil || *final.ExitCode != 1 {
+		t.Errorf("final exit_code = %v, want 1 (the code of the step that failed, "+
+			"not the zero of the step that succeeded last)", final.ExitCode)
+	}
+	if final.ErrorMessage == nil || *final.ErrorMessage == "" {
+		t.Error("final error_message is empty: the console needs the reason")
+	}
+
+	// All four steps still reported, so their bytes_freed still accumulate.
+	for i, step := range fullScanSteps {
+		if cs.reports[i].Step != step {
+			t.Errorf("report %d step = %q, want %q", i, cs.reports[i].Step, step)
+		}
+	}
+}
+
 func writeFile(t *testing.T, dir, name, content string) string {
 	t.Helper()
 	p := filepath.Join(dir, name)

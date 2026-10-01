@@ -182,6 +182,18 @@ func (e *Engine) Run(ctx context.Context, raw json.RawMessage, id string) error 
 		exec = runStepOS
 	}
 
+	// anyFailed carries a failure from an earlier step to the final report.
+	// Only the last step may post a terminal status: the server closes the
+	// task on the first terminal one and absorbs every later report
+	// (repository.go:567), and a 'failed' posted mid-run would lose the bytes
+	// of the steps that follow. So the verdict has to be assembled here and
+	// attached to the one report the server does accept — otherwise a full_scan
+	// whose first step refused every root still ends 'completed', because the
+	// last step alone decided the outcome.
+	var anyFailed bool
+	var firstExit int
+	var firstStep string
+
 	for i, step := range steps {
 		stepCtx, cancel := context.WithTimeout(ctx, stepTimeout(step))
 		out, err := exec(stepCtx, step)
@@ -216,6 +228,15 @@ func (e *Engine) Run(ctx context.Context, raw json.RawMessage, id string) error 
 				out.exitCode)
 			out.output = strings.TrimSpace(out.output + "\n" + err.Error())
 		}
+		if status == statusFailed {
+			anyFailed = true
+			// The first non-zero code wins: it names the step that broke the
+			// run, which is the one an operator needs to look at.
+			if firstExit == 0 {
+				firstExit = out.exitCode
+				firstStep = step
+			}
+		}
 
 		last := i == len(steps)-1
 		// OutputLog and ErrorMessage are *string on both sides, so each needs a
@@ -242,6 +263,14 @@ func (e *Engine) Run(ctx context.Context, raw json.RawMessage, id string) error 
 			// status here would close the task and the server would absorb
 			// every remaining step.
 			rep.Status = statusRunning
+		} else if anyFailed && status != statusFailed {
+			// The run as a whole failed even though this step did not. The
+			// status and the exit code have to agree, or the console shows a
+			// red pill next to exit 0 and reads as a broken row.
+			rep.Status = statusFailed
+			rep.ExitCode = &firstExit
+			msg := fmt.Sprintf("%s failed earlier in this task; see output log", firstStep)
+			rep.ErrorMessage = &msg
 		}
 		if err := e.report(ctx, rep); err != nil {
 			log.Error().Err(err).
@@ -289,15 +318,57 @@ func (e *Engine) reportBusy(ctx context.Context, taskID, taskType string) {
 	}
 }
 
+// errPermanent marks a report the server refused on purpose. A 4xx means the
+// same payload will be refused again, and a marshal or request-build failure
+// will never succeed on a retry — repeating those only burns the window the
+// step still has left.
+type errPermanent struct{ error }
+
+// reportAttempts and reportBackoff bound the retry of a TRANSIENT failure. One
+// dropped POST used to lose a step permanently: the row stayed 'dispatched',
+// the job stayed 'running', and the console polled both forever. Three tries
+// over ~700ms rides out a server restart or a single 502 without ever holding
+// the sweep for a second longer than that.
+const (
+	reportAttempts = 3
+)
+
+func reportBackoff(attempt int) time.Duration {
+	return 100 * time.Millisecond << (attempt - 1)
+}
+
+// report posts one step report, retrying only a transient failure.
 func (e *Engine) report(ctx context.Context, rep StepReport) error {
+	var last error
+	for attempt := 1; attempt <= reportAttempts; attempt++ {
+		if attempt > 1 {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(reportBackoff(attempt - 1)):
+			}
+		}
+		last = e.reportOnce(ctx, rep)
+		if last == nil {
+			return nil
+		}
+		var permanent *errPermanent
+		if errors.As(last, &permanent) {
+			return last
+		}
+	}
+	return last
+}
+
+func (e *Engine) reportOnce(ctx context.Context, rep StepReport) error {
 	url := e.serverBase + "/api/agent/maintenance/tasks/" + rep.TaskID + "/result"
 	body, err := json.Marshal(rep)
 	if err != nil {
-		return fmt.Errorf("marshal maintenance report: %w", err)
+		return &errPermanent{fmt.Errorf("marshal maintenance report: %w", err)}
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
-		return fmt.Errorf("create report request: %w", err)
+		return &errPermanent{fmt.Errorf("create report request: %w", err)}
 	}
 	req.Header.Set("Content-Type", "application/json")
 	// The per-device secret, not a user JWT. These header names are the ones
@@ -310,6 +381,9 @@ func (e *Engine) report(ctx context.Context, rep StepReport) error {
 		return fmt.Errorf("send maintenance report: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode >= 400 && resp.StatusCode < 500 {
+		return &errPermanent{fmt.Errorf("maintenance report rejected with status %d", resp.StatusCode)}
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return fmt.Errorf("maintenance report rejected with status %d", resp.StatusCode)
 	}

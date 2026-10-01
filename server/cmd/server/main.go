@@ -552,6 +552,12 @@ func buildServer(cfg config.Config, database *sqlx.DB) (*http.Server, func()) {
 	// reaps them so a rollout does not read as 'still running' forever.
 	go runDeploymentSweep(softRepo)
 
+	// Maintenance tasks stranded by an agent that took the command and then
+	// never reported. Nothing else closes them: the job status is written only
+	// from a task's terminal report, so one silent task holds its job 'running'
+	// and the console polls it forever.
+	go maintRepo.StartSweep(bgCtx, maintenance.SweepInterval, maintenance.AbandonGrace)
+
 	// Periodic online database backups. VACUUM INTO takes a consistent
 	// snapshot without stopping the server, so a failed backup is logged but
 	// never fatal.
