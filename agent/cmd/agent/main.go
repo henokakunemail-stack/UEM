@@ -8,6 +8,7 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -46,13 +47,28 @@ func main() {
 		credsPath     string
 		heartbeatSecs int
 		serviceAction string
+		rcWorkerArg   string
+		rcWorkerCreds string
 	)
 	flag.StringVar(&serverURL, "server", envOr("AGENT_SERVER", "http://localhost:8443"), "central server URL")
 	flag.StringVar(&enrollToken, "enroll", "", "one-time enrollment token (first run only)")
 	flag.StringVar(&credsPath, "creds", defaultCredsPath(), "path to persisted credentials")
 	flag.IntVar(&heartbeatSecs, "heartbeat", 20, "heartbeat interval in seconds")
 	flag.StringVar(&serviceAction, "service", "", "OS service management action (install|uninstall|start|stop|status)")
+	// Internal: the remote control session worker launched into the logged-on
+	// user's session. Not an operator-facing flag — see runRCWorker.
+	flag.StringVar(&rcWorkerArg, "rc-worker", "", "internal: base64 remote control session config (session worker mode)")
+	flag.StringVar(&rcWorkerCreds, "rc-creds", "", "internal: credential path for the session worker")
 	flag.Parse()
+
+	// The worker branch runs before the service check on purpose. A worker spawned
+	// into the user's session is not a service, so RunAsService would be false
+	// anyway — but ordering it first also means a misconfigured worker can never be
+	// mistaken for the daemon and end up enrolling a second device.
+	if rcWorkerArg != "" {
+		runRCWorker(rcWorkerArg, rcWorkerCreds)
+		return
+	}
 
 	if serviceAction != "" {
 		handleServiceAction(serviceAction, serverURL, credsPath)
@@ -74,6 +90,68 @@ func main() {
 	}
 
 	runAgent(serverURL, enrollToken, credsPath, heartbeatSecs)
+}
+
+// runRCWorker is the whole of the session worker's behaviour: run one remote
+// control session in the interactive user session, then exit.
+//
+// It deliberately does almost nothing else. The service already owns enrollment,
+// the heartbeat, inventory and command dispatch; a second copy of all of it
+// would fight the service for the credentials file and register the device
+// twice. The worker exists for exactly one reason: to be on a desktop.
+//
+// The session here is the ordinary remotecontrol.Session, dialling the ordinary
+// relay with the ordinary credentials. Nothing in the capture, relay or frame
+// path is worker-aware, and nothing needed to be: running in the user's session
+// is sufficient, because that is what makes GetDC and SendInput point at a
+// desktop and a human.
+func runRCWorker(cfgArg, credsPath string) {
+	raw, err := base64.StdEncoding.DecodeString(cfgArg)
+	if err != nil {
+		log.Error().Err(err).Msg("decode rc worker config")
+		return
+	}
+	var cfg remotecontrol.SessionConfig
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		log.Error().Err(err).Msg("parse rc worker config")
+		return
+	}
+
+	creds, err := enrollment.Load(credsPath)
+	if err != nil {
+		// The secret was never passed on the command line, so this is the only
+		// way the worker can authenticate. Without it there is no session, and
+		// saying so here is the only trace: the service already logged that it
+		// handed the session off.
+		log.Error().Err(err).Str("creds", credsPath).Msg("rc worker cannot load credentials")
+		return
+	}
+
+	serverURL := creds.ServerURL
+	if serverURL == "" {
+		log.Error().Msg("rc worker has no server url in its credentials")
+		return
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	session := remotecontrol.NewSession(cfg, serverURL, remotecontrol.Credentials{
+		DeviceID:     creds.DeviceID,
+		DeviceSecret: creds.DeviceSecret,
+	}, remotecontrol.NewPlatformCapturer())
+
+	if err := session.Start(ctx); err != nil {
+		log.Error().Err(err).Str("session", cfg.SessionID).Msg("rc worker session failed to start")
+		return
+	}
+	log.Info().Str("session", cfg.SessionID).Msg("rc worker session started on the interactive desktop")
+
+	// Block until the session ends or the operator stops it. Start returns as
+	// soon as the socket is up and the loops are running, so returning early here
+	// would end the session the instant it began.
+	session.Wait(ctx)
+	log.Info().Str("session", cfg.SessionID).Msg("rc worker session ended")
 }
 
 func runAgent(serverURL, enrollToken, credsPath string, heartbeatSecs int) {
@@ -366,6 +444,12 @@ func runAgent(serverURL, enrollToken, credsPath string, heartbeatSecs int) {
 	// Phase 11: Remote Control
 	rcCapturer := remotecontrol.NewPlatformCapturer()
 	var activeRCSession *remotecontrol.Session
+	// activeRCWorker is the pid of a session worker this service spawned into
+	// the user's session. It is tracked separately from activeRCSession because
+	// the two are mutually exclusive: when a worker owns the session there is no
+	// local Session object, and stopping a local nil pointer would silently
+	// leave the worker's process running and streaming to nobody.
+	var activeRCWorker uint32
 	var rcMu sync.Mutex
 
 	dispatcher.Register("rc.start", func(ctx context.Context, command, id string, payload json.RawMessage) any {
@@ -392,12 +476,44 @@ func runAgent(serverURL, enrollToken, credsPath string, heartbeatSecs int) {
 			activeRCSession.Stop()
 			activeRCSession = nil
 		}
+		if activeRCWorker != 0 {
+			_ = remotecontrol.KillSessionWorker(activeRCWorker)
+			activeRCWorker = 0
+		}
 		session := remotecontrol.NewSession(cfg, targetServerURL, remotecontrol.Credentials{
 			DeviceID:     creds.DeviceID,
 			DeviceSecret: creds.DeviceSecret,
 		}, rcCapturer)
 		activeRCSession = session
 		rcMu.Unlock()
+
+		// Hand the session to a process on the user's desktop before giving up on
+		// it here. This service runs in Session 0, which has no desktop at all:
+		// GetDC cannot blit from it and SendInput cannot reach a human through it,
+		// so a session started here can never carry a frame. The worker is the
+		// same binary re-run in the logged-on user's session, which is what makes
+		// the ordinary capture path work without a single change to it.
+		//
+		// Failing to spawn is not fatal and must not be silent: a machine with
+		// nobody logged on has no session to attach to, and in that case falling
+		// back below is correct — the console gets an explanation instead of a
+		// connection that never produces a frame.
+		if exe, err := os.Executable(); err == nil {
+			pid, err := remotecontrol.SpawnSessionWorker(exe, credsPath, cfg)
+			if err == nil {
+				log.Info().Uint32("worker_pid", pid).Str("session", cfg.SessionID).
+					Msg("remote control session handed to the user session worker")
+				rcMu.Lock()
+				activeRCWorker = pid
+				activeRCSession = nil
+				rcMu.Unlock()
+				return map[string]string{"status": "starting", "session_id": cfg.SessionID}
+			}
+			log.Warn().Err(err).Str("session", cfg.SessionID).
+				Msg("could not start a session worker; falling back to the service process")
+		} else {
+			log.Warn().Err(err).Msg("cannot locate the agent executable for a session worker")
+		}
 
 		go func() {
 			if err := session.Start(context.Background()); err != nil {
@@ -430,6 +546,18 @@ func runAgent(serverURL, enrollToken, credsPath string, heartbeatSecs int) {
 		if activeRCSession != nil && activeRCSession.ID() == p.SessionID {
 			activeRCSession.Stop()
 			activeRCSession = nil
+		}
+		// A worker has no Session object to stop, so the process is the session.
+		// Leaving it alive would keep a desktop streaming to a console that has
+		// already gone away, on an endpoint whose operator believes they ended
+		// it. A stale pid is normal — it means the worker exited on its own — and
+		// is logged rather than treated as a failure.
+		if activeRCWorker != 0 {
+			if err := remotecontrol.KillSessionWorker(activeRCWorker); err != nil {
+				log.Warn().Err(err).Uint32("worker_pid", activeRCWorker).
+					Msg("session worker was already gone")
+			}
+			activeRCWorker = 0
 		}
 		return map[string]string{"status": "stopped"}
 	})

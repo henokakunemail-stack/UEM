@@ -197,6 +197,23 @@ func (s *Session) Stop() {
 // session it means instead of whatever happened to be running.
 func (s *Session) ID() string { return s.config.SessionID }
 
+// Wait blocks until the session has ended, and is what keeps a process that
+// owns a session alive to own it.
+//
+// Start returns as soon as the socket is up and the loops are running, so a
+// caller that treated Start as the whole job would end the session the instant
+// it began. Only Stop closes the channel: the streaming loop watches stopChan,
+// and every path that ends a session — an operator stopping it, the socket
+// dying, a context cancellation — has to come through Stop for the wait to
+// release.
+func (s *Session) Wait(ctx context.Context) {
+	select {
+	case <-s.stopChan:
+	case <-ctx.Done():
+		s.Stop()
+	}
+}
+
 func (s *Session) currentMode() string {
 	s.modeMu.RLock()
 	defer s.modeMu.RUnlock()

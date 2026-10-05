@@ -31,12 +31,14 @@ type activeRelay struct {
 	agentWriteMu    sync.Mutex
 	agentWS         *websocket.Conn
 
-	mu          sync.Mutex
-	framesCount int
-	bytesCount  int64
-	inputsCount int
-	closed      bool
-	closeChan   chan struct{}
+	mu             sync.Mutex
+	framesCount    int
+	bytesCount     int64
+	inputsCount    int
+	closed         bool
+	closeChan      chan struct{}
+	pendingControl [][]byte
+	agentClosed    bool
 }
 
 type RelayManager struct {
@@ -115,7 +117,17 @@ func (rm *RelayManager) AttachOperator(sessionID string, ws *websocket.Conn) (*a
 
 	r.mu.Lock()
 	r.operatorWS = ws
+	pending := r.pendingControl
+	r.pendingControl = nil
 	r.mu.Unlock()
+
+	if len(pending) > 0 {
+		r.operatorWriteMu.Lock()
+		for _, msg := range pending {
+			_ = ws.WriteMessage(websocket.TextMessage, msg)
+		}
+		r.operatorWriteMu.Unlock()
+	}
 
 	// A read deadline plus a pong handler keeps a half-open socket — a laptop
 	// that closed without a close frame — from holding the relay open forever.
@@ -210,6 +222,45 @@ func (rm *RelayManager) CloseRelay(sessionID string) {
 	log.Info().Str("session", sessionID).Int("frames", frames).Int("inputs", inputs).Msg("remote control relay closed")
 }
 
+// AgentDisconnected handles an agent websocket disconnect. If the operator is already
+// attached, the relay closes immediately. If the operator has not yet completed the
+// HTTP/WS ticket handshake, the relay remains accessible for a 15-second grace period
+// so the operator receives buffered terminal messages (such as "unsupported").
+func (rm *RelayManager) AgentDisconnected(sessionID string) {
+	rm.relaysMu.Lock()
+	r, exists := rm.relays[sessionID]
+	if !exists {
+		rm.relaysMu.Unlock()
+		return
+	}
+	r.mu.Lock()
+	if r.operatorWS != nil {
+		r.mu.Unlock()
+		rm.relaysMu.Unlock()
+		rm.CloseRelay(sessionID)
+		return
+	}
+	r.agentClosed = true
+	r.mu.Unlock()
+	rm.relaysMu.Unlock()
+
+	go func() {
+		select {
+		case <-r.closeChan:
+			return
+		case <-time.After(15 * time.Second):
+			rm.CloseRelay(sessionID)
+		}
+	}()
+}
+
+// IsAgentClosed reports whether the agent has already disconnected from the relay.
+func (r *activeRelay) IsAgentClosed() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.agentClosed
+}
+
 // ForwardControlMessage sends a control message to the agent regardless of the
 // input gate. It is the mode-change path, which must work in both directions.
 func (r *activeRelay) ForwardControlMessage(msgType int, data []byte) error {
@@ -264,14 +315,28 @@ func (r *activeRelay) ForwardAgentFrame(msgType int, data []byte) error {
 		r.mu.Unlock()
 		return nil
 	}
-	ws := r.operatorWS
+	// Counted before the operator check, which is where it always was. The
+	// pending-control buffer below is new, but moving these two lines under it
+	// meant a frame the agent produced while no operator was attached vanished
+	// from the session telemetry entirely -- so the worse the delay between
+	// starting a session and opening the console, the less the record showed.
+	// The counter answers "how much did this endpoint send", which is a fact
+	// about the endpoint and does not depend on anyone being watching.
 	r.framesCount++
 	r.bytesCount += int64(len(data))
-	r.mu.Unlock()
 
+	ws := r.operatorWS
 	if ws == nil {
+		if msgType == websocket.TextMessage {
+			msgCopy := make([]byte, len(data))
+			copy(msgCopy, data)
+			r.pendingControl = append(r.pendingControl, msgCopy)
+		}
+		r.mu.Unlock()
 		return nil
 	}
+	r.mu.Unlock()
+
 	r.operatorWriteMu.Lock()
 	defer r.operatorWriteMu.Unlock()
 	return ws.WriteMessage(msgType, data)

@@ -324,3 +324,66 @@ func TestTheRelayPingsSoItsOwnDeadlineCanBeRefreshed(t *testing.T) {
 			"CloseRelay should end it")
 	}
 }
+
+func TestRelayBuffersEarlyAgentControlMessageAndDeliversToOperator(t *testing.T) {
+	h, _, _ := rcFixture(t)
+	session := &RemoteControlSession{DeviceID: "dev-1", OperatorID: "u-1", SessionMode: "full_control"}
+	if err := h.repo.CreateSession(context.Background(), session); err != nil {
+		t.Fatal(err)
+	}
+	relay := h.relay.RegisterSession(session.ID, session.SessionMode)
+
+	// Agent sends unsupported control message before operator attaches
+	errMsg := []byte(`{"type":"unsupported","reason":"screen capture unavailable"}`)
+	if err := relay.ForwardAgentFrame(websocket.TextMessage, errMsg); err != nil {
+		t.Fatalf("ForwardAgentFrame failed: %v", err)
+	}
+	// Agent disconnects
+	h.relay.AgentDisconnected(session.ID)
+
+	if !relay.IsAgentClosed() {
+		t.Error("expected relay.IsAgentClosed() to be true")
+	}
+
+	serverConn := make(chan *websocket.Conn, 1)
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := (&websocket.Upgrader{}).Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		serverConn <- conn
+		for {
+			if _, _, err := conn.ReadMessage(); err != nil {
+				return
+			}
+		}
+	}))
+	defer up.Close()
+
+	client, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(up.URL, "http"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+
+	conn := <-serverConn
+	defer conn.Close()
+
+	// Operator attaches now
+	attachedRelay, ok := h.relay.AttachOperator(session.ID, conn)
+	if !ok || attachedRelay == nil {
+		t.Fatal("AttachOperator failed to find relay")
+	}
+
+	// Operator must receive the buffered message
+	msgType, msg, err := client.ReadMessage()
+	if err != nil {
+		t.Fatalf("operator failed to read buffered message: %v", err)
+	}
+	if msgType != websocket.TextMessage {
+		t.Fatalf("expected TextMessage, got %d", msgType)
+	}
+	if !bytes.Equal(msg, errMsg) {
+		t.Fatalf("expected message %s, got %s", string(errMsg), string(msg))
+	}
+}

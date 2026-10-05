@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/gorilla/websocket"
@@ -296,6 +297,13 @@ func (h *Handler) handleOperatorWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if relay.IsAgentClosed() {
+		time.Sleep(50 * time.Millisecond)
+		_ = ws.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, "session ended"))
+		h.relay.CloseRelay(sessionID)
+		return
+	}
+
 	// Read operator input events and forward to agent
 	for {
 		msgType, msg, err := ws.ReadMessage()
@@ -383,7 +391,7 @@ func (h *Handler) handleAgentWS(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	h.relay.CloseRelay(sessionID)
+	h.relay.AgentDisconnected(sessionID)
 }
 
 func writeErr(w http.ResponseWriter, code int, msg string) {

@@ -182,6 +182,7 @@ func NewPlatformCapturer() ScreenCapturer {
 // so the caller inspects the blit, not this error.
 var attachedThreads sync.Map
 
+// attachToInputDesktop gives the calling thread a desktop to draw from.
 func attachToInputDesktop() error {
 	tid, _, _ := procGetCurrentThreadID.Call()
 	if _, done := attachedThreads.Load(tid); done {
@@ -192,12 +193,12 @@ func attachToInputDesktop() error {
 	if hDesktop == 0 {
 		return fmt.Errorf("open input desktop: %w", callErr)
 	}
-	defer procCloseDesktop.Call(hDesktop)
 
 	if ret, _, callErr := procSetThreadDesktop.Call(hDesktop); ret == 0 {
+		procCloseDesktop.Call(hDesktop)
 		return fmt.Errorf("set thread desktop: %w", callErr)
 	}
-	attachedThreads.Store(tid, true)
+	attachedThreads.Store(tid, hDesktop)
 	return nil
 }
 
@@ -212,12 +213,20 @@ func attachToInputDesktop() error {
 // only test that tells the truth, so Capabilities never claims a capability
 // the host cannot deliver.
 func (c *WindowsCapturer) Capabilities() Capabilities {
-	caps := Capabilities{Mouse: true, Keyboard: true}
+	caps := Capabilities{}
 	if err := c.probeCapture(); err != nil {
 		caps.Reason = "screen capture is unavailable on this host: " + err.Error()
 		return caps
 	}
+	// Mouse and keyboard are claimed here, not before the probe, because
+	// claiming them on the strength of "SendInput exists" is what made the hello
+	// frame a lie. Both inject into the calling session's input queue, so a host
+	// that cannot be blitted cannot be typed at either. Asserting them first gave
+	// an endpoint that advertised "no capture, but mouse and keyboard work" -- and
+	// the console has no way to show a capability the agent never tested.
 	caps.Capture = true
+	caps.Mouse = true
+	caps.Keyboard = true
 	return caps
 }
 
@@ -294,6 +303,8 @@ func (c *WindowsCapturer) CaptureScreen() ([]byte, int, int, error) {
 
 	ret, _, callErr := procBitBlt.Call(hdcMem, 0, 0, uintptr(width), uintptr(height), hdcScreen, 0, 0, uintptr(SRCCOPY))
 	if ret == 0 {
+		tid, _, _ := procGetCurrentThreadID.Call()
+		attachedThreads.Delete(tid)
 		// The Win32 code is kept deliberately. A non-interactive window station
 		// (a service, a CI runner, a container) makes BitBlt fail with a code
 		// that no amount of code change will fix, and without it this error is

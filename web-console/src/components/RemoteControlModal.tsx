@@ -676,9 +676,13 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
             </>
           ) : status === 'error' ? (
             <div className="remote-placeholder">
-              <AlertCircle className="remote-placeholder-icon" />
-              <h3 className="remote-placeholder-title">Session Failed</h3>
+              <Monitor className="remote-placeholder-icon" />
+              <h3 className="remote-placeholder-title">Cannot Stream This Desktop</h3>
               <p className="remote-placeholder-text">{errorMessage}</p>
+              <p className="remote-placeholder-text">
+                Remote control needs a person logged in at the endpoint so the agent has a
+                desktop to attach to. Ask them to sign in, then start a new session.
+              </p>
               <button type="button" className="btn btn-secondary" onClick={onClose}>
                 Close Window
               </button>
