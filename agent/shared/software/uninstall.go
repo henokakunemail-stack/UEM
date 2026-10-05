@@ -59,12 +59,45 @@ func Uninstall(ctx context.Context, payload UninstallPayload) (exitCode int, out
 			packageName)
 	}
 
-	found, err := findInstalled(ctx, packageName)
+	target, err := resolveTarget(ctx, packageName)
 	if err != nil {
+		// resolveTarget reports ErrNotInstalled with the operator-facing text
+		// already in the message slot, because a caller that treats it as a
+		// success still wants that sentence in the result rather than an empty
+		// string. It has to be checked INSIDE this branch: a blanket return above
+		// it makes the next line unreachable, which is how the catalog path came
+		// to report an absent package as exit -1 with a blank output log.
+		if errors.Is(err, ErrNotInstalled) {
+			return 0, err.Error(), err
+		}
 		return -1, "", err
 	}
+
+	return runPlatformUninstall(ctx, target, args)
+}
+
+// resolveTarget finds the one installed program a name refers to, or refuses.
+//
+// It is the guard half of Uninstall, extracted so that every caller gets the
+// same answer for the same name. That matters because the second caller --
+// UninstallByName -- resolves its own switches instead of taking them from the
+// server, and a second copy of this logic is exactly how an ambiguity check
+// ends up applied on one path and forgotten on the other.
+//
+// The three refusals here are the safety argument for the whole feature:
+//   - no match is not installed, which the callers treat as success, because a
+//     machine that never had the program already satisfies a compliance rule
+//   - an exact match beats a prefix match, so "Microsoft Edge" still names one
+//     program on a box that also has Edge WebView2 Runtime
+//   - several matches are reported, never guessed at; there is no undo
+func resolveTarget(ctx context.Context, packageName string) (*installedProgram, error) {
+	found, err := findInstalled(ctx, packageName)
+	if err != nil {
+		return nil, err
+	}
 	if len(found) == 0 {
-		return 0, fmt.Sprintf("%s is not installed on this endpoint; nothing to remove", packageName), ErrNotInstalled
+		return nil, fmt.Errorf("%s is not installed on this endpoint; nothing to remove: %w",
+			packageName, ErrNotInstalled)
 	}
 
 	// A name that matches one program exactly has named that program, even when
@@ -85,14 +118,13 @@ func Uninstall(ctx context.Context, payload UninstallPayload) (exitCode int, out
 		// Refusing here is the whole safety argument for this feature. Picking one
 		// of several matching programs risks removing an application nobody
 		// named.
-		return -1, "", fmt.Errorf(
+		return nil, fmt.Errorf(
 			"%q matches %d installed programs (%s): refusing to guess which one to remove. "+
 				"Narrow the package name, or remove the others first",
 			packageName, len(found), strings.Join(names, ", "))
 	}
 
-	target := found[0]
-	return runPlatformUninstall(ctx, target, args)
+	return found[0], nil
 }
 
 // exactMatches returns the candidates whose name normalises to exactly the

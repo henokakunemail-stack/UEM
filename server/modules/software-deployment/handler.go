@@ -89,10 +89,21 @@ type Handler struct {
 	// devices authenticates agent-facing endpoints by the per-device secret.
 	// Agent endpoints have no user JWT, so without this any client that can
 	// reach the port could report progress for arbitrary tasks or pull packages.
-	devices devicemgmt.SecretLookup
+	//
+	// It is the full Repository rather than SecretLookup because the by-name
+	// uninstall route has to confirm the device exists before it queues anything.
+	devices DeviceLookup
 }
 
-func NewHandler(repo *Repository, hub HubDispatcher, auditLogger AuditLogger, storageDir string, authMW func(http.Handler) http.Handler, devices devicemgmt.SecretLookup) *Handler {
+// DeviceLookup is the device surface this handler needs. devicemgmt.Repository
+// satisfies it; so does a test double, which is why the handler depends on this
+// and not on the concrete type.
+type DeviceLookup interface {
+	devicemgmt.SecretLookup
+	GetByID(ctx context.Context, id string) (devicemgmt.Device, error)
+}
+
+func NewHandler(repo *Repository, hub HubDispatcher, auditLogger AuditLogger, storageDir string, authMW func(http.Handler) http.Handler, devices DeviceLookup) *Handler {
 	if storageDir == "" {
 		storageDir = "./data/packages"
 	}
@@ -123,6 +134,13 @@ func (h *Handler) Register(r chi.Router) {
 		r.With(rbac.RequireRole(rbac.RoleViewer)).Get("/api/software/deployments/{id}", h.getDeployment)
 		r.With(rbac.RequireRole(rbac.RoleViewer)).Get("/api/software/deployments/{id}/tasks", h.listTasks)
 		r.With(rbac.RequireRole(rbac.RoleTechnician)).Post("/api/software/deployments", h.createDeployment)
+
+		// Remove one program named off a device's installed-software list.
+		//
+		// Not the catalog path, and deliberately so: that one demands a
+		// package_id, and a program violating policy on an endpoint is by
+		// definition one nobody deployed from the catalog.
+		r.With(rbac.RequireRole(rbac.RoleTechnician)).Post("/api/devices/{id}/software/uninstall", h.uninstallDeviceSoftware)
 	})
 
 	// Agent Endpoints (Authenticated via device header or unauthenticated download token)
@@ -479,6 +497,117 @@ func (h *Handler) createDeployment(w http.ResponseWriter, r *http.Request) {
 		"deployment":      dep,
 		"tasks_total":     len(tasks),
 		"dispatched_live": dispatchedCount,
+	})
+}
+
+// uninstallDeviceSoftware requests removal of one program named off a device's
+// installed-software list.
+//
+// The body carries no uninstall arguments, and that absence is the design rather
+// than a gap. There is no universal silent switch for a Windows uninstaller --
+// NSIS wants /S, Inno Setup wants /VERYSILENT, WinRAR wants /s -- so an operator
+// asked for switches would be guessing, and a wrong guess is what opens a window
+// on the endpoint. The agent resolves the switches from the endpoint's own
+// registry and refuses when it cannot verify them, so the operator supplies a
+// name and nothing else.
+//
+// What this response does NOT say is that anything was removed. It returns 201
+// when the command was handed to the agent, which is a different moment from the
+// uninstall finishing. The real outcome -- including a refusal, which is the
+// common case for a program with no recorded quiet command -- arrives later in
+// agent_commands.result. So the console must present this as "sent".
+func (h *Handler) uninstallDeviceSoftware(w http.ResponseWriter, r *http.Request) {
+	deviceID := chi.URLParam(r, "id")
+
+	var req struct {
+		SoftwareName string `json:"software_name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	name := strings.TrimSpace(req.SoftwareName)
+	if name == "" {
+		writeErr(w, http.StatusBadRequest, "software_name is required")
+		return
+	}
+
+	if _, err := h.devices.GetByID(r.Context(), deviceID); err != nil {
+		if errors.Is(err, devicemgmt.ErrNotFound) {
+			writeErr(w, http.StatusNotFound, "device not found")
+			return
+		}
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	// An agent that predates this command would drop it silently, and its row
+	// would sit in 'sent' forever on a healthy endpoint: the reply lands in
+	// agent_commands, not in deployment_tasks, so the orphan sweep -- which only
+	// reaps offline devices -- never touches it. Refusing here is the only
+	// version of that story that ends.
+	const command = "software.uninstall.by_name"
+	missing, err := h.repo.DevicesWithoutCapability(r.Context(), []string{deviceID}, command)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "failed to check endpoint capabilities: "+err.Error())
+		return
+	}
+	if len(missing) > 0 {
+		label := missing[0].OSName
+		if label == "" {
+			label = "unknown OS"
+		}
+		writeErr(w, http.StatusBadRequest, fmt.Sprintf(
+			"endpoint %s (%s) runs an agent that cannot handle %q. Update that agent first; "+
+				"nothing was uninstalled.", deviceID, label, command))
+		return
+	}
+
+	// Offline is a refusal, not a queue. The operator is standing on the device's
+	// page looking at a program that is still there; answering 202 "queued" for a
+	// command no agent will ever read teaches them that pressing the button works.
+	if !h.hub.Online(deviceID) {
+		writeErr(w, http.StatusConflict,
+			"endpoint is offline: nothing was uninstalled. Try again once it reconnects.")
+		return
+	}
+
+	cmdID := NewID()
+	payload := fmt.Sprintf(`{"software_name":%q}`, name)
+	if err := h.repo.CreateAgentCommand(r.Context(), cmdID, deviceID, command, payload); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	envBytes, err := json.Marshal(transport.Envelope{
+		Type:    transport.TypeCommand,
+		ID:      cmdID,
+		Command: command,
+		Payload: map[string]string{"software_name": name},
+	})
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if !h.hub.SendTo(deviceID, envBytes) {
+		// The row exists and says 'sent' while nothing reached the agent. Left
+		// that way it is honest -- it never claims a removal -- so it is not
+		// deleted here. The operator is told the truth about this attempt.
+		writeErr(w, http.StatusConflict,
+			"endpoint connection is busy; the uninstall was not sent. Try again.")
+		return
+	}
+
+	if h.audit != nil {
+		_ = h.audit.Log(r.Context(), "user", auth.UserIDFromContext(r.Context()),
+			"software.uninstall.requested", deviceID,
+			map[string]string{"software_name": name, "command_id": cmdID})
+	}
+
+	writeJSON(w, http.StatusCreated, map[string]string{
+		"status":        "sent",
+		"command_id":    cmdID,
+		"software_name": name,
 	})
 }
 

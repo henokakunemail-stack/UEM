@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/signal"
 	"runtime/debug"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -176,6 +177,76 @@ func runAgent(serverURL, enrollToken, credsPath string, heartbeatSecs int) {
 	defer termMgr.CloseAll()
 
 	client := transport.NewClient(creds.ServerURL, creds.DeviceID, creds.DeviceSecret)
+
+	// Uninstall a program named off a device's installed-software list, with no
+	// task row and no arguments from the operator.
+	//
+	// It replies with transport.Deferred rather than an immediate result because
+	// the reply carries the outcome, not the acceptance. Answering "dispatched"
+	// here would write status='done' to the command row while the uninstall was
+	// still waiting behind an installer in softwareQueue -- and if the agent were
+	// stopped before the queue reached it, the row would claim a removal that
+	// never happened. The result goes out once the work is really finished.
+	//
+	// Registered after client is built because the queued work sends its own
+	// reply; the two handlers above it do not, and do not need to.
+	dispatcher.Register("software.uninstall.by_name", func(ctx context.Context, command, id string, payload json.RawMessage) any {
+		var p struct {
+			SoftwareName string `json:"software_name"`
+		}
+		if err := json.Unmarshal(payload, &p); err != nil || strings.TrimSpace(p.SoftwareName) == "" {
+			log.Error().Err(err).Str("command", id).Msg("software uninstall by name payload rejected")
+			return map[string]string{"status": "rejected", "error": "invalid uninstall payload: software_name is required"}
+		}
+		name := strings.TrimSpace(p.SoftwareName)
+
+		// Queued behind installs on purpose: see softwareQueue. An uninstall
+		// racing an install of the same product is the MSI collision.
+		if err := softwareQueue.Submit(id, "uninstall_by_name", func() {
+			defer guardAgentGoroutine("software.uninstall.by_name")
+
+			// Background, not the command context: that context is cancelled when
+			// the command's reply is sent, and no reply is sent from in here. The
+			// deadline is the same 20 minutes the catalog uninstall path uses, set
+			// where the work starts rather than borrowed from the command.
+			runCtx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
+			defer cancel()
+
+			exitCode, output, runErr := software.UninstallByName(runCtx, name)
+			result := software.DescribeUninstall(name, exitCode, output, runErr)
+
+			// ErrNotInstalled is a completed check, not a failure: a machine that
+			// never had the program already satisfies the rule being enforced. It
+			// reports done with the reason in the result text.
+			status := "done"
+			switch {
+			case runErr == nil:
+				log.Info().Str("software", name).Int("exit_code", exitCode).Msg("uninstall by name finished")
+			case errors.Is(runErr, software.ErrNotInstalled):
+				log.Info().Str("software", name).Msg("uninstall by name: target was not installed")
+			default:
+				status = "failed"
+				log.Warn().Str("software", name).Int("exit_code", exitCode).
+					Err(runErr).Msg("uninstall by name refused or failed")
+			}
+
+			// Reported even on failure. This row is the only record the console has
+			// of what happened on the endpoint, and the refusals -- no quiet command,
+			// no elevation, ambiguous name -- arrive here and nowhere else. A
+			// dropped send leaves the row at 'sent', which says the agent did not
+			// finish rather than claiming a removal that never ran.
+			_ = client.Send(transport.Envelope{
+				Type:   transport.TypeCommandResult,
+				ID:     id,
+				Status: status,
+				Result: map[string]string{"result": result},
+			})
+		}); err != nil {
+			log.Warn().Err(err).Str("command", id).Msg("software uninstall by name not accepted")
+			return map[string]string{"status": "rejected", "error": err.Error()}
+		}
+		return transport.Deferred{}
+	})
 
 	dispatcher.Register("exec.run", func(ctx context.Context, command, id string, payload json.RawMessage) any {
 		go func() {

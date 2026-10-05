@@ -10,10 +10,12 @@ import {
   RefreshCw,
   Search,
   Server,
+  Trash2,
 } from 'lucide-react'
 import { api } from '../services/api'
+import { usePermission } from '../hooks/usePermission'
 import { DataTable, Modal } from './ui'
-import type { DeviceDTO, DeviceInventorySnapshot } from '../types/api'
+import type { DeviceDTO, DeviceInventorySnapshot, SoftwareInfo } from '../types/api'
 
 interface DeviceDetailModalProps {
   device: DeviceDTO | null
@@ -27,6 +29,9 @@ export const DeviceDetailModal: React.FC<DeviceDetailModalProps> = ({ device, on
   const [softwareSearch, setSoftwareSearch] = useState('')
   const [actionMsg, setActionMsg] = useState<string | null>(null)
   const [collecting, setCollecting] = useState(false)
+  const [uninstallTarget, setUninstallTarget] = useState<SoftwareInfo | null>(null)
+  const [uninstalling, setUninstalling] = useState(false)
+  const canUninstall = usePermission().can('technician')
 
   useEffect(() => {
     if (!device) return
@@ -77,6 +82,35 @@ export const DeviceDetailModal: React.FC<DeviceDetailModalProps> = ({ device, on
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Action failed'
       setActionMsg(`Ping failed: ${msg}`)
+    }
+  }
+
+  // Submitting an uninstall deliberately does NOT refresh the inventory.
+  //
+  // The snapshot only changes once the agent runs its next collection, and the
+  // uninstall has not even started yet -- the server answered when the command
+  // was handed over, not when anything was removed. Refetching here would
+  // redraw the identical row and read as "nothing happened" or, worse, invite
+  // pressing the button again.
+  const handleUninstall = async () => {
+    if (!uninstallTarget) return
+    const name = uninstallTarget.name
+    setUninstalling(true)
+    try {
+      await api.uninstallDeviceSoftware(device.id, name)
+      setActionMsg(
+        `Uninstall request for "${name}" was sent to ${device.hostname}. ` +
+          `The agent runs it silently and refuses if no verified silent command exists. ` +
+          `The request was accepted for delivery, which is not a removal: use Refresh ` +
+          `to collect a new inventory, and the program will only be gone from this ` +
+          `list if the agent actually removed it.`
+      )
+      setUninstallTarget(null)
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Request failed'
+      setActionMsg(`Uninstall of "${name}" was not sent: ${msg}`)
+    } finally {
+      setUninstalling(false)
     }
   }
 
@@ -321,12 +355,17 @@ export const DeviceDetailModal: React.FC<DeviceDetailModalProps> = ({ device, on
                         <th>Application Name</th>
                         <th>Version</th>
                         <th>Publisher / Vendor</th>
+                        {canUninstall && (
+                          <th className="text-right">
+                            <span className="visually-hidden">Actions</span>
+                          </th>
+                        )}
                       </tr>
                     </thead>
                     <tbody>
                       {filteredSoftware.length === 0 ? (
                         <tr>
-                          <td colSpan={3} className="text-center py-4">
+                          <td colSpan={canUninstall ? 4 : 3} className="text-center py-4">
                             No matching software entries
                           </td>
                         </tr>
@@ -338,6 +377,24 @@ export const DeviceDetailModal: React.FC<DeviceDetailModalProps> = ({ device, on
                             </td>
                             <td>{s.version || '—'}</td>
                             <td>{s.publisher || '—'}</td>
+                            {canUninstall && (
+                              <td className="text-right">
+                                <button
+                                  type="button"
+                                  className="btn btn-danger-outline btn-sm"
+                                  aria-label={`Uninstall ${s.name}`}
+                                  disabled={device.status !== 'online'}
+                                  title={
+                                    device.status !== 'online'
+                                      ? 'Endpoint is offline'
+                                      : 'Request silent uninstall'
+                                  }
+                                  onClick={() => setUninstallTarget(s)}
+                                >
+                                  <Trash2 size={15} />
+                                </button>
+                              </td>
+                            )}
                           </tr>
                         ))
                       )}
@@ -384,6 +441,65 @@ export const DeviceDetailModal: React.FC<DeviceDetailModalProps> = ({ device, on
           </>
         )}
       </div>
+
+      {/* Confirmation. There is no field here for uninstall arguments, and that
+          is the point: asking an operator to type the silent switch of a program
+          they are trying to remove is asking them to guess, and a wrong guess is
+          what puts a window on the endpoint. The agent reads the switches off the
+          endpoint's own registry or refuses. */}
+      <Modal
+        open={uninstallTarget !== null}
+        onClose={() => {
+          if (!uninstalling) setUninstallTarget(null)
+        }}
+        size="md"
+        title={
+          <span className="modal-title-group">
+            <Trash2 size={22} className="modal-icon" />
+            Request uninstall
+          </span>
+        }
+        footer={
+          <>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => setUninstallTarget(null)}
+              disabled={uninstalling}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="btn btn-danger-outline"
+              onClick={handleUninstall}
+              disabled={uninstalling}
+            >
+              {uninstalling ? 'Sending...' : 'Send uninstall request'}
+            </button>
+          </>
+        }
+      >
+        <p>
+          Send an uninstall request to{' '}
+          <strong>{device.hostname}</strong> for:
+        </p>
+        <p className="subtext">
+          <strong>{uninstallTarget?.name}</strong>
+          {uninstallTarget?.version ? ` ${uninstallTarget.version}` : ''}
+        </p>
+        <p className="subtext">
+          The agent works out the silent uninstall switches from the endpoint
+          itself. If the program records no verifiable silent command, the request
+          is refused and nothing is run -- no window ever opens on the endpoint.
+        </p>
+        <p className="subtext">
+          This sends a request. It does not confirm removal: the agent can still
+          refuse once it receives it. Use Refresh afterwards to collect a new
+          inventory -- the row disappears only if the program really was
+          removed.
+        </p>
+      </Modal>
     </Modal>
   )
 }

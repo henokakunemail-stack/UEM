@@ -228,6 +228,17 @@ func (c *Client) connectAndServe(ctx context.Context, hello any, heartbeat time.
 	}
 }
 
+// Deferred is the handler result that means "this agent will send the reply".
+//
+// handleCommand normally answers a command the moment its handler returns, which
+// is right for everything that finishes inline. A handler that queues work and
+// returns cannot use that: the reply would land first and record the command
+// done while the work is still pending, and if the agent then died mid-task the
+// row would say the operation succeeded when nothing had run yet. Handlers that
+// own their reply return this and call Send with a TypeCommandResult envelope
+// themselves, once there is a real outcome to report.
+type Deferred struct{}
+
 // handleCommand dispatches one server command and replies with its result.
 func (c *Client) handleCommand(ctx context.Context, env Envelope) {
 	var raw json.RawMessage
@@ -235,8 +246,18 @@ func (c *Client) handleCommand(ctx context.Context, env Envelope) {
 		raw, _ = json.Marshal(env.Payload)
 	}
 	res := c.onCommand(ctx, env.Command, env.ID, raw)
+	if _, ok := res.(Deferred); ok {
+		return
+	}
 	status := StatusDone
 	if res == nil {
+		status = StatusFailed
+	} else if s, ok := res.(map[string]string); ok && s["status"] == "rejected" {
+		// A handler that answers {"status": "rejected"} has NOT run the work --
+		// the queue was full, or the payload was unusable. Reporting that as done
+		// writes status='done' to the command row for an operation that never
+		// started, and the row is the only record the console has. The word to
+		// match on is the same one these handlers already send.
 		status = StatusFailed
 	}
 	_ = c.send(Envelope{Type: TypeCommandResult, ID: env.ID, Status: status, Result: res})

@@ -352,6 +352,26 @@ export const api = {
     )
   },
 
+  // Request removal of one program named off a device's installed-software list.
+  //
+  // The response says "sent", not "removed". The agent works out the silent
+  // uninstall switches itself and refuses when it cannot verify them, and that
+  // refusal arrives later in agent_commands.result -- which has no UI. Presenting
+  // a 201 as a successful removal is how this console has already shown operators
+  // successes that did not happen.
+  async uninstallDeviceSoftware(
+    deviceId: string,
+    softwareName: string
+  ): Promise<{ status: string; command_id: string; software_name: string }> {
+    return request<{ status: string; command_id: string; software_name: string }>(
+      `/api/devices/${deviceId}/software/uninstall`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ software_name: softwareName }),
+      }
+    )
+  },
+
   // Remote Execution APIs (Phase 5)
   async runRemoteCommand(
     deviceId: string,

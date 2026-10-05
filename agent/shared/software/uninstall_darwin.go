@@ -87,14 +87,28 @@ func runPlatformUninstall(ctx context.Context, p *installedProgram, args []strin
 	if p.PackageID == "" {
 		return -1, "", errors.New("no receipt id recorded; cannot remove " + p.Name)
 	}
-	// pkgutil --forget removes the receipt. It does not delete files an app
-	// installed outside its bundle, so the caller is told what was and was not
-	// removed rather than being handed a bare success.
 	runArgs := append([]string{"--forget", p.PackageID}, args...)
 	res := runProcess(ctx, "pkgutil", runArgs)
 	out := decodeOutput([]byte(res.output))
 	if res.err != nil {
 		return res.exitCode, out, fmt.Errorf("pkgutil --forget %s: %w", p.PackageID, res.err)
 	}
+	// pkgutil --forget drops the receipt and nothing else. The .app bundle, and
+	// anything the installer wrote outside it, are still on disk -- this is the
+	// same reason pkgutil's own documentation says the command exists for a
+	// package that is already gone, not as an uninstaller.
+	//
+	// So the exit code says the receipt went, and this sentence says the program
+	// did not. Reporting a bare exit 0 here is how an operator ends up believing a
+	// compliance violation was remediated while the app is still installed, which
+	// is the false success this row exists to prevent. The output is appended
+	// rather than substituted so the exit code stays whatever pkgutil returned.
+	if out != "" {
+		out += "\n"
+	}
+	out += fmt.Sprintf(
+		"[receipt %s was forgotten; its files were NOT deleted. Remove %s manually "+
+			"to finish this uninstall -- the receipt database is not an uninstaller]",
+		p.PackageID, p.Name)
 	return res.exitCode, out, nil
 }

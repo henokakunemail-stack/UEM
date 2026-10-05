@@ -24,6 +24,23 @@ func NewRepository(db *sqlx.DB) *Repository {
 	return &Repository{db: db}
 }
 
+// CreateAgentCommand records a one-off command aimed at a device, before it is
+// dispatched.
+//
+// Before dispatch, not after, and that order is the whole point: the agent's
+// reply is an UPDATE by command id, so a command sent first and recorded second
+// has no row to update if the socket dies in between. The row then stays 'sent'
+// forever, which says the agent never finished -- the truth -- rather than
+// losing the record entirely.
+func (r *Repository) CreateAgentCommand(ctx context.Context, id, deviceID, commandType, payload string) error {
+	now := time.Now().UTC()
+	_, err := r.db.ExecContext(ctx, `
+		INSERT INTO agent_commands (id, device_id, command_type, payload, status, created_at, sent_at)
+		VALUES (?, ?, ?, ?, 'sent', ?, ?)`,
+		id, deviceID, commandType, payload, now, now)
+	return err
+}
+
 // CreatePackage inserts a new package into the software_packages table.
 func (r *Repository) CreatePackage(ctx context.Context, p SoftwarePackage) error {
 	query := `
