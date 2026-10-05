@@ -59,6 +59,40 @@ Enterprise-grade, central endpoint management and security compliance platform a
 | **Phase 14** | **IT Asset & License Management** | Hardware Asset Management (HAM) with configurable currency valuation, Software Asset Management (SAM) live seat reconciliation |
 | **Phase 15** | **Device Maintenance** | Server-defined maintenance jobs (disk cleanup, temp purge, cache clearing) with per-device step progress and fleet-wide progress reporting |
 
+### Interactive remote control runs as the signed-in user
+
+A remote-control session has to inject input into a desktop the operator can see,
+and the agent service does not have one: it runs in Session 0, where there is
+no interactive desktop, no visible cursor and no way to click anything. So when a
+session starts, the service asks Windows for the token of the console session
+(`WTSQueryUserToken`), duplicates it into a primary token
+(`DuplicateTokenEx(TokenPrimary)`), builds that user's environment block, and
+spawns the capture worker with `CreateProcessAsUser` on `winsta0\default`.
+
+Two consequences worth knowing before you use it:
+
+- **The desktop belongs to whoever is logged in.** If nobody is signed in on the
+  endpoint, there is no user token to borrow and the session is refused. This is
+  the correct answer — see the fallback note below.
+- **The worker is scoped to that session.** It runs in the console session's
+  session id, not the service's, and it is terminated when the session closes.
+
+### Silent uninstall refuses anything it cannot verify
+
+Uninstalling from **Device → Installed Software** never opens a window on the
+endpoint. The agent reads the program's own `UninstallString` /
+`QuietUninstallString` from the registry and runs the quiet variant only. If the
+program records no verifiable silent command, the request is **refused** and
+nothing is executed — an operator gets a refusal in the console instead of a
+dialog box appearing on someone's desktop. PostgreSQL, for example, is refused
+with the reason attached.
+
+The uninstall is a *request*, not a removal. The console says so plainly, and
+the list only changes once the agent reports a new inventory snapshot: click
+**Collect Inventory**, which waits for the agent's own `collected_at` to change
+rather than assuming a fixed delay, so what you see afterwards is what the agent
+actually found.
+
 ---
 
 ## 📂 Repository Directory Structure
