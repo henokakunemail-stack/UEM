@@ -94,7 +94,12 @@ func darwinDiskCheck(ctx context.Context) (stepOutcome, error) {
 		volumes = append(volumes, darwinDataVolume)
 	}
 	for _, vol := range volumes {
-		out = appendLog(out, run(ctx, "/usr/sbin/diskutil", "verifyVolume", vol))
+		// runLong, for the reason chkdsk is: a volume verification reads the
+		// whole filesystem, so it scales with what is on the disk. A flat
+		// ceiling makes the volume-health check unable to report a healthy
+		// large volume, which is the same inversion that made disk_check fail
+		// on Windows for a disk that was fine.
+		out = appendLog(out, runLong(ctx, "/usr/sbin/diskutil", "verifyVolume", vol))
 	}
 	return out, nil
 }
@@ -118,7 +123,13 @@ func darwinLogMaintenance(ctx context.Context) (stepOutcome, error) {
 	// /usr/bin/log erase keeps 7 days of the unified log. A non-zero exit is
 	// logged but does not fail the step: on a managed Mac the agent is often
 	// not entitled to erase the log, and that is worth recording, not reddening.
-	erase := run(ctx, "/usr/bin/log", "erase", "--keep", darwinLogKeepWindow)
+	// runLong: the unified log erase is bounded by the size of the log, not by
+	// the speed of the machine, and on a long-lived host it is a multi-minute
+	// operation. The refusal branch below is for a non-zero exit, not for a
+	// timeout — a killed erase leaves the log in place either way, and calling
+	// that an entitlement problem would be the same confident wrong answer the
+	// elevation message used to be.
+	erase := runLong(ctx, "/usr/bin/log", "erase", "--keep", darwinLogKeepWindow)
 	out = appendLog(out, erase)
 	if erase.exitCode != 0 {
 		out = appendLog(out, stepOutcome{

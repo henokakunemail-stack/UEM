@@ -546,6 +546,23 @@ func (r *Repository) RecordStep(ctx context.Context, rep StepReport) error {
 		if rep.RebootRequired {
 			rebootRequired = 1
 		}
+		// A heartbeat is a liveness signal and nothing else. It must not touch
+		// step, exit_code, output_log, error_message or bytes_freed, and the
+		// reason is the byte counter's idempotency guard below: that guard
+		// reads the step column to decide "has this step already been
+		// counted?". A heartbeat that advanced the step would make the real
+		// report of the step it was heartbeating look like a replay, and the
+		// bytes that step freed would be dropped — silently, on a sweep that
+		// then reported having freed less than it did. So a heartbeat only
+		// moves updated_at, which is the one column the sweep reads.
+		if rep.Heartbeat {
+			if _, err := tx.ExecContext(ctx, `
+				UPDATE maintenance_tasks SET updated_at = ? WHERE id = ?`,
+				now, rep.TaskID); err != nil {
+				return fmt.Errorf("record heartbeat on %s: %w", rep.TaskID, err)
+			}
+			return tx.Commit()
+		}
 		if _, err := tx.ExecContext(ctx, `
 			UPDATE maintenance_tasks
 			SET status = ?, step = ?, exit_code = ?, output_log = ?, error_message = ?,

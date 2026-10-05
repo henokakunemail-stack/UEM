@@ -150,9 +150,15 @@ func linuxLogMaintenance(ctx context.Context) (stepOutcome, error) {
 	// has one. There is no -f / --force: forcing a rotation during business
 	// hours discards the logs an incident investigation needs.
 	if p, err := exec.LookPath("journalctl"); err == nil {
-		out = appendLog(out, run(ctx, p, "--vacuum-size=50M"))
+		out = appendLog(out, runLong(ctx, p, "--vacuum-size=50M"))
 	}
 	// No logrotate -f. Rotated logs are the only ones this step touches.
+	//
+	// journalctl is runLong: vacuum walks and rewrites every journal on every
+	// filesystem it holds, so its runtime scales with the amount of log on the
+	// box rather than being a property of the machine. Under the flat ceiling
+	// it was killed on any host with a real journal, and the step was reported
+	// as a log-maintenance failure when the logs were in fact fine.
 
 	// /var/log/*.gz and *.1 — already-rotated logs older than 30 days. The live
 	// syslog/messages/auth.log have no rotated suffix and are never matched.

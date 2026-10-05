@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"golang.org/x/sys/windows"
 )
 
 const (
@@ -71,6 +73,10 @@ func windowsCleanupTemp(ctx context.Context) (stepOutcome, error) {
 	// — one root refused at both the scan and the delete pass is still one root,
 	// and counting refusals printed "5 of 3 cleanup roots" here.
 	denied := map[string]bool{}
+	// locked counts files left in place because something else held them open.
+	// It is reported, never failed on: it is the reason a sweep can honestly
+	// say it freed 25 MB while a file or two survived.
+	locked := 0
 	for _, root := range roots {
 		before, beforeErr := dirSize(root, winTempMinAge)
 		if beforeErr != nil {
@@ -95,27 +101,57 @@ func windowsCleanupTemp(ctx context.Context) (stepOutcome, error) {
 			exitCode: 0,
 		})
 		if err != nil {
-			// Same rule as the scan: a delete that was refused for want of
-			// privilege left the files in place, so the step is not clean.
-			denied[root] = true
-			out = appendLog(out, stepOutcome{
-				output:   fmt.Sprintf("delete pass on %s: %v", root, err),
-				exitCode: 1,
-			})
+			// Two causes with two different meanings, and treating them alike
+			// produced a transcript that was wrong in three ways at once. A file
+			// held open by another process is normal on a live machine: it costs
+			// nothing, breaks nothing, and the next sweep removes it. A file the
+			// process is not permitted to touch is a privilege problem, and only
+			// that one is worth failing over.
+			//
+			// Collapsing them made a sweep that had just deleted 24 files and freed
+			// 25 MB report itself failed, and told the operator to install the
+			// agent as a Windows Service -- while the agent WAS running as one.
+			// An operator who is told that cannot act on it, and learns that red
+			// does not mean work was left undone.
+			if isPermissionDenied(err) {
+				denied[root] = true
+				out = appendLog(out, stepOutcome{
+					output:   fmt.Sprintf("delete pass on %s: %v", root, err),
+					exitCode: 1,
+				})
+			} else {
+				locked++
+				out = appendLog(out, stepOutcome{
+					output:   fmt.Sprintf("delete pass on %s: %v", root, err),
+					exitCode: 0,
+				})
+			}
 		}
 	}
 	deniedRoots := len(denied)
 
-	// Recycle Bin. Clear-RecycleBin is a literal cmdlet invocation; -ErrorAction
-	// SilentlyContinue keeps an empty bin from reddening the sweep.
+	// Recycle Bin. Clear-RecycleBin is a literal cmdlet invocation.
+	// -ErrorAction SilentlyContinue suppresses the error *output* but does
+	// not prevent the cmdlet from setting a non-zero exit code, and in
+	// PowerShell 5.1 an empty recycle bin does exactly that. The trailing
+	// `; exit 0` makes the exit code unconditional: an empty bin is a
+	// success, not a failure, and without it appendLog promotes the non-zero
+	// code into the step's own exitCode, which then fails cleanup_temp on
+	// every machine whose recycle bin happens to be empty.
 	out = appendLog(out, run(ctx, "powershell.exe",
 		"-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command",
-		"Clear-RecycleBin -Force -ErrorAction SilentlyContinue"))
+		"Clear-RecycleBin -Force -ErrorAction SilentlyContinue; exit 0"))
 
 	// Component store cleanup. Dism.exe is absent on Windows Home, so it is
 	// LookPath-guarded rather than treated as a failure.
+	//
+	// runLong for the same reason as chkdsk: the work scales with the size of
+	// the component store, and it finished inside the flat 90s ceiling on the
+	// machine this was measured on only because that store was small. Killing
+	// it on a larger host would fail the whole step for a store that is
+	// perfectly healthy.
 	if p, err := exec.LookPath("Dism.exe"); err == nil {
-		out = appendLog(out, run(ctx, p, "/Online", "/Cleanup-Image", "/StartComponentCleanup"))
+		out = appendLog(out, runLong(ctx, p, "/Online", "/Cleanup-Image", "/StartComponentCleanup"))
 	} else {
 		out = appendLog(out, stepOutcome{output: "Dism.exe not present; component store cleanup skipped", exitCode: 0})
 	}
@@ -139,10 +175,42 @@ func windowsCleanupTemp(ctx context.Context) (stepOutcome, error) {
 	// print "5 of 3 cleanup roots" on a three-root machine.
 	if deniedRoots > 0 {
 		out.output = strings.TrimSpace(out.output + "\n" + fmt.Sprintf(
-			"all %d cleanup roots were refused; install the agent as a Windows "+
-				"Service so it runs elevated", deniedRoots))
+			"%d of %d cleanup roots were refused; install the agent as a Windows "+
+				"Service so it runs elevated", deniedRoots, len(roots)))
+	} else if locked > 0 {
+		// The survivor, stated as a result rather than as an apology. A file that
+		// another process is using right now is not a problem to escalate -- it
+		// is the expected residue of cleaning a machine that is switched on, and
+		// saying so is what keeps "25 MB freed" reading as the success it is.
+		out = appendLog(out, stepOutcome{
+			output: fmt.Sprintf(
+				"%d file(s) were held open by another process and were left in place; "+
+					"they are removed by a later sweep once nothing is using them", locked),
+			exitCode: 0,
+		})
 	}
 	return out, nil
+}
+
+// isPermissionDenied separates "this process may not touch that" from "that file
+// is in use at this moment". Only the first is something a more privileged agent
+// would fix.
+//
+// Windows is the reason this exists. os.Remove surfaces a raw syscall.Errno from
+// the filesystem, and the two causes are distinct codes: ERROR_ACCESS_DENIED (5)
+// when the ACL refuses the delete, ERROR_SHARING_VIOLATION (32) when another
+// process holds the file without FILE_SHARE_DELETE. The second is not a
+// privilege problem at all -- not even LocalSystem can delete a file somebody
+// else is holding -- and failing the sweep over it invents a cause that no
+// amount of elevation can fix.
+//
+// Everywhere else os.Remove returns fs.ErrPermission, which is already checked
+// first so the non-Windows builds classify the same way they always have.
+func isPermissionDenied(err error) bool {
+	if errors.Is(err, fs.ErrPermission) {
+		return true
+	}
+	return errors.Is(err, windows.ERROR_ACCESS_DENIED)
 }
 
 func windowsDiskCheck(ctx context.Context) (stepOutcome, error) {
@@ -173,16 +241,28 @@ func windowsDiskCheck(ctx context.Context) (stepOutcome, error) {
 		// chkdsk /scan is the online scan. Plain `chkdsk` on a live volume would
 		// offer to schedule itself for the next reboot, which takes the machine
 		// offline at a moment nobody chose.
-		out = appendLog(out, run(ctx, "chkdsk.exe", vol, "/scan"))
+		//
+		// runLong, not run: chkdsk's runtime scales with the number of files on
+		// the volume, and it was measured here at 17.19 minutes over 3,189,248
+		// files. Under the flat 90s ceiling that command was killed mid-scan and
+		// the step was reported as a disk failure — the one step whose entire
+		// purpose is to answer "is this disk healthy" was structurally unable
+		// to say yes on a large volume. The step ceiling still bounds it, and
+		// the heartbeat keeps the server from reaping it while it works.
+		out = appendLog(out, runLong(ctx, "chkdsk.exe", vol, "/scan"))
 		// defrag /L is the online optimization pass for SSDs and HDD alike.
-		out = appendLog(out, run(ctx, "defrag.exe", vol, "/L"))
+		// Same reasoning: it is a long operation on a large volume, and it is
+		// the second of two, so a flat ceiling would starve it of whatever the
+		// first left over.
+		out = appendLog(out, runLong(ctx, "defrag.exe", vol, "/L"))
 	}
 	// disk_check reports 0 bytes freed by design: chkdsk /scan and defrag /L
 	// change no file sizes. A fabricated number here would be worse than none.
 	//
 	// A non-zero exitCode here is the volume refusing the scan for want of
-	// elevation, not a corrupt filesystem. appendLog carries it up so the step
-	// reads as failed rather than as a clean volume nobody looked at.
+	// elevation, or a command that ran out of time. appendLog carries it up so
+	// the step reads as failed rather than as a clean volume nobody looked at,
+	// and timedOut distinguishes the two for the reason the step reports.
 	return out, nil
 }
 

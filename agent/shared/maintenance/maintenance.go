@@ -89,10 +89,14 @@ type StepRequest struct {
 // Go excludes test-only imports from non-test builds, but a non-test import
 // would drag the whole server module graph into the agent binary.
 type StepReport struct {
-	TaskID         string  `json:"task_id"`
-	Step           string  `json:"step"`
-	Status         string  `json:"status"`
-	ExitCode       *int    `json:"exit_code,omitempty"`
+	TaskID   string `json:"task_id"`
+	Step     string `json:"step"`
+	Status   string `json:"status"`
+	ExitCode *int   `json:"exit_code,omitempty"`
+	// Heartbeat is the liveness flag the server's orphan sweep depends on. See
+	// server/modules/maintenance/model.go:185 — the same comment lives on both
+	// sides, and TestStepReportFieldTagsMatchServer keeps them from drifting.
+	Heartbeat      bool    `json:"heartbeat,omitempty"`
 	OutputLog      *string `json:"output_log,omitempty"`
 	ErrorMessage   *string `json:"error_message,omitempty"`
 	RebootRequired bool    `json:"reboot_required,omitempty"`
@@ -104,6 +108,11 @@ type stepOutcome struct {
 	exitCode     int
 	bytesFreed   int64
 	rebootNeeded bool
+	// timedOut records that at least one command in this step was stopped by
+	// its own ceiling rather than exiting on its own. It is what separates "the
+	// tool refused" from "we gave up waiting", which the exit code alone cannot:
+	// both arrive as a non-zero code.
+	timedOut bool
 }
 
 // Engine runs maintenance tasks for one device. mu is a TryLock, not a Lock:
@@ -195,9 +204,7 @@ func (e *Engine) Run(ctx context.Context, raw json.RawMessage, id string) error 
 	var firstStep string
 
 	for i, step := range steps {
-		stepCtx, cancel := context.WithTimeout(ctx, stepTimeout(step))
-		out, err := exec(stepCtx, step)
-		cancel()
+		out, err := e.runWithCeiling(ctx, params.TaskID, step, exec, stepTimeout(step))
 
 		status := statusCompleted
 		switch {
@@ -223,9 +230,10 @@ func (e *Engine) Run(ctx context.Context, raw json.RawMessage, id string) error 
 			// reddening every endpoint for that teaches operators to ignore
 			// the alert. Those steps do not set a non-zero code on themselves.
 			status = statusFailed
-			err = fmt.Errorf("step did not complete (exit %d); "+
-				"install the agent as a Windows Service so it runs elevated",
-				out.exitCode)
+			err = fmt.Errorf("step did not complete (exit %d): %s",
+				out.exitCode, failureCause(step, out))
+			// Also appended to the transcript, below the cause and behind
+			// truncateLog's tail: an operator reading only the log still sees it.
 			out.output = strings.TrimSpace(out.output + "\n" + err.Error())
 		}
 		if status == statusFailed {
@@ -244,7 +252,7 @@ func (e *Engine) Run(ctx context.Context, raw json.RawMessage, id string) error 
 		// empty one, so an empty transcript is still worth sending: the console
 		// renders it verbatim and a silent row is indistinguishable from a
 		// sweep that did nothing.
-		outputLog := truncate(out.output, 8*1024)
+		outputLog := truncateLog(out.output, 8*1024)
 		rep := StepReport{
 			TaskID:         params.TaskID,
 			Step:           step,
@@ -282,6 +290,146 @@ func (e *Engine) Run(ctx context.Context, raw json.RawMessage, id string) error 
 		// all-or-nothing.
 	}
 	return nil
+}
+
+// heartbeatInterval is how often a long step says it is still alive. It has to
+// be well under the server's maintenance AbandonGrace (20 minutes) — that grace
+// is measured from the last write to the task row, and the only thing that
+// writes it during a step is a step report. A 10-minute tick leaves room for
+// two missed reports plus a slow round trip before the sweep is entitled to
+// conclude the agent is gone.
+const heartbeatInterval = 10 * time.Minute
+
+// heartbeatEvery is the interval the engine actually uses. It is a variable and
+// not the constant directly so a test can drive the loop in milliseconds; the
+// production path never assigns it.
+var heartbeatEvery = heartbeatInterval
+
+// runWithCeiling runs one step under its ceiling while posting a 'running'
+// report every heartbeatInterval until it returns.
+//
+// This exists because the two numbers that were supposed to keep each other in
+// check did not. A step may now run for up to 30 minutes, and the sweep reaps a
+// task that has not been written to for 20 — so a slow-but-healthy disk check
+// would be killed by the server roughly ten minutes in, and the console would
+// show the sweep as abandoned while the agent was still chkdsking through it.
+// The heartbeat is what makes the ceiling safe to raise: the sweep's evidence
+// that an agent is still working is the agent saying so, and before this a step
+// was silent for its entire duration.
+//
+// The heartbeat sets a dedicated flag rather than posting a bare 'running' for
+// the step in flight, and that is not a cosmetic choice. RecordStep's ordinary
+// path guards its byte counter with `bytes_freed = bytes_freed + CASE WHEN
+// step <> ? THEN ? ELSE 0 END`, which reads the step column to ask "has this
+// step already been counted?" — so a plain 'running' for the in-flight step
+// would advance the step column, and the step's own terminal report would then
+// match it and read as a replay. Its bytes would be dropped, silently, on a
+// sweep that would then report having freed less than it did. A heartbeat takes
+// an early return in RecordStep that moves updated_at and nothing else.
+func (e *Engine) runWithCeiling(
+	ctx context.Context,
+	taskID, step string,
+	exec func(context.Context, string) (stepOutcome, error),
+	limit time.Duration,
+) (stepOutcome, error) {
+	stepCtx, cancel := context.WithTimeout(ctx, limit)
+	defer cancel()
+
+	type result struct {
+		out stepOutcome
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		out, err := exec(stepCtx, step)
+		done <- result{out, err}
+	}()
+
+	ticker := time.NewTicker(heartbeatEvery)
+	defer ticker.Stop()
+	// Latched, because a closed Done channel is always ready and the ticker
+	// often is too: without this, a step that has already blown its ceiling
+	// keeps heartbeating, and the one thing worse than a silent agent is an
+	// agent insisting it is fine while the server waits for work that stopped.
+	deadlineHit := false
+	for {
+		select {
+		case r := <-done:
+			return r.out, r.err
+		case <-ticker.C:
+			if deadlineHit {
+				continue
+			}
+			// Nothing has changed about the step; this is a liveness signal
+			// only. The log is left empty and the server advances no column but
+			// updated_at, so the step the console is showing, the bytes already
+			// counted, and the transcript on screen all survive it.
+			if err := e.report(ctx, StepReport{
+				TaskID:    taskID,
+				Step:      step,
+				Status:    statusRunning,
+				Heartbeat: true,
+			}); err != nil {
+				// Logged, not fatal. The step is still running and still has a
+				// terminal report to post; failing here would kill a healthy
+				// scan because a heartbeat happened to be dropped.
+				log.Error().Err(err).
+					Str("task_id", taskID).Str("step", step).
+					Msg("send maintenance step heartbeat")
+			}
+		case <-stepCtx.Done():
+			// The ceiling arrived. Wait for the step to unwind so its partial
+			// output and exit code are still reported — a goroutine that has not
+			// returned yet is one that has not noticed the cancel yet, and both
+			// sides of the race produce the same answer once it does.
+			//
+			// ponytail: this can block past the ceiling, because a step is not
+			// required to poll its context (the dirSize walk does not). That is
+			// the same hang the pre-heartbeat code had, since it called exec
+			// synchronously. Every subprocess path does honour it; the walk is
+			// the outlier and gets ctx-aware when it is worth the plumbing.
+			deadlineHit = true
+			r := <-done
+			return r.out, r.err
+		}
+	}
+}
+
+// failureCause names why a step did not finish, in the one sentence an operator
+// reads before deciding what to do about it.
+//
+// It used to say the same thing for every non-zero exit: "install the agent as
+// a Windows Service so it runs elevated". That was wrong often enough to be
+// worse than silence. On a properly elevated agent a chkdsk that outran its
+// budget was reported as a missing service, and the operator's next move — go
+// install the service — could not have changed anything, because the service was
+// already there and already LocalSystem. A reason that is confidently false
+// costs more than no reason, so every cause here is one this process actually
+// observed rather than one it guessed at.
+func failureCause(step string, out stepOutcome) string {
+	// The one cause that is genuinely this process's own doing, and the only
+	// one it can prove: a command was still running when its ceiling arrived.
+	if out.timedOut {
+		return fmt.Sprintf("%s did not finish inside its time limit and was stopped; "+
+			"re-run it, or check the transcript for which command stalled", step)
+	}
+	// Windows prints its own refusal text, and it is specific enough to quote.
+	// chkdsk and defrag both say "running in elevated mode" when they mean
+	// elevation; matching on it costs nothing and rules the cause in or out
+	// instead of asserting it.
+	if strings.Contains(out.output, "elevated mode") ||
+		strings.Contains(out.output, "Access is denied") {
+		return "the operating system refused the request for want of privilege; " +
+			"install the agent as a Windows Service so it runs elevated"
+	}
+	// cleanup_temp writes its own summary line naming the refused roots, and it
+	// is the accurate version of the above — repeating a generic privilege line
+	// next to it would contradict a line that already has the specifics.
+	if strings.Contains(out.output, "cleanup roots were refused") {
+		return "one or more cleanup roots were refused; see the transcript for which"
+	}
+	return fmt.Sprintf("%s reported exit %d; the transcript above has its output",
+		step, out.exitCode)
 }
 
 // reportBusy closes a task the engine refused to start. A rejection reason the
@@ -390,59 +538,107 @@ func (e *Engine) reportOnce(ctx context.Context, rep StepReport) error {
 	return nil
 }
 
-// subprocessTimeout is the per-command ceiling inside one step. The step
-// timeout is the budget for the whole step, which several commands share, so a
-// single one of them would otherwise be able to consume all of it and leave the
-// console showing no progress at all. Clear-RecycleBin is the usual culprit: it
-// sits on a full recycle bin long enough to matter, which was measured at over
-// 20 seconds here and grows with the bin.
+// commandTimeout is the per-command ceiling inside one step. The step timeout
+// is the budget for the whole step, which several commands share, so a single
+// one of them would otherwise be able to consume all of it and leave the
+// console showing no progress at all.
 //
-// A command that hits this ceiling is killed and its partial output is kept
-// with a non-zero exit code, recorded in the step's transcript rather than
-// raised as a step failure: a recycle bin that would not empty is a lesser
-// outcome than a sweep that never finishes.
-const subprocessTimeout = 90 * time.Second
+// It is a default, not a verdict. The commands that legitimately run for a
+// quarter of an hour are long ones — chkdsk /scan and Dism /StartComponentCleanup
+// both scale with the size of the machine — and a flat ceiling shorter than
+// their real runtime does not fail them, it kills them and reports the failure
+// as something it is not. runLong, below, is the opt-in for those.
+//
+// Clear-RecycleBin is the opposite case and is why the default is not generous:
+// it sits on a full recycle bin long enough to matter, which was measured at
+// over 20 seconds here and grows with the bin. A bin that will not empty is a
+// lesser outcome than a sweep that never finishes.
+const commandTimeout = 90 * time.Second
+
+// commandCeiling is the flat ceiling run actually enforces. It is a variable
+// and not commandTimeout directly for the same reason heartbeatEvery is not
+// heartbeatInterval: the property that a long command is not killed by the flat
+// ceiling can only be tested in milliseconds, since asserting it at production
+// scale would mean waiting 90 seconds to watch a command survive. The
+// production path never assigns it.
+var commandCeiling = commandTimeout
 
 // run is argv-only. It never accepts a shell string, and nothing from a server
 // payload is ever concatenated into one: every call site passes a compile-time
 // name and literal arguments.
+//
+// The ceiling here is the flat commandTimeout. It is a ceiling and not a
+// budget: the caller's context still bounds it, so a command can never outlive
+// its step.
 func run(ctx context.Context, name string, args ...string) stepOutcome {
+	return runFor(ctx, commandCeiling, name, args...)
+}
+
+// runLong is run for a command that is allowed to take the whole step. It is
+// named at the call site rather than derived from a table so that reading
+// windowsDiskCheck tells you which of its commands are unbounded without a
+// lookup, and so a new long command cannot be added by accident.
+func runLong(ctx context.Context, name string, args ...string) stepOutcome {
+	return runFor(ctx, 0, name, args...)
+}
+
+// runFor is the shared body. A zero ceiling means "whatever the caller's
+// context allows", which is how a long command gets the whole step while still
+// being killed by it.
+func runFor(ctx context.Context, limit time.Duration, name string, args ...string) stepOutcome {
 	if path, err := exec.LookPath(name); err == nil {
 		name = path
 	}
-	runCtx, cancel := context.WithTimeout(ctx, subprocessTimeout)
-	defer cancel()
+	runCtx := ctx
+	if limit > 0 {
+		var cancel context.CancelFunc
+		runCtx, cancel = context.WithTimeout(ctx, limit)
+		defer cancel()
+	}
 	var buf bytes.Buffer
 	cmd := exec.CommandContext(runCtx, name, args...)
 	cmd.Stdout = &buf
 	cmd.Stderr = &buf
 	err := cmd.Run()
-	code := 0
+	out := stepOutcome{}
 	if err != nil {
-		code = 1
+		out.exitCode = 1
 		var ee *exec.ExitError
 		if errors.As(err, &ee) {
-			code = ee.ExitCode()
+			out.exitCode = ee.ExitCode()
 		}
 		// Exceeded the budget rather than exiting: say so in the transcript,
-		// because "exit 1" and "gave up after 90s" are different things for
-		// whoever reads the maintenance log.
+		// because "exit 1" and "gave up waiting" are different things for
+		// whoever reads the maintenance log, and only one of them is fixed by
+		// running the agent elevated.
 		if runCtx.Err() != nil {
-			buf.WriteString("\ncommand exceeded the " +
-				subprocessTimeout.String() + " limit and was stopped")
+			out.timedOut = true
+			if limit > 0 {
+				buf.WriteString("\ncommand exceeded the " +
+					limit.String() + " limit and was stopped")
+			} else {
+				buf.WriteString("\ncommand exceeded its step's time limit and was stopped")
+			}
 		}
 	}
-	return stepOutcome{output: buf.String(), exitCode: code}
+	out.output = buf.String()
+	return out
 }
 
 // stepTimeout is the per-step ceiling. disk_check is slow on a large or
 // fragmented volume; memory_hygiene is a few seconds of work at most.
+//
+// ponytail: these ceilings are a backstop, not the mechanism. Every step heart
+// beats while it works, so the sweep no longer reaps a long scan. Raise a
+// ceiling only when a command on the slowest supported machine genuinely
+// exceeds it — and when you do, check it against maintenance.AbandonGrace on
+// the server, which is the only other number this interacts with.
 func stepTimeout(step string) time.Duration {
 	switch step {
 	case TaskDiskCheck:
-		return 15 * time.Minute
+		return 30 * time.Minute
 	case TaskCleanupTemp, TaskLogMaintenance, TaskFullScan:
-		return 10 * time.Minute
+		return 20 * time.Minute
 	case TaskMemoryHygiene:
 		return 2 * time.Minute
 	default:
@@ -580,12 +776,46 @@ func freedBytes(before, after int64) int64 {
 
 // truncate bounds an agent-supplied string before it goes over the wire. It
 // byte-slices, so a multi-byte rune can be cut; output logs are terminal text
-// rendered in a <pre>, so a trailing replacement byte is cosmetic.
+// rendered in a <pre>, so a replacement byte is cosmetic.
 func truncate(s string, max int) string {
 	if len(s) <= max {
 		return s
 	}
 	return s[:max]
+}
+
+// truncateLog bounds an output log, keeping its head AND its tail.
+//
+// The head is what says what was being attempted: chkdsk's first lines name the
+// volume, the file system, and the flags. The tail is what says how it ended,
+// and it is where a command killed by its ceiling announces itself. A
+// head-only cut loses the second of those — which is how a transcript came to
+// end mid-progress-bar with nothing saying why it stopped. Worse, the tail is
+// also where the reason this step failed was appended, so a head-only cut
+// discarded the explanation along with it.
+//
+// A plain byte-slice cannot give both without deciding the seam by hand, so the
+// two halves are joined with an explicit marker; the marker is part of the
+// budget rather than added on top of it, so the result is exactly max bytes.
+//
+// ponytail: 1/3 head, 2/3 tail, split by a constant. A byte-accurate seam
+// would survive a UTF-8 boundary better, but both cuts can already land inside
+// a rune and the text is terminal output in a <pre>. Revisit only if a
+// transcript ever has to be machine-parsed rather than read.
+func truncateLog(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	const marker = "\n... [transcript truncated] ...\n"
+	// Not max/2: the tail is the half that carries the verdict, so it gets the
+	// larger share, but only once the head has proven long enough to be worth
+	// most of the budget.
+	if len(marker) >= max {
+		return truncate(s, max)
+	}
+	keep := max - len(marker)
+	head, tail := keep/3, keep-keep/3
+	return s[:head] + marker + s[len(s)-tail:]
 }
 
 // appendLog folds a subprocess outcome into an accumulating step outcome:
@@ -601,6 +831,8 @@ func truncate(s string, max int) string {
 //
 // The code only ever moves away from 0, so a later successful subprocess cannot
 // paper over an earlier failure, and the first non-zero code is the one kept.
+// timedOut latches the same way: once a command has been stopped, no later
+// success in the same step makes the stop untrue.
 func appendLog(acc stepOutcome, out stepOutcome) stepOutcome {
 	if out.output != "" {
 		if acc.output == "" {
@@ -617,6 +849,9 @@ func appendLog(acc stepOutcome, out stepOutcome) stepOutcome {
 	}
 	if out.rebootNeeded {
 		acc.rebootNeeded = true
+	}
+	if out.timedOut {
+		acc.timedOut = true
 	}
 	return acc
 }

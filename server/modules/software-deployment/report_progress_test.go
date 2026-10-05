@@ -37,6 +37,19 @@ func (l lookup) FindBySecretHash(_ context.Context, hash string) (devicemgmt.Dev
 	return d, nil
 }
 
+// GetByID satisfies DeviceLookup, which the by-name uninstall route uses to
+// confirm a device exists before it queues anything. Keyed by id rather than by
+// secret hash, which is the whole difference between the two lookups: this one
+// is asked about a device named in a URL by a logged-in operator.
+func (l lookup) GetByID(_ context.Context, id string) (devicemgmt.Device, error) {
+	for _, d := range l.devices {
+		if d.ID == id {
+			return d, nil
+		}
+	}
+	return devicemgmt.Device{}, devicemgmt.ErrNotFound
+}
+
 func newProgressFixture(t *testing.T) (*Handler, *chi.Mux, *sqlx.DB) {
 	t.Helper()
 	d, err := sqlx.Open("sqlite", ":memory:")

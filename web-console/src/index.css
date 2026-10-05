@@ -1577,6 +1577,21 @@ body {
   background-color: var(--color-danger-subtle);
 }
 
+/* A header cell whose only content is a screen-reader label. The Installed
+   Software table has one so its action column is announced, but printing an
+   empty column header looks like a layout bug. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .btn-link {
   background: transparent;
   border: none;

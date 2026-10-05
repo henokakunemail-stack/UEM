@@ -179,10 +179,16 @@ type RunRequest struct {
 // StepReport is what the agent posts back for a single step of a task. A
 // multi-step task (full_scan) posts once per step, each with its own status.
 type StepReport struct {
-	TaskID         string  `json:"task_id"`
-	Step           string  `json:"step"`
-	Status         string  `json:"status"`
-	ExitCode       *int    `json:"exit_code,omitempty"`
+	TaskID   string `json:"task_id"`
+	Step     string `json:"step"`
+	Status   string `json:"status"`
+	ExitCode *int   `json:"exit_code,omitempty"`
+	// Heartbeat marks a report that exists only to prove the agent is still
+	// working. It must be non-terminal and carries no result, and RecordStep
+	// advances nothing but updated_at for it — the column the orphan sweep
+	// reads. A step that took longer than the sweep's grace window would
+	// otherwise be reaped while its agent was demonstrably still running.
+	Heartbeat      bool    `json:"heartbeat,omitempty"`
 	OutputLog      *string `json:"output_log,omitempty"`
 	ErrorMessage   *string `json:"error_message,omitempty"`
 	RebootRequired bool    `json:"reboot_required,omitempty"`

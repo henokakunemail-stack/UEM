@@ -17,12 +17,21 @@ const SweepInterval = 15 * time.Second
 // AbandonGrace is how long a task may sit without a step report before the
 // sweep assumes the agent that owned it will never send one.
 //
-// It is not a timeout on the work. Each step has its own ceiling (stepTimeout,
-// up to 15 minutes for disk_check) and the agent posts a report at the end of
-// every step, so the longest legitimate gap between two updates of one row is
-// one step. Grace exceeds that ceiling, which is what makes the sweep safe to
-// run on an ONLINE device: a machine still working has just written a row the
-// sweep would otherwise reap.
+// It is not a timeout on the work. A step that is still running posts a
+// heartbeat every 10 minutes, so the longest legitimate gap between two writes
+// to a live row is one heartbeat, and Grace is twice that plus room for a slow
+// round trip.
+//
+// Grace used to have to exceed the longest step ceiling (stepTimeout on the
+// agent), and it did. It no longer has to, and the relationship is now the
+// other way round: disk_check's ceiling is 30 minutes against a 20-minute
+// grace. That is safe only because of the heartbeat — a step silent for its
+// whole duration would be reaped mid-scan, which is what happened before the
+// heartbeat existed and is why a ceiling cannot be raised without one.
+//
+// If you raise a step ceiling past AbandonGrace anywhere, the heartbeat is
+// already required, and this is the number to re-check against it. If you
+// shorten this, the agent's heartbeatInterval has to come down with it.
 //
 // ponytail: unlike the two sibling sweeps, this one has no "device is offline"
 // predicate. That predicate alone would have missed the case that made this
