@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import {
   Activity,
   Cpu,
@@ -22,16 +22,62 @@ interface DeviceDetailModalProps {
   onClose: () => void
 }
 
+// How often to ask whether a new snapshot has landed, and how long to keep
+// asking. Both are deliberate: the old code made exactly one refetch three
+// seconds after the click, which is a guess, and a guess that silently returns
+// the snapshot you already had whenever the agent is slower than three seconds.
+const COLLECT_POLL_MS = 2000
+const COLLECT_TIMEOUT_TICKS = 30
+
+// Past this age the snapshot is no longer a description of the machine, and the
+// operator should be told so in the same breath as the timestamp. Without it the
+// only way to tell a fresh list from a two-day-old one is to read the date and
+// do arithmetic.
+const SNAPSHOT_STALE_AFTER_MS = 60 * 60 * 1000
+
+// formatAge renders an elapsed duration in the largest unit that still reads as
+// a whole number, because "5 minutes ago" is a fact an operator can act on and
+// "312,000 milliseconds ago" is not. A snapshot whose clock is behind ours
+// (agent clock skew, a timezone written into the timestamp) produces a negative
+// age; it is reported as "just now" rather than as a negative number, since
+// being unable to measure the age is not evidence the data is old.
+function formatAge(ms: number): string {
+  if (ms < 0) return 'just now'
+  const minutes = Math.floor(ms / 60000)
+  if (minutes < 1) return 'just now'
+  if (minutes < 60) return `${minutes} minute${minutes === 1 ? '' : 's'} ago`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours} hour${hours === 1 ? '' : 's'} ago`
+  const days = Math.floor(hours / 24)
+  return `${days} day${days === 1 ? '' : 's'} ago`
+}
+
 export const DeviceDetailModal: React.FC<DeviceDetailModalProps> = ({ device, onClose }) => {
   const [inventory, setInventory] = useState<DeviceInventorySnapshot | null>(null)
   const [loading, setLoading] = useState(false)
   const [activeTab, setActiveTab] = useState<'hardware' | 'software' | 'network'>('hardware')
   const [softwareSearch, setSoftwareSearch] = useState('')
   const [actionMsg, setActionMsg] = useState<string | null>(null)
-  const [collecting, setCollecting] = useState(false)
   const [uninstallTarget, setUninstallTarget] = useState<SoftwareInfo | null>(null)
   const [uninstalling, setUninstalling] = useState(false)
   const canUninstall = usePermission().can('technician')
+
+  // The collect poll, and the collected_at it is waiting for. See handleCollect:
+  // the snapshot's own timestamp is the only completion signal that cannot be
+  // faked by a clock, because it only moves when the agent uploads a new one.
+  const pollRef = useRef<number | null>(null)
+  const [collecting, setCollecting] = useState(false)
+
+  // Idempotent: called from the poll body on success, on the timeout, from the
+  // cleanup effect, and from the error path. Clearing an already-cleared
+  // interval is harmless, but nulling the ref twice is what makes a second
+  // clear a no-op instead of a leak.
+  const stopPolling = useCallback(() => {
+    if (pollRef.current !== null) {
+      window.clearInterval(pollRef.current)
+      pollRef.current = null
+    }
+  }, [])
 
   useEffect(() => {
     if (!device) return
@@ -53,23 +99,84 @@ export const DeviceDetailModal: React.FC<DeviceDetailModalProps> = ({ device, on
     }
   }, [device])
 
+  // Teardown in its own effect, separate from the load effect above: a cleanup
+  // folded into that one would run on every re-render of its dependencies and
+  // kill the poll the click handler had just armed. It has to sit above the
+  // `if (!device) return null` below, because a hook after an early return is
+  // conditional, and React will refuse to render the modal at all once it sees
+  // the hook count change between renders.
+  useEffect(() => stopPolling, [stopPolling])
+
   if (!device) return null
 
   const handleCollect = async () => {
+    const deviceId = device.id
+    // Read the timestamp BEFORE asking for a collection. Anything that arrives
+    // afterwards with this value unchanged is the snapshot we already had, and
+    // waiting for it to differ is what proves the agent did the work rather
+    // than the clock running.
+    const before = inventory?.collected_at ?? null
+
     setCollecting(true)
     setActionMsg(null)
     try {
-      await api.collectInventory(device.id)
-      setActionMsg('Collection request dispatched. Snapshot will refresh shortly.')
-      // Refresh inventory snapshot after 3 seconds
-      setTimeout(async () => {
-        const updated = await api.getDeviceInventory(device.id).catch(() => null)
-        if (updated) setInventory(updated)
+      const res = await api.collectInventory(deviceId)
+      // 202 queued means the endpoint was offline between render and click. The
+      // server accepted the request but nothing will run until the agent next
+      // reports, so a spinner here would be waiting for an event this device
+      // cannot produce yet.
+      if (res.status === 'queued') {
+        setActionMsg(
+          'The endpoint is offline. The collection is queued and will run on its next report.'
+        )
         setCollecting(false)
-      }, 3000)
+        return
+      }
+
+      setActionMsg('Collection dispatched. Waiting for the agent to report a new snapshot...')
+
+      let ticks = 0
+      stopPolling()
+      pollRef.current = window.setInterval(async () => {
+        ticks++
+        // The bound is a real deadline, not a formality: a device that accepts
+        // the request and never reports must not leave the operator watching a
+        // spinner forever, because "still waiting" and "will never finish" look
+        // identical without it.
+        if (ticks >= COLLECT_TIMEOUT_TICKS) {
+          stopPolling()
+          setCollecting(false)
+          setActionMsg(
+            'The endpoint accepted the collection but has not reported a new snapshot yet. ' +
+              'It may be offline, or the agent may still be scanning. Use Collect Inventory again later.'
+          )
+          return
+        }
+
+        const updated = await api.getDeviceInventory(deviceId).catch(() => null)
+        // A failed tick is not a failed collection. Swallowing it here is what
+        // the old code did for the only fetch it ever made, and that is how a
+        // 500 looked identical to success. If the network is genuinely gone the
+        // ticks run out above and say so.
+        if (!updated) return
+
+        // before === null means the device has never reported a snapshot, so
+        // there is no earlier timestamp to compare against: the arrival of any
+        // snapshot is the event.
+        const arrived = before === null ? true : updated.collected_at !== before
+        setInventory(updated)
+        if (!arrived) return
+
+        stopPolling()
+        setCollecting(false)
+        setActionMsg(
+          `Snapshot collected: ${updated.software.length} program(s) reported at ` +
+            `${new Date(updated.collected_at).toLocaleTimeString()}.`
+        )
+      }, COLLECT_POLL_MS)
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Action failed'
-      setActionMsg(`Failed: ${msg}`)
+      setActionMsg(`Collection request failed: ${msg}`)
       setCollecting(false)
     }
   }
@@ -91,7 +198,9 @@ export const DeviceDetailModal: React.FC<DeviceDetailModalProps> = ({ device, on
   // uninstall has not even started yet -- the server answered when the command
   // was handed over, not when anything was removed. Refetching here would
   // redraw the identical row and read as "nothing happened" or, worse, invite
-  // pressing the button again.
+  // pressing the button again. The operator is told to press Collect Inventory
+  // instead, which now waits for a genuinely new snapshot rather than assuming
+  // one is already there after three seconds.
   const handleUninstall = async () => {
     if (!uninstallTarget) return
     const name = uninstallTarget.name
@@ -101,8 +210,8 @@ export const DeviceDetailModal: React.FC<DeviceDetailModalProps> = ({ device, on
       setActionMsg(
         `Uninstall request for "${name}" was sent to ${device.hostname}. ` +
           `The agent runs it silently and refuses if no verified silent command exists. ` +
-          `The request was accepted for delivery, which is not a removal: use Refresh ` +
-          `to collect a new inventory, and the program will only be gone from this ` +
+          `The request was accepted for delivery, which is not a removal: use Collect ` +
+          `Inventory to collect a new inventory, and the program will only be gone from this ` +
           `list if the agent actually removed it.`
       )
       setUninstallTarget(null)
@@ -115,6 +224,10 @@ export const DeviceDetailModal: React.FC<DeviceDetailModalProps> = ({ device, on
   }
 
   const hw = inventory?.hw || inventory?.hardware
+  const snapshotAge = inventory?.collected_at
+    ? Date.now() - new Date(inventory.collected_at).getTime()
+    : null
+  const snapshotIsStale = snapshotAge !== null && snapshotAge > SNAPSHOT_STALE_AFTER_MS
   const ramBytes = hw?.ram_total_bytes || inventory?.ram_bytes || inventory?.hw_ram_bytes
   const ramGB = ramBytes ? (ramBytes / (1024 * 1024 * 1024)).toFixed(1) : null
 
@@ -142,7 +255,9 @@ export const DeviceDetailModal: React.FC<DeviceDetailModalProps> = ({ device, on
           <span className="snapshot-timestamp">
             Last Inventory Snapshot:{' '}
             {inventory?.collected_at
-              ? new Date(inventory.collected_at).toLocaleString()
+              ? `${new Date(inventory.collected_at).toLocaleString()} (${formatAge(snapshotAge!)}${
+                  snapshotIsStale ? ' — this list may be out of date' : ''
+                })`
               : 'Never'}
           </span>
           <button type="button" className="btn btn-secondary" onClick={onClose}>
@@ -242,9 +357,9 @@ export const DeviceDetailModal: React.FC<DeviceDetailModalProps> = ({ device, on
               type="button"
               className="btn btn-primary"
               onClick={handleCollect}
-              disabled={device.status !== 'online'}
+              disabled={collecting || device.status !== 'online'}
             >
-              Trigger On-Demand Collection
+              Collect Inventory
             </button>
           </div>
         ) : (
@@ -495,7 +610,7 @@ export const DeviceDetailModal: React.FC<DeviceDetailModalProps> = ({ device, on
         </p>
         <p className="subtext">
           This sends a request. It does not confirm removal: the agent can still
-          refuse once it receives it. Use Refresh afterwards to collect a new
+          refuse once it receives it. Use Collect Inventory afterwards to collect a new
           inventory -- the row disappears only if the program really was
           removed.
         </p>
