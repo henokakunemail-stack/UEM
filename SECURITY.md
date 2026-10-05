@@ -70,3 +70,21 @@ Deployers must ensure:
   backed up regularly and access is restricted to the service user.
 - Agent deployments use a code-signing certificate so Windows SmartScreen
   does not block the installer.
+
+## Known gaps
+
+Stated plainly, because a security policy that only lists strengths is not a
+security policy:
+
+- **Agents are not code-signed.** Releases are distributed unsigned, so Windows
+  SmartScreen will warn on first run, and the self-update path verifies a
+  SHA-256 hash but not a signature. A hash only proves the download matches what
+  the server offered; it does not prove who built it. Sign the agent and the
+  updater before treating either as a trust anchor.
+- **The default installation is not hardened for the public internet.** The
+  threat model assumes a trusted internal network. `JWT_SECRET`, TLS
+  certificates, and the origin allowlist must be configured before the console
+  is reachable from anywhere else.
+- **Remote control inherits the console user's session.** The worker runs in the
+  interactive session it borrows, so it can act as that user. Anyone able to
+  start a session can act as whoever is signed in on that endpoint.
