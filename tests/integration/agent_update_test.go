@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -188,9 +189,12 @@ func TestAgentUpdate_CampaignAndTasks(t *testing.T) {
 // neither, so the test passed only while the health check was the weaker
 // os.Stat the audit replaced.
 //
-// The payload carries both headers rather than branching on runtime.GOOS, so the
-// test says the same thing on every platform and does not need a build tag.
-// Nothing executes this file -- the engine swaps and stats it, it never runs it.
+// verifySwappedBinary reads the first bytes of the file, so only the leading
+// header can satisfy it: the MZ image has to lead on Windows and the ELF image
+// everywhere else. Concatenating both in a fixed order made this pass on one OS
+// and fail the other, and the comment that said it needed no build tag was
+// wrong. Nothing executes this file -- the engine swaps and stats it, it never
+// runs it -- so the trailing marker is what each case is identified by.
 func fakeExecutable(marker string) []byte {
 	// Little-endian uint32 0x80 is the PE header offset that e_lfanew points at
 	// in the block below, and the PE signature sits exactly there.
@@ -201,10 +205,14 @@ func fakeExecutable(marker string) []byte {
 
 	elf := append([]byte{0x7f, 'E', 'L', 'F'}, make([]byte, 0x40)...)
 
+	image := pe
+	if runtime.GOOS != "windows" {
+		image = elf
+	}
+
 	body := []byte(marker)
-	out := make([]byte, 0, len(pe)+len(elf)+len(body))
-	out = append(out, pe...)
-	out = append(out, elf...)
+	out := make([]byte, 0, len(image)+len(body))
+	out = append(out, image...)
 	return append(out, body...)
 }
 

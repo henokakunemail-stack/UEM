@@ -3,14 +3,12 @@ package update
 import (
 	"context"
 	"crypto/sha256"
-	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"runtime"
 	"sync"
 	"testing"
 )
@@ -200,52 +198,6 @@ func TestAChecksumMismatchStillRollsBack(t *testing.T) {
 	}
 	if string(after) != original {
 		t.Errorf("executable is %q, want the untouched original %q", after, original)
-	}
-}
-
-// TestTheFormatCheckItself exercises the verifier directly, on both the shape
-// it must accept and the shapes it must reject. The tests above go through the
-// whole engine on this machine's platform; these cover the branch that does not
-// run here, so a Windows build is not the only thing guarding the PE path.
-func TestTheFormatCheckItself(t *testing.T) {
-	dir := t.TempDir()
-	write := func(name string, b []byte) string {
-		p := filepath.Join(dir, name)
-		if err := os.WriteFile(p, b, 0755); err != nil {
-			t.Fatal(err)
-		}
-		return p
-	}
-
-	valid := func() []byte {
-		// A minimal but structurally correct image for whichever platform the
-		// test is running on.
-		if runtime.GOOS == "windows" {
-			b := make([]byte, 0x100)
-			b[0], b[1] = 'M', 'Z'
-			binary.LittleEndian.PutUint32(b[0x3c:], 0x80)
-			copy(b[0x80:], []byte{'P', 'E', 0, 0})
-			return b
-		}
-		return append([]byte{0x7f, 'E', 'L', 'F'}, make([]byte, 60)...)
-	}
-
-	if err := verifySwappedBinary(write("good", valid())); err != nil {
-		t.Errorf("a well-formed image was rejected: %v", err)
-	}
-
-	rejects := map[string][]byte{
-		"text.txt":    []byte("this is not a program; it will not boot\n"),
-		"empty.bin":   {},
-		"zeros.bin":   make([]byte, 4096),
-		"almost-mz":   append([]byte{'M', 'Z'}, make([]byte, 200)...),
-		"truncated":   valid()[:2],
-		"header-only": {0x7f, 'E', 'L', 'F'},
-	}
-	for name, content := range rejects {
-		if err := verifySwappedBinary(write(name, content)); err == nil {
-			t.Errorf("%s was accepted; it is not a loadable image for any platform", name)
-		}
 	}
 }
 

@@ -72,9 +72,14 @@ func TestReleasePathRejectsATraversingMultipartFilename(t *testing.T) {
 	dir := t.TempDir()
 	got, err := releasePath(dir, "1.2.3", "windows", "x64", "..\\..\\evil.exe")
 	if err != nil {
-		// filepath.Base reduces it, so this is the correct outcome.
+		// On Windows the separators are real and the join escapes, so rejection is
+		// the outcome. On Linux they are just characters in a basename, so the
+		// value lands inside the directory; either way it must not climb out of it.
 		if strings.Contains(got, "..") {
 			t.Errorf("resolved path %q still contains a relative segment", got)
+		}
+		if filepath.Dir(got) != filepath.Clean(dir) {
+			t.Errorf("error path resolved %q outside %q", got, dir)
 		}
 		return
 	}
