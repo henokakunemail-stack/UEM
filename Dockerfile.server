@@ -5,6 +5,28 @@
 # The CI docker-smoke job builds this file, so it has to work from a bare
 # checkout with no host state. Everything it needs comes from the repository.
 
+# --- console -----------------------------------------------------------------
+# The frontend is built on a node image because it needs node, and the Go image
+# has none. `RUN cd web-console && npm ci` inside the golang stage failed with
+# exit 127 on every build, which meant this image had never been built at all --
+# the CI job that would have caught it was failing for a different reason.
+# Node 24 matches the frontend toolchain (vite 8 requires it). CI's frontend job
+# pins the same major so the bundle the image ships is the one CI tested.
+FROM node:24-alpine AS console
+
+WORKDIR /src
+COPY web-console/ ./web-console/
+
+# node_modules is excluded by .dockerignore, so this installs for this image's
+# platform rather than reusing a Windows tree from the host.
+RUN cd web-console && npm ci && npm run build
+
+# vite.config.ts sets outDir to ../server/cmd/server/dist, so from /src/web-console
+# the bundle lands at /src/server/cmd/server/dist. Asserting the file is here
+# turns a silently-empty embed directory into a build failure at the stage that
+# caused it, rather than a binary that serves a blank console.
+RUN test -f /src/server/cmd/server/dist/index.html
+
 # --- build -------------------------------------------------------------------
 # Pinned to the toolchain go.mod requires. A floating 1.26 tag would let the
 # image build on a patch release CI has not seen.
@@ -16,14 +38,13 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 
-# server/ has to be in place before the frontend build, because Vite writes its
-# output into server/cmd/server/dist — the directory //go:embed captures.
+# server/ has to be in place before the console bundle is placed, because Vite
+# writes its output into server/cmd/server/dist -- the directory //go:embed
+# captures. .dockerignore keeps the committed copy of that directory out of the
+# context, so what lands here is the bundle built above from this checkout's
+# sources and not one left over from an older tree.
 COPY server/ ./server/
-COPY web-console/ ./web-console/
-
-# node_modules is excluded by .dockerignore, so this installs for this image's
-# platform rather than reusing a Windows tree from the host.
-RUN cd web-console && npm ci && npm run build
+COPY --from=console /src/server/cmd/server/dist/ ./server/cmd/server/dist/
 
 # CGO_ENABLED=0 is a project invariant, not an optimisation: the binary has to
 # run on a distroless base, and the SQLite driver is the pure-Go modernc one.

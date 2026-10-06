@@ -3,6 +3,8 @@ package software
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -50,17 +52,94 @@ func TestResolveSilentArgsTrustsAnMSIWithoutAnyOperatorInput(t *testing.T) {
 // command and nothing else. The switches come from the endpoint's registry, so
 // they are the vendor's own declaration rather than a guess -- which is the only
 // reason this path is allowed to proceed at all.
+//
+// The uninstaller is a real file on disk. That is not incidental: the quiet string
+// is quoted, so uninstallerPath returns its executable without touching the
+// filesystem, but UninstallString here is unquoted and goes through isRegularFile.
+// With nothing on disk it fell back to the first token, "C:\Program", and the
+// two no longer named the same program -- so the mismatch check below refused a
+// perfectly good uninstaller, and the test passed or failed depending on whether
+// the machine happened to have WinRAR installed. The recorded strings are real
+// registry output and are kept verbatim; only the path they name is redirected.
 func TestResolveSilentArgsUsesTheRecordedQuietCommand(t *testing.T) {
+	uninstaller := filepath.Join(t.TempDir(), "WinRAR", "Uninstall.exe")
+	if err := os.MkdirAll(filepath.Dir(uninstaller), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(uninstaller, []byte("MZ"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
 	args, err := resolveSilentArgs(&installedProgram{
 		Name:            "WinRAR 6.24 (64-bit)",
-		UninstallString: `C:\Program Files\WinRAR\Uninstall.exe`,
-		QuietString:     `"C:\Program Files\WinRAR\Uninstall.exe" /S`,
+		UninstallString: uninstaller,
+		QuietString:     `"` + uninstaller + `" /S`,
 	})
 	if err != nil {
 		t.Fatalf("resolveSilentArgs refused a program that records a quiet command: %v", err)
 	}
 	if len(args) != 1 || !strings.EqualFold(args[0], "/S") {
 		t.Errorf("resolveSilentArgs returned %v, want the recorded /S from QuietUninstallString", args)
+	}
+}
+
+// An unquoted UninstallString carrying switches has to survive being split back
+// into the executable, and that split is the step that needs the file to exist.
+// A quoted value cannot cover this, which is why the test above needs the real
+// file as well.
+func TestResolveSilentArgsSplitsAnUnquotedPathThatCarriesSwitches(t *testing.T) {
+	uninstaller := filepath.Join(t.TempDir(), "Program Files", "Some App", "unins000.exe")
+	if err := os.MkdirAll(filepath.Dir(uninstaller), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(uninstaller, []byte("MZ"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	args, err := resolveSilentArgs(&installedProgram{
+		Name:            "Some App",
+		UninstallString: `"` + uninstaller + `" /VERYSILENT`,
+		QuietString:     `"` + uninstaller + `" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART`,
+	})
+	if err != nil {
+		t.Fatalf("resolveSilentArgs refused a quiet command for an uninstaller that exists: %v", err)
+	}
+	want := []string{"/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"}
+	if len(args) != len(want) {
+		t.Fatalf("resolveSilentArgs returned %v, want %v", args, want)
+	}
+	for i := range want {
+		if !strings.EqualFold(args[i], want[i]) {
+			t.Errorf("arg %d = %q, want %q", i, args[i], want[i])
+		}
+	}
+}
+
+// The mismatch refusal is real and must stay: a quiet command naming a different
+// executable than the one UninstallString runs is a set of instructions for some
+// other program. Both files exist here so the refusal is about the mismatch and
+// not about one of the paths failing to resolve.
+func TestResolveSilentArgsRefusesAQuietCommandForADifferentExecutable(t *testing.T) {
+	dir := t.TempDir()
+	installed := filepath.Join(dir, "installed.exe")
+	other := filepath.Join(dir, "other.exe")
+	for _, p := range []string{installed, other} {
+		if err := os.WriteFile(p, []byte("MZ"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	_, err := resolveSilentArgs(&installedProgram{
+		Name:            "Mismatched",
+		UninstallString: `"` + installed + `"`,
+		QuietString:     `"` + other + `" /S`,
+	})
+	if err == nil {
+		t.Fatal("resolveSilentArgs accepted a quiet command for a different executable; " +
+			"its switches describe a program that will not be run")
+	}
+	if !strings.Contains(err.Error(), "nothing was run") {
+		t.Errorf("refusal does not say nothing was run:\n%v", err)
 	}
 }
 
