@@ -123,6 +123,21 @@ func (r *Repository) UpdateStatus(ctx context.Context, id, status string, lastSe
 	return nil
 }
 
+// UpdateLastPatchScan stamps the device with the time of its most recent patch
+// scan. Called when a scan report is accepted, so the stamp moves only when the
+// server actually holds the result -- a scan that died on the device, or a
+// report that failed to store, leaves the previous timestamp standing rather
+// than claiming the machine was just examined.
+func (r *Repository) UpdateLastPatchScan(ctx context.Context, id string, at time.Time) error {
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE devices SET last_patch_scan_at = ?, updated_at = ? WHERE id = ?`,
+		at.UTC(), time.Now().UTC(), id)
+	if err != nil {
+		return fmt.Errorf("update last patch scan %s: %w", id, err)
+	}
+	return nil
+}
+
 // UpdateOSInfo stores OS/agent details sent in the agent hello message.
 func (r *Repository) UpdateOSInfo(ctx context.Context, id, osVersion, agentVersion string) error {
 	_, err := r.db.ExecContext(ctx, `

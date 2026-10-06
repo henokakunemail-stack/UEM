@@ -50,6 +50,10 @@ type deviceDTO struct {
 	Site         string     `json:"site"`
 	EnrolledAt   time.Time  `json:"enrolled_at"`
 	RetiredAt    *time.Time `json:"retired_at,omitempty"`
+	// LastPatchScanAt is when this device last ran a patch scan, or null if it
+	// never has. The Patches page needs it to tell an unpatched device from an
+	// unexamined one.
+	LastPatchScanAt *time.Time `json:"last_patch_scan_at"`
 	// Capabilities is decoded from its stored JSON so the console sees an array,
 	// not a stringified blob.
 	Capabilities []string `json:"capabilities,omitempty"`
@@ -64,7 +68,7 @@ func toDTO(d Device) deviceDTO {
 		ID: d.ID, Hostname: d.Hostname, OSName: d.OSName, OSVersion: d.OSVersionString(),
 		AgentVersion: d.AgentVersionString(), Status: d.Status, LastSeenAt: d.LastSeenAt,
 		Site: d.SiteValue(), EnrolledAt: d.EnrolledAt,
-		RetiredAt: d.RetiredAt, Capabilities: caps,
+		RetiredAt: d.RetiredAt, LastPatchScanAt: d.LastPatchScanAt, Capabilities: caps,
 	}
 }
 

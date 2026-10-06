@@ -18,10 +18,11 @@ try {
     $session = New-Object -ComObject Microsoft.Update.Session
     $searcher = $session.CreateUpdateSearcher()
     $searcher.ServerSelection = 2
-    $result = $searcher.Search("IsInstalled=0 and Type='Software'")
+    $result = $searcher.Search("IsInstalled=0")
     $list = @()
     if ($result -and $result.Updates) {
         foreach ($u in $result.Updates) {
+            if ($u.IsHidden) { continue }
             $kb = ""
             if ($u.KBArticleIDs -and $u.KBArticleIDs.Count -gt 0) {
                 $kb = "KB" + $u.KBArticleIDs[0]
@@ -33,13 +34,23 @@ try {
                 "Moderate"  { $sev = "moderate" }
                 "Low"        { $sev = "low" }
             }
-            $cat = "security"
-            if ($u.Categories -and $u.Categories.Count -gt 0) {
-                $catName = $u.Categories[0].Name
-                if ($catName -match "Security") { $cat = "security" }
-                elseif ($catName -match "Critical") { $cat = "critical" }
-                elseif ($catName -match "Definition") { $cat = "definition" }
-                else { $cat = "updates" }
+            # Type 2 is a driver. Control Panel lists those under Windows
+            # Update too, so a scan that only asked for Type 1 reported a
+            # compliant host while WUA held a fingerprint and a display driver
+            # upgrade. Type is the authoritative field; the category strings
+            # under it are a free-form label an OEM chooses.
+            if ($u.Type -eq 2) {
+                $cat = "driver"
+            } else {
+                $cat = "security"
+                if ($u.Categories) {
+                    foreach ($c in $u.Categories) {
+                        if ($c.Name -match "Security") { $cat = "security"; break }
+                        elseif ($c.Name -match "Definition") { $cat = "definition"; break }
+                        elseif ($c.Name -match "Critical") { $cat = "critical"; break }
+                        elseif ($c.Name -match "Driver") { $cat = "driver"; break }
+                    }
+                }
             }
             $patchIdent = if ($kb -ne "") { $kb } else { $u.Identity.UpdateID }
             $list += [PSCustomObject]@{

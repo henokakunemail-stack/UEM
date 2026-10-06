@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/rs/zerolog/log"
 
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/auth"
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/rbac"
@@ -23,6 +24,7 @@ type AuditLogger interface {
 type DeviceValidator interface {
 	FindBySecretHash(ctx context.Context, secretHash string) (devicemgmt.Device, error)
 	GetByID(ctx context.Context, id string) (devicemgmt.Device, error)
+	UpdateLastPatchScan(ctx context.Context, id string, at time.Time) error
 }
 
 type Handler struct {
@@ -279,6 +281,16 @@ func (h *Handler) reportScanResults(w http.ResponseWriter, r *http.Request) {
 	if err := h.repo.UpsertPatches(r.Context(), deviceID, rep.Patches); err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
+	}
+
+	// Stamp only after the rows landed. This is what lets the console tell an
+	// unpatched device from one nobody has scanned: both have zero pending rows,
+	// and without a timestamp the panel says the same thing for both.
+	if err := h.devices.UpdateLastPatchScan(r.Context(), deviceID, time.Now()); err != nil {
+		// The scan itself is stored and the report is a success. Losing the
+		// timestamp costs the console its "last scanned" line and nothing else,
+		// so this must not fail the agent's report.
+		log.Warn().Err(err).Str("device", deviceID).Msg("could not stamp last patch scan")
 	}
 
 	_ = h.audit.Log(r.Context(), "agent", deviceID, "patch.reported", deviceID, map[string]string{

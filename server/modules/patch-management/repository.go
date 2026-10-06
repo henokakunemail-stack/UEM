@@ -77,7 +77,69 @@ func (r *Repository) UpsertPatches(ctx context.Context, deviceID string, patches
 		}
 	}
 
+	if err := reconcileAbsentPatches(ctx, tx, deviceID, patches); err != nil {
+		return err
+	}
+
 	return tx.Commit()
+}
+
+// reconcileAbsentPatches marks rows for this device that the scan no longer
+// reports as installed. Without it a superseded update stays 'missing' forever:
+// Windows Update drops an offer once a newer cumulative supersedes it, and the
+// row that described the old one was never removed anywhere, so the console
+// kept counting it and the install button kept offering a KB the machine cannot
+// fetch.
+//
+// 'installed' is the right state rather than a deletion. The row is the history
+// that this update was once offered, and an operator auditing last quarter needs
+// it; it just stops being pending.
+//
+// An empty scan is a real answer -- this device is up to date -- so it does
+// reconcile, and every row is the correct one to settle. It is safe only because
+// the scanners refuse to report an empty list for a host they could not scan:
+// a machine with no package manager, or a Windows Update service that did not
+// answer, is now a failed scan rather than a compliant one.
+func reconcileAbsentPatches(ctx context.Context, tx *sqlx.Tx, deviceID string, patches []DevicePatch) error {
+	// Every patch_id the scan still reports, deduplicated. Those are the ones
+	// that stay pending; the upsert above already wrote their state.
+	stillReported := make([]string, 0, len(patches))
+	seen := make(map[string]bool, len(patches))
+	for _, p := range patches {
+		if seen[p.PatchID] {
+			continue
+		}
+		seen[p.PatchID] = true
+		stillReported = append(stillReported, p.PatchID)
+	}
+	if len(stillReported) == 0 {
+		// Nothing to protect, and sqlx.In renders an empty slice as IN () -- a
+		// syntax error SQLite rejects. Settle-all would need a second query with
+		// no NOT IN clause, and that is the one statement no scan should be able
+		// to trigger: a device that reports an empty list would clear every row
+		// it owns and read as fully compliant. The scanners now fail rather than
+		// report a fake empty list, but an agent is still the one saying so.
+		//
+		// The cost is bounded. A ghost row needs a scan that still reports
+		// something to be swept, so a fully patched device keeps a superseded KB
+		// on its list until the next update lands. Wrong for a few days, and never
+		// able to install, rather than a device that can be declared compliant
+		// because it went quiet.
+		return nil
+	}
+
+	query, args, err := sqlx.In(`
+		UPDATE device_patches
+		SET installed_state = ?, updated_at = ?
+		WHERE device_id = ? AND patch_id NOT IN (?)
+	`, StateInstalled, time.Now().UTC(), deviceID, stillReported)
+	if err != nil {
+		return fmt.Errorf("build reconcile query: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, query, args...); err != nil {
+		return fmt.Errorf("reconcile absent patches for device %s: %w", deviceID, err)
+	}
+	return nil
 }
 
 func (r *Repository) ListDevicePatches(ctx context.Context, deviceID string, state string) ([]DevicePatch, error) {

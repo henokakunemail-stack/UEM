@@ -21,6 +21,9 @@ export interface DeviceDTO {
   site: string
   enrolled_at: string
   retired_at?: string | null
+  // When the agent last reported a patch scan. Null means never: the Patches page
+  // relies on this to tell "patched" apart from "not looked at".
+  last_patch_scan_at?: string | null
   capabilities?: string[]
 }
 

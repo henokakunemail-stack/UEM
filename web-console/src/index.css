@@ -2587,6 +2587,14 @@ body {
   border: 1px solid rgba(239, 68, 68, 0.35);
   color: #fca5a5;
 }
+/* A caution, not a failure. The patch panel uses it where the action is allowed
+   but has a consequence the operator should know about first -- installing a
+   display driver remotely can take the monitor dark until a restart. */
+.alert-banner.alert-warning {
+  background-color: var(--color-warning-subtle);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  color: var(--color-warning);
+}
 .alert-banner .close-btn {
   background: transparent;
   border: none;

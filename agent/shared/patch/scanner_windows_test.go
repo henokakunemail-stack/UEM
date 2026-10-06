@@ -19,7 +19,7 @@ try {
     $session = New-Object -ComObject Microsoft.Update.Session
     $searcher = $session.CreateUpdateSearcher()
     $searcher.ServerSelection = 2
-    $result = $searcher.Search("IsInstalled=0 and Type='Software'")
+    $result = $searcher.Search("IsInstalled=0")
 `
 
 // scanBody returns winScanScript with its session-creating head stripped, i.e.
@@ -51,6 +51,11 @@ func min(a, b int) int {
 //
 // $u1 has a KB article and a Security category; $u2 has an empty KBArticleIDs
 // and no categories, so the null-guarded property paths are exercised.
+//
+// Every update needs a Type and an IsHidden: the script classifies a driver by
+// Type 2 and skips IsHidden, and a PSCustomObject without them compares null,
+// which is neither 2 nor true -- so a fixture that omitted them would silently
+// pass as software.
 func comShim(searchBody string) string {
 	cat := `[PSCustomObject]@{ Name = 'Security Updates' }`
 	u1 := `[PSCustomObject]@{
@@ -60,6 +65,8 @@ func comShim(searchBody string) string {
         Title          = 'Cumulative Update for Windows'
         Description    = 'A security update.'
         RebootRequired = $false
+        Type           = 1
+        IsHidden       = $false
         Identity       = [PSCustomObject]@{ UpdateID = 'GUID-A' }
     }`
 	u2 := `[PSCustomObject]@{
@@ -69,6 +76,8 @@ func comShim(searchBody string) string {
         Title          = 'Optional .NET update'
         Description    = ''
         RebootRequired = $true
+        Type           = 1
+        IsHidden       = $false
         Identity       = [PSCustomObject]@{ UpdateID = 'GUID-B' }
     }`
 	return `$u1 = ` + u1 + `
@@ -82,7 +91,7 @@ $session = [PSCustomObject]@{}
 $session | Add-Member -MemberType ScriptMethod -Name CreateUpdateSearcher -Value { $searcher } -Force
 $list = @()
 try {
-    $result = $searcher.Search("IsInstalled=0 and Type='Software'")
+    $result = $searcher.Search("IsInstalled=0")
 `
 }
 

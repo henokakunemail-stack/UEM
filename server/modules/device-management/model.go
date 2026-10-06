@@ -30,9 +30,14 @@ type Device struct {
 	// Capabilities is the JSON array of command types the agent advertised in
 	// its hello message, so the server never sends a command it would drop.
 	// NULL until the agent first reconnects with a build that advertises them.
-	Capabilities *string   `db:"capabilities"`
-	CreatedAt    time.Time `db:"created_at"`
-	UpdatedAt    time.Time `db:"updated_at"`
+	Capabilities *string `db:"capabilities"`
+	// LastPatchScanAt is when the agent last ran a patch scan. NULL means it has
+	// never run one, which the console must say out loud rather than render as an
+	// empty patch list -- a device that was never scanned and a device that is
+	// fully patched both have zero pending rows.
+	LastPatchScanAt *time.Time `db:"last_patch_scan_at"`
+	CreatedAt       time.Time  `db:"created_at"`
+	UpdatedAt       time.Time  `db:"updated_at"`
 }
 
 const (

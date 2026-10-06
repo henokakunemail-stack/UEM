@@ -19,6 +19,8 @@ func installShim() string {
         Title          = 'Cumulative Update for Windows'
         Description    = 'A security update.'
         RebootRequired = $false
+        Type           = 1
+        IsHidden       = $false
         Identity       = [PSCustomObject]@{ UpdateID = 'GUID-A' }
     }`
 	return `$u1 = ` + u1 + `

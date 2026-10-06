@@ -17,6 +17,20 @@ import { api } from '../services/api'
 import { useToast } from '../context/ToastContext'
 import type { DeviceDTO, PatchDetailDTO, PatchSummaryDTO } from '../types/api'
 
+// An absolute date, not "3d ago". The empty-state panel is a compliance claim
+// and "3d ago" invites reading it as current; an auditor needs the date itself.
+function formatScanTime(iso: string): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return 'an unrecorded time'
+  return d.toLocaleString(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
 export const PatchesPage: React.FC = () => {
   const { can } = usePermission()
   // Scan and install both dispatch work to endpoints, which the server gates at
@@ -105,6 +119,11 @@ export const PatchesPage: React.FC = () => {
       if (req === patchReqRef.current) setPatchesLoading(false)
     }
   }
+
+  // The empty-state panel claims compliance, so it has to know when the claim
+  // was earned. Null here means the device has never reported a scan at all, and
+  // the panel says that instead of calling it compliant.
+  const lastScanAt = selectedDevice?.last_patch_scan_at ?? null
 
   const handleScan = async (deviceId: string) => {
     setScanningId(deviceId)
@@ -387,17 +406,44 @@ export const PatchesPage: React.FC = () => {
           </div>
         ) : devicePatches.length === 0 ? (
           <div className="py-8 text-center">
-            <CheckCircle2 size={40} className="text-success mx-auto mb-2" />
-            <h4 className="text-success font-semibold">Device is Fully Compliant</h4>
-            <p className="text-muted text-sm mt-1">
-              No missing security updates or pending hotfixes detected.
-            </p>
+            {lastScanAt ? (
+              <>
+                <CheckCircle2 size={40} className="text-success mx-auto mb-2" />
+                <h4 className="text-success font-semibold">No pending updates</h4>
+                <p className="text-muted text-sm mt-1">
+                  This device reported nothing outstanding as of its last scan
+                  ({formatScanTime(lastScanAt)}). That is what Windows Update and the
+                  package manager had on offer then, not a standing promise — scan again
+                  after the next update cycle.
+                </p>
+              </>
+            ) : (
+              <>
+                <ShieldAlert size={40} className="text-warning mx-auto mb-2" />
+                <h4 className="text-warning font-semibold">Never scanned</h4>
+                <p className="text-muted text-sm mt-1">
+                  This device has never reported a patch scan, so nothing is known about
+                  what it is missing. An empty list here means nobody has looked, not that
+                  the machine is up to date.
+                </p>
+              </>
+            )}
           </div>
         ) : (
           <div className="patch-list">
             <div className="patch-list-header text-sm text-muted mb-2">
               Found {devicePatches.length} available updates
             </div>
+            {devicePatches.some((p) => p.category === 'driver') && (
+              <div className="alert-banner alert-error">
+                <strong>This list includes driver and firmware updates.</strong>{' '}
+                Windows Update offers those here too, and Install All will push all of
+                them. A graphics driver is the one to watch: if the machine goes dark
+                after the install, that is the likely cause, and a restart normally
+                brings it back. Windows may also require a restart before a driver
+                install can proceed at all.
+              </div>
+            )}
             <DataTable label={`Patches for ${selectedDevice?.hostname ?? 'device'}`}>
               <thead>
                 <tr>
@@ -420,7 +466,17 @@ export const PatchesPage: React.FC = () => {
                         {p.severity || 'Important'}
                       </span>
                     </td>
-                    <td data-label="Category">{p.category || 'Security Update'}</td>
+                    <td data-label="Category">
+                      {/* A driver carries no KB article — its identifier is the
+                          WUA UpdateID GUID, shown in the first column — and it is
+                          firmware rather than a security fix, so it must not be
+                          counted as one. */}
+                      {p.category === 'driver' ? (
+                        <span className="badge-severity medium">Driver / Firmware</span>
+                      ) : (
+                        p.category || 'Security Update'
+                      )}
+                    </td>
                     <td data-label="Reboot">
                       {p.reboot_required ? (
                         <span className="badge-severity critical">

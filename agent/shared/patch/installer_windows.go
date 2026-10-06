@@ -36,7 +36,7 @@ func buildInstallScript(idArrayStr string) string {
 		"  $session = New-Object -ComObject Microsoft.Update.Session\n"+
 		"  $searcher = $session.CreateUpdateSearcher()\n"+
 		"  $searcher.ServerSelection = 2\n"+
-		"  $searchResult = $searcher.Search(\"IsInstalled=0 and Type='Software'\")\n"+
+		"  $searchResult = $searcher.Search(\"IsInstalled=0\")\n"+
 		"  $toDownload = New-Object -ComObject Microsoft.Update.UpdateColl\n"+
 		"  foreach ($u in $searchResult.Updates) {\n"+
 		"    $kb = ''\n"+

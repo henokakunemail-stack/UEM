@@ -11,6 +11,7 @@ import (
 	_ "modernc.org/sqlite"
 
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/db"
+	devicemgmt "github.com/henokakunemail-stack/Endpoint-Manager/server/modules/device-management"
 	patchmgmt "github.com/henokakunemail-stack/Endpoint-Manager/server/modules/patch-management"
 )
 
@@ -237,6 +238,80 @@ func TestPatchManagement_UpsertIdempotency(t *testing.T) {
 		t.Fatalf("expected critical severity, got %s", listed[0].Severity)
 	}
 	t.Log("Upsert idempotency verified: same patch_id updated in place")
+}
+
+// TestPatchManagement_ScanReportStampsDevice is the end-to-end version of the
+// empty-state fix: a device that reports a scan must come back carrying when it
+// was scanned, and one that never has must not. The console renders "no pending
+// updates" and "never scanned" off exactly this field, and the field is only
+// worth having if the report path writes it.
+func TestPatchManagement_ScanReportStampsDevice(t *testing.T) {
+	database, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+
+	repo := patchmgmt.NewRepository(database)
+	devices := devicemgmt.NewRepository(database)
+	ctx := context.Background()
+
+	createTestDeviceForPatch(t, database, "dev-stamp", "IDEM-STAMP")
+	createTestDeviceForPatch(t, database, "dev-never", "IDEM-NEVER")
+
+	for _, id := range []string{"dev-stamp", "dev-never"} {
+		if _, err := database.ExecContext(ctx,
+			`INSERT INTO device_patches
+				(id, device_id, patch_id, title, description, severity, category,
+				 kb_id, size_bytes, installed_state, reboot_required, discovered_at, updated_at)
+			 VALUES (?, ?, ?, 'x', '', 'low', 'updates', '', 0, 'missing', 0, ?, ?)`,
+			"row-"+id, id, "KB0000000", time.Now().UTC(), time.Now().UTC(),
+		); err != nil {
+			t.Fatalf("seed patch for %s: %v", id, err)
+		}
+	}
+
+	before := time.Now().UTC().Add(-time.Minute)
+
+	// What reportScanResults does on accepting a report.
+	if err := repo.UpsertPatches(ctx, "dev-stamp", []patchmgmt.DevicePatch{
+		{PatchID: "KB5007652", Title: "b", Severity: patchmgmt.SeverityLow,
+			Category: patchmgmt.CategoryUpdates, InstalledState: patchmgmt.StateMissing},
+	}); err != nil {
+		t.Fatal("upsert:", err)
+	}
+	if err := devices.UpdateLastPatchScan(ctx, "dev-stamp", time.Now().UTC()); err != nil {
+		t.Fatal("stamp:", err)
+	}
+
+	scanned, err := devices.GetByID(ctx, "dev-stamp")
+	if err != nil {
+		t.Fatal("get scanned device:", err)
+	}
+	if scanned.LastPatchScanAt == nil {
+		t.Error("LastPatchScanAt is nil for a device that just reported a scan; the console would render it as never scanned")
+	} else if scanned.LastPatchScanAt.Before(before) {
+		t.Errorf("LastPatchScanAt = %v, want at or after %v", scanned.LastPatchScanAt, before)
+	}
+
+	// The device that was never scanned must stay NULL -- not defaulted to the
+	// row's discovery time, which would date an unexamined machine as examined.
+	never, err := devices.GetByID(ctx, "dev-never")
+	if err != nil {
+		t.Fatal("get unscanned device:", err)
+	}
+	if never.LastPatchScanAt != nil {
+		t.Errorf("LastPatchScanAt = %v, want nil: this device never reported a scan", never.LastPatchScanAt)
+	}
+
+	// And the scanned device's superseded row is no longer pending.
+	pending, err := repo.ListDevicePatches(ctx, "dev-stamp", patchmgmt.StateMissing)
+	if err != nil {
+		t.Fatal("list pending:", err)
+	}
+	if len(pending) != 1 || pending[0].PatchID != "KB5007652" {
+		t.Fatalf("pending = %+v, want only KB5007652", pending)
+	}
 }
 
 func createTestDeviceForPatch(t *testing.T, database *sqlx.DB, id, hostname string) {

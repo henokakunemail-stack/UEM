@@ -12,6 +12,10 @@ const (
 	CategoryDefinition = "definition"
 	CategoryUpdates    = "updates"
 	CategoryFeature    = "feature"
+	// CategoryDriver marks a firmware or driver update. Control Panel lists
+	// these under Windows Update, so leaving them out made a host with eight
+	// pending driver upgrades report as compliant.
+	CategoryDriver = "driver"
 
 	StateMissing   = "missing"
 	StateInstalled = "installed"

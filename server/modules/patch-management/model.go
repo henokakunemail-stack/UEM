@@ -18,6 +18,9 @@ const (
 	CategoryDefinition = "definition"
 	CategoryUpdates    = "updates"
 	CategoryFeature    = "feature"
+	// CategoryDriver mirrors the agent constant. Kept in step with it because
+	// both files enumerate the same vocabulary for the same column.
+	CategoryDriver = "driver"
 
 	StateMissing   = "missing"
 	StateInstalled = "installed"
