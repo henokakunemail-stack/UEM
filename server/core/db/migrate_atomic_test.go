@@ -251,19 +251,53 @@ func TestAFixedMigrationAppliesOnTheNextRun(t *testing.T) {
 // SQLite has no ADD COLUMN IF NOT EXISTS, so skipPresentColumns is the only thing
 // standing between an already-migrated database and a server that cannot start.
 // If a future SQLite gains the statement, this test says the filter can go.
+//
+// A widening migration that is not named here is itself the failure: the list is
+// what tells the next reader that skipPresentColumns is load-bearing for that
+// file. 0020 widens devices twice and was never added, so the list silently went
+// stale. The second half of the test walks the migrations directory and fails on
+// any bare ALTER TABLE the list does not carry, which is what keeps that from
+// happening again -- a migration landing outside the list now has to be noticed.
 func TestTheMigrationsThatWidenATableAreNamedHere(t *testing.T) {
-	for _, name := range []string{
-		"0002_device_mgmt.sql",
-		"0007_user_management.sql",
-		"0015_software_uninstall.sql",
-		"0016_auth_sessions_and_audit_chain.sql",
-	} {
+	widening := map[string]bool{
+		"0002_device_mgmt.sql":                      true,
+		"0007_user_management.sql":                  true,
+		"0015_software_uninstall.sql":               true,
+		"0016_auth_sessions_and_audit_chain.sql":    true,
+		"0020_patch_scan_and_enrollment_expiry.sql": true,
+	}
+	for name := range widening {
 		stmt, err := fs.ReadFile(migrations, "migrations/"+name)
 		if err != nil {
 			t.Fatalf("read %s: %v", name, err)
 		}
 		if !strings.Contains(string(stmt), "ALTER TABLE") {
 			t.Errorf("%s no longer has a bare ALTER TABLE; if it now uses ADD COLUMN IF NOT EXISTS, delete skipPresentColumns and this test", name)
+		}
+	}
+
+	// Everything else in the directory that widens a table must be in the map
+	// above. `ADD COLUMN` inside a bare ALTER TABLE is the statement the filter
+	// exists for; a CREATE TABLE or an index does not need it.
+	entries, err := fs.ReadDir(migrations, "migrations")
+	if err != nil {
+		t.Fatalf("list migrations: %v", err)
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		if widening[e.Name()] {
+			continue
+		}
+		stmt, err := fs.ReadFile(migrations, "migrations/"+e.Name())
+		if err != nil {
+			t.Fatalf("read %s: %v", e.Name(), err)
+		}
+		if strings.Contains(string(stmt), "ALTER TABLE") {
+			t.Errorf("%s widens a table but is not in the list above; "+
+				"skipPresentColumns is load-bearing for it and nothing says so",
+				e.Name())
 		}
 	}
 }
