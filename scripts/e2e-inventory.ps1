@@ -131,7 +131,10 @@ try {
     if ([math]::Abs($ramGB - $truthRam) -gt 1) {
         throw "RAM mismatch: agent reported ${ramGB}GB, CIM says ${truthRam}GB"
     }
-    if ($invRow[0].hw_cpu_model -ne $truthCPU) {
+    # WMI/CIM pads its strings on some providers -- the runner's reported a model
+    # with a trailing space while the agent's own query returned the trimmed
+    # string, so an exact -ne compared them unequal on identical hardware.
+    if ("$($invRow[0].hw_cpu_model)".Trim() -ne "$truthCPU".Trim()) {
         throw "CPU mismatch: agent reported '$($invRow[0].hw_cpu_model)', CIM says '$truthCPU'"
     }
     Write-Host 'OK   reported RAM and CPU match independently queried CIM values'
@@ -139,7 +142,7 @@ try {
     # 3. The API returns the same facts the DB holds.
     $inv = Invoke-RestMethod -Uri "$base/api/devices/$($tok.device_id)/inventory" -Headers @{Authorization = "Bearer $token"}
     if ($inv.ram_bytes -ne $invRow[0].hw_ram_bytes) { throw "API ram_bytes $($inv.ram_bytes) != DB $($invRow[0].hw_ram_bytes)" }
-    if ($inv.cpu_model -ne $truthCPU) { throw "API cpu_model does not match ground truth" }
+    if ("$($inv.cpu_model)".Trim() -ne "$truthCPU".Trim()) { throw "API cpu_model does not match ground truth" }
     if (-not $inv.hw.disks) { throw 'no disks reported' }
     Write-Host "OK   GET /inventory returns: model=$($inv.hw.model.vendor) $($inv.hw.model.product) serial=$($inv.hw.model.serial_number)"
     Write-Host "    disks: $($inv.hw.disks.Count) volumes, software entries: $($inv.software.Count)"

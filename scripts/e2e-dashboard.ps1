@@ -203,8 +203,29 @@ try {
     if ($collect.status -ne "sent") {
         throw "collect to an online device must be sent, got $($collect.status)"
     }
-    Start-Sleep -Seconds 4
-    $inv = Invoke-RestMethod -Uri "$base/api/devices/$($dev.id)/inventory" -Headers $authHeader
+
+    # A fixed 4s sleep is what lost this job on a cold runner: the agent had
+    # connected and reported 'sent', but its first collection had not landed
+    # yet, so GET /inventory 404'd with 'no inventory collected for this
+    # device yet' -- an error about a device the script had just collected
+    # from, with nothing in the output pointing at the agent. Poll the row
+    # instead of sleeping, and if it never arrives, say where to look.
+    $inv = $null
+    for ($i = 0; $i -lt 30; $i++) {
+        try {
+            $inv = Invoke-RestMethod -Uri "$base/api/devices/$($dev.id)/inventory" -Headers $authHeader
+            break
+        } catch {
+            Start-Sleep -Milliseconds 500
+        }
+    }
+    if (-not $inv) {
+        if (Test-Path $agentErr) {
+            Write-Host "--- Agent Error Log ---"
+            Get-Content $agentErr | ForEach-Object { Write-Host "  $_" }
+        }
+        throw "inventory was never reported for device $($dev.id): the collect command was sent but no snapshot landed"
+    }
     $cpuName = if ($inv.hw.cpu.name) { $inv.hw.cpu.name } else { $inv.cpu_model }
     $ramTotal = if ($inv.hw.ram_total_bytes) { $inv.hw.ram_total_bytes } else { $inv.ram_bytes }
     Write-Host "  - CPU: $cpuName"
