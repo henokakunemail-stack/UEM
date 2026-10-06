@@ -242,12 +242,17 @@ exit 0
     Write-Host "`n10. Verifying Audit Trail..."
     $auditLogs = Invoke-RestMethod -Uri "$base/api/audit-logs" -Headers $authHeader
     $uploadAudit = $auditLogs.logs | Where-Object { $_.action -eq "software.upload" }
-    $deployAudit = $auditLogs.logs | Where-Object { $_.action -eq "software.deploy" }
+    # The audit action is the verb that ran, not the noun the test named. The
+    # handler logs "software." + req.Action (handler.go createDeployment), and
+    # req.Action is 'install' or 'uninstall' -- 'software.deploy' is not a value
+    # that path can produce, so this assertion failed on every run against a
+    # server that had recorded the event correctly.
+    $deployAudit = $auditLogs.logs | Where-Object { $_.action -eq "software.install" }
 
     if (-not $uploadAudit) { throw "Missing audit log for software.upload" }
-    if (-not $deployAudit) { throw "Missing audit log for software.deploy" }
+    if (-not $deployAudit) { throw "Missing audit log for software.install" }
     Write-Host "  [PASS] Audit record for software.upload confirmed (Actor: $($uploadAudit.actor_id))" -ForegroundColor Green
-    Write-Host "  [PASS] Audit record for software.deploy confirmed (Actor: $($deployAudit.actor_id))" -ForegroundColor Green
+    Write-Host "  [PASS] Audit record for software.install confirmed (Actor: $($deployAudit.actor_id))" -ForegroundColor Green
 
     Write-Host "`n=======================================================" -ForegroundColor Green
     Write-Host "FASE 4 E2E VERIFICATION PASSED WITH 100% SUCCESS!" -ForegroundColor Green

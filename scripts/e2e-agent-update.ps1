@@ -37,6 +37,8 @@ $expectedSha256 = [System.BitConverter]::ToString($expectedHashBytes).Replace("-
 
 Write-Host "=== FASE 13 E2E: AGENT SELF-UPDATE & ROLLOUT MANAGEMENT ===" -ForegroundColor Cyan
 
+. (Join-Path $PSScriptRoot 'Read-AgentCommand.ps1')
+
 # 1. Build server
 Write-Host "1. Building server binary (CGO_ENABLED=0)..."
 Push-Location (Resolve-Path (Join-Path $PSScriptRoot ".."))
@@ -216,15 +218,12 @@ try {
 
     # 9. Verify Agent Receives update.apply Command
     Write-Host "`n8. Agent Receiving and Validating Update Envelope..."
-    $buffer = New-Object byte[] 4096
-    $seg = New-Object System.ArraySegment[byte] ($buffer, 0, $buffer.Length)
-    $recvTask = $wsAgent.ReceiveAsync($seg, $ctSource.Token)
-    $recvTask.Wait(5000) | Out-Null
-    $receivedText = [System.Text.Encoding]::UTF8.GetString($buffer, 0, $recvTask.Result.Count)
-    $cmdEnv = $receivedText | ConvertFrom-Json
-    if ($cmdEnv.command -ne "update.apply") {
-        throw "Agent expected 'update.apply' command, got: $($cmdEnv.command)"
-    }
+    # The reconnect hook pushes the filter policy to a device that has not
+    # reported 'synced' yet, which is every device in this run. That frame
+    # arrives first and is not the one under test here. The envelope id is the
+    # task id the dispatch just created, so matching on it selects this command.
+    $cmdEnv = Read-AgentCommand -Ws $wsAgent -CommandName 'update.apply' `
+        -CancellationToken $ctSource.Token -Id $taskId
     $updatePayload = $cmdEnv.payload
     if ($updatePayload.sha256_checksum -ne $expectedSha256) {
         throw "SHA256 mismatch in update command payload"

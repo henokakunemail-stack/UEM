@@ -26,8 +26,17 @@ $env:ADMIN_PASSWORD = 'admin12345'
 
 $serverExe = Join-Path $env:TEMP 'emserver.exe'
 $agentExe = Join-Path $env:TEMP 'emagent.exe'
-if (-not (Test-Path $serverExe)) { throw "build server first: go build -o emserver.exe ./server/cmd/server" }
-if (-not (Test-Path $agentExe)) { throw "build agent first: go build -o emagent.exe ./agent/cmd/agent" }
+
+# Both binaries are built here rather than required to exist already. The two
+# scripts that launch the real agent (this one and e2e-inventory) documented a
+# manual build step in a header comment and then threw when the runner had not
+# done it, so the CI job failed before testing anything. Building is what CI is
+# for, and the Go toolchain is a declared step of every job that runs a script.
+$env:CGO_ENABLED = '0'
+& go build -o $serverExe ./server/cmd/server
+if ($LASTEXITCODE -ne 0) { throw "server build failed" }
+& go build -o $agentExe ./agent/cmd/agent
+if ($LASTEXITCODE -ne 0) { throw "agent build failed" }
 
 # Query-Sqlite runs a SELECT against the SQLite DB without any external module:
 # it shells out to a tiny Go helper (scripts/querysqlite) that prints rows as

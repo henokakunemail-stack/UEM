@@ -17,6 +17,8 @@ Get-Process emserver-rc -ErrorAction SilentlyContinue |
 
 Write-Host "=== FASE 11 E2E: REMOTE CONTROL (PURE GO RELAY) ===" -ForegroundColor Cyan
 
+. (Join-Path $PSScriptRoot 'Read-AgentCommand.ps1')
+
 # 1. Build server
 Write-Host "1. Building server binary (CGO_ENABLED=0)..."
 Push-Location (Resolve-Path (Join-Path $PSScriptRoot ".."))
@@ -32,7 +34,7 @@ $env:HTTP_ADDR = ":$port"
 $env:LOG_LEVEL = "info"
 $env:ADMIN_PASSWORD = "admin_rc_password"
 
-$serverProc = Start-Process $serverExe -PassThru -WindowStyle Hidden
+$serverProc = Start-Process $serverExe -PassThru -WindowStyle Hidden -RedirectStandardOutput "$env:TEMP\em-e2e-rc-server.log"
 Write-Host "Server started with PID: $($serverProc.Id) on port $port"
 
 $ready = $false
@@ -135,16 +137,11 @@ try {
     if (-not $sessionId) { throw "Expected session ID in response" }
     Write-Host "  [PASS] Remote Control Session initiated: $sessionId (Status: $($sessionResp.status), Mode: $($sessionResp.session_mode))" -ForegroundColor Green
 
-    # Verify agent receives rc.start command on its control socket
-    $buffer = New-Object byte[] 4096
-    $seg = New-Object System.ArraySegment[byte] ($buffer, 0, $buffer.Length)
-    $recvTask = $wsAgent.ReceiveAsync($seg, $ctSource.Token)
-    $recvTask.Wait(5000) | Out-Null
-    $receivedText = [System.Text.Encoding]::UTF8.GetString($buffer, 0, $recvTask.Result.Count)
-    $cmdEnv = $receivedText | ConvertFrom-Json
-    if ($cmdEnv.command -ne "rc.start") {
-        throw "Agent did not receive rc.start command, got: $($cmdEnv.command)"
-    }
+    # Verify agent receives rc.start command on its control socket. The envelope
+    # id is the session id the create call just returned, which selects this
+    # dispatch rather than a stale frame from an earlier session.
+    $cmdEnv = Read-AgentCommand -Ws $wsAgent -CommandName 'rc.start' `
+        -CancellationToken $ctSource.Token -Id $sessionId
     Write-Host "  [PASS] Agent received rc.start command with relay payload" -ForegroundColor Green
 
     # 8. Connect Operator & Agent WebSockets to Relay
@@ -258,6 +255,15 @@ try {
     Write-Host "========================================================" -ForegroundColor Green
 } finally {
     Stop-Process -Id $serverProc.Id -Force -ErrorAction SilentlyContinue
+    if (Test-Path "$env:TEMP\em-e2e-rc-server.log") {
+        $lines = Get-Content "$env:TEMP\em-e2e-rc-server.log" |
+            Where-Object { $_ -match 'ZZZ|relay closed' }
+        if ($lines) {
+            Write-Host "`n--- remote control server log ---" -ForegroundColor DarkGray
+            foreach ($l in $lines) { Write-Host $l -ForegroundColor DarkGray }
+        }
+        Remove-Item "$env:TEMP\em-e2e-rc-server.log" -ErrorAction SilentlyContinue
+    }
     Remove-Item $dbPath -ErrorAction SilentlyContinue
     Remove-Item $serverExe -ErrorAction SilentlyContinue
 }

@@ -40,8 +40,18 @@ $env:ADMIN_PASSWORD = 'admin12345'
 
 $serverExe = Join-Path $env:TEMP 'emserver.exe'
 $agentExe = Join-Path $env:TEMP 'emagent-rel.exe'
-if (-not (Test-Path $serverExe)) { throw "build server first: go build -o emserver.exe ./server/cmd/server" }
-if (-not (Test-Path $agentExe)) { throw "build agent first: see scripts/e2e-inventory.ps1 header" }
+
+# Built here rather than required to exist already: the manual build step was
+# documented in the header comment above and then thrown when the CI runner
+# had not performed it, so this job failed before testing anything.
+$env:CGO_ENABLED = '0'
+& go build -o $serverExe ./server/cmd/server
+if ($LASTEXITCODE -ne 0) { throw "server build failed" }
+# The ldflags matter on Windows: see the header comment. A plain
+# `go build -o .../emagent.exe` is quarantined by Defender as a false positive,
+# which makes the run fail at Start-Process instead of in the test itself.
+& go build -ldflags '-X github.com/henokakunemail-stack/Endpoint-Manager/agent/shared/osinfo.Version=0.2.0-e2e' -o $agentExe ./agent/cmd/agent
+if ($LASTEXITCODE -ne 0) { throw "agent build failed" }
 
 # Query-Sqlite runs a SELECT against the SQLite DB without any external module:
 # it shells out to a tiny Go helper (scripts/querysqlite) that prints rows as

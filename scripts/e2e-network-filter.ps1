@@ -23,6 +23,8 @@ Set-Content -Path $mockHostsFile -Value "127.0.0.1 localhost`n::1 localhost`n10.
 
 Write-Host "=== FASE 12 E2E: NETWORK & WEB FILTER SECURITY RULES ===" -ForegroundColor Cyan
 
+. (Join-Path $PSScriptRoot 'Read-AgentCommand.ps1')
+
 # 1. Build server
 Write-Host "1. Building server binary (CGO_ENABLED=0)..."
 Push-Location (Resolve-Path (Join-Path $PSScriptRoot ".."))
@@ -180,8 +182,8 @@ try {
     # 8. Technician triggers Policy Synchronization
     Write-Host "`n7. Technician Triggering Filter Policy Sync..."
     $syncResp = Invoke-RestMethod -Uri "$base/api/devices/$deviceId/filter/sync" -Method POST -Headers $techHeaders
-    if ($syncResp.status -ne "dispatched") {
-        throw "Expected status 'dispatched', got: $($syncResp.status)"
+    if ($syncResp.status -ne "pending") {
+        throw "Expected status 'pending', got: $($syncResp.status)"
     }
     if ($syncResp.effective_rules -ne 3) {
         throw "Expected 3 effective rules compiled for device, got: $($syncResp.effective_rules)"
@@ -191,15 +193,19 @@ try {
 
     # 9. Verify Agent Receives filter.apply Command
     Write-Host "`n8. Agent Receiving and Validating Filter Dispatch..."
-    $buffer = New-Object byte[] 4096
-    $seg = New-Object System.ArraySegment[byte] ($buffer, 0, $buffer.Length)
-    $recvTask = $wsAgent.ReceiveAsync($seg, $ctSource.Token)
-    $recvTask.Wait(5000) | Out-Null
-    $receivedText = [System.Text.Encoding]::UTF8.GetString($buffer, 0, $recvTask.Result.Count)
-    $cmdEnv = $receivedText | ConvertFrom-Json
-    if ($cmdEnv.command -ne "filter.apply") {
-        throw "Agent expected 'filter.apply' command, got: $($cmdEnv.command)"
+    # $syncResp.dispatched is the field that actually answers "did the bytes
+    # leave". The response's `status` is 'pending', deliberately: it describes
+    # the enforcement row, not the wire, and the console reads `dispatched` for
+    # exactly this reason (NetworkFilterPage.tsx handleSync). Asserting
+    # status='dispatched' here was testing a value the server never returns.
+    if (-not $syncResp.dispatched) {
+        throw "Filter sync did not dispatch: the device was not reachable on the hub"
     }
+    # The envelope id is the policy version the sync just computed, so matching
+    # on it selects this dispatch rather than the empty one the reconnect hook
+    # pushed at connect time -- before any policy existed.
+    $cmdEnv = Read-AgentCommand -Ws $wsAgent -CommandName 'filter.apply' `
+        -CancellationToken $ctSource.Token -Id $syncResp.policy_version
     $blockedDomains = $cmdEnv.payload.blocked_domains
     if ($blockedDomains.Count -ne 3) {
         throw "Agent expected 3 blocked domains in payload, got: $($blockedDomains.Count)"
