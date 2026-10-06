@@ -128,6 +128,28 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now endpoint-mgmt
 ```
 
+##### Kalau Anda menjalankan biner secara manual, bukan lewat systemd
+
+`EnvironmentFile=` adalah fitur **systemd**, bukan fitur server. Server hanya
+membaca environment proses (`os.LookupEnv`); tidak ada dotenv loader yang
+membaca `.env` di working directory. Jadi unit di atas bekerja justru karena
+systemd yang membaca file itu dan menyuntikkan hasilnya ke process environment.
+
+Jalankan manual, Anda harus menyebut file-nya sendiri:
+
+```bash
+sudo -u endpointmgmt /opt/endpoint-mgmt/endpoint-mgmt-server \
+  -env-file /opt/endpoint-mgmt/.env
+```
+
+Tanpa `-env-file`, semua variabel di file itu diabaikan dan server keluar dengan
+`JWT_SECRET must be set`.
+
+Ingat juga bahwa `-env-file` adalah **fallback, bukan override**: variabel yang
+sudah ada di environment proses menang. Kalau dijalankan lewat systemd, itu
+berarti `EnvironmentFile=` adalah sumber yang sesungguhnya, dan `-env-file`
+tidak perlu ada di `ExecStart`.
+
 #### Langkah 6: Konfigurasi TLS & Nginx Reverse Proxy
 Tempatkan sertifikat SSL:
 ```bash
@@ -155,6 +177,9 @@ sudo ufw allow 443/tcp
 sudo ufw --force enable
 ```
 
+> **Agen tidak butuh port inbound.** Semua koneksi dari agen ke server adalah
+> outbound. Buka hanya port server agar agen bisa menghubungi server.
+
 ---
 
 ## 3. Verifikasi Status Layanan
@@ -165,7 +190,7 @@ sudo systemctl status endpoint-mgmt
 
 # Tes endpoint healthcheck internal
 curl -s http://127.0.0.1:8443/healthz
-# Respon yang diharapkan: {"status":"ok","time":"..."}
+# Respon yang diharapkan: {"status":"ok","agents_online":0}
 
 # Pantau log aktif
 sudo journalctl -u endpoint-mgmt -f

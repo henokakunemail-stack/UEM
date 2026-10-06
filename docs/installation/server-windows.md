@@ -110,43 +110,61 @@ Write-Host "Simpan kata sandi ini untuk login pertama di Web Console."
 
 ---
 
-## 5. Menjalankan Server Sebagai Windows Service (NSSM)
+## 5. Menjalankan Server Sebagai Windows Service
 
-Biner server Go dirancang sebagai proses background berkinerja tinggi. Agar berjalan otomatis saat komputer booting tanpa login user, gunakan **NSSM** (Non-Sucking Service Manager) yang teruji di enterprise:
+Server berjalan sebagai proses background. Agar hidup otomatis saat boot tanpa
+perlu login user, daftarkan sebagai Windows service.
 
-### Langkah 5.1: Unduh & Pasang NSSM
-1. Unduh NSSM dari `https://nssm.cc/download` (atau pasang via `winget install nssm` atau `choco install nssm`).
-2. Tempatkan `nssm.exe` (versi 64-bit) di `C:\Windows\System32\` atau `C:\EndpointMgmt\bin\`.
+**Tidak perlu NSSM.** Biner ini punya mode `-service` bawaan yang terdaftar
+sendiri lewat Windows SCM. `packaging/windows/server.nsi` memakainya persis
+seperti di bawah, jadi installer resmi dan langkah manual berikut melakukan hal
+yang sama.
 
-### Langkah 5.2: Daftarkan Service
-Jalankan perintah berikut di PowerShell Administrator:
+### Langkah 5.1: Pastikan file konfigurasi ada
+
+Service yang dijalankan SCM mewarisi **tidak ada** environment dari shell Anda.
+Artinya file `.env` harus punya `-env-file` yang eksplisit. Tanpa flag itu,
+seluruh file diabaikan diam-diam, `JWT_SECRET` kosong, dan server keluar dengan
+`JWT_SECRET must be set` tanpa pernah membaca satu baris pun dari konfigurasi
+Anda.
+
+> Ini bukan peringatan teoretis. Jalur NSSM yang pernah ada di dokumen ini
+> mendaftarkan service **tanpa** `-env-file`, sehingga langkah "edit `.env`"
+> sesudahnya tidak pernah berefek apa pun.
+
+### Langkah 5.2: Daftarkan service
+
+Jalankan di PowerShell **Administrator**:
 
 ```powershell
-$nssmPath = "nssm.exe"
 $serviceName = "EndpointMgmtServer"
-$exePath = "C:\EndpointMgmt\bin\endpoint-mgmt-server.exe"
-$workDir = "C:\EndpointMgmt\config"
+$exePath     = "C:\EndpointMgmt\bin\endpoint-mgmt-server.exe"
+$envFile     = "C:\EndpointMgmt\config\.env"
 
-# Pasang Service
-& $nssmPath install $serviceName $exePath
-& $nssmPath set $serviceName AppDirectory $workDir
-& $nssmPath set $serviceName DisplayName "Endpoint Management Central Server"
-& $nssmPath set $serviceName Description "Manages enterprise branch endpoints and remote execution relay."
-& $nssmPath set $serviceName Start SERVICE_AUTO_START
+# -env-file wajib: SCM tidak mewarisi environment dari shell Anda
+& $exePath -env-file $envFile -service install
+& $exePath -service start
 
-# Konfigurasi Log Output (Rotasi log otomatis)
-New-Item -ItemType Directory -Force -Path "C:\EndpointMgmt\logs"
-& $nssmPath set $serviceName AppStdout "C:\EndpointMgmt\logs\server-out.log"
-& $nssmPath set $serviceName AppStderr "C:\EndpointMgmt\logs\server-err.log"
-& $nssmPath set $serviceName AppRotateFiles 1
-& $nssmPath set $serviceName AppRotateOnline 1
-& $nssmPath set $serviceName AppRotateSeconds 86400
-& $nssmPath set $serviceName AppRotateBytes 52428800
-
-# Jalankan Service
-Start-Service $serviceName
 Get-Service $serviceName
 ```
+
+Perintah yang tersedia:
+
+| Perintah | Fungsi |
+|---|---|
+| `-service install` | Daftarkan service dengan `-env-file` yang diberikan |
+| `-service start` / `-service stop` | Kontrol service |
+| `-service status` | Lihat status |
+| `-service uninstall` | Hapus service (data tidak dihapus) |
+
+### Langkah 5.3: Rotasi log
+
+Service menulis ke `LOG_FILE` yang ada di file `.env` — bukan ke stdout. Kalau
+Anda butuh rotasi yang dikelola otomatis, biarkan Task Scheduler atau tool log
+lain yang mengarsipkan; service ini tidak melakukan rotasi sendiri.
+
+Kalau Anda lebih suka stdout, jalankan biner di luar service dengan stdout yang
+di-redirect ke file, dan rotasikan dengan tool yang Anda inginkan.
 
 ---
 
@@ -193,6 +211,10 @@ New-NetFirewallRule -DisplayName "Endpoint Management Server (HTTPS-443)" `
     -Direction Inbound -Protocol TCP -LocalPort 443 -Action Allow
 ```
 
+> **Agen tidak butuh port inbound.** Semua koneksi dari agen ke server adalah
+> outbound. Yang perlu dibuka hanyalah port server agar agen bisa
+> **_menghubungi_** server — bukan agar server bisa menghubungi agen.
+
 ---
 
 ## 8. Verifikasi Operasional
@@ -205,9 +227,16 @@ Get-NetTCPConnection -LocalPort 8443, 443 -State Listen -ErrorAction SilentlyCon
 Invoke-RestMethod -Uri "http://127.0.0.1:8443/healthz"
 # Mengembalikan: status = "ok"
 
-# 3. Pantau log real-time
-Get-Content -Path "C:\EndpointMgmt\logs\server-out.log" -Tail 30 -Wait
+# 3. Pastikan service benar-benar membaca konfigurasi Anda
+#    (kalau JWT_SECRET kosong, server tidak akan start sama sekali)
+& "C:\EndpointMgmt\bin\endpoint-mgmt-server.exe" -env-file "C:\EndpointMgmt\config\.env" -service status
+
+# 4. Pantau log — ke LOG_FILE, bukan ke stdout
+Get-Content -Path "C:\EndpointMgmt\logs\server.log" -Tail 30 -Wait
 ```
+
+> Kalau langkah 2 gagal dengan `JWT_SECRET must be set`, service berjalan
+> **tanpa** `-env-file`. Periksa baris `-service install` di Langkah 5.2.
 
 ---
 

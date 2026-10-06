@@ -135,7 +135,7 @@ yang perlu dibuka di firewall kantor cabang.
 2. Jalankan installer/biner agen di komputer klien:
 
    ```cmd
-   emagent.exe -server https://mgmt.example.com -enroll <TOKEN_DARI_WEB_CONSOLE>
+   endpoint-agent.exe -server https://mgmt.example.com -enroll <TOKEN_DARI_WEB_CONSOLE>
    ```
 
 3. Komputer klien terdaftar otomatis, mengirim inventaris hardware/software

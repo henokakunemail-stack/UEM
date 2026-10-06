@@ -14,12 +14,15 @@ interface EnrollTokenModalProps {
   onEnrolled?: () => void
 }
 
-// The binary name each platform's build actually produces. packaging/*/build.*
-// writes these; nothing else in the repo is authoritative for it.
+// The binary name each platform's installer actually puts on disk. These are
+// not the names `go build` produces (agent-windows-amd64.exe): packaging/windows/
+// agent.nsi installs it as endpoint-agent.exe, and packaging/linux/deb installs
+// it as /usr/bin/endpoint-agent. A copy-pasteable command has to name the file
+// the operator will actually have.
 const BINARY: Record<string, string> = {
-  windows: 'endpoint-mgmt-agent.exe',
-  linux: 'endpoint-mgmt-agent',
-  macos: 'endpoint-mgmt-agent',
+  windows: 'endpoint-agent.exe',
+  linux: 'endpoint-agent',
+  macos: 'endpoint-agent',
 }
 
 /**
