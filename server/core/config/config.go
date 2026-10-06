@@ -49,6 +49,15 @@ type Config struct {
 	LogFile string
 	// LogTailLines caps how many recent lines GET /api/logs holds in memory.
 	LogTailLines int
+
+	// LDAPBindPassword authenticates the directory bind account, and it is an
+	// env var rather than a database column on purpose: this server has no
+	// encryption at rest and no other stored credential, so a bind password in
+	// SQLite would mean any copy of the .db is a copy of the company
+	// directory. The console only ever learns whether one is set.
+	//
+	// Trade-off: rotating it needs a server restart.
+	LDAPBindPassword string
 }
 
 // Load reads configuration from environment variables with sane defaults.
@@ -58,6 +67,7 @@ func Load() (Config, error) {
 		HTTPAddr:             getEnv("HTTP_ADDR", ":8443"),
 		DBPath:               dbPath,
 		JWTSecret:            getEnv("JWT_SECRET", ""),
+		LDAPBindPassword:     getEnv("LDAP_BIND_PASSWORD", ""),
 		AccessTokenTTL:       getDuration("ACCESS_TOKEN_TTL", 15*time.Minute),
 		RefreshTokenTTL:      getDuration("REFRESH_TOKEN_TTL", 24*7*time.Hour),
 		TLSCertFile:          getEnv("TLS_CERT_FILE", ""),

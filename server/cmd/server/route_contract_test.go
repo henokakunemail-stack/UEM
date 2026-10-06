@@ -298,6 +298,11 @@ var listShapes = []struct {
 	// the repository's own non-nil slices.
 	{path: "/api/maintenance/tasks"},
 	{path: "/api/maintenance/jobs"},
+	// A directory that has never been synced answers []. Written as a nil
+	// slice it would answer null, and the console's PIC dropdown reads
+	// `list || []` only because a nil slice is exactly what a Go server sends
+	// for a list that was never built.
+	{path: "/api/directory/contacts"},
 }
 
 func TestListEndpointResponseShape(t *testing.T) {

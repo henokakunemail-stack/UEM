@@ -445,6 +445,66 @@ export interface HardwareAssetDTO {
   notes: string
   created_at: string
   updated_at: string
+  /** Hostname of the linked device, from the server's LEFT JOIN. Empty when
+   *  the asset is unlinked or its device has since been retired. */
+  device_hostname?: string
+}
+
+// Phase 16: Directory (LDAP/AD) sync. A contact is NOT a console account --
+// synced people have no login here and no password_hash, so `login.go` refuses
+// them like any other unknown user. The only job this table has is to be the
+// list a PIC is picked from on the hardware asset form.
+export interface DirectoryContactDTO {
+  id: string
+  /** objectGUID / entryUUID / DN -- whatever the directory gave as a stable
+   *  identity. The console shows it only on the Settings page, where it is
+   *  what tells an operator *why* two people are two rows. */
+  external_id: string
+  distinguished_name: string
+  display_name: string
+  email: string
+  department: string
+  title: string
+  username: string
+  source: string
+  /** False means "gone from the directory". Kept as a row rather than deleted
+   *  so asset history still points at the person who used to hold the machine. */
+  is_active: boolean
+  /** When this person was first seen, kept across renames and re-homing. The
+   *  console does not display it; it is here so the shape matches the server. */
+  first_seen_at: string
+  last_synced_at: string
+}
+
+// What the console may change about a directory. Deliberately has no password
+// field: the bind password is an env var (LDAP_BIND_PASSWORD), never a column,
+// and the server refuses to store one.
+export interface DirectoryConfigDTO {
+  host: string
+  port: number
+  use_tls: boolean
+  base_dn: string
+  bind_dn: string
+  search_filter: string
+  source: string
+  /** Whether LDAP_BIND_PASSWORD is set. Never the value itself. */
+  bind_password_configured: boolean
+  /** Who last saved this, and when. Unused by the form today — a settings row
+   *  with no visible editor is worth having on record. Empty on a config that
+   *  has never been saved. */
+  updated_by?: string
+  updated_at?: string
+}
+
+// The add/update/deactivate split a preview produces. Re-derived from the
+// directory on every call rather than stored, so an Apply can never act on a
+// plan that was computed against an older view of the database.
+export interface DirectorySyncPlanDTO {
+  adds: DirectoryContactDTO[]
+  updates: DirectoryContactDTO[]
+  deactivations: DirectoryContactDTO[]
+  unchanged: number
+  total_in_directory: number
 }
 
 export interface AssetSummaryDTO {

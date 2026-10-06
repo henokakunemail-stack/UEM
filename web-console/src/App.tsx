@@ -22,6 +22,7 @@ import { NetworkFilterPage } from './pages/NetworkFilterPage'
 import { PatchesPage } from './pages/PatchesPage'
 import { ReportsPage } from './pages/ReportsPage'
 import { RemoteControlPage } from './pages/RemoteControlPage'
+import { SettingsPage } from './pages/SettingsPage'
 import { SoftwarePage } from './pages/SoftwarePage'
 import { TasksSchedulerPage } from './pages/TasksSchedulerPage'
 import { UsersPage } from './pages/UsersPage'
@@ -49,6 +50,7 @@ const PAGE_LABELS: Record<string, string> = {
   users: 'User management',
   audit: 'Audit trail',
   log: 'Server log',
+  settings: 'Settings',
 }
 
 const pageLabel = (pathname: string) => PAGE_LABELS[pathname.split('/')[1]] ?? 'This page'
@@ -110,6 +112,7 @@ function ConsoleRoot() {
         <Route path="/users" element={<Restricted role="admin"><UsersPage /></Restricted>} />
         <Route path="/audit" element={<Restricted role="technician"><AuditPage /></Restricted>} />
         <Route path="/log" element={<Restricted role="admin"><LogPage /></Restricted>} />
+        <Route path="/settings" element={<Restricted role="admin"><SettingsPage /></Restricted>} />
         <Route path="*" element={<div className="empty-state"><h1>Page not found</h1><Link to="/dashboard">Return to dashboard</Link></div>} />
       </Routes>
     </ErrorBoundary>

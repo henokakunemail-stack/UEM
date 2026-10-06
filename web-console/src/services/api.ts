@@ -25,6 +25,9 @@ import type {
   AlertIncidentDTO,
   AlertRuleDTO,
   HardwareAssetDTO,
+  DirectoryContactDTO,
+  DirectoryConfigDTO,
+  DirectorySyncPlanDTO,
   AssetSummaryDTO,
   SoftwareLicenseDTO,
   LicenseComplianceSummaryDTO,
@@ -508,7 +511,6 @@ export const api = {
     description: string
     target_type: string
     target_id: string
-    priority: number
   }): Promise<FilterPolicyDTO> {
     return request<FilterPolicyDTO>('/api/filter/policies', {
       method: 'POST',
@@ -518,7 +520,17 @@ export const api = {
 
   async updateFilterPolicy(
     id: string,
-    data: { name?: string; description?: string; is_enabled?: boolean; priority?: number }
+    // target_type/target_id belong here: the server has always accepted them, and
+    // without them in this signature the only way to change a policy's scope was
+    // to delete it and create it again, losing its rules along with it.
+    data: {
+      name?: string
+      description?: string
+      target_type?: string
+      target_id?: string
+      is_enabled?: boolean
+      priority?: number
+    }
   ): Promise<FilterPolicyDTO> {
     return request<FilterPolicyDTO>(`/api/filter/policies/${id}`, {
       method: 'PUT',
@@ -541,7 +553,10 @@ export const api = {
 
   async createFilterRule(
     policyId: string,
-    data: { rule_type: string; pattern: string; category: string; action: string }
+    // No rule_type and no action: enforcement is domain-name blocking only, and the
+    // server rejects anything else. Sending them implied a choice the caller cannot
+    // actually make.
+    data: { pattern: string; category: string }
   ): Promise<FilterRuleDTO> {
     return request<FilterRuleDTO>(`/api/filter/policies/${policyId}/rules`, {
       method: 'POST',
@@ -627,6 +642,45 @@ export const api = {
   async deleteAsset(id: string): Promise<{ status: string }> {
     return request<{ status: string }>(`/api/assets/${id}`, {
       method: 'DELETE',
+    })
+  },
+
+  // Directory contacts are read-only here. The console never creates or edits
+  // one: the directory is the only writer, so the asset form's PIC dropdown
+  // has nothing to save and a viewer reading a name/department is not a
+  // privilege escalation.
+  async getDirectoryContacts(): Promise<DirectoryContactDTO[]> {
+    return request<DirectoryContactDTO[]>('/api/directory/contacts')
+  },
+
+  async getDirectoryConfig(): Promise<DirectoryConfigDTO> {
+    return request<DirectoryConfigDTO>('/api/directory/config')
+  },
+
+  async updateDirectoryConfig(data: Partial<DirectoryConfigDTO>): Promise<DirectoryConfigDTO> {
+    return request<DirectoryConfigDTO>('/api/directory/config', {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    })
+  },
+
+  // Preview and apply both re-read the directory; nothing is cached between
+  // them. That is why preview is not "save the plan, then replay it".
+  async previewDirectorySync(): Promise<DirectorySyncPlanDTO> {
+    return request<DirectorySyncPlanDTO>('/api/directory/sync/preview', {
+      method: 'POST',
+    })
+  },
+
+  async applyDirectorySync(): Promise<DirectorySyncPlanDTO> {
+    return request<DirectorySyncPlanDTO>('/api/directory/sync/apply', {
+      method: 'POST',
+    })
+  },
+
+  async testDirectoryConnection(): Promise<{ ok: boolean; message: string; entries_seen: number }> {
+    return request<{ ok: boolean; message: string; entries_seen: number }>('/api/directory/test', {
+      method: 'POST',
     })
   },
 
