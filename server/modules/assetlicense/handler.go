@@ -83,6 +83,54 @@ func (h *Handler) handleGetAsset(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, a)
 }
 
+// validDeviceRef refuses a device_id that names no device, before the write.
+//
+// Without it the foreign key does the check, but it reports itself: a bad id
+// comes back as a 500 carrying SQLite's "FOREIGN KEY constraint failed", which
+// reads as a server fault rather than as the wrong id that it is. One device
+// may legitimately own several assets (a laptop, a dock, a monitor), so this
+// deliberately does not treat a second link as a conflict.
+func (h *Handler) validDeviceRef(w http.ResponseWriter, r *http.Request, deviceID *string) bool {
+	if deviceID == nil || *deviceID == "" {
+		return true // unlinked is a valid state
+	}
+	exists, err := h.repo.DeviceExists(r.Context(), *deviceID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return false
+	}
+	if !exists {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "linked device does not exist"})
+		return false
+	}
+	return true
+}
+
+// validAssetTag refuses a tag another asset already holds, before the write.
+//
+// Same reasoning as validDeviceRef: the UNIQUE index does catch this, but it
+// reports itself, so the console receives a 500 whose body reads
+// "constraint failed: UNIQUE constraint failed: hardware_assets.asset_tag
+// (2067)". To an operator typing a tag that is already taken that is both the
+// wrong status and an unreadable message -- it looks like the server broke
+// rather than like the thing they need to change.
+func (h *Handler) validAssetTag(w http.ResponseWriter, r *http.Request, tag string) bool {
+	return h.validAssetTagExcluding(w, r, tag, "")
+}
+
+func (h *Handler) validAssetTagExcluding(w http.ResponseWriter, r *http.Request, tag, excludeID string) bool {
+	exists, err := h.repo.AssetTagTaken(r.Context(), tag, excludeID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return false
+	}
+	if exists {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "asset_tag is already in use"})
+		return false
+	}
+	return true
+}
+
 func (h *Handler) handleCreateAsset(w http.ResponseWriter, r *http.Request) {
 	var a HardwareAsset
 	if err := json.NewDecoder(r.Body).Decode(&a); err != nil {
@@ -91,6 +139,12 @@ func (h *Handler) handleCreateAsset(w http.ResponseWriter, r *http.Request) {
 	}
 	if a.AssetTag == "" || a.ModelName == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "asset_tag and model_name are required"})
+		return
+	}
+	if !h.validDeviceRef(w, r, a.DeviceID) {
+		return
+	}
+	if !h.validAssetTag(w, r, a.AssetTag) {
 		return
 	}
 
@@ -135,6 +189,15 @@ func (h *Handler) handleUpdateAsset(w http.ResponseWriter, r *http.Request) {
 	existing.WarrantyExpiresAt = updateReq.WarrantyExpiresAt
 	existing.Status = updateReq.Status
 	existing.Notes = updateReq.Notes
+
+	if !h.validDeviceRef(w, r, existing.DeviceID) {
+		return
+	}
+	// excludeID is the asset's own id: renaming an asset to the tag it already
+	// has must not report itself as a duplicate.
+	if !h.validAssetTagExcluding(w, r, existing.AssetTag, id) {
+		return
+	}
 
 	if err := h.repo.UpdateAsset(r.Context(), existing); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})

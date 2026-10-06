@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import {
   AlertTriangle,
   Award,
@@ -6,6 +6,7 @@ import {
   DollarSign,
   Key,
   Laptop,
+  Pencil,
   Plus,
   RefreshCw,
   ShieldAlert,
@@ -21,12 +22,47 @@ import { ConfirmDialog } from '../components/ui/ConfirmDialog'
 import { Modal } from '../components/ui/Modal'
 import type {
   AssetSummaryDTO,
+  DeviceDTO,
+  DirectoryContactDTO,
   HardwareAssetDTO,
   LicenseComplianceSummaryDTO,
   SoftwareLicenseDTO,
 } from '../types/api'
 
 export type AssetTab = 'hardware' | 'licenses'
+
+const ASSET_STATUSES: HardwareAssetDTO['status'][] = [
+  'in_use',
+  'in_stock',
+  'in_repair',
+  'retired',
+  'disposed',
+]
+
+// Every field the table stores, so the create form cannot silently drop one
+// again. The previous initial state listed ten keys but the form only rendered
+// six, so vendor, site, status and notes were submitted empty on every create
+// no matter what the operator typed.
+const emptyAssetForm = (): Partial<HardwareAssetDTO> => ({
+  asset_tag: '',
+  model_name: '',
+  serial_number: '',
+  vendor: '',
+  site: '',
+  department: '',
+  assigned_user: '',
+  purchase_date: null,
+  purchase_cost: 0,
+  warranty_expires_at: null,
+  status: 'in_use',
+  notes: '',
+  device_id: null,
+})
+
+// <input type="date"> wants yyyy-mm-dd; the server sends and expects a timestamp.
+const toDateInput = (v?: string | null) => (v ? v.slice(0, 10) : '')
+// An empty date input must clear the column, not store the epoch.
+const fromDateInput = (v: string) => (v ? new Date(v + 'T00:00:00Z').toISOString() : null)
 
 interface AssetLicensePageProps {
   activeTab: AssetTab
@@ -49,6 +85,11 @@ export const AssetLicensePage: React.FC<AssetLicensePageProps> = ({ activeTab: s
   // Modals
   const [isAssetModalOpen, setIsAssetModalOpen] = useState(false)
   const [isLicenseModalOpen, setIsLicenseModalOpen] = useState(false)
+  // The same modal creates and edits. null = creating; an asset = editing that
+  // one. api.updateAsset existed with no call site, so handleUpdateAsset was
+  // unreachable — the server already copied DeviceID correctly, nothing reached
+  // it.
+  const [editingAsset, setEditingAsset] = useState<HardwareAssetDTO | null>(null)
   // Destructive deletes go through a stateful dialog instead of window.confirm
   // so the pending state can block a double-submit while the request is in
   // flight. Null = no dialog open; the row id is what gets deleted on confirm.
@@ -58,21 +99,19 @@ export const AssetLicensePage: React.FC<AssetLicensePageProps> = ({ activeTab: s
   const toast = useToast()
 
   // New Asset Form
-  const [newAsset, setNewAsset] = useState<Partial<HardwareAssetDTO>>({
-    asset_tag: '',
-    model_name: '',
-    serial_number: '',
-    vendor: '',
-    site: '',
-    department: '',
-    assigned_user: '',
-    purchase_cost: 0,
-    status: 'in_use',
-    notes: '',
-  })
+  const [newAsset, setNewAsset] = useState<Partial<HardwareAssetDTO>>(emptyAssetForm())
+
+  // Devices available to link, and the contacts a PIC is picked from. Both are
+  // loaded when the modal opens rather than on mount: they are only needed
+  // here, and a page load should not pay for a 200-device list nobody looks at.
+  const [devices, setDevices] = useState<DeviceDTO[]>([])
+  const [contacts, setContacts] = useState<DirectoryContactDTO[]>([])
+  // True while the chosen device's inventory is in flight, so the form can say
+  // the fields are filling themselves rather than looking broken.
+  const [prefilling, setPrefilling] = useState(false)
 
   // New License Form
-  const [newLicense, setNewLicense] = useState<Partial<SoftwareLicenseDTO>>({
+  const emptyLicenseForm = (): Partial<SoftwareLicenseDTO> => ({
     software_name: '',
     publisher: '',
     license_type: 'per_device',
@@ -80,7 +119,13 @@ export const AssetLicensePage: React.FC<AssetLicensePageProps> = ({ activeTab: s
     cost: 0,
     notes: '',
   })
+  const [newLicense, setNewLicense] = useState<Partial<SoftwareLicenseDTO>>(emptyLicenseForm())
 
+  // This also runs after every create/update/delete, so it outlives the mount it
+  // started on. `alive` is false once the page is gone, and every setState below
+  // is behind that check — setting state on an unmounted component is a wasted
+  // render at best and a React warning at worst.
+  const alive = useRef(true)
   const loadData = async () => {
     setLoading(true)
     try {
@@ -90,46 +135,160 @@ export const AssetLicensePage: React.FC<AssetLicensePageProps> = ({ activeTab: s
         api.getLicenses().catch(() => []),
         api.getLicenseCompliance().catch(() => ({ audited_at: '', compliance: [] })),
       ])
+      if (!alive.current) return
       setAssets(astList)
       setSummary(sumData)
       setLicenses(licList)
       setCompliance(compData.compliance || [])
     } catch (err: any) {
+      if (!alive.current) return
       setMsg({ type: 'error', text: err.message || 'Failed to load asset & license data' })
     } finally {
-      setLoading(false)
+      if (alive.current) setLoading(false)
     }
   }
 
   useEffect(() => {
+    alive.current = true
     loadData()
+    return () => { alive.current = false }
   }, [])
 
-  const handleCreateAsset = async (e: React.FormEvent) => {
-    e.preventDefault()
+  // Devices and contacts are only needed inside the form. Loading them on
+  // modal open keeps a page view from paying for a 200-device list and a
+  // directory that might be far larger.
+  useEffect(() => {
+    if (!isAssetModalOpen) return
+    let stopped = false
+    // Contacts are optional: before a directory sync has run there are none,
+    // and the PIC field has to stay usable as free text in that state.
+    api.getDevices(200, 0)
+      .then((res) => { if (!stopped) setDevices(res.devices || []) })
+      .catch(() => { if (!stopped) setDevices([]) })
+    api.getDirectoryContacts()
+      .then((list: DirectoryContactDTO[]) => { if (!stopped) setContacts(list || []) })
+      .catch(() => { if (!stopped) setContacts([]) })
+    return () => { stopped = true }
+  }, [isAssetModalOpen])
+
+  const openCreateAsset = () => {
+    setEditingAsset(null)
+    setNewAsset(emptyAssetForm())
+    setIsAssetModalOpen(true)
+  }
+
+  // A PIC can be typed by hand before any sync has run, or can name somebody
+  // who has since been deactivated. The server stores the name, not an id, so
+  // the name must survive a round trip even when it matches no contact — the
+  // dropdown gets an explicit option for it. Without that, the browser falls
+  // back to the first option ("Unassigned") while the state still holds the
+  // old name, and one Save silently clears the PIC.
+  const unmatchedPic = newAsset.assigned_user
+    && !contacts.some((c) => c.display_name === newAsset.assigned_user)
+    ? newAsset.assigned_user
+    : null
+
+  // The modal creates and edits from the same state, so it has to be reset on
+  // open — not just on submit. Opening it raw after cancelling a half-typed
+  // licence showed the previous operator's text as if it were saved data.
+  const openCreateLicense = () => {
+    setNewLicense(emptyLicenseForm())
+    setIsLicenseModalOpen(true)
+  }
+
+  const openEditAsset = (a: HardwareAssetDTO) => {
+    setEditingAsset(a)
+    setNewAsset({
+      asset_tag: a.asset_tag,
+      device_id: a.device_id ?? null,
+      model_name: a.model_name,
+      serial_number: a.serial_number,
+      vendor: a.vendor,
+      site: a.site,
+      department: a.department,
+      assigned_user: a.assigned_user,
+      purchase_date: a.purchase_date ?? null,
+      purchase_cost: a.purchase_cost,
+      warranty_expires_at: a.warranty_expires_at ?? null,
+      status: a.status,
+      notes: a.notes,
+    })
+    setIsAssetModalOpen(true)
+  }
+
+  const closeAssetModal = () => {
+    setIsAssetModalOpen(false)
+    setEditingAsset(null)
+    prefetchAbort.current?.abort()
+  }
+
+  // Link a device and fill in what the machine already knows about itself. The
+  // agent reports chassis identity (vendor, product, serial) in its inventory
+  // snapshot, so the operator should not have to retype what a barcode scan
+  // already knows.
+  //
+  // Only fills fields that are still empty: an operator who has already typed
+  // the model does not lose it to a snapshot that happened to land late. The
+  // abort is what makes "late" harmless — without it, a slow response for the
+  // previously selected device can overwrite the current selection.
+  const prefetchAbort = useRef<AbortController | null>(null)
+  const handleDeviceChange = useCallback(async (deviceId: string) => {
+    prefetchAbort.current?.abort()
+    setNewAsset((prev) => ({ ...prev, device_id: deviceId || null }))
+
+    // "Not linked" clears the hint without waiting on anything. It has to be
+    // reset here rather than left to the fetch's `finally`: that branch is
+    // skipped once the abort above fires, so with no new request to own the
+    // flag it would stay true until the modal closed.
+    setPrefilling(false)
+    if (!deviceId) return
+    const controller = new AbortController()
+    prefetchAbort.current = controller
+    setPrefilling(true)
     try {
-      await api.createAsset(newAsset)
-      const successText = `Hardware Asset '${newAsset.asset_tag}' registered successfully.`
-      setMsg({ type: 'success', text: successText })
-      toast.success(successText, 'Asset Registered')
-      setIsAssetModalOpen(false)
-      setNewAsset({
-        asset_tag: '',
-        model_name: '',
-        serial_number: '',
-        vendor: '',
-        site: '',
-        department: '',
-        assigned_user: '',
-        purchase_cost: 0,
-        status: 'in_use',
-        notes: '',
-      })
+      const inv = await api.getDeviceInventory(deviceId)
+      if (controller.signal.aborted) return
+      const model = inv.hw?.model
+      if (!model) return
+      setNewAsset((prev) => ({
+        ...prev,
+        vendor: prev.vendor || model.vendor || '',
+        model_name: prev.model_name || model.product || '',
+        serial_number: prev.serial_number || model.serial_number || '',
+      }))
+    } catch {
+      // A device with no snapshot yet, or an offline one, is an ordinary
+      // state — the operator types the fields by hand. Not worth a banner.
+    } finally {
+      if (!controller.signal.aborted) setPrefilling(false)
+    }
+  }, [])
+
+  const handleSaveAsset = async (e: React.FormEvent) => {
+    e.preventDefault()
+    const isEdit = editingAsset !== null
+    // Clear first, so a failure shows only its own message. Without this the
+    // previous action's "registered successfully" banner is still on screen
+    // behind the new one and reads as a second confirmation.
+    setMsg(null)
+    try {
+      if (isEdit) {
+        await api.updateAsset(editingAsset.id, newAsset)
+        const infoText = `Hardware Asset '${newAsset.asset_tag}' updated.`
+        setMsg({ type: 'success', text: infoText })
+        toast.success(infoText, 'Asset Updated')
+      } else {
+        await api.createAsset(newAsset)
+        const successText = `Hardware Asset '${newAsset.asset_tag}' registered successfully.`
+        setMsg({ type: 'success', text: successText })
+        toast.success(successText, 'Asset Registered')
+      }
+      closeAssetModal()
       loadData()
     } catch (err: any) {
-      const errorText = err.message || 'Failed to register asset'
+      const errorText = err.message || (isEdit ? 'Failed to update asset' : 'Failed to register asset')
       setMsg({ type: 'error', text: errorText })
-      toast.error(errorText, 'Registration Failed')
+      toast.error(errorText, isEdit ? 'Update Failed' : 'Registration Failed')
     }
   }
 
@@ -137,6 +296,7 @@ export const AssetLicensePage: React.FC<AssetLicensePageProps> = ({ activeTab: s
     if (!assetPendingDelete) return
     const { id, tag } = assetPendingDelete
     setDeletingAsset(true)
+    setMsg(null)
     try {
       await api.deleteAsset(id)
       const infoText = `Asset '${tag}' removed from inventory.`
@@ -155,6 +315,7 @@ export const AssetLicensePage: React.FC<AssetLicensePageProps> = ({ activeTab: s
 
   const handleCreateLicense = async (e: React.FormEvent) => {
     e.preventDefault()
+    setMsg(null)
     try {
       await api.createLicense(newLicense)
       const successText = `License '${newLicense.software_name}' created.`
@@ -192,13 +353,13 @@ export const AssetLicensePage: React.FC<AssetLicensePageProps> = ({ activeTab: s
             <span>Refresh</span>
           </button>
           {subTab === 'hardware' && canRegister && (
-            <button type="button" className="btn btn-primary" onClick={() => setIsAssetModalOpen(true)}>
+            <button type="button" className="btn btn-primary" onClick={openCreateAsset}>
               <Plus size={16} />
               <span>Register Hardware Asset</span>
             </button>
           )}
           {subTab === 'licenses' && canAdmin && (
-            <button type="button" className="btn btn-primary" onClick={() => setIsLicenseModalOpen(true)}>
+            <button type="button" className="btn btn-primary" onClick={openCreateLicense}>
               <Plus size={16} />
               <span>Add Software License</span>
             </button>
@@ -284,19 +445,26 @@ export const AssetLicensePage: React.FC<AssetLicensePageProps> = ({ activeTab: s
               <thead>
                 <tr>
                   <th>Asset Tag</th>
+                  <th>Linked Device</th>
                   <th>Model & Vendor</th>
                   <th>Serial Number</th>
                   <th>Department & Site</th>
-                  <th>Assigned User</th>
+                  <th>PIC</th>
                   <th>Valuation</th>
                   <th>Status</th>
                   <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {assets.length === 0 ? (
+                {loading ? (
                   <tr>
-                    <td colSpan={8} className="text-center py-8 text-muted">
+                    <td colSpan={9} className="text-center py-8 text-muted">
+                      Loading hardware assets…
+                    </td>
+                  </tr>
+                ) : assets.length === 0 ? (
+                  <tr>
+                    <td colSpan={9} className="text-center py-8 text-muted">
                       No hardware assets registered yet.
                     </td>
                   </tr>
@@ -305,6 +473,13 @@ export const AssetLicensePage: React.FC<AssetLicensePageProps> = ({ activeTab: s
                     <tr key={a.id}>
                       <td>
                         <span className="font-mono font-semibold text-primary">{a.asset_tag}</span>
+                      </td>
+                      <td>
+                        {a.device_hostname ? (
+                          <span className="font-mono text-sm">{a.device_hostname}</span>
+                        ) : (
+                          <span className="text-sm text-dim">Not linked</span>
+                        )}
                       </td>
                       <td>
                         <div>
@@ -322,17 +497,30 @@ export const AssetLicensePage: React.FC<AssetLicensePageProps> = ({ activeTab: s
                         </span>
                       </td>
                       <td>
-                        {canAdmin && (
-                          <button
-                            type="button"
-                            className="btn-action text-danger"
-                            onClick={() => setAssetPendingDelete({ id: a.id, tag: a.asset_tag })}
-                            title="Delete asset record"
-                          >
-                            <Trash2 size={14} />
-                            <span>Delete</span>
-                          </button>
-                        )}
+                        <div className="action-buttons">
+                          {canRegister && (
+                            <button
+                              type="button"
+                              className="btn-action"
+                              onClick={() => openEditAsset(a)}
+                              title="Edit this asset"
+                            >
+                              <Pencil size={14} />
+                              <span>Edit</span>
+                            </button>
+                          )}
+                          {canAdmin && (
+                            <button
+                              type="button"
+                              className="btn-action text-danger"
+                              onClick={() => setAssetPendingDelete({ id: a.id, tag: a.asset_tag })}
+                              title="Delete asset record"
+                            >
+                              <Trash2 size={14} />
+                              <span>Delete</span>
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ))
@@ -369,7 +557,13 @@ export const AssetLicensePage: React.FC<AssetLicensePageProps> = ({ activeTab: s
                 </tr>
               </thead>
               <tbody>
-                {compliance.length === 0 ? (
+                {loading ? (
+                  <tr>
+                    <td colSpan={7} className="text-center py-8 text-muted">
+                      Loading license compliance…
+                    </td>
+                  </tr>
+                ) : compliance.length === 0 ? (
                   <tr>
                     <td colSpan={7} className="text-center py-8 text-muted">
                       No software license records to reconcile.
@@ -424,24 +618,48 @@ export const AssetLicensePage: React.FC<AssetLicensePageProps> = ({ activeTab: s
         </div>
       )}
 
-      {/* Register Asset Modal */}
+      {/* Register / Edit Asset Modal */}
       <Modal
         open={isAssetModalOpen}
-        onClose={() => setIsAssetModalOpen(false)}
-        title="Register Physical Hardware Asset"
+        onClose={closeAssetModal}
+        title={editingAsset ? `Edit Asset ${editingAsset.asset_tag}` : 'Register Physical Hardware Asset'}
         size="md"
         footer={
           <>
-            <button type="button" className="btn btn-secondary" onClick={() => setIsAssetModalOpen(false)}>
+            <button type="button" className="btn btn-secondary" onClick={closeAssetModal}>
               Cancel
             </button>
             <button type="submit" form="asset-form" className="btn btn-primary">
-              Save Asset
+              {editingAsset ? 'Save Changes' : 'Save Asset'}
             </button>
           </>
         }
       >
-        <form id="asset-form" onSubmit={handleCreateAsset}>
+        <form id="asset-form" onSubmit={handleSaveAsset}>
+          <div className="form-group">
+            <label className="form-label" htmlFor="asset-device">
+              Linked Device (registered agent)
+            </label>
+            <select
+              id="asset-device"
+              className="form-select"
+              value={newAsset.device_id || ''}
+              onChange={(e) => handleDeviceChange(e.target.value)}
+            >
+              <option value="">Not linked</option>
+              {devices.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.hostname} — {d.os_name}
+                  {d.site ? ` (${d.site})` : ''}
+                </option>
+              ))}
+            </select>
+            <span className="form-hint">
+              {prefilling
+                ? 'Reading the device inventory…'
+                : 'Vendor, model and serial fill themselves in from the agent inventory.'}
+            </span>
+          </div>
           <div className="form-group">
             <label className="form-label" htmlFor="asset-tag">
               Asset Tag (Barcode / Sticker ID)
@@ -456,19 +674,34 @@ export const AssetLicensePage: React.FC<AssetLicensePageProps> = ({ activeTab: s
               onChange={(e) => setNewAsset({ ...newAsset, asset_tag: e.target.value })}
             />
           </div>
-          <div className="form-group">
-            <label className="form-label" htmlFor="asset-model">
-              Model Name
-            </label>
-            <input
-              id="asset-model"
-              type="text"
-              className="form-input"
-              required
-              placeholder="e.g. Dell Latitude 3420"
-              value={newAsset.model_name}
-              onChange={(e) => setNewAsset({ ...newAsset, model_name: e.target.value })}
-            />
+          <div className="form-row">
+            <div className="form-field">
+              <label className="form-label" htmlFor="asset-vendor">
+                Vendor
+              </label>
+              <input
+                id="asset-vendor"
+                type="text"
+                className="form-input"
+                placeholder="e.g. Dell Inc."
+                value={newAsset.vendor}
+                onChange={(e) => setNewAsset({ ...newAsset, vendor: e.target.value })}
+              />
+            </div>
+            <div className="form-field">
+              <label className="form-label" htmlFor="asset-model">
+                Model Name
+              </label>
+              <input
+                id="asset-model"
+                type="text"
+                className="form-input"
+                required
+                placeholder="e.g. Dell Latitude 3420"
+                value={newAsset.model_name}
+                onChange={(e) => setNewAsset({ ...newAsset, model_name: e.target.value })}
+              />
+            </div>
           </div>
           <div className="form-group">
             <label className="form-label" htmlFor="asset-serial">
@@ -485,17 +718,39 @@ export const AssetLicensePage: React.FC<AssetLicensePageProps> = ({ activeTab: s
           </div>
           <div className="form-row">
             <div className="form-field">
-              <label className="form-label" htmlFor="asset-user">
-                Assigned User
+              <label className="form-label" htmlFor="asset-pic">
+                PIC (Person in Charge)
               </label>
-              <input
-                id="asset-user"
-                type="text"
-                className="form-input"
-                placeholder="User Name"
-                value={newAsset.assigned_user}
-                onChange={(e) => setNewAsset({ ...newAsset, assigned_user: e.target.value })}
-              />
+              {contacts.length > 0 ? (
+                <select
+                  id="asset-pic"
+                  className="form-select"
+                  value={newAsset.assigned_user}
+                  onChange={(e) => setNewAsset({ ...newAsset, assigned_user: e.target.value })}
+                >
+                  <option value="">Unassigned</option>
+                  {contacts.map((c) => (
+                    <option key={c.id} value={c.display_name}>
+                      {c.display_name}
+                      {c.department ? ` — ${c.department}` : ''}
+                    </option>
+                  ))}
+                  {unmatchedPic && (
+                    <option value={unmatchedPic}>
+                      {unmatchedPic} — not in the synced directory
+                    </option>
+                  )}
+                </select>
+              ) : (
+                <input
+                  id="asset-pic"
+                  type="text"
+                  className="form-input"
+                  placeholder="No directory synced yet — type a name"
+                  value={newAsset.assigned_user}
+                  onChange={(e) => setNewAsset({ ...newAsset, assigned_user: e.target.value })}
+                />
+              )}
             </div>
             <div className="form-field">
               <label className="form-label" htmlFor="asset-dept">
@@ -511,6 +766,64 @@ export const AssetLicensePage: React.FC<AssetLicensePageProps> = ({ activeTab: s
               />
             </div>
           </div>
+          <div className="form-row">
+            <div className="form-field">
+              <label className="form-label" htmlFor="asset-site">
+                Site
+              </label>
+              <input
+                id="asset-site"
+                type="text"
+                className="form-input"
+                placeholder="e.g. Kantor Pusat"
+                value={newAsset.site}
+                onChange={(e) => setNewAsset({ ...newAsset, site: e.target.value })}
+              />
+            </div>
+            <div className="form-field">
+              <label className="form-label" htmlFor="asset-status">
+                Status
+              </label>
+              <select
+                id="asset-status"
+                className="form-select"
+                value={newAsset.status}
+                onChange={(e) => setNewAsset({ ...newAsset, status: e.target.value as HardwareAssetDTO['status'] })}
+              >
+                {ASSET_STATUSES.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+          <div className="form-row">
+            <div className="form-field">
+              <label className="form-label" htmlFor="asset-purchased">
+                Purchase Date
+              </label>
+              <input
+                id="asset-purchased"
+                type="date"
+                className="form-input"
+                value={toDateInput(newAsset.purchase_date)}
+                onChange={(e) => setNewAsset({ ...newAsset, purchase_date: fromDateInput(e.target.value) })}
+              />
+            </div>
+            <div className="form-field">
+              <label className="form-label" htmlFor="asset-warranty">
+                Warranty Expires
+              </label>
+              <input
+                id="asset-warranty"
+                type="date"
+                className="form-input"
+                value={toDateInput(newAsset.warranty_expires_at)}
+                onChange={(e) => setNewAsset({ ...newAsset, warranty_expires_at: fromDateInput(e.target.value) })}
+              />
+            </div>
+          </div>
           <div className="form-group">
             <label className="form-label" htmlFor="asset-cost">
               Purchase Valuation (IDR)
@@ -522,6 +835,19 @@ export const AssetLicensePage: React.FC<AssetLicensePageProps> = ({ activeTab: s
               placeholder="15000000"
               value={newAsset.purchase_cost}
               onChange={(e) => setNewAsset({ ...newAsset, purchase_cost: Number(e.target.value) })}
+            />
+          </div>
+          <div className="form-group">
+            <label className="form-label" htmlFor="asset-notes">
+              Notes
+            </label>
+            <textarea
+              id="asset-notes"
+              className="form-textarea"
+              rows={2}
+              placeholder="Anything worth recording about this asset"
+              value={newAsset.notes}
+              onChange={(e) => setNewAsset({ ...newAsset, notes: e.target.value })}
             />
           </div>
         </form>

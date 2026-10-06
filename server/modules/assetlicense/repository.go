@@ -27,6 +27,11 @@ type HardwareAsset struct {
 	Notes             string     `db:"notes" json:"notes"`
 	CreatedAt         time.Time  `db:"created_at" json:"created_at"`
 	UpdatedAt         time.Time  `db:"updated_at" json:"updated_at"`
+
+	// DeviceHostname comes from the LEFT JOIN in ListAssets, not from the
+	// hardware_assets table. It is the only way the console can show which
+	// machine an asset belongs to without one extra request per row.
+	DeviceHostname string `db:"device_hostname" json:"device_hostname"`
 }
 
 type SoftwareLicense struct {
@@ -114,13 +119,53 @@ func (r *Repository) CreateAsset(ctx context.Context, a *HardwareAsset) error {
 	return nil
 }
 
+// AssetTagTaken reports whether another asset already holds this tag. Excludes
+// excludeID when non-empty, so an edit that keeps its own tag is not refused
+// as a conflict with itself.
+func (r *Repository) AssetTagTaken(ctx context.Context, tag, excludeID string) (bool, error) {
+	query := `SELECT COUNT(*) FROM hardware_assets WHERE asset_tag = ?`
+	args := []any{tag}
+	if excludeID != "" {
+		query += ` AND id != ?`
+		args = append(args, excludeID)
+	}
+	var n int
+	if err := r.db.GetContext(ctx, &n, query, args...); err != nil {
+		return false, fmt.Errorf("check asset tag %s: %w", tag, err)
+	}
+	return n > 0, nil
+}
+
 func (r *Repository) GetAsset(ctx context.Context, id string) (*HardwareAsset, error) {
+	// Same LEFT JOIN as ListAssets, so the edit form shows the linked machine's
+	// hostname without the console needing a second request per open.
 	var a HardwareAsset
-	err := r.db.GetContext(ctx, &a, `SELECT * FROM hardware_assets WHERE id = ?`, id)
+	err := r.db.GetContext(ctx, &a, `
+		SELECT a.id, a.asset_tag, a.device_id, a.model_name, a.serial_number,
+		       a.vendor, a.site, a.department, a.assigned_user, a.purchase_date,
+		       a.purchase_cost, a.warranty_expires_at, a.status, a.notes,
+		       a.created_at, a.updated_at,
+		       COALESCE(d.hostname, '') AS device_hostname
+		FROM hardware_assets a
+		LEFT JOIN devices d ON d.id = a.device_id
+		WHERE a.id = ?
+	`, id)
 	if err != nil {
 		return nil, fmt.Errorf("get asset %s: %w", id, err)
 	}
 	return &a, nil
+}
+
+// DeviceExists reports whether an id names a real device. It exists so a bad
+// device_id is refused with a message an operator can act on, instead of
+// surfacing as a raw SQLite foreign-key string on a 500.
+func (r *Repository) DeviceExists(ctx context.Context, deviceID string) (bool, error) {
+	var n int
+	err := r.db.GetContext(ctx, &n, `SELECT COUNT(*) FROM devices WHERE id = ?`, deviceID)
+	if err != nil {
+		return false, fmt.Errorf("check device %s: %w", deviceID, err)
+	}
+	return n > 0, nil
 }
 
 func (r *Repository) GetAssetByTag(ctx context.Context, tag string) (*HardwareAsset, error) {
@@ -133,18 +178,35 @@ func (r *Repository) GetAssetByTag(ctx context.Context, tag string) (*HardwareAs
 }
 
 func (r *Repository) ListAssets(ctx context.Context, site, status string) ([]*HardwareAsset, error) {
-	query := `SELECT * FROM hardware_assets WHERE 1=1`
+	// LEFT JOIN, not INNER: device_id is nullable and ON DELETE SET NULL, so a
+	// retired device leaves the asset behind with no device row to match. An
+	// inner join would silently drop exactly the assets an operator most wants
+	// to find — the ones whose machine is gone.
+	//
+	// Columns are listed explicitly rather than SELECT * because the joined
+	// hostname has no hardware_assets column to keep the two in step, and a
+	// duplicate name across the two tables would be a silent scan error.
+	query := `
+		SELECT a.id, a.asset_tag, a.device_id, a.model_name, a.serial_number,
+		       a.vendor, a.site, a.department, a.assigned_user, a.purchase_date,
+		       a.purchase_cost, a.warranty_expires_at, a.status, a.notes,
+		       a.created_at, a.updated_at,
+		       COALESCE(d.hostname, '') AS device_hostname
+		FROM hardware_assets a
+		LEFT JOIN devices d ON d.id = a.device_id
+		WHERE 1=1
+	`
 	var args []any
 
 	if site != "" {
-		query += ` AND site = ?`
+		query += ` AND a.site = ?`
 		args = append(args, site)
 	}
 	if status != "" {
-		query += ` AND status = ?`
+		query += ` AND a.status = ?`
 		args = append(args, status)
 	}
-	query += ` ORDER BY created_at DESC`
+	query += ` ORDER BY a.created_at DESC`
 
 	list := []*HardwareAsset{}
 	err := r.db.SelectContext(ctx, &list, query, args...)
