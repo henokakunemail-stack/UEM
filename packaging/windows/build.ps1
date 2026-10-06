@@ -28,10 +28,21 @@ if (-not $Version) {
     }
     Write-Host "Version from VERSION file: $Version" -ForegroundColor DarkGray
 }
-# VIProductVersion wants four numeric components; "1.0.0" alone is rejected by
-# makensis, so pad it. A prerelease suffix like "1.0.0-rc1" is not valid for
-# the field and is caught by the same numeric check the release path applies.
-$VersionNum = "$Version.0"
+# VIProductVersion wants exactly four numeric components. Appending ".0" only
+# works for a version that already has three: the CI release job passes a bare
+# run number ("-Version 10"), which became "10.0" and makensis rejected it with
+# "invalid VIProductVersion format" on every release build. Splitting and
+# re-padding arithmetically handles any count, so "10" -> 10.0.0.0 and
+# "1.4.0" -> 1.4.0.0. A non-numeric component is a real error, not padding.
+$parts = $Version -split '\.'
+$numeric = foreach ($p in $parts) {
+    if ($p -notmatch '^\d+$') {
+        throw "VERSION '$Version' cannot be rendered as a numeric file version: '$p' is not a number"
+    }
+    [int]$p
+}
+while ($numeric.Count -lt 4) { $numeric += 0 }
+$VersionNum = ($numeric[0..3] -join '.')
 
 Push-Location $RepoRoot
 try {

@@ -29,13 +29,20 @@ if (-not $Version) {
     }
     Write-Host "Version from VERSION file: $Version" -ForegroundColor DarkGray
 }
-# VIProductVersion wants four numeric components. A plain "1.0.0" would be
-# rejected by makensis, so it is padded to "1.0.0.0" here and passed as a
-# separate define.
-$VersionNum = "$Version.0"
-if ($VersionNum -split '\.',4 | Where-Object { $_ -notmatch '^\d+$' }) {
-    throw "VERSION '$Version' cannot be rendered as a numeric file version"
+# VIProductVersion wants exactly four numeric components. Appending ".0" only
+# works for a version that already has three: the CI release job passes a bare
+# run number ("-Version 10"), which became "10.0" and makensis rejected it on
+# every release build. Splitting and re-padding arithmetically handles any
+# count, so "10" -> 10.0.0.0 and "1.4.0" -> 1.4.0.0.
+$parts = $Version -split '\.'
+$numeric = foreach ($p in $parts) {
+    if ($p -notmatch '^\d+$') {
+        throw "VERSION '$Version' cannot be rendered as a numeric file version: '$p' is not a number"
+    }
+    [int]$p
 }
+while ($numeric.Count -lt 4) { $numeric += 0 }
+$VersionNum = ($numeric[0..3] -join '.')
 
 Push-Location $RepoRoot
 try {

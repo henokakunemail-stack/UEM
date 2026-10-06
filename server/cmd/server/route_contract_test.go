@@ -194,6 +194,78 @@ func consoleAPIPaths(t *testing.T) []string {
 	return out
 }
 
+// rawFetchPaths are the console's direct `fetch()` calls that never pass
+// through the typed `request<T>()` helper, so the parser above cannot see them.
+// They are listed explicitly because two of them are the gates the whole
+// console depends on, and a route parser that misses them reports clean while
+// login is down:
+//
+//   - /api/auth/login is the only call in api.ts that is allowed to return 401
+//     without bouncing the session, so it is the first thing any operator hits.
+//   - /api/auth/refresh is what request() itself calls to keep a session alive;
+//     a missing route turns every token expiry into a hard re-login.
+//   - /healthz is polled by ConsoleShell to decide whether the shell renders at
+//     all, and it is the only path here outside /api.
+//
+// The parser cannot be taught these without also matching every third-party
+// fetch in the tree, and a literal list is the smaller and more honest thing:
+// it says "these three matter" instead of pretending the file was fully mined.
+// Each entry is re-read from the source below, so a rename in api.ts still
+// fails here rather than silently drifting from this list.
+var rawFetchPaths = []string{
+	"/api/auth/login",
+	"/api/auth/refresh",
+	"/healthz",
+}
+
+// TestThePathsTheConsoleFetchesDirectlyStillExist covers the routes above, which
+// the typed-call parser structurally cannot reach. /api/auth/refresh appears
+// twice in api.ts (request()'s retry and fetchRaw()'s), so the check is that
+// each listed path is really still fetched somewhere, not that it appears once.
+func TestThePathsTheConsoleFetchesDirectlyStillExist(t *testing.T) {
+	routes := routesOf(t)
+	src, err := os.ReadFile(filepath.Join("..", "..", "..", "web-console", "src", "services", "api.ts"))
+	if err != nil {
+		t.Fatalf("read web-console/src/services/api.ts: %v", err)
+	}
+	// ConsoleShell's /healthz poll lives in a different file; without it the
+	// check below would report the health route as console-side dead code.
+	shell, err := os.ReadFile(filepath.Join("..", "..", "..", "web-console", "src", "components", "layout", "ConsoleShell.tsx"))
+	if err != nil {
+		t.Fatalf("read web-console/src/components/layout/ConsoleShell.tsx: %v", err)
+	}
+	consoleSrc := string(src) + "\n" + string(shell)
+
+	for _, path := range rawFetchPaths {
+		t.Run(path, func(t *testing.T) {
+			// The literal the console writes between quotes, so a path that
+			// moved to a template string is still noticed by a human reading
+			// the failure.
+			if !strings.Contains(consoleSrc, "'"+path+"'") &&
+				!strings.Contains(consoleSrc, `"`+path+`"`) {
+				t.Fatalf("the console no longer fetches %s: the raw-fetch list in "+
+					"route_contract_test.go is stale, and the route is now unguarded",
+					path)
+			}
+			// Any method the route is registered under satisfies the console,
+			// which builds the request itself: /healthz is a GET and both auth
+			// routes are POSTs, but the assertion that matters is that the
+			// pattern is wired up at all.
+			found := false
+			for route := range routes {
+				if strings.HasSuffix(route, " "+path) {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Errorf("MISSING ROUTE: %s is fetched by the console but not "+
+					"registered on the server", path)
+			}
+		})
+	}
+}
+
 func TestEveryConsoleAPIPathIsRegistered(t *testing.T) {
 	routes := routesOf(t)
 	paths := consoleAPIPaths(t)
