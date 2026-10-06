@@ -35,11 +35,16 @@ if (-not $Version) {
 # every release build. Splitting and re-padding arithmetically handles any
 # count, so "10" -> 10.0.0.0 and "1.4.0" -> 1.4.0.0.
 $parts = $Version -split '\.'
-$numeric = foreach ($p in $parts) {
+# [int[]] is load-bearing: a single-element -split result is a scalar in
+# PowerShell, not a one-element array, so .Count is 1 and `+= 0` reassigns the
+# scalar instead of appending. The while loop below spins forever on a bare
+# run number that way, which is the shape the release job passes.
+$numeric = [int[]]@()
+foreach ($p in $parts) {
     if ($p -notmatch '^\d+$') {
         throw "VERSION '$Version' cannot be rendered as a numeric file version: '$p' is not a number"
     }
-    [int]$p
+    $numeric += [int]$p
 }
 while ($numeric.Count -lt 4) { $numeric += 0 }
 $VersionNum = ($numeric[0..3] -join '.')
