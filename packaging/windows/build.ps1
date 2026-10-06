@@ -1,14 +1,37 @@
 # ==============================================================================
 # Build script for Windows Agent NSIS Installer
 # ==============================================================================
+# ==============================================================================
+# $Version defaults to the repository's VERSION file, which is the single source
+# of truth. It is still overridable from the command line, because the release
+# job numbers installers by CI run number rather than by the file.
+# ==============================================================================
 param(
-    [string]$Version = "1.0.0",
+    [string]$Version = "",
     [switch]$SkipCompile = $false
 )
 
 $ErrorActionPreference = "Stop"
 $ScriptRoot = $PSScriptRoot
 $RepoRoot = Resolve-Path (Join-Path $ScriptRoot "..\..")
+
+if (-not $Version) {
+    $VersionFile = Join-Path $RepoRoot "VERSION"
+    if (-not (Test-Path $VersionFile)) {
+        throw "VERSION file not found at $VersionFile. Pass -Version explicitly, or restore the file."
+    }
+    # trimEnd: a file written with a trailing newline otherwise produces a version
+    # string with an embedded CR/LF, which NSIS writes into the registry verbatim.
+    $Version = (Get-Content $VersionFile -Raw).trim()
+    if ($Version -notmatch '^\d+\.\d+\.\d+') {
+        throw "VERSION contains '$Version', which does not look like a release version (expected e.g. 1.4.0)"
+    }
+    Write-Host "Version from VERSION file: $Version" -ForegroundColor DarkGray
+}
+# VIProductVersion wants four numeric components; "1.0.0" alone is rejected by
+# makensis, so pad it. A prerelease suffix like "1.0.0-rc1" is not valid for
+# the field and is caught by the same numeric check the release path applies.
+$VersionNum = "$Version.0"
 
 Push-Location $RepoRoot
 try {
@@ -19,7 +42,12 @@ try {
         $env:CGO_ENABLED = "0"
         $env:GOOS = "windows"
         $env:GOARCH = "amd64"
-        & go build -ldflags="-s -w" -o $AgentExe ./agent/cmd/agent
+        # -X stamps the version the agent reports in its inventory, which is how an
+        # operator tells a 1.4.0 endpoint from a 1.3.0 one. It was declared and
+        # documented in osinfo.go but no build script ever passed it, so every
+        # binary reported the compiled-in 0.1.0 default.
+        $Ldflags = "-s -w -X github.com/henokakunemail-stack/Endpoint-Manager/agent/shared/osinfo.Version=$Version"
+        & go build -ldflags="$Ldflags" -o $AgentExe ./agent/cmd/agent
         if ($LASTEXITCODE -ne 0) {
             throw "Go build failed with exit code $LASTEXITCODE"
         }
@@ -57,7 +85,7 @@ try {
 
     Push-Location $ScriptRoot
     try {
-        & $NsisPath /DVERSION=$Version agent.nsi
+        & $NsisPath /DVERSION=$Version /DVERSION_NUM=$VersionNum agent.nsi
         if ($LASTEXITCODE -eq 0) {
             $OutExe = Join-Path $ScriptRoot "EndpointAgent-Setup.exe"
             Write-Host "[+] Installer built successfully: $OutExe" -ForegroundColor Green

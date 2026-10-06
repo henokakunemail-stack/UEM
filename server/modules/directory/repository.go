@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"time"
 
@@ -173,7 +174,7 @@ func (r *Repository) GetConfig(ctx context.Context) (*Config, bool, error) {
 		LIMIT 1
 	`)
 	if err != nil {
-		if err == sql.ErrNoRows {
+		if errors.Is(err, sql.ErrNoRows) {
 			return nil, false, nil
 		}
 		return nil, false, fmt.Errorf("get directory config: %w", err)

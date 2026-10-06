@@ -85,7 +85,7 @@ func TestExpiredAndUnknownTokensAreIndistinguishable(t *testing.T) {
 		t.Errorf("expired = %v, unknown = %v; both must be ErrNotFound", expiredErr, unknownErr)
 	}
 
-	var expErr, unkErr error = repo.ConsumeEnrollmentToken(ctx, HashToken("the-token"), HashToken("s1")),
+	expErr, unkErr := repo.ConsumeEnrollmentToken(ctx, HashToken("the-token"), HashToken("s1")),
 		repo.ConsumeEnrollmentToken(ctx, HashToken("never-issued"), HashToken("s2"))
 	if !errors.Is(expErr, ErrNotFound) || !errors.Is(unkErr, ErrNotFound) {
 		t.Errorf("consume: expired = %v, unknown = %v; both must be ErrNotFound", expErr, unkErr)

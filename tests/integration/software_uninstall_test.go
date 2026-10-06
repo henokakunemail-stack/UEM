@@ -363,6 +363,18 @@ func TestE2EUninstallAllAgentsLostIsNotReportedCompleted(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// The sweep only reaps a task older than the grace cutoff:
+	// updated_at < now - grace. With grace=0 that cutoff is "now", and a task
+	// whose UPDATE landed in the same millisecond the sweep runs is NOT yet
+	// older than now -- so the reap depends on the sweep's clock reading later
+	// than the task write's. That read is not guaranteed, and when it is not,
+	// the test reports the deployment flow broken when only the cutoff raced it.
+	// Move the task row firmly into the past instead of trusting the clock.
+	if _, err := env.db.Exec(`UPDATE deployment_tasks SET updated_at = ? WHERE id = ?`,
+		time.Now().UTC().Add(-time.Minute), taskID); err != nil {
+		t.Fatal(err)
+	}
+
 	repo := softwaredeployment.NewRepository(env.db)
 	n, err := repo.AbandonOrphanedTasks(context.Background(), 0)
 	if err != nil {

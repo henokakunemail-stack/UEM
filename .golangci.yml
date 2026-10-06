@@ -11,10 +11,12 @@ version: "2"
 
 run:
   timeout: 5m
-  # A pure-Go, cross-compiled repository has no cgo. Being explicit keeps the
-  # linter from probing a C toolchain the CI image does not have.
-  env:
-    CGO_ENABLED: "0"
+
+# CGO_ENABLED is not set here. v2 accepts `env` at neither the top level nor
+# under `run:`, and `golangci-lint config verify` -- which the action runs before
+# it lints anything -- rejects the whole file over it. The CI step sets it as a
+# real environment variable on the golangci-lint step, which is where the
+# linter reads it from anyway.
 
 linters:
   default: standard
@@ -94,6 +96,11 @@ linters:
     presets:
       - comments
       - std-error-handling
+    paths:
+      # The vite build output that //go:embed captures. It is committed, so
+      # without this every generated bundle file is parsed as source. This
+      # replaces `issues.exclude-dirs`, which the v2 schema removed.
+      - server/cmd/server/dist
 
 formatters:
   enable:
@@ -101,8 +108,6 @@ formatters:
     - goimports
 
 issues:
-  exclude-dirs:
-    - server/cmd/server/dist
   # Never truncate: a linter that silently drops findings past a cap is worse
   # than one that is slow.
   max-issues-per-linter: 0

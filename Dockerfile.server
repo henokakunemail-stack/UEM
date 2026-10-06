@@ -38,12 +38,18 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 
-# server/ has to be in place before the console bundle is placed, because Vite
-# writes its output into server/cmd/server/dist -- the directory //go:embed
-# captures. .dockerignore keeps the committed copy of that directory out of the
-# context, so what lands here is the bundle built above from this checkout's
-# sources and not one left over from an older tree.
+# server/, agent/shared/service, and protocol/ have to be in place before the
+# console bundle is placed, because Vite writes its output into
+# server/cmd/server/dist -- the directory //go:embed captures. The module is
+# not server-only: server/cmd/server/main.go imports agent/shared/service, and
+# server/core/transport/protocol.go imports the top-level protocol package.
+# Copying only server/ was enough to fail the build with "no required module
+# provides package", which is the error the first docker-smoke run hit.
+# .dockerignore keeps the committed copy of dist/ out of the context, so what
+# lands here is the bundle built from this checkout's sources.
 COPY server/ ./server/
+COPY agent/shared/service ./agent/shared/service
+COPY protocol/ ./protocol/
 COPY --from=console /src/server/cmd/server/dist/ ./server/cmd/server/dist/
 
 # CGO_ENABLED=0 is a project invariant, not an optimisation: the binary has to

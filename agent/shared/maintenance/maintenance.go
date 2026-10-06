@@ -347,19 +347,11 @@ func (e *Engine) runWithCeiling(
 
 	ticker := time.NewTicker(heartbeatEvery)
 	defer ticker.Stop()
-	// Latched, because a closed Done channel is always ready and the ticker
-	// often is too: without this, a step that has already blown its ceiling
-	// keeps heartbeating, and the one thing worse than a silent agent is an
-	// agent insisting it is fine while the server waits for work that stopped.
-	deadlineHit := false
 	for {
 		select {
 		case r := <-done:
 			return r.out, r.err
 		case <-ticker.C:
-			if deadlineHit {
-				continue
-			}
 			// Nothing has changed about the step; this is a liveness signal
 			// only. The log is left empty and the server advances no column but
 			// updated_at, so the step the console is showing, the bytes already
@@ -388,7 +380,6 @@ func (e *Engine) runWithCeiling(
 			// the same hang the pre-heartbeat code had, since it called exec
 			// synchronously. Every subprocess path does honour it; the walk is
 			// the outlier and gets ctx-aware when it is worth the plumbing.
-			deadlineHit = true
 			r := <-done
 			return r.out, r.err
 		}

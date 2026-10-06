@@ -32,13 +32,21 @@ RequestExecutionLevel admin
 InstallDir "$PROGRAMFILES64\EndpointMgmtServer"
 InstallDirRegKey HKLM "${SERVICE_KEY}" "InstallDir"
 
-VIProductVersion "1.0.0.0"
+; Same VERSION plumbing as agent.nsi: /DVERSION and /DVERSION_NUM come from
+; build-server.ps1, which defaults both from the repository's VERSION file.
+!ifndef VERSION
+  !define VERSION "1.0.0"
+!endif
+!ifndef VERSION_NUM
+  !define VERSION_NUM "1.0.0.0"
+!endif
+VIProductVersion "${VERSION_NUM}"
 VIAddVersionKey "ProductName" "Enterprise Endpoint Management Server"
 VIAddVersionKey "CompanyName" "Enterprise Management"
 VIAddVersionKey "LegalCopyright" "MIT License"
 VIAddVersionKey "FileDescription" "Enterprise Endpoint Management Server Installer"
-VIAddVersionKey "FileVersion" "1.0.0.0"
-VIAddVersionKey "ProductVersion" "1.0.0.0"
+VIAddVersionKey "FileVersion" "${VERSION_NUM}"
+VIAddVersionKey "ProductVersion" "${VERSION}"
 
 Var DATADIR
 Var ENVFILE
@@ -236,7 +244,7 @@ Section "Install Server" SecInstall
     WriteRegStr HKLM "${UNINSTALL_KEY}" "DisplayName" "Endpoint Management Server"
     WriteRegStr HKLM "${UNINSTALL_KEY}" "UninstallString" '"$INSTDIR\uninstall.exe"'
     WriteRegStr HKLM "${UNINSTALL_KEY}" "DisplayIcon" '"$INSTDIR\endpoint-server.exe"'
-    WriteRegStr HKLM "${UNINSTALL_KEY}" "DisplayVersion" "1.0.0"
+    WriteRegStr HKLM "${UNINSTALL_KEY}" "DisplayVersion" "${VERSION}"
     WriteRegStr HKLM "${UNINSTALL_KEY}" "Publisher" "Enterprise Endpoint Management"
     WriteRegDWORD HKLM "${UNINSTALL_KEY}" "NoModify" 1
     WriteRegDWORD HKLM "${UNINSTALL_KEY}" "NoRepair" 1

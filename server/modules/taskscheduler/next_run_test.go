@@ -156,6 +156,13 @@ func TestFiringAScheduleAdvancesItsNextRun(t *testing.T) {
 	}
 	firstNext := *created.NextRunAt
 
+	// The fire writes next_run_at = now + interval, and now is read again at the
+	// top of CreateRun -- so the recorded value only moves if CreateRun's now is
+	// strictly newer than the pre-run NextRunAt. A rounding delta between the two
+	// reads can collapse that on a fast runner, making the column look un-moved.
+	// Sleep long enough that the two reads cannot land in the same tick.
+	time.Sleep(1100 * time.Millisecond)
+
 	// Fire it the way the console's Run button does.
 	if _, err := NewScheduler(repo, stubHub{}).TriggerSchedule(context.Background(), s.ID, "u1"); err != nil {
 		t.Fatal(err)

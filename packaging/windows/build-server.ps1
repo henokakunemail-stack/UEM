@@ -7,13 +7,35 @@
 # usually wants one without the other.
 
 param(
-    [string]$Version = "1.0.0",
+    [string]$Version = "",
     [switch]$SkipCompile = $false
 )
 
 $ErrorActionPreference = "Stop"
 $ScriptRoot = $PSScriptRoot
 $RepoRoot = Resolve-Path (Join-Path $ScriptRoot "..\..")
+
+# Same VERSION default as build.ps1: the repository's VERSION file is the
+# single source of truth; an explicit -Version overrides it for the CI release
+# job, which numbers installers by run number.
+if (-not $Version) {
+    $VersionFile = Join-Path $RepoRoot "VERSION"
+    if (-not (Test-Path $VersionFile)) {
+        throw "VERSION file not found at $VersionFile. Pass -Version explicitly."
+    }
+    $Version = (Get-Content $VersionFile -Raw).trim()
+    if ($Version -notmatch '^\d+\.\d+\.\d+') {
+        throw "VERSION contains '$Version', which does not look like a release version (expected e.g. 1.4.0)"
+    }
+    Write-Host "Version from VERSION file: $Version" -ForegroundColor DarkGray
+}
+# VIProductVersion wants four numeric components. A plain "1.0.0" would be
+# rejected by makensis, so it is padded to "1.0.0.0" here and passed as a
+# separate define.
+$VersionNum = "$Version.0"
+if ($VersionNum -split '\.',4 | Where-Object { $_ -notmatch '^\d+$' }) {
+    throw "VERSION '$Version' cannot be rendered as a numeric file version"
+}
 
 Push-Location $RepoRoot
 try {
@@ -38,7 +60,10 @@ try {
                 Pop-Location
             }
         }
-        & go build -ldflags="-s -w" -o $ServerExe ./server/cmd/server
+        # -X stamps the same compiled-in version build.ps1 gives the agent, so an
+        # endpoint and its server report consistent version strings.
+        $Ldflags = "-s -w -X github.com/henokakunemail-stack/Endpoint-Manager/agent/shared/osinfo.Version=$Version"
+        & go build -ldflags="$Ldflags" -o $ServerExe ./server/cmd/server
         if ($LASTEXITCODE -ne 0) {
             throw "Go build failed with exit code $LASTEXITCODE"
         }
@@ -70,7 +95,7 @@ try {
 
     Push-Location $ScriptRoot
     try {
-        & $NsisPath /DVERSION=$Version server.nsi
+        & $NsisPath /DVERSION=$Version /DVERSION_NUM=$VersionNum server.nsi
         if ($LASTEXITCODE -eq 0) {
             $OutExe = Join-Path $ScriptRoot "EndpointServer-Setup.exe"
             Write-Host "[+] Installer built: $OutExe" -ForegroundColor Green

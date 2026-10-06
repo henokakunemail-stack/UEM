@@ -281,8 +281,8 @@ func quoteArg(arg string) string {
 	b.Grow(len(arg) + 2)
 	b.WriteByte('"')
 	for i := 0; i < len(arg); i++ {
-		switch c := arg[i]; {
-		case c == '\\':
+		switch c := arg[i]; c {
+		case '\\':
 			run := 1
 			for i+run < len(arg) && arg[i+run] == '\\' {
 				run++
@@ -292,7 +292,7 @@ func quoteArg(arg string) string {
 			}
 			b.WriteString(strings.Repeat(`\`, run))
 			i += run - 1
-		case c == '"':
+		case '"':
 			b.WriteString(`\"`)
 		default:
 			b.WriteByte(c)

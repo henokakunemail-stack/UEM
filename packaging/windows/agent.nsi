@@ -16,13 +16,25 @@ InstallDir "$PROGRAMFILES64\EndpointAgent"
 InstallDirRegKey HKLM "Software\EndpointAgent" "InstallDir"
 
 ; --- Version Information ---
-VIProductVersion "1.0.0.0"
+; /DVERSION= and /DVERSION_NUM= are both passed by build.ps1, derived from the
+; repository's VERSION file. The defaults below keep a direct makensis run
+; from failing on undefined macros; they exist so the script compiles, not
+; because 1.0.0 is special anywhere else.
+!ifndef VERSION
+  !define VERSION "1.0.0"
+!endif
+; VIProductVersion wants four numeric components, so the build script passes
+; 1.0.0 as 1.0.0.0 separately rather than rendering "${VERSION}.0" here.
+!ifndef VERSION_NUM
+  !define VERSION_NUM "1.0.0.0"
+!endif
+VIProductVersion "${VERSION_NUM}"
 VIAddVersionKey "ProductName" "Endpoint Management Agent"
 VIAddVersionKey "CompanyName" "Enterprise Management"
 VIAddVersionKey "LegalCopyright" "MIT License"
 VIAddVersionKey "FileDescription" "Enterprise Endpoint Management Agent Installer"
-VIAddVersionKey "FileVersion" "1.0.0.0"
-VIAddVersionKey "ProductVersion" "1.0.0.0"
+VIAddVersionKey "FileVersion" "${VERSION_NUM}"
+VIAddVersionKey "ProductVersion" "${VERSION}"
 
 ; --- Variables ---
 Var Dialog
@@ -137,7 +149,7 @@ Section "Install Agent" SecInstall
     WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\EndpointAgent" "DisplayName" "Endpoint Management Agent"
     WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\EndpointAgent" "UninstallString" '"$INSTDIR\uninstall.exe"'
     WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\EndpointAgent" "DisplayIcon" '"$INSTDIR\endpoint-agent.exe"'
-    WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\EndpointAgent" "DisplayVersion" "1.0.0"
+    WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\EndpointAgent" "DisplayVersion" "${VERSION}"
     WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\EndpointAgent" "Publisher" "Enterprise Endpoint Management"
     WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\EndpointAgent" "NoModify" 1
     WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\EndpointAgent" "NoRepair" 1

@@ -63,7 +63,7 @@ func (w *windowsFirewall) Apply(addrs []net.IP) (int, error) {
 		// empty result as success.
 		if !strings.Contains(strings.ToLower(err.Error()), "no rules match") &&
 			!strings.Contains(strings.ToLower(err.Error()), "no rules") {
-			return 0, fmt.Errorf("%w: %v", ErrFirewallPermission, err)
+			return 0, fmt.Errorf("%w: %w", ErrFirewallPermission, err)
 		}
 	}
 	if len(addrs) == 0 {
@@ -86,7 +86,7 @@ func (w *windowsFirewall) Apply(addrs []net.IP) (int, error) {
 			"remoteip=" + joinIPs(chunk),
 		}
 		if err := netsh(args...); err != nil {
-			return applied, fmt.Errorf("%w: %v", ErrFirewallPermission, err)
+			return applied, fmt.Errorf("%w: %w", ErrFirewallPermission, err)
 		}
 		applied += len(chunk)
 	}
