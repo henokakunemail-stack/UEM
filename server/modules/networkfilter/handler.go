@@ -37,11 +37,20 @@ const (
 	// statusPending is what an operator-side dispatch reports before the device has
 	// answered.
 	statusPending = "pending"
-	// statusTampered is reported when the managed hosts section was edited by hand.
-	statusTampered = "tampered"
 	// statusFailed means the agent could not apply the policy at all.
 	statusFailed = "failed"
 )
+
+// validStatus is the closed set above, as a lookup. The report endpoint writes a
+// status string that came from the device, so without this the column could hold
+// any text at all while its own definition calls it a closed set -- and the
+// console renders whatever is in there.
+var validStatus = map[string]bool{
+	statusSynced:   true,
+	statusDegraded: true,
+	statusPending:  true,
+	statusFailed:   true,
+}
 
 type Hub interface {
 	Online(deviceID string) bool
@@ -141,6 +150,27 @@ type createPolicyReq struct {
 	Priority    int    `json:"priority"`
 }
 
+// updatePolicyReq is deliberately not createPolicyReq. A partial update has to
+// tell "the caller did not mention this" apart from "the caller sent it empty",
+// and a plain string cannot: JSON leaves both as "". Assigning the decoded zero
+// straight onto the policy wiped the scope on every partial write, so the
+// console's enable/disable toggle -- which sends only {is_enabled} -- blanked
+// target_id and then failed validateTarget with a 400. Disabling a scoped
+// policy was impossible through the UI. Pointers restore the distinction.
+//
+// Name and TargetType additionally reject an explicit empty string: neither an
+// unnamed policy nor an unrecognised scope is a meaningful value, so an empty
+// one is a mistake to ignore rather than a field to clear. TargetID does accept
+// empty, because clearing the scope is exactly how a policy returns to "all".
+type updatePolicyReq struct {
+	Name        *string `json:"name"`
+	Description *string `json:"description"`
+	TargetType  *string `json:"target_type"`
+	TargetID    *string `json:"target_id"`
+	IsEnabled   *bool   `json:"is_enabled"`
+	Priority    *int    `json:"priority"`
+}
+
 // validTargetTypes is closed on purpose. An unrecognised scope used to be stored
 // verbatim and then matched nothing, so the policy looked configured and applied
 // to nobody.
@@ -235,19 +265,31 @@ func (h *Handler) updatePolicy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req createPolicyReq
+	var req updatePolicyReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	if req.Name != "" {
-		policy.Name = req.Name
+	if req.Name != nil {
+		if *req.Name == "" {
+			writeErr(w, http.StatusBadRequest, "name must not be empty")
+			return
+		}
+		policy.Name = *req.Name
 	}
-	policy.Description = req.Description
-	if req.TargetType != "" {
-		policy.TargetType = req.TargetType
+	if req.Description != nil {
+		policy.Description = *req.Description
 	}
-	policy.TargetID = req.TargetID
+	if req.TargetType != nil {
+		if *req.TargetType == "" {
+			writeErr(w, http.StatusBadRequest, "target_type must not be empty")
+			return
+		}
+		policy.TargetType = *req.TargetType
+	}
+	if req.TargetID != nil {
+		policy.TargetID = *req.TargetID
+	}
 	if err := h.validateTarget(r.Context(), policy.TargetType, policy.TargetID); err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
@@ -255,8 +297,12 @@ func (h *Handler) updatePolicy(w http.ResponseWriter, r *http.Request) {
 	if req.IsEnabled != nil {
 		policy.IsEnabled = *req.IsEnabled
 	}
-	if req.Priority > 0 {
-		policy.Priority = req.Priority
+	if req.Priority != nil {
+		if *req.Priority <= 0 {
+			writeErr(w, http.StatusBadRequest, "priority must be greater than zero")
+			return
+		}
+		policy.Priority = *req.Priority
 	}
 
 	if err := h.repo.UpdatePolicy(r.Context(), policy); err != nil {
@@ -455,12 +501,37 @@ func (h *Handler) syncDeviceFilter(w http.ResponseWriter, r *http.Request) {
 		dispatched = h.hub.SendTo(deviceID, envBytes)
 	}
 
-	// 'pending' means the command is on the wire or was not, and nothing records
-	// which. The row it was paired with before is what the reconnect hook reads, so
-	// the device is re-sent on its next connect either way.
-	status := statusPending
-	if dispatched {
-		status = "dispatched"
+	// rules_applied stays at whatever the agent last reported. This dispatch has
+	// not been confirmed, so writing this policy's rule count here would claim the
+	// device is enforcing N rules the moment the bytes leave the server.
+	priorRules := 0
+	if prior, err := h.repo.GetDeviceFilterState(r.Context(), deviceID); err == nil {
+		priorRules = prior.RulesApplied
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	// The status in the response tells the console which of two honest messages to
+	// show, so it answers a question about the wire, not about enforcement: the
+	// device has not applied anything yet either way. 'pending' is that state, and
+	// it is the value the reconnect hook and the state row both use, so the row
+	// written here cannot disagree with the response.
+	//
+	// The row is written before the response, not left to the agent's report. The
+	// agent only reports after it has applied the policy, so with no write here the
+	// DB kept whatever the last report said -- a device that was pushed a new policy
+	// and had not yet answered still read as its previous status, and a reloaded page
+	// showed a state that no longer described the device.
+	state := &DeviceFilterState{
+		DeviceID:      deviceID,
+		PolicyVersion: version,
+		Status:        statusPending,
+		RulesApplied:  priorRules,
+	}
+	if err := h.repo.RecordDeviceFilterState(r.Context(), state); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
 	}
 
 	actorID := auth.UserIDFromContext(r.Context())
@@ -471,7 +542,15 @@ func (h *Handler) syncDeviceFilter(w http.ResponseWriter, r *http.Request) {
 	})
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"status":          status,
+		// Reported separately from the stored status. Collapsing them would force one
+		// value to mean both "the bytes are on the wire" and "the row says pending",
+		// which is how 'dispatched' came to be a filter status at all -- it is the
+		// command-lifecycle vocabulary of every other module (agent update, software
+		// deployment, maintenance, patch, remote exec), where it describes a task on
+		// the wire. It is not a statement about enforcement, so it is not a value of
+		// device_filter_states.status.
+		"dispatched":      dispatched,
+		"status":          state.Status,
 		"policy_version":  version,
 		"effective_rules": len(patterns),
 	})
@@ -524,6 +603,14 @@ func (h *Handler) agentReportFilterState(w http.ResponseWriter, r *http.Request)
 	}
 	if req.Status == "" {
 		req.Status = statusSynced
+	}
+	// The agent produces exactly synced, degraded and failed. Anything else means
+	// the payload is not from an agent speaking this protocol, and storing it would
+	// put a value in a column that documents itself as a closed set -- which the
+	// console then renders as an enforcement state the code cannot explain.
+	if !validStatus[req.Status] {
+		writeErr(w, http.StatusBadRequest, "status must be one of synced, degraded, pending, failed (got "+strconv.Quote(req.Status)+")")
+		return
 	}
 
 	state := &DeviceFilterState{

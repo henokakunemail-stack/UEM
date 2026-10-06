@@ -23,6 +23,7 @@ import type {
   FilterPolicyDTO,
   FilterRuleDTO,
   DeviceFilterStateDTO,
+  FilterSyncResultDTO,
   AlertIncidentDTO,
   AlertRuleDTO,
   HardwareAssetDTO,
@@ -585,8 +586,8 @@ export const api = {
   // fleet-wide "apply": enforcement is per device, so the caller loops.
   async syncDeviceFilter(
     deviceId: string
-  ): Promise<{ status: string; policy_version: string; effective_rules: number }> {
-    return request<{ status: string; policy_version: string; effective_rules: number }>(
+  ): Promise<FilterSyncResultDTO> {
+    return request<FilterSyncResultDTO>(
       `/api/devices/${deviceId}/filter/sync`,
       { method: 'POST' }
     )

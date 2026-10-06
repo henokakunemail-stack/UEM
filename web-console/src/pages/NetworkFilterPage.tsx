@@ -27,18 +27,20 @@ const STATUS_LABEL: Record<string, string> = {
   synced: 'Enforcing',
   degraded: 'Partial — host file only',
   pending: 'Awaiting agent',
-  tampered: 'Tampered',
   failed: 'Failed',
 }
 
 // 'synced' is rendered plain rather than green: it is the absence of a problem, and
 // a green tick on a device that has simply never been synced is the exact false
 // reassurance this column exists to remove.
+//
+// No 'tampered': nothing in the agent detects a hand-edited hosts section, so the
+// server had no code path that could ever produce it. It was a status an operator
+// would look for on a tampered endpoint and never find.
 const STATUS_CLASS: Record<string, string> = {
   synced: 'text-muted',
   degraded: 'text-warning',
   pending: 'text-muted',
-  tampered: 'text-danger',
   failed: 'text-danger',
 }
 
@@ -58,6 +60,87 @@ function renderStatus(s?: DeviceFilterStateDTO) {
     </span>
   )
 }
+
+// One scope picker, used by both the create and the re-target form.
+//
+// Re-targeting used to be a window.prompt asking for a raw device or group id.
+// That is the id from the API, not a name an operator recognises, so the only way
+// to use it was to go and read the id off another screen and paste it -- with no
+// way to tell a typo from a wrong machine except the server answering 400. The
+// create form already had the right control and did not share it.
+const PolicyScopeFields: React.FC<{
+  targetType: string
+  targetId: string
+  groups: DeviceGroupDTO[]
+  devices: DeviceDTO[]
+  idPrefix: string
+  onChange: (next: { target_type: string; target_id: string }) => void
+}> = ({ targetType, targetId, groups, devices, idPrefix, onChange }) => (
+  <>
+    <div className="form-group">
+      <label className="form-label" htmlFor={`${idPrefix}-scope`}>
+        Scope
+      </label>
+      <select
+        id={`${idPrefix}-scope`}
+        className="form-select"
+        value={targetType}
+        onChange={(e) => onChange({ target_type: e.target.value, target_id: '' })}
+      >
+        <option value="all">Entire Fleet (All Devices)</option>
+        <option value="group">Device Group</option>
+        <option value="device">Single Device</option>
+      </select>
+    </div>
+
+    {targetType === 'group' && (
+      <div className="form-group">
+        <label className="form-label" htmlFor={`${idPrefix}-group`}>
+          Device Group
+        </label>
+        <select
+          id={`${idPrefix}-group`}
+          className="form-select"
+          required
+          value={targetId}
+          onChange={(e) => onChange({ target_type: targetType, target_id: e.target.value })}
+        >
+          <option value="">-- Select Group --</option>
+          {groups.map((g) => (
+            <option key={g.id} value={g.id}>
+              {g.name} ({g.member_count} device{g.member_count === 1 ? '' : 's'})
+            </option>
+          ))}
+        </select>
+        {groups.length === 0 && (
+          <p className="form-hint">No device groups defined. Create one under Devices first.</p>
+        )}
+      </div>
+    )}
+
+    {targetType === 'device' && (
+      <div className="form-group">
+        <label className="form-label" htmlFor={`${idPrefix}-device`}>
+          Device
+        </label>
+        <select
+          id={`${idPrefix}-device`}
+          className="form-select"
+          required
+          value={targetId}
+          onChange={(e) => onChange({ target_type: targetType, target_id: e.target.value })}
+        >
+          <option value="">-- Select Device --</option>
+          {devices.map((d) => (
+            <option key={d.id} value={d.id}>
+              {d.hostname} ({d.os_name}, {d.status})
+            </option>
+          ))}
+        </select>
+      </div>
+    )}
+  </>
+)
 
 // The server owns the policy model: a policy carries the target scope and
 // holds rules, and enforcement is pushed per device rather than fleet-wide.
@@ -90,6 +173,11 @@ export const NetworkFilterPage: React.FC = () => {
   const [loading, setLoading] = useState(true)
   const [syncingId, setSyncingId] = useState<string | null>(null)
   const [isPolicyModalOpen, setIsPolicyModalOpen] = useState(false)
+  // Re-targeting an existing policy: which row is open, and the scope chosen for
+  // it. Seeding from the policy's current scope means Cancel really does cancel
+  // and reopening shows what is actually in effect.
+  const [retargeting, setRetargeting] = useState<FilterPolicyDTO | null>(null)
+  const [retargetForm, setRetargetForm] = useState({ target_type: 'all', target_id: '' })
   const [isRuleModalOpen, setIsRuleModalOpen] = useState(false)
   const [msg, setMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
   const [policyPendingDelete, setPolicyPendingDelete] = useState<{
@@ -282,22 +370,29 @@ export const NetworkFilterPage: React.FC = () => {
   }
 
   // Re-targeting an existing policy previously required deleting and recreating it,
-  // which also discarded its rules. The server has always accepted target_id on an
-  // update, so this only exposes what the API can already do.
-  const handleEditTarget = async (p: FilterPolicyDTO) => {
-    const next = window.prompt(
-      `Re-target policy "${p.name}"\n\nEnter the device or group ID it should apply to.\nLeave empty to apply it to the entire fleet.`,
-      p.target_id
-    )
-    if (next === null) return
-    const trimmed = next.trim()
+  // which also discarded its rules. The server has always accepted target_type and
+  // target_id on an update, so this only exposes what the API can already do.
+  const handleEditTargetSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!retargeting) return
     try {
-      await api.updateFilterPolicy(p.id, { target_id: trimmed })
-      const text = trimmed
-        ? `Policy '${p.name}' now targets ${trimmed}. Sync the affected devices to apply it.`
-        : `Policy '${p.name}' now applies to the entire fleet.`
+      // Both fields go together. Sending only target_id left target_type behind, so
+      // a policy aimed at a device could be re-pointed at a group id while still
+      // typed 'device', and the server would look for a device with that id and 400.
+      await api.updateFilterPolicy(retargeting.id, {
+        target_type: retargetForm.target_type,
+        target_id: retargetForm.target_id,
+      })
+      const scope =
+        retargetForm.target_type === 'all'
+          ? 'the entire fleet'
+          : retargetForm.target_type === 'group'
+            ? `group '${groupName(retargetForm.target_id)}'`
+            : `'${deviceName(retargetForm.target_id)}'`
+      const text = `Policy '${retargeting.name}' now applies to ${scope}. Sync the affected devices to apply it.`
       setMsg({ type: 'success', text })
       toast.success(text, 'Policy Re-targeted')
+      setRetargeting(null)
       await loadPolicies()
     } catch (err: any) {
       const text = err.message || 'Failed to update the policy target'
@@ -332,7 +427,7 @@ export const NetworkFilterPage: React.FC = () => {
     try {
       const res = await api.syncDeviceFilter(d.id)
       const text =
-        res.status === 'dispatched'
+        res.dispatched
           ? `Pushed ${res.effective_rules} rule(s) to ${d.hostname} (version ${res.policy_version.slice(0, 12)}).`
           : // True now, but previously it was an unbacked claim: the row said 'pending'
             // and nothing re-read it. The server re-sends the policy on reconnect when
@@ -477,7 +572,10 @@ export const NetworkFilterPage: React.FC = () => {
                           <button
                             type="button"
                             className="btn-action"
-                            onClick={() => handleEditTarget(p)}
+                            onClick={() => {
+                              setRetargetForm({ target_type: p.target_type, target_id: p.target_id })
+                              setRetargeting(p)
+                            }}
                             title={`Currently targets ${scopeLabel(p)}`}
                           >
                             <Target size={14} />
@@ -724,68 +822,48 @@ export const NetworkFilterPage: React.FC = () => {
               onChange={(e) => setNewPolicy({ ...newPolicy, description: e.target.value })}
             />
           </div>
-          <div className="form-group">
-            <label className="form-label" htmlFor="filter-policy-scope">
-              Scope
-            </label>
-            <select
-              id="filter-policy-scope"
-              className="form-select"
-              value={newPolicy.target_type}
-              onChange={(e) => setNewPolicy({ ...newPolicy, target_type: e.target.value, target_id: '' })}
-            >
-              <option value="all">Entire Fleet (All Devices)</option>
-              <option value="group">Device Group</option>
-              <option value="device">Single Device</option>
-            </select>
-          </div>
+          <PolicyScopeFields
+            targetType={newPolicy.target_type}
+            targetId={newPolicy.target_id}
+            groups={groups}
+            devices={devices}
+            idPrefix="filter-policy"
+            onChange={(next) => setNewPolicy({ ...newPolicy, ...next })}
+          />
+        </form>
+      </Modal>
 
-          {newPolicy.target_type === 'group' && (
-            <div className="form-group">
-              <label className="form-label" htmlFor="filter-policy-group">
-                Device Group
-              </label>
-              <select
-                id="filter-policy-group"
-                className="form-select"
-                required
-                value={newPolicy.target_id}
-                onChange={(e) => setNewPolicy({ ...newPolicy, target_id: e.target.value })}
-              >
-                <option value="">-- Select Group --</option>
-                {groups.map((g) => (
-                  <option key={g.id} value={g.id}>
-                    {g.name} ({g.member_count} device{g.member_count === 1 ? '' : 's'})
-                  </option>
-                ))}
-              </select>
-              {groups.length === 0 && (
-                <p className="form-hint">No device groups defined. Create one under Devices first.</p>
-              )}
-            </div>
-          )}
-
-          {newPolicy.target_type === 'device' && (
-            <div className="form-group">
-              <label className="form-label" htmlFor="filter-policy-device">
-                Device
-              </label>
-              <select
-                id="filter-policy-device"
-                className="form-select"
-                required
-                value={newPolicy.target_id}
-                onChange={(e) => setNewPolicy({ ...newPolicy, target_id: e.target.value })}
-              >
-                <option value="">-- Select Device --</option>
-                {devices.map((d) => (
-                  <option key={d.id} value={d.id}>
-                    {d.hostname} ({d.os_name}, {d.status})
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
+      {/* Re-target Modal */}
+      <Modal
+        open={retargeting !== null}
+        onClose={() => setRetargeting(null)}
+        title="Change Policy Scope"
+        description={retargeting ? `"${retargeting.name}" — currently ${scopeLabel(retargeting)}` : undefined}
+        size="md"
+        footer={
+          <>
+            <button type="button" className="btn btn-secondary" onClick={() => setRetargeting(null)}>
+              Cancel
+            </button>
+            <button type="submit" form="filter-retarget-form" className="btn btn-primary">
+              Apply Scope
+            </button>
+          </>
+        }
+      >
+        <form id="filter-retarget-form" onSubmit={handleEditTargetSubmit}>
+          <PolicyScopeFields
+            targetType={retargetForm.target_type}
+            targetId={retargetForm.target_id}
+            groups={groups}
+            devices={devices}
+            idPrefix="filter-retarget"
+            onChange={(next) => setRetargetForm(next)}
+          />
+          <p className="form-hint">
+            The policy's rules are kept. Devices keep the rules they already have until their next
+            sync.
+          </p>
         </form>
       </Modal>
 

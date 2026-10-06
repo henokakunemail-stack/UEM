@@ -39,7 +39,7 @@ type FilterRule struct {
 type DeviceFilterState struct {
 	DeviceID      string    `json:"device_id" db:"device_id"`
 	PolicyVersion string    `json:"policy_version" db:"policy_version"`
-	Status        string    `json:"status" db:"status"` // 'synced', 'pending', 'tampered', 'failed'
+	Status        string    `json:"status" db:"status"` // 'synced', 'degraded', 'pending', 'failed'
 	RulesApplied  int       `json:"rules_applied" db:"rules_applied"`
 	LastAppliedAt time.Time `json:"last_applied_at" db:"last_applied_at"`
 	ErrorMessage  string    `json:"error_message" db:"error_message"`

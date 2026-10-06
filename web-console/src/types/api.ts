@@ -401,6 +401,21 @@ export interface DeviceFilterStateDTO {
   error_message?: string | null
 }
 
+// The answer to POST /api/devices/{id}/filter/sync.
+//
+// `dispatched` says whether the bytes reached an online device; `status` is the
+// enforcement state that dispatch left behind, which is 'pending' either way
+// because the agent has not applied anything yet. They used to be one field
+// carrying "dispatched", which was a command-lifecycle word from every other
+// module rather than a value of DeviceFilterStateDTO.status -- so the row the
+// console renders could hold a status the server could not produce.
+export interface FilterSyncResultDTO {
+  dispatched: boolean
+  status: string
+  policy_version: string
+  effective_rules: number
+}
+
 // Phase 9: Alerting & Incidents
 // AlertIncident / AlertRule on the server. The incident's headline text is
 // `title` and its trigger count is `trigger_count`; the console read a

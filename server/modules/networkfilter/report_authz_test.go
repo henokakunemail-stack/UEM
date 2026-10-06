@@ -81,8 +81,14 @@ func nfFixture(t *testing.T) (*Handler, *sqlx.DB) {
 
 func reportFilterState(t *testing.T, h *Handler, pathID, headerID, secret string) *httptest.ResponseRecorder {
 	t.Helper()
+	// The status has to be a real one: agentReportFilterState rejects anything
+	// outside the closed set, and a bogus value would 400 on the way in and mask
+	// the ownership assertion this fixture exists to make. "failed" carries the
+	// same hostile intent -- it is the worst thing an agent can claim about its
+	// own enforcement -- and the invented version and rule count below already
+	// mark the row as not written by a real agent.
 	body, err := json.Marshal(agentFilterReportReq{
-		PolicyVersion: "v666", Status: "error", RulesApplied: 999,
+		PolicyVersion: "v666", Status: statusFailed, RulesApplied: 999,
 		ErrorMessage: "written by another device",
 	})
 	if err != nil {

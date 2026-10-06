@@ -384,7 +384,19 @@ func runAgent(serverURL, enrollToken, credsPath string, heartbeatSecs int) {
 		if p.SessionID == "" {
 			p.SessionID = id
 		}
-		_ = termMgr.WriteInput(p.SessionID, p.Data)
+		// Not "delivered" regardless of what happened. WriteInput answers
+		// "terminal session not found" or "terminal session is closed" when the
+		// shell has already exited -- which is what happens whenever the operator
+		// starts typing into a session that died between the click and the
+		// keystroke. Discarding that error told the console the keystroke arrived
+		// when nothing was written, and the operator's only symptom was a shell
+		// that had stopped responding. Interactive input is the one place where
+		// silent loss is felt immediately and cannot be reproduced afterwards.
+		if err := termMgr.WriteInput(p.SessionID, p.Data); err != nil {
+			log.Warn().Err(err).Str("session_id", p.SessionID).
+				Msg("terminal input dropped: session is not writable")
+			return map[string]string{"status": "rejected", "error": err.Error()}
+		}
 		return map[string]string{"status": "delivered"}
 	})
 
@@ -396,6 +408,10 @@ func runAgent(serverURL, enrollToken, credsPath string, heartbeatSecs int) {
 		if p.SessionID == "" {
 			p.SessionID = id
 		}
+		// CloseSession is already nil-on-missing on purpose -- closing a session that
+		// has ended is a no-op the caller should not have to distinguish. So "closed"
+		// is honest here and was already; the input path above is the one that had to
+		// report an error, because failing to write is not a no-op.
 		_ = termMgr.CloseSession(p.SessionID)
 		return map[string]string{"status": "closed"}
 	})

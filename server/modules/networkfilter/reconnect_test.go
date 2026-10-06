@@ -77,8 +77,11 @@ func newConnectFixture(t *testing.T) *connectFixture {
 	}
 
 	hub := &fakeHub{online: true}
+	// nopAudit, not nil: syncDeviceFilter audits its dispatch, so a handler built
+	// with a nil auditor panics on that path. Every test here used to reach only
+	// SyncOnReconnect, which does not audit, so the nil survived.
 	return &connectFixture{
-		h:    NewHandler(repo, hub, devicemgmt.NewRepository(database), nil, nil),
+		h:    NewHandler(repo, hub, devicemgmt.NewRepository(database), nopAudit{}, nil),
 		repo: repo, hub: hub, database: database, version: version,
 	}
 }
