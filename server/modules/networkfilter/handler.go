@@ -2,16 +2,45 @@ package networkfilter
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/rs/zerolog/log"
 
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/auth"
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/rbac"
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/transport"
 	devicemgmt "github.com/henokakunemail-stack/Endpoint-Manager/server/modules/device-management"
+)
+
+// Compile-time proof the handler satisfies the transport hook. Without it a
+// signature change here would only surface as a silent no-op at the reconnect
+// site, because that call is guarded by a nil check.
+var _ transport.FilterSyncer = (*Handler)(nil)
+
+// device_filter_states.status is a closed set, so the values live here rather than
+// being spelled out at each use site.
+const (
+	// statusSynced means the agent applied the policy at both enforcement layers.
+	statusSynced = "synced"
+	// statusDegraded means the rules reached the device but enforcement is weaker
+	// than requested: the firewall layer was refused, or some domains did not
+	// resolve. Distinct from 'failed' because the hosts layer did apply, and
+	// distinct from 'synced' because a device blocking only via the hosts file
+	// still lets every subdomain of a blocked domain through.
+	statusDegraded = "degraded"
+	// statusPending is what an operator-side dispatch reports before the device has
+	// answered.
+	statusPending = "pending"
+	// statusTampered is reported when the managed hosts section was edited by hand.
+	statusTampered = "tampered"
+	// statusFailed means the agent could not apply the policy at all.
+	statusFailed = "failed"
 )
 
 type Hub interface {
@@ -112,6 +141,44 @@ type createPolicyReq struct {
 	Priority    int    `json:"priority"`
 }
 
+// validTargetTypes is closed on purpose. An unrecognised scope used to be stored
+// verbatim and then matched nothing, so the policy looked configured and applied
+// to nobody.
+var validTargetTypes = map[string]bool{"all": true, "group": true, "device": true}
+
+// validateTarget refuses a policy whose scope names a device or group that does
+// not exist. Without this, a mistyped ID is accepted, saved, listed in the policy
+// table, and silently blocks nothing -- the operator's only clue is that the
+// device's rule count never moves.
+func (h *Handler) validateTarget(ctx context.Context, targetType, targetID string) error {
+	if !validTargetTypes[targetType] {
+		return fmt.Errorf("target_type must be one of all, group, device (got %q)", targetType)
+	}
+	// "all" is the whole fleet, so there is nothing to point at and an empty ID is
+	// its correct value rather than a missing one.
+	if targetType == "all" {
+		return nil
+	}
+	if targetID == "" {
+		return fmt.Errorf("target_id is required when target_type is %q", targetType)
+	}
+	if targetType == "device" {
+		if _, err := h.devices.GetByID(ctx, targetID); err != nil {
+			return fmt.Errorf("device %q not found", targetID)
+		}
+		return nil
+	}
+	var exists int
+	err := h.repo.db.GetContext(ctx, &exists, `SELECT COUNT(*) FROM device_groups WHERE id = ?`, targetID)
+	if err != nil {
+		return fmt.Errorf("look up group: %w", err)
+	}
+	if exists == 0 {
+		return fmt.Errorf("device group %q not found", targetID)
+	}
+	return nil
+}
+
 func (h *Handler) createPolicy(w http.ResponseWriter, r *http.Request) {
 	var req createPolicyReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -124,6 +191,10 @@ func (h *Handler) createPolicy(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.TargetType == "" {
 		req.TargetType = "all"
+	}
+	if err := h.validateTarget(r.Context(), req.TargetType, req.TargetID); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
 	}
 	if req.Priority <= 0 {
 		req.Priority = 100
@@ -177,6 +248,10 @@ func (h *Handler) updatePolicy(w http.ResponseWriter, r *http.Request) {
 		policy.TargetType = req.TargetType
 	}
 	policy.TargetID = req.TargetID
+	if err := h.validateTarget(r.Context(), policy.TargetType, policy.TargetID); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	if req.IsEnabled != nil {
 		policy.IsEnabled = *req.IsEnabled
 	}
@@ -246,12 +321,28 @@ func (h *Handler) addRule(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "pattern is required")
 		return
 	}
+	// The two rejected combinations are refused with an explanation rather than
+	// stored. Both were accepted and then discarded later: CompileEffectiveRules
+	// filters on action = 'block', so an 'allow' rule was dropped at enforcement
+	// time, and 'ip_port' reached the hosts file where the engine strips everything
+	// after the first "/" -- "198.51.100.0/24:443" was written as a bare hostname.
+	// Neither failure was visible from the console.
+	if req.Action != "" && req.Action != "block" {
+		writeErr(w, http.StatusBadRequest,
+			"action must be \"block\": enforcement unions every block rule and has no allow/exempt path, so an allow rule would never take effect")
+		return
+	}
+	if req.RuleType != "" && req.RuleType != "domain" {
+		writeErr(w, http.StatusBadRequest,
+			"rule_type must be \"domain\": filtering is name-based, and a host rule cannot express a CIDR or a port")
+		return
+	}
 
 	rule := &FilterRule{
 		PolicyID: policyID,
-		RuleType: req.RuleType,
+		RuleType: "domain",
 		Pattern:  req.Pattern,
-		Action:   req.Action,
+		Action:   "block",
 		Category: req.Category,
 	}
 
@@ -281,6 +372,65 @@ func (h *Handler) deleteRule(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
+// filterApplyEnvelope builds the wire message an agent applies. Both the manual
+// sync and the reconnect re-sync send exactly this, so a device cannot end up
+// holding one shape of policy from one path and another shape from the other.
+func filterApplyEnvelope(version string, patterns []string) ([]byte, error) {
+	env := transport.Envelope{
+		Type:    transport.TypeCommand,
+		ID:      version,
+		Command: "filter.apply",
+		Payload: map[string]any{
+			"policy_version":  version,
+			"blocked_domains": patterns,
+		},
+	}
+	return json.Marshal(env)
+}
+
+// SyncOnReconnect re-pushes the compiled policy to a device that just came back
+// online holding a version the server no longer considers current.
+//
+// This is the counterpart to a manual sync that was clicked while the device was
+// asleep: that path wrote status='pending' and returned, and nothing ever read the
+// row, so the device stayed unfiltered until an operator clicked Sync again. The
+// version check is what keeps this from re-pushing the same rule set to the whole
+// fleet on every reconnect -- a device that reports 'synced' at the current version
+// sends nothing.
+//
+// A device that reports anything other than 'synced' IS re-sent, including one
+// already at the current version. 'failed' and 'degraded' both mean the rules are
+// there and not being enforced, and re-running apply is the only thing that can fix
+// that: a service restart that lands the agent under SYSTEM with the same policy
+// now succeeds where the previous attempt was refused for lack of elevation.
+func (h *Handler) SyncOnReconnect(ctx context.Context, deviceID string) error {
+	if h.hub == nil || !h.hub.Online(deviceID) {
+		return nil
+	}
+	patterns, version, err := h.repo.CompileEffectiveRules(ctx, deviceID)
+	if err != nil {
+		return fmt.Errorf("compile rules: %w", err)
+	}
+	state, err := h.repo.GetDeviceFilterState(ctx, deviceID)
+	switch {
+	case err == nil && state.PolicyVersion == version && state.Status == statusSynced:
+		return nil
+	case err != nil && !errors.Is(err, sql.ErrNoRows):
+		return fmt.Errorf("read filter state: %w", err)
+	}
+
+	payload, err := filterApplyEnvelope(version, patterns)
+	if err != nil {
+		return fmt.Errorf("encode filter policy: %w", err)
+	}
+	if !h.hub.SendTo(deviceID, payload) {
+		return fmt.Errorf("send filter policy for device %s", deviceID)
+	}
+	log.Info().Str("device", deviceID).Str("version", version).
+		Int("rules", len(patterns)).Msg("re-synced filter policy on reconnect")
+	return nil
+}
+
 func (h *Handler) syncDeviceFilter(w http.ResponseWriter, r *http.Request) {
 	deviceID := chi.URLParam(r, "id")
 	if _, err := h.devices.GetByID(r.Context(), deviceID); err != nil {
@@ -294,25 +444,21 @@ func (h *Handler) syncDeviceFilter(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Dispatch command via WebSocket
-	cmdPayload := map[string]any{
-		"policy_version":  version,
-		"blocked_domains": patterns,
+	envBytes, err := filterApplyEnvelope(version, patterns)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "encode filter policy: "+err.Error())
+		return
 	}
-	env := transport.Envelope{
-		Type:    transport.TypeCommand,
-		ID:      version,
-		Command: "filter.apply",
-		Payload: cmdPayload,
-	}
-	envBytes, _ := json.Marshal(env)
 
 	dispatched := false
 	if h.hub != nil && h.hub.Online(deviceID) {
 		dispatched = h.hub.SendTo(deviceID, envBytes)
 	}
 
-	status := "pending"
+	// 'pending' means the command is on the wire or was not, and nothing records
+	// which. The row it was paired with before is what the reconnect hook reads, so
+	// the device is re-sent on its next connect either way.
+	status := statusPending
 	if dispatched {
 		status = "dispatched"
 	}
@@ -337,7 +483,7 @@ func (h *Handler) getDeviceFilterState(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"device_id":      deviceID,
-			"status":         "pending",
+			"status":         statusPending,
 			"rules_applied":  0,
 			"policy_version": "none",
 		})
@@ -377,7 +523,7 @@ func (h *Handler) agentReportFilterState(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if req.Status == "" {
-		req.Status = "synced"
+		req.Status = statusSynced
 	}
 
 	state := &DeviceFilterState{

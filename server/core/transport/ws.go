@@ -36,6 +36,22 @@ type WSHandler struct {
 	// was offline. Optional: nil means queued updates wait for the next manual
 	// dispatch, which is the behaviour before this hook existed.
 	updateQueue UpdateQueue
+	// filterSync pushes the effective filter policy to a device that reconnected
+	// without it having been applied. Optional, for the same reason as updateQueue.
+	//
+	// Without this, a policy aimed at a laptop that happened to be asleep was never
+	// delivered: the manual sync reported "queued until it reconnects", wrote
+	// status='pending', and returned. Nothing read that row, so the device stayed
+	// unfiltered until an operator clicked Sync again.
+	filterSync FilterSyncer
+}
+
+// FilterSyncer re-sends the compiled filter policy to a device that has just
+// come back online. It must be a no-op when the device already holds the current
+// version, so a reconnect storm does not re-push an identical rule set to every
+// device in the fleet.
+type FilterSyncer interface {
+	SyncOnReconnect(ctx context.Context, deviceID string) error
 }
 
 // UpdateQueue delivers the update tasks left pending for a device. It is called
@@ -91,6 +107,14 @@ func (h *WSHandler) WithInventory(r InventoryReceiver) *WSHandler {
 // re-reads it.
 func (h *WSHandler) WithUpdateQueue(q UpdateQueue) *WSHandler {
 	h.updateQueue = q
+	return h
+}
+
+// WithFilterSync attaches the re-sync hook for the web filter policy. Without it,
+// a device that was offline when the operator synced stays unfiltered until the
+// next manual sync.
+func (h *WSHandler) WithFilterSync(s FilterSyncer) *WSHandler {
+	h.filterSync = s
 	return h
 }
 
@@ -198,6 +222,15 @@ func (h *WSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if h.updateQueue != nil {
 		if err := h.updateQueue.FlushPendingUpdates(r.Context(), deviceID); err != nil {
 			log.Warn().Err(err).Str("device", deviceID).Msg("flush pending agent updates")
+		}
+	}
+
+	// Same reasoning for the filter policy: a sync clicked while the device was
+	// offline never reached it. Ordered after the status update because this
+	// dispatches over this socket.
+	if h.filterSync != nil {
+		if err := h.filterSync.SyncOnReconnect(r.Context(), deviceID); err != nil {
+			log.Warn().Err(err).Str("device", deviceID).Msg("re-sync filter policy on reconnect")
 		}
 	}
 

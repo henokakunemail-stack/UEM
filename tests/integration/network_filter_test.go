@@ -197,7 +197,7 @@ func TestNetworkFilter_AgentHostsEngine(t *testing.T) {
 
 	// 1. Apply rules
 	domains := []string{"malware.com", "*.tracker.org", "https://phishing.xyz/login"}
-	count, err := engine.ApplyBlockedDomains(domains)
+	count, _, err := engine.ApplyBlockedDomains(domains)
 	if err != nil {
 		t.Fatalf("apply blocked domains: %v", err)
 	}
@@ -230,7 +230,7 @@ func TestNetworkFilter_AgentHostsEngine(t *testing.T) {
 
 	// 2. Re-apply updated rules (atomic update without duplication)
 	newDomains := []string{"single-threat.ru"}
-	count2, err := engine.ApplyBlockedDomains(newDomains)
+	count2, _, err := engine.ApplyBlockedDomains(newDomains)
 	if err != nil {
 		t.Fatalf("re-apply domains: %v", err)
 	}
@@ -248,7 +248,7 @@ func TestNetworkFilter_AgentHostsEngine(t *testing.T) {
 	}
 
 	// 3. Clear rules (empty domain list)
-	count3, err := engine.ApplyBlockedDomains([]string{})
+	count3, _, err := engine.ApplyBlockedDomains([]string{})
 	if err != nil {
 		t.Fatalf("clear domains: %v", err)
 	}

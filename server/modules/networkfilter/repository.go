@@ -204,13 +204,29 @@ func (r *Repository) DeleteRule(ctx context.Context, id string) error {
 	return nil
 }
 
-// CompileEffectiveRules resolves all active policies targeting the device (device, group, or all)
-// and returns unique blocked domain patterns.
+// CompileEffectiveRules resolves all active policies targeting the device (device,
+// group, or all) and returns unique blocked domain patterns.
+//
+// Every group the device belongs to is collected, not just the first one. A device
+// can sit in several groups at once (the membership table is keyed by
+// (group_id, device_id), not device_id), and taking an arbitrary single group meant
+// a device in three groups silently ignored two of the policies aimed at it -- with
+// no error anywhere, because the query succeeded and returned a short list.
 func (r *Repository) CompileEffectiveRules(ctx context.Context, deviceID string) ([]string, string, error) {
-	// Find device group
-	var groupID string
-	_ = r.db.GetContext(ctx, &groupID, `SELECT group_id FROM device_group_members WHERE device_id = ? LIMIT 1`, deviceID)
+	var groupIDs []string
+	// Not _ =: a failure here would silently degrade the device to "no groups" and
+	// drop every group policy aimed at it, which reads as a working system rather
+	// than a failed query.
+	if err := r.db.SelectContext(ctx, &groupIDs,
+		`SELECT group_id FROM device_group_members WHERE device_id = ?`, deviceID); err != nil {
+		return nil, "", fmt.Errorf("resolve device groups: %w", err)
+	}
 
+	// The pattern set has to be a stable, deterministic union, so the caller and the
+	// device independently compute the same version hash from the same ordering.
+	// Priority is the tiebreak an operator already sets in the UI, so it keeps
+	// deciding the order.
+	patterns := []string{}
 	query := `
 		SELECT r.pattern
 		FROM filter_rules r
@@ -220,13 +236,34 @@ func (r *Repository) CompileEffectiveRules(ctx context.Context, deviceID string)
 		  AND (
 		      p.target_type = 'all'
 		      OR (p.target_type = 'device' AND p.target_id = ?)
-		      OR (p.target_type = 'group' AND p.target_id = ?)
 		  )
 		ORDER BY p.priority ASC, r.created_at ASC
 	`
-	var patterns []string
-	if err := r.db.SelectContext(ctx, &patterns, query, deviceID, groupID); err != nil {
+	if err := r.db.SelectContext(ctx, &patterns, query, deviceID); err != nil {
 		return nil, "", fmt.Errorf("compile rules: %w", err)
+	}
+
+	// Group policies are a second query rather than an IN clause because sqlx.In
+	// cannot bind an empty slice -- which is the common case, since most devices
+	// are in no group at all.
+	if len(groupIDs) > 0 {
+		groupQuery, args, err := sqlx.In(`
+			SELECT r.pattern
+			FROM filter_rules r
+			JOIN filter_policies p ON p.id = r.policy_id
+			WHERE p.is_enabled = 1
+			  AND r.action = 'block'
+			  AND p.target_type = 'group' AND p.target_id IN (?)
+			ORDER BY p.priority ASC, r.created_at ASC
+		`, groupIDs)
+		if err != nil {
+			return nil, "", fmt.Errorf("build group query: %w", err)
+		}
+		var groupPatterns []string
+		if err := r.db.SelectContext(ctx, &groupPatterns, groupQuery, args...); err != nil {
+			return nil, "", fmt.Errorf("compile group rules: %w", err)
+		}
+		patterns = append(patterns, groupPatterns...)
 	}
 
 	// Deduplicate preserving order

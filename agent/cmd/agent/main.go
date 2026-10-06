@@ -577,13 +577,20 @@ func runAgent(serverURL, enrollToken, credsPath string, heartbeatSecs int) {
 
 		go func() {
 			defer guardAgentGoroutine("networkfilter.apply")
-			count, err := filterEngine.ApplyBlockedDomains(p.BlockedDomains)
-			status := "synced"
-			errMsg := ""
-			if err != nil {
-				status = "failed"
-				errMsg = err.Error()
+			count, degraded, err := filterEngine.ApplyBlockedDomains(p.BlockedDomains)
+			status, errMsg := "synced", ""
+			switch {
+			case err != nil:
+				status, errMsg = "failed", err.Error()
 				log.Error().Err(err).Msg("apply filter rules failed")
+			case degraded != "":
+				// Not 'failed': the rules did reach the device. But the firewall layer
+				// was refused or some domains did not resolve, so the hosts file alone
+				// is standing and subdomains of those domains are still reachable.
+				// Reporting 'synced' here is how an operator concludes the endpoint is
+				// enforcing web filtering when it is not.
+				status, errMsg = "degraded", degraded
+				log.Warn().Str("reason", degraded).Msg("filter policy applied with reduced enforcement")
 			}
 			_ = filterEngine.ReportFilterState(context.Background(), p.PolicyVersion, status, count, errMsg)
 		}()

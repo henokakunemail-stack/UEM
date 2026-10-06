@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -31,6 +32,8 @@ type Engine struct {
 	deviceSecret string
 	httpClient   *http.Client
 	mu           sync.Mutex
+	resolver     *resolver
+	firewall     firewallBackend
 }
 
 func NewEngine(serverURL, deviceID, deviceSecret string) *Engine {
@@ -45,6 +48,8 @@ func NewEngine(serverURL, deviceID, deviceSecret string) *Engine {
 		deviceID:     deviceID,
 		deviceSecret: deviceSecret,
 		httpClient:   transport.NewHTTPClient(10 * time.Second),
+		resolver:     newResolver(),
+		firewall:     newFirewallBackend(),
 	}
 }
 
@@ -65,11 +70,57 @@ func (e *Engine) SetHostsPath(p string) {
 	e.hostsPath = p
 }
 
-// ApplyBlockedDomains updates the system hosts file with 0.0.0.0 sinkholes inside managed markers
-func (e *Engine) ApplyBlockedDomains(domains []string) (int, error) {
+// ApplyBlockedDomains enforces the block list on both layers: the hosts file gets
+// one sinkhole line per domain, and the firewall gets every address those domains
+// resolve to.
+//
+// The two layers exist because neither covers the other. A hosts file cannot block
+// a subdomain, so www.detik.com survives a rule naming detik.com. A firewall
+// cannot be applied without elevation, so on a non-elevated agent it is the only
+// thing that would work -- and it cannot be relied on there.
+//
+// The hosts layer runs first and its failure is an error, because it is the layer
+// that must work. A firewall failure is not fatal, but it is returned as `degraded`
+// rather than swallowed: a silent fallback is how a device ends up reporting
+// "synced" while only the weaker layer is enforced, which is the state an operator
+// must be able to see. An empty degraded string means both layers applied.
+func (e *Engine) ApplyBlockedDomains(domains []string) (count int, degraded string, err error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
+	hostsCount, err := e.writeHosts(domains)
+	if err != nil {
+		return 0, "", err
+	}
+
+	blocked, resolveErrs, fwErr := applyFirewall(e.firewall, e.resolver, domains)
+	var warnings []string
+	for domain, msg := range resolveErrs {
+		log.Warn().Str("domain", domain).Str("error", msg).
+			Msg("filter rule could not be resolved; its addresses are not blocked")
+		warnings = append(warnings, fmt.Sprintf("%s: %s", domain, msg))
+	}
+	if fwErr != nil {
+		msg := describeFirewallError(fwErr)
+		log.Warn().Str("error", msg).Int("hosts_rules", hostsCount).
+			Msg("firewall layer unavailable; enforcement is limited to the hosts file")
+		warnings = append(warnings, msg)
+	}
+	// Sorted so the same policy produces the same report text, which is what makes
+	// a changed message meaningful to an operator reading the device's history.
+	sort.Strings(warnings)
+
+	if len(warnings) > 0 {
+		return hostsCount, strings.Join(warnings, "; "), nil
+	}
+	log.Info().Int("hosts_rules", hostsCount).Int("addresses_blocked", blocked).
+		Str("path", e.hostsPath).Msg("network filter rules applied")
+	return hostsCount, "", nil
+}
+
+// writeHosts rewrites the managed section of the hosts file. It is the layer that
+// must always succeed, so every failure here is returned rather than tolerated.
+func (e *Engine) writeHosts(domains []string) (int, error) {
 	var existingContent []byte
 	if _, err := os.Stat(e.hostsPath); err == nil {
 		data, err := os.ReadFile(e.hostsPath)
@@ -94,18 +145,11 @@ func (e *Engine) ApplyBlockedDomains(domains []string) (int, error) {
 		sb.WriteString(MarkerBegin + "\n")
 		sb.WriteString("# Managed by Endpoint Management Platform - DO NOT EDIT MANUALLY\n")
 		for _, d := range domains {
-			domain := strings.TrimSpace(d)
+			domain := normalizeDomain(d)
 			if domain == "" || strings.HasPrefix(domain, "#") {
 				continue
 			}
-			// Clean domain from protocols or wildcards
-			domain = strings.TrimPrefix(domain, "http://")
-			domain = strings.TrimPrefix(domain, "https://")
-			domain = strings.TrimPrefix(domain, "*.")
-			parts := strings.Split(domain, "/")
-			cleanDomain := parts[0]
-
-			fmt.Fprintf(&sb, "0.0.0.0 %s\n", cleanDomain)
+			fmt.Fprintf(&sb, "0.0.0.0 %s\n", domain)
 			appliedCount++
 		}
 		sb.WriteString(MarkerEnd + "\n")
@@ -118,8 +162,6 @@ func (e *Engine) ApplyBlockedDomains(domains []string) (int, error) {
 
 	// Flush OS DNS resolver cache
 	e.flushDNS()
-
-	log.Info().Int("rules_applied", appliedCount).Str("path", e.hostsPath).Msg("network filter rules applied successfully")
 	return appliedCount, nil
 }
 

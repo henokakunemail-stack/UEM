@@ -36,6 +36,7 @@ import (
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/modules/assetlicense"
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/modules/dashboard"
 	devicemgmt "github.com/henokakunemail-stack/Endpoint-Manager/server/modules/device-management"
+	"github.com/henokakunemail-stack/Endpoint-Manager/server/modules/directory"
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/modules/maintenance"
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/modules/networkfilter"
 	patchmgmt "github.com/henokakunemail-stack/Endpoint-Manager/server/modules/patch-management"
@@ -481,6 +482,10 @@ func buildServer(cfg config.Config, database *sqlx.DB) (*http.Server, func()) {
 	// operator presses Dispatch again. Wired here rather than at construction
 	// because the update handler is built below the agent websocket handler.
 	wsH.WithUpdateQueue(updateH)
+	// Same for the filter policy: a sync clicked against a device that was offline
+	// wrote status='pending' and nothing ever re-read the row, so the endpoint
+	// stayed unfiltered until someone pressed Sync a second time.
+	wsH.WithFilterSync(filterH)
 
 	// Phase 14: asset & license management.
 	assetRepo := assetlicense.NewRepository(database)
@@ -489,6 +494,17 @@ func buildServer(cfg config.Config, database *sqlx.DB) (*http.Server, func()) {
 
 	// Phase 15: device maintenance.
 	maintH.Register(r)
+
+	// Phase 16: LDAP / Active Directory directory sync. Contacts only — the
+	// synced people are not console accounts and no auth code is touched.
+	dirH := directory.NewHandler(
+		directory.NewRepository(database),
+		&auditAdapter{db: database},
+		directory.NewLDAPClient(),
+		cfg.LDAPBindPassword,
+		jwtSvc.RequireAuth,
+	)
+	dirH.Register(r)
 
 	// Command dispatch demo endpoint: send "ping" to a device's live connection.
 	r.With(jwtSvc.RequireAuth, rbac.RequireRole(rbac.RoleTechnician)).
