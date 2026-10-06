@@ -5,6 +5,7 @@ import type {
   DeviceDTO,
   DeviceInventorySnapshot,
   DeviceListResponse,
+  EnrollmentTokenDTO,
   OSMetric,
   SiteMetric,
   UserToken,
@@ -296,6 +297,16 @@ export const api = {
   async restoreDevice(id: string): Promise<{ status: string }> {
     return request<{ status: string }>(`/api/devices/${id}/restore`, {
       method: 'POST',
+    })
+  },
+
+  // Pre-registers a device and returns a one-time token the agent exchanges for
+  // its persistent secret. Admin only, and the plaintext comes back exactly
+  // once — close the dialog without copying it and it is gone.
+  async createEnrollmentToken(body: { hostname: string; os_name: string; site?: string }): Promise<EnrollmentTokenDTO> {
+    return request<EnrollmentTokenDTO>('/api/devices/enroll-token', {
+      method: 'POST',
+      body: JSON.stringify(body),
     })
   },
 

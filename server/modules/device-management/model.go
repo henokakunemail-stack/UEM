@@ -22,8 +22,13 @@ type Device struct {
 	LastSeenAt          *time.Time `db:"last_seen_at"`
 	EnrolledAt          time.Time  `db:"enrolled_at"`
 	EnrollmentTokenHash *string    `db:"enrollment_token_hash"` // NULL once consumed
-	DeviceSecretHash    string     `db:"device_secret_hash"`
-	Site                *string    `db:"site"`
+	// EnrollmentTokenExpiresAt is when the pending token stops being honoured.
+	// NULL means it does not expire, which is every row that predates the
+	// column: those tokens were issued by a server that never enforced a
+	// deadline, and stranding them would break an enrollment somebody chose.
+	EnrollmentTokenExpiresAt *time.Time `db:"enrollment_token_expires_at"`
+	DeviceSecretHash         string     `db:"device_secret_hash"`
+	Site                     *string    `db:"site"`
 	// RetiredAt is set when the device leaves the fleet. NULL means active.
 	// The row is kept so audit references stay resolvable; the secret is cleared.
 	RetiredAt *time.Time `db:"retired_at"`

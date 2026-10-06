@@ -24,9 +24,11 @@ func (r *Repository) Create(ctx context.Context, d Device) error {
 	_, err := r.db.NamedExecContext(ctx, `
 		INSERT INTO devices (id, hostname, os_name, os_version, agent_version, status,
 		                     last_seen_at, enrolled_at, enrollment_token_hash,
+		                     enrollment_token_expires_at,
 		                     device_secret_hash, site, created_at, updated_at)
 		VALUES (:id, :hostname, :os_name, :os_version, :agent_version, :status,
 		        :last_seen_at, :enrolled_at, :enrollment_token_hash,
+		        :enrollment_token_expires_at,
 		        :device_secret_hash, :site, :created_at, :updated_at)`, d)
 	if err != nil {
 		return fmt.Errorf("create device: %w", err)
@@ -150,13 +152,19 @@ func (r *Repository) UpdateOSInfo(ctx context.Context, id, osVersion, agentVersi
 }
 
 // ConsumeEnrollmentToken marks the one-time token as used by storing the persistent
-// device secret hash. Returns ErrNotFound if the token hash is not registered.
+// device secret hash. Returns ErrNotFound if the token hash is not registered or
+// has expired.
+//
+// The deadline is repeated here rather than trusted from the caller's earlier
+// lookup. This statement is what actually mints the secret, and a token that
+// expired between the two must not be spendable.
 func (r *Repository) ConsumeEnrollmentToken(ctx context.Context, tokenHash, secretHash string) error {
 	res, err := r.db.ExecContext(ctx, `
 		UPDATE devices SET device_secret_hash = ?, enrollment_token_hash = NULL,
 		                   status = 'offline', updated_at = ?
-		WHERE enrollment_token_hash = ?`,
-		secretHash, time.Now().UTC(), tokenHash)
+		WHERE enrollment_token_hash = ?
+		  AND (enrollment_token_expires_at IS NULL OR enrollment_token_expires_at > ?)`,
+		secretHash, time.Now().UTC(), tokenHash, time.Now().UTC())
 	if err != nil {
 		return fmt.Errorf("consume enrollment token: %w", err)
 	}
@@ -168,9 +176,19 @@ func (r *Repository) ConsumeEnrollmentToken(ctx context.Context, tokenHash, secr
 }
 
 // findByEnrollmentTokenHash loads the device waiting on a one-time enrollment token.
+//
+// The deadline is part of the lookup rather than a check afterwards, so an
+// expired token and an unknown one are the same absence: the caller cannot tell
+// them apart, and neither can somebody probing for valid tokens. NULL means the
+// token has no deadline, which is every device enrolled before the column
+// existed.
 func (r *Repository) findByEnrollmentTokenHash(ctx context.Context, tokenHash string) (Device, error) {
 	var d Device
-	err := r.db.GetContext(ctx, &d, `SELECT * FROM devices WHERE enrollment_token_hash = ?`, tokenHash)
+	err := r.db.GetContext(ctx, &d, `
+		SELECT * FROM devices
+		WHERE enrollment_token_hash = ?
+		  AND (enrollment_token_expires_at IS NULL OR enrollment_token_expires_at > ?)`,
+		tokenHash, time.Now().UTC())
 	if errors.Is(err, sql.ErrNoRows) {
 		return Device{}, ErrNotFound
 	}

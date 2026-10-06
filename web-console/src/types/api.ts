@@ -27,8 +27,17 @@ export interface DeviceDTO {
   capabilities?: string[]
 }
 
-export interface DeviceListResponse {
-  devices: DeviceDTO[]
+// The plaintext token is returned exactly once, by the request that mints it.
+// Nothing else in the system ever sees it: the server stores only the hash, and
+// after the agent exchanges it the row's hash is nulled. Re-closing this modal
+// therefore loses it for good, and a lost token means minting another one.
+export interface EnrollmentTokenDTO {
+  device_id: string
+  enrollment_token: string
+  expires_at: string
+}
+
+export interface DeviceListResponse {  devices: DeviceDTO[]
   count: number
   total: number
   limit: number

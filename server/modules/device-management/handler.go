@@ -172,20 +172,22 @@ func (h *Handler) createEnrollToken(w http.ResponseWriter, r *http.Request) {
 	plain := GenerateToken()
 	now := time.Now().UTC()
 	tokenHash := HashToken(plain) // consumed to NULL once the agent enrolls
+	expiresAt := now.Add(h.ttl)
 	var site *string
 	if req.Site != "" {
 		site = &req.Site
 	}
 	dev := Device{
-		ID:                  NewID(),
-		Hostname:            req.Hostname,
-		OSName:              req.OSName,
-		Status:              StatusOffline,
-		EnrolledAt:          now,
-		EnrollmentTokenHash: &tokenHash,
-		Site:                site,
-		CreatedAt:           now,
-		UpdatedAt:           now,
+		ID:                       NewID(),
+		Hostname:                 req.Hostname,
+		OSName:                   req.OSName,
+		Status:                   StatusOffline,
+		EnrolledAt:               now,
+		EnrollmentTokenHash:      &tokenHash,
+		EnrollmentTokenExpiresAt: &expiresAt,
+		Site:                     site,
+		CreatedAt:                now,
+		UpdatedAt:                now,
 	}
 	if err := h.repo.Create(r.Context(), dev); err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
@@ -200,7 +202,7 @@ func (h *Handler) createEnrollToken(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, createEnrollTokenResp{
 		DeviceID:        dev.ID,
 		EnrollmentToken: plain,
-		ExpiresAt:       now.Add(h.ttl),
+		ExpiresAt:       expiresAt,
 	})
 }
 

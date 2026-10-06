@@ -103,6 +103,14 @@ func (h *EnrollmentHandler) enroll(w http.ResponseWriter, r *http.Request) {
 
 	plain := GenerateToken()
 	if err := h.repo.ConsumeEnrollmentToken(r.Context(), tokenHash, HashToken(plain)); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			// The lookup above and this UPDATE are two statements, so a token that
+			// expired between them lands here instead of being enrolled. The agent
+			// gets the same refusal it would have got from the lookup, which is
+			// what makes the deadline real rather than advisory.
+			writeErr(w, http.StatusUnauthorized, "invalid or expired enrollment token")
+			return
+		}
 		log.Error().Err(err).Msg("consume enrollment token")
 		writeErr(w, http.StatusInternalServerError, "internal error")
 		return

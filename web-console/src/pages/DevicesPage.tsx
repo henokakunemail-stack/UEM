@@ -8,6 +8,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Filter,
+  KeyRound,
   Laptop,
   Layers,
   Monitor,
@@ -28,6 +29,7 @@ import { PAGE_SIZES, buildDevicesQuery, parseDevicesQuery } from './devicesQuery
 import type { DeviceStatus } from './devicesQuery'
 import { DeviceGroupsPanel } from './DeviceGroupsPanel'
 import { GroupMembersModal } from './GroupMembersModal'
+import { EnrollTokenModal } from '../components/EnrollTokenModal'
 
 export const DevicesPage: React.FC<{
   onOpenExec?: (device: DeviceDTO) => void
@@ -51,6 +53,7 @@ export const DevicesPage: React.FC<{
   const [pageSize, setPageSize] = useState<(typeof PAGE_SIZES)[number]>(10)
   const [selectedDevice, setSelectedDevice] = useState<DeviceDTO | null>(null)
   const [retireTarget, setRetireTarget] = useState<DeviceDTO | null>(null)
+  const [enrollOpen, setEnrollOpen] = useState(false)
   const [retiring, setRetiring] = useState(false)
   const [actionMsg, setActionMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(
     null
@@ -243,6 +246,16 @@ export const DevicesPage: React.FC<{
           </p>
         </div>
         <div className="header-controls">
+          {can('admin') && (
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => setEnrollOpen(true)}
+            >
+              <KeyRound size={16} />
+              <span>Generate Enrollment Token</span>
+            </button>
+          )}
           <button
             type="button"
             className="btn btn-secondary"
@@ -686,6 +699,11 @@ export const DevicesPage: React.FC<{
           onChanged={loadGroups}
         />
       )}
+
+      {/* Minting a token pre-registers the device, so the list is stale the moment
+          one exists — refresh on the way out rather than making the operator
+          guess why a new row has not appeared. */}
+      <EnrollTokenModal open={enrollOpen} onClose={() => setEnrollOpen(false)} onEnrolled={fetchDevices} />
     </div>
   )
 }
