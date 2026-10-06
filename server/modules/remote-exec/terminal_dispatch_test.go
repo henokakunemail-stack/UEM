@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -38,11 +39,31 @@ func (h *wedgedHub) Online(string) bool { return h.online }
 
 func (h *wedgedHub) SendTo(string, []byte) bool { return h.accepts }
 
-type recordingAudit struct{ actions []string }
+// recordingAudit is written from the handler's goroutine while the test reads
+// it, so the slice needs a lock -- `go test -race` catches the unguarded
+// version, and an ordinary run catches it only when the scheduler happens to
+// interleave.
+type recordingAudit struct {
+	mu      sync.Mutex
+	actions []string
+}
 
 func (a *recordingAudit) Log(_ context.Context, _, _, action, _ string, _ map[string]string) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	a.actions = append(a.actions, action)
 	return nil
+}
+
+func (a *recordingAudit) seen(want string) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for _, got := range a.actions {
+		if got == want {
+			return true
+		}
+	}
+	return false
 }
 
 // terminalFixture builds a handler over a real database holding one device, a
@@ -165,6 +186,31 @@ func dialTerminal(t *testing.T, h *Handler, accessToken string) <-chan string {
 	return frames
 }
 
+// waitForTerminalCleanup waits for the handler to finish tearing the session
+// down.
+//
+// The refusal frame is written to the browser BEFORE the durable state is fixed
+// up (handler.go writes term.error, then closes the session row, then audits),
+// so reading the row the moment the frame lands races the handler. Waiting on
+// the frame channel instead is no better: the reader goroutine sees the socket
+// close before the handler's deferred cleanup has run, so a closed channel is
+// not a signal the work is done. Poll for the settled state instead.
+func waitForTerminalCleanup(t *testing.T, database *sqlx.DB) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	var status string
+	for {
+		err := database.Get(&status, `SELECT status FROM terminal_sessions`)
+		if err == nil && status != "active" {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the terminal session was still %q after 5s", status)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
 func firstFrame(t *testing.T, frames <-chan string) string {
 	t.Helper()
 	select {
@@ -217,6 +263,8 @@ func TestADroppedTerminalOpenIsNotAnnouncedAsAShell(t *testing.T) {
 			"agent never received term.open", first)
 	}
 
+	waitForTerminalCleanup(t, database)
+
 	status, closedAt := sessionRow(t, database)
 	if status == "active" {
 		t.Error("durable row says \"active\" for a terminal that never started; it " +
@@ -226,16 +274,9 @@ func TestADroppedTerminalOpenIsNotAnnouncedAsAShell(t *testing.T) {
 		t.Error("closed_at is NULL on a session that can never run")
 	}
 
-	var sawFailure bool
-	for _, a := range auditor.actions {
-		if a == "terminal.open_failed" {
-			sawFailure = true
-		}
-	}
-	if !sawFailure {
-		t.Errorf("audit actions = %v, want a terminal.open_failed entry: the drop is "+
-			"invisible in the audit trail, which records only the successful open",
-			auditor.actions)
+	if !auditor.seen("terminal.open_failed") {
+		t.Errorf("audit trail has no terminal.open_failed entry: the drop is " +
+			"invisible, which records only the successful open")
 	}
 }
 

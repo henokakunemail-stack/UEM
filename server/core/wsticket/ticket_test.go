@@ -54,6 +54,26 @@ func liveRows(t *testing.T, d *sqlx.DB) int {
 	return n
 }
 
+// expireTicket puts one ticket's expiry in the past, which is the state a row
+// reaches on its own once its TTL elapses.
+//
+// The alternative is to issue with a short TTL and sleep, but that makes the
+// test bet on the machine: a GC pause or a loaded CI runner can stretch the
+// window between issuing and asserting, and the row expires before the
+// assertion that needs it still live runs. That is not a rare edge -- it
+// reproduced in roughly one run in eight on an idle developer machine. Setting
+// expires_at is what elapsed time actually does to the column, so the store
+// under test sees the identical state and the test stops depending on the
+// scheduler.
+func expireTicket(t *testing.T, d *sqlx.DB, ticket string) {
+	t.Helper()
+	_, err := d.Exec(`UPDATE ws_tickets SET expires_at = ? WHERE ticket_hash = ?`,
+		time.Now().UTC().Add(-time.Minute), hashTicket(ticket))
+	if err != nil {
+		t.Fatalf("expire ticket: %v", err)
+	}
+}
+
 // TestConsumeRedeemsOnce is the base contract: a ticket is a name for exactly
 // one handshake. The second consume is what stops a copy of the URL that
 // survived in an access log from connecting an hour later.
@@ -349,7 +369,7 @@ func TestPurgeExpiredReclaimsRoom(t *testing.T) {
 	ctx := context.Background()
 	shortLived := make([]string, 0, 3)
 	for i := 0; i < 2; i++ {
-		tk, err := s.Issue(ctx, subject, purpose, 40*time.Millisecond)
+		tk, err := s.Issue(ctx, subject, purpose, DefaultTTL)
 		if err != nil {
 			t.Fatalf("issue %d: %v", i, err)
 		}
@@ -361,18 +381,19 @@ func TestPurgeExpiredReclaimsRoom(t *testing.T) {
 
 	// The one the refused call asked for never existed, so both rows above must
 	// go stale for the store to drain.
-	time.Sleep(120 * time.Millisecond)
+	for _, tk := range shortLived {
+		expireTicket(t, d, tk)
+	}
 	if _, err := s.Issue(ctx, subject, purpose, DefaultTTL); err != nil {
 		t.Errorf("issue after the earlier tickets expired: %v", err)
 	}
 
 	// And the explicit janitor call, for a store that goes quiet while full.
-	expiring, err := s.Issue(ctx, subject, purpose, 30*time.Millisecond)
+	expiring, err := s.Issue(ctx, subject, purpose, DefaultTTL)
 	if err != nil {
 		t.Fatalf("issue before the purge check: %v", err)
 	}
-	_ = expiring
-	time.Sleep(80 * time.Millisecond)
+	expireTicket(t, d, expiring)
 	if err := s.PurgeExpired(ctx); err != nil {
 		t.Fatalf("PurgeExpired: %v", err)
 	}
