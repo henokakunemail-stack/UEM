@@ -8,7 +8,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/db"
@@ -68,24 +67,42 @@ func TestReleasePathStaysInsideTheStorageDirectory(t *testing.T) {
 // TestReleasePathRejectsATraversingMultipartFilename covers the other side of
 // the same join: the filename the client put in the multipart header is just as
 // attacker-controlled as the form fields.
+//
+// The outcome is platform-specific in a way the assertion has to accommodate
+// rather than paper over, because filepath.Base is what stands between the
+// header and the filesystem and it treats backslashes as separators only on
+// Windows:
+//
+//	Windows: Base(`..\..\evil.exe`) = "evil.exe" -- the traversal is stripped,
+//	the joined name is clean, and no error is returned.
+//	Linux:   backslashes are ordinary filename characters, so Base keeps them
+//	verbatim. The join produces one component named
+//	`1.2.3_windows_x64_..\..\evil.exe`, which is still inside dir, so no error
+//	is returned either.
+//
+// So `strings.Contains(got, "..")` is not a defensible check here -- it passes
+// on Windows and fails on Linux for input both platforms handle safely, and a
+// previous version of this test asserted it. Either branch, the guarantee is
+// that the write stays inside the storage directory; that is what the download
+// route and the cleanup routines assume. The literal-backslash name Linux
+// produces is ugly but harmless, and rejecting it would mean teaching the agent
+// uploader which separators the client's OS used.
 func TestReleasePathRejectsATraversingMultipartFilename(t *testing.T) {
 	dir := t.TempDir()
-	got, err := releasePath(dir, "1.2.3", "windows", "x64", "..\\..\\evil.exe")
+	got, err := releasePath(dir, "1.2.3", "windows", "x64", `..\..\evil.exe`)
+
 	if err != nil {
-		// On Windows the separators are real and the join escapes, so rejection is
-		// the outcome. On Linux they are just characters in a basename, so the
-		// value lands inside the directory; either way it must not climb out of it.
-		if strings.Contains(got, "..") {
-			t.Errorf("resolved path %q still contains a relative segment", got)
-		}
+		// Only reachable on Windows, where the separators are real and the join
+		// would escape. The error must still name a contained path.
 		if filepath.Dir(got) != filepath.Clean(dir) {
 			t.Errorf("error path resolved %q outside %q", got, dir)
 		}
 		return
 	}
-	if strings.Contains(got, "..") {
-		t.Errorf("accepted a traversing multipart filename: %q", got)
-	}
+
+	// Reachable on both platforms: Windows stripped the traversal, Linux kept
+	// the backslashes as literal filename characters. Either way the file lands
+	// in the storage directory and nothing climbs out of it.
 	if filepath.Dir(got) != filepath.Clean(dir) {
 		t.Errorf("resolved path %q escaped %q", got, dir)
 	}
