@@ -257,7 +257,7 @@ try {
     Stop-Process -Id $serverProc.Id -Force -ErrorAction SilentlyContinue
     if (Test-Path "$env:TEMP\em-e2e-rc-server.log") {
         $lines = Get-Content "$env:TEMP\em-e2e-rc-server.log" |
-            Where-Object { $_ -match 'ZZZ|relay closed' }
+            Where-Object { $_ -match 'relay closed' }
         if ($lines) {
             Write-Host "`n--- remote control server log ---" -ForegroundColor DarkGray
             foreach ($l in $lines) { Write-Host $l -ForegroundColor DarkGray }

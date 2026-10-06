@@ -192,6 +192,17 @@ func (rm *RelayManager) CloseRelay(sessionID string) {
 	// history shows zero frames for a desktop the operator was watching. The
 	// 'ended' status is what this branch owns; the counters belong to the relay
 	// that closed them, so it reports only the status.
+	//
+	// The two closes race, and the other ordering is just as bad. If this branch
+	// lands first it takes the row to 'ended', and the relay-present close is
+	// still coming with the counters it snapshotted. EndSession's update is not
+	// gated on the status for that reason: a guard that protected the first
+	// ordering discarded the counters in the second, and the e2e run caught it --
+	// a history row reporting an empty desktop for a session the log showed
+	// streaming one frame and one input. Unconditional is safe because the
+	// relay-present path is the only writer of the counters, and CloseSession's
+	// own `WHERE status = 'active'` keeps this branch from clobbering a row the
+	// other close already finished.
 	if !exists || r == nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()

@@ -120,14 +120,14 @@ func (r *Repository) EndSession(ctx context.Context, id string, frames int, byte
 			bytes_transmitted = ?,
 			input_events_count = ?,
 			ended_at = ?
-		WHERE id = ? AND status = 'active'
+		WHERE id = ?
 	`, frames, bytes, inputEvents, now, id)
 	if err != nil {
 		return fmt.Errorf("end rc session: %w", err)
 	}
 	rows, _ := res.RowsAffected()
 	if rows == 0 {
-		return fmt.Errorf("session not found or already ended")
+		return fmt.Errorf("session not found")
 	}
 	return nil
 }

@@ -228,13 +228,12 @@ func TestEndingASessionWithNoRelayAtAllStillClosesTheRow(t *testing.T) {
 // stopSession runs in the HTTP handler goroutine while the agent's read loop
 // ends its own relay from another, so which one reaches the row first is not
 // determined. When the relay-absent close lands on a row that is still
-// 'active', EndSession's `WHERE status = 'active'` guard does not protect it --
-// the guard only stops a row that is already 'ended' -- so real counters are
-// overwritten with zeros. The operator watched a desktop and the history says
-// nothing was ever sent.
+// 'active', EndSession's own counters replace real counts with nothing. The
+// operator watched a desktop and the history says nothing was ever sent.
 //
 // The relay-absent path owns the status, not the counters. CloseSession is
-// status-only, so no interleaving can make it erase telemetry.
+// status-only, so no interleaving can make it erase telemetry. The complementary
+// ordering is pinned by TestTheTelemetryCloseLosingTheRaceStillWritesItsCounters.
 func TestASecondCloseDoesNotZeroTelemetryTheFirstCloseRecorded(t *testing.T) {
 	h, database, _ := rcFixture(t)
 
@@ -284,6 +283,74 @@ func TestASecondCloseDoesNotZeroTelemetryTheFirstCloseRecorded(t *testing.T) {
 	}
 	if row.Bytes != int64(len("frame")) {
 		t.Errorf("bytes_transmitted = %d, want %d", row.Bytes, len("frame"))
+	}
+}
+
+// TestTheTelemetryCloseLosingTheRaceStillWritesItsCounters is the other
+// interleaving of the same two closes, and the one the e2e run on CI hit.
+//
+// CloseRelay's relay-absent path takes the row to 'ended' without touching the
+// counters, which is correct on its own. But the relay-present path is still
+// coming: it snapshotted frames=1, inputs=1 before the map entry went away, and
+// EndSession writes through `WHERE status = 'active'`. The guard is the same one
+// that made the first fix safe, and it fires here for the opposite reason -- the
+// row is no longer 'active', so the UPDATE matches nothing and the counters the
+// relay actually counted are discarded. The history says a desktop nobody
+// streamed to, and the operator's own session record contradicts it.
+//
+// The counters are the relay's to report; the status is not what decides
+// whether they land. EndSession writes them unconditionally, and CloseSession's
+// `WHERE status = 'active'` keeps it from overwriting an already-ended row.
+func TestTheTelemetryCloseLosingTheRaceStillWritesItsCounters(t *testing.T) {
+	h, database, _ := rcFixture(t)
+
+	// A session that streamed a frame and forwarded an input, still 'active',
+	// with its relay still registered.
+	session := &RemoteControlSession{DeviceID: "dev-1", OperatorID: "u-1", SessionMode: "full_control"}
+	if err := h.repo.CreateSession(context.Background(), session); err != nil {
+		t.Fatal(err)
+	}
+	relay := h.relay.RegisterSession(session.ID, session.SessionMode)
+	if err := relay.ForwardAgentFrame(websocket.BinaryMessage, []byte("frame")); err != nil {
+		t.Fatal(err)
+	}
+	if err := relay.ForwardOperatorInput(websocket.TextMessage, []byte("click")); err != nil {
+		t.Fatal(err)
+	}
+
+	// The two closes interleave. handleOperatorWS took the relay-present path:
+	// it deleted the map entry and snapshotted the counters, then stopSession
+	// arrived between that unlock and the telemetry write, found no entry, and
+	// took the relay-absent path to the row. The relay is replayed here in the
+	// state the operator-side close was in -- still holding its counters, still
+	// the entry CloseRelay is about to look up -- with the row already 'ended'
+	// underneath it.
+	if err := h.repo.CloseSession(context.Background(), session.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	// The relay-present close now reaches the row the absent path already closed,
+	// holding the counters it snapshotted. EndSession's
+	// `WHERE status = 'active'` guard matches nothing here.
+	h.relay.CloseRelay(session.ID)
+
+	var row struct {
+		Status string `db:"status"`
+		Frames int    `db:"frames_transmitted"`
+		Inputs int    `db:"input_events_count"`
+	}
+	if err := database.Get(&row, `SELECT status, frames_transmitted, input_events_count FROM remote_control_sessions`); err != nil {
+		t.Fatal(err)
+	}
+	if row.Status != "ended" {
+		t.Errorf("status = %q, want ended", row.Status)
+	}
+	if row.Frames != 1 {
+		t.Errorf("frames_transmitted = %d, want 1: the telemetry close lost the race and its "+
+			"counters were discarded by a guard that no longer matched the row", row.Frames)
+	}
+	if row.Inputs != 1 {
+		t.Errorf("input_events_count = %d, want 1", row.Inputs)
 	}
 }
 
