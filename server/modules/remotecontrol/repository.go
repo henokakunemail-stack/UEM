@@ -67,6 +67,29 @@ func (r *Repository) CreateSession(ctx context.Context, s *RemoteControlSession)
 	return nil
 }
 
+// CloseSession marks a session ended without touching its telemetry. It is the
+// path for a session whose relay is already gone: the operator's read loop
+// closed the relay and deleted the map entry, and stopSession then arrives for
+// the same session. EndSession would write its counters, and zero is a lie
+// here -- the counters the deleted relay recorded are the truth.
+func (r *Repository) CloseSession(ctx context.Context, id string) error {
+	now := time.Now().UTC()
+	res, err := r.db.ExecContext(ctx, `
+		UPDATE remote_control_sessions SET
+			status = 'ended',
+			ended_at = ?
+		WHERE id = ? AND status = 'active'
+	`, now, id)
+	if err != nil {
+		return fmt.Errorf("close rc session: %w", err)
+	}
+	rows, _ := res.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("session not found or already ended")
+	}
+	return nil
+}
+
 func (r *Repository) GetSessionByID(ctx context.Context, id string) (*RemoteControlSession, error) {
 	var s RemoteControlSession
 	query := `

@@ -183,10 +183,19 @@ func (rm *RelayManager) CloseRelay(sessionID string) {
 	// Nothing sweeps it, so it stayed in the device's session history as an
 	// ACTIVE session for the life of the installation, indistinguishable from
 	// one an operator has open right now.
+	//
+	// But a relay that is already gone may well have recorded telemetry before
+	// it left: the operator's read loop ends the relay itself when its socket
+	// breaks, the map entry is deleted there, and stopSession then arrives and
+	// takes this branch. Writing zeros through EndSession on a row that is still
+	// 'active' at that moment replaces real counts with nothing -- the session
+	// history shows zero frames for a desktop the operator was watching. The
+	// 'ended' status is what this branch owns; the counters belong to the relay
+	// that closed them, so it reports only the status.
 	if !exists || r == nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		_ = rm.repo.EndSession(ctx, sessionID, 0, 0, 0)
+		_ = rm.repo.CloseSession(ctx, sessionID)
 		return
 	}
 

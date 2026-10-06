@@ -219,6 +219,74 @@ func TestEndingASessionWithNoRelayAtAllStillClosesTheRow(t *testing.T) {
 	}
 }
 
+// TestASecondCloseDoesNotZeroTelemetryTheFirstCloseRecorded is the regression
+// test for a session history that reported an empty desktop.
+//
+// CloseRelay has two paths to the durable row. The relay-present path writes
+// the counters it snapshot; the relay-absent path -- `!exists || r == nil` --
+// used to call EndSession(0, 0, 0). Those two closes can race for one session:
+// stopSession runs in the HTTP handler goroutine while the agent's read loop
+// ends its own relay from another, so which one reaches the row first is not
+// determined. When the relay-absent close lands on a row that is still
+// 'active', EndSession's `WHERE status = 'active'` guard does not protect it --
+// the guard only stops a row that is already 'ended' -- so real counters are
+// overwritten with zeros. The operator watched a desktop and the history says
+// nothing was ever sent.
+//
+// The relay-absent path owns the status, not the counters. CloseSession is
+// status-only, so no interleaving can make it erase telemetry.
+func TestASecondCloseDoesNotZeroTelemetryTheFirstCloseRecorded(t *testing.T) {
+	h, database, _ := rcFixture(t)
+
+	// A live session that has already counted a frame and an input event but
+	// has not flushed either to the row yet. This is the state a session is in
+	// while the relay is still running.
+	session := &RemoteControlSession{DeviceID: "dev-1", OperatorID: "u-1", SessionMode: "full_control"}
+	if err := h.repo.CreateSession(context.Background(), session); err != nil {
+		t.Fatal(err)
+	}
+	relay := h.relay.RegisterSession(session.ID, session.SessionMode)
+	if err := relay.ForwardAgentFrame(websocket.BinaryMessage, []byte("frame")); err != nil {
+		t.Fatal(err)
+	}
+	if err := relay.ForwardOperatorInput(websocket.TextMessage, []byte("click")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`UPDATE remote_control_sessions
+		SET frames_transmitted = ?, bytes_transmitted = ?, input_events_count = ? WHERE id = ?`,
+		relay.framesCount, relay.bytesCount, relay.inputsCount, session.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	// The relay's map entry has already been removed -- the read-loop path --
+	// while the row is still 'active'. stopSession then arrives at a manager
+	// holding no entry for this session.
+	delete(h.relay.relays, session.ID)
+	h.relay.CloseRelay(session.ID)
+
+	var row struct {
+		Status string `db:"status"`
+		Frames int    `db:"frames_transmitted"`
+		Bytes  int64  `db:"bytes_transmitted"`
+		Inputs int    `db:"input_events_count"`
+	}
+	if err := database.Get(&row, `SELECT status, frames_transmitted, bytes_transmitted, input_events_count FROM remote_control_sessions`); err != nil {
+		t.Fatal(err)
+	}
+	if row.Status != "ended" {
+		t.Errorf("status = %q, want ended: a session that was stopped must not stay ACTIVE", row.Status)
+	}
+	if row.Frames != 1 {
+		t.Errorf("frames_transmitted = %d, want 1: the relay-absent close erased telemetry a running session had already counted", row.Frames)
+	}
+	if row.Inputs != 1 {
+		t.Errorf("input_events_count = %d, want 1: the relay-absent close erased the recorded input events", row.Inputs)
+	}
+	if row.Bytes != int64(len("frame")) {
+		t.Errorf("bytes_transmitted = %d, want %d", row.Bytes, len("frame"))
+	}
+}
+
 var _ = json.Marshal
 
 // TestTheRelayPingsSoItsOwnDeadlineCanBeRefreshed is the regression test for a
