@@ -54,7 +54,7 @@ func (n *nftablesFirewall) Apply(addrs []net.IP) (int, error) {
 	if err := runNFT("delete", "table", "inet", nftTable); err != nil {
 		// Absent table is the normal first-run case.
 		if !isNotFound(err) {
-			return 0, fmt.Errorf("%w: %v", ErrFirewallPermission, err)
+			return 0, fmt.Errorf("%w: %w", ErrFirewallPermission, err)
 		}
 	}
 	if len(addrs) == 0 {
@@ -72,7 +72,7 @@ func (n *nftablesFirewall) Apply(addrs []net.IP) (int, error) {
 		"add", "rule", "inet", nftTable, "output",
 		"ip", "daddr", "@"+nftSet, "drop",
 	); err != nil {
-		return 0, fmt.Errorf("%w: %v", ErrFirewallPermission, err)
+		return 0, fmt.Errorf("%w: %w", ErrFirewallPermission, err)
 	}
 
 	applied := 0
@@ -90,7 +90,7 @@ func (n *nftablesFirewall) Apply(addrs []net.IP) (int, error) {
 		}
 		if err := runNFT("add", "element", "inet", nftTable, nftSet,
 			"{ "+strings.Join(elements, ", ")+" }"); err != nil {
-			return applied, fmt.Errorf("%w: %v", ErrFirewallPermission, err)
+			return applied, fmt.Errorf("%w: %w", ErrFirewallPermission, err)
 		}
 		applied += len(chunk)
 	}

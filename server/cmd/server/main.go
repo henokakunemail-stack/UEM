@@ -560,13 +560,13 @@ func buildServer(cfg config.Config, database *sqlx.DB) (*http.Server, func()) {
 	}
 
 	// Background sweeper: mark devices whose agents went silent as offline.
-	go runOfflineSweep(database, hub, cfg.AgentOfflineAfter)
+	go runOfflineSweep(bgCtx, database, hub, cfg.AgentOfflineAfter)
 
 	// Deployment tasks whose agent died mid-install never get a final report:
 	// the agent posts progress over HTTP from a goroutine, and a logout, an
 	// agent update, or a pulled power cord all end that goroutine silently. This
 	// reaps them so a rollout does not read as 'still running' forever.
-	go runDeploymentSweep(softRepo)
+	go runDeploymentSweep(bgCtx, softRepo)
 
 	// Maintenance tasks stranded by an agent that took the command and then
 	// never reported. Nothing else closes them: the job status is written only
@@ -695,51 +695,56 @@ func bootstrapAdmin(d *sqlx.DB) error {
 // transient heartbeat stall, and a device whose socket is gone is marked offline
 // by the disconnect handler itself. This sweeper catches the remaining case —
 // a socket that died silently (e.g. NAT timeout) without a close frame.
-func runOfflineSweep(d *sqlx.DB, hub *transport.Hub, threshold time.Duration) {
+func runOfflineSweep(ctx context.Context, d *sqlx.DB, hub *transport.Hub, threshold time.Duration) {
 	ticker := time.NewTicker(15 * time.Second)
 	defer ticker.Stop()
-	for range ticker.C {
-		// The staleness cutoff is part of the one SELECT, deliberately. Filtering
-		// per device instead would be 10,000 extra round trips every 15 seconds
-		// on a large fleet, which is the cost the batched write below exists to
-		// avoid.
-		//
-		// This also had a correctness bug: the sweep used to flip every
-		// socket-less device offline regardless of age, so a device that was
-		// merely mid-reconnect was marked down, and AGENT_OFFLINE_AFTER only
-		// ever set the read deadline.
-		//
-		// A device with a NULL last_seen_at has never reported, so there is no
-		// staleness to judge; enrollment decides its initial state, and guessing
-		// here would flip a freshly enrolled device offline on the first tick.
-		now := time.Now().UTC()
-		var ids []string
-		err := d.Select(&ids,
-			`SELECT id FROM devices
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			// The staleness cutoff is part of the one SELECT, deliberately. Filtering
+			// per device instead would be 10,000 extra round trips every 15 seconds
+			// on a large fleet, which is the cost the batched write below exists to
+			// avoid.
+			//
+			// This also had a correctness bug: the sweep used to flip every
+			// socket-less device offline regardless of age, so a device that was
+			// merely mid-reconnect was marked down, and AGENT_OFFLINE_AFTER only
+			// ever set the read deadline.
+			//
+			// A device with a NULL last_seen_at has never reported, so there is no
+			// staleness to judge; enrollment decides its initial state, and guessing
+			// here would flip a freshly enrolled device offline on the first tick.
+			now := time.Now().UTC()
+			var ids []string
+			err := d.Select(&ids,
+				`SELECT id FROM devices
 			 WHERE status = 'online'
 			   AND last_seen_at IS NOT NULL
 			   AND last_seen_at < ?`,
-			now.Add(-threshold))
-		if err != nil {
-			log.Debug().Err(err).Msg("offline sweep: list stale devices")
-			continue
-		}
-
-		// Collect first, then write in ONE transaction. A per-device UPDATE
-		// would mean 10,000 separate write transactions every sweep on a large
-		// fleet, reintroducing exactly the SQLite write-lock contention the
-		// HeartbeatFlusher exists to avoid.
-		stale := make([]string, 0, len(ids))
-		for _, id := range ids {
-			if hub.Online(id) {
-				continue // live socket — trust it over last_seen
+				now.Add(-threshold))
+			if err != nil {
+				log.Debug().Err(err).Msg("offline sweep: list stale devices")
+				continue
 			}
-			stale = append(stale, id)
+
+			// Collect first, then write in ONE transaction. A per-device UPDATE
+			// would mean 10,000 separate write transactions every sweep on a large
+			// fleet, reintroducing exactly the SQLite write-lock contention the
+			// HeartbeatFlusher exists to avoid.
+			stale := make([]string, 0, len(ids))
+			for _, id := range ids {
+				if hub.Online(id) {
+					continue // live socket — trust it over last_seen
+				}
+				stale = append(stale, id)
+			}
+			if len(stale) == 0 {
+				continue
+			}
+			markOfflineBatch(d, stale, now)
 		}
-		if len(stale) == 0 {
-			continue
-		}
-		markOfflineBatch(d, stale, now)
 	}
 }
 
@@ -754,20 +759,28 @@ func runOfflineSweep(d *sqlx.DB, hub *transport.Hub, threshold time.Duration) {
 //
 // The sweep runs on the same cadence as the offline sweep and after it, so a
 // device is marked offline first and its tasks are reaped on a later tick.
-func runDeploymentSweep(repo *softwaredeployment.Repository) {
+func runDeploymentSweep(ctx context.Context, repo *softwaredeployment.Repository) {
 	ticker := time.NewTicker(softwaredeployment.SweepInterval)
 	defer ticker.Stop()
-	for range ticker.C {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		n, err := repo.AbandonOrphanedTasks(ctx, softwaredeployment.AbandonGrace)
-		cancel()
-		if err != nil {
-			log.Warn().Err(err).Msg("deployment sweep: reap orphaned tasks")
-			continue
-		}
-		if n > 0 {
-			log.Warn().Int64("tasks", n).
-				Msg("deployment sweep: marked tasks failed because their agent stopped reporting")
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			sweepCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+			n, err := repo.AbandonOrphanedTasks(sweepCtx, softwaredeployment.AbandonGrace)
+			cancel()
+			if err != nil {
+				if ctx.Err() != nil {
+					return
+				}
+				log.Warn().Err(err).Msg("deployment sweep: reap orphaned tasks")
+				continue
+			}
+			if n > 0 {
+				log.Warn().Int64("tasks", n).
+					Msg("deployment sweep: marked tasks failed because their agent stopped reporting")
+			}
 		}
 	}
 }

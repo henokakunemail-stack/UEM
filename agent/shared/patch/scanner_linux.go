@@ -121,7 +121,7 @@ func scanDnf(ctx context.Context, bin string) ([]PatchItem, error) {
 	// mirror, another process holding the lock -- and its stdout lists nothing.
 	// Swallowing it reported every broken repository as an up-to-date host.
 	var exitErr *exec.ExitError
-	if err != nil && !(errors.As(err, &exitErr) && exitErr.ExitCode() == 100) {
+	if err != nil && (!errors.As(err, &exitErr) || exitErr.ExitCode() != 100) {
 		return nil, fmt.Errorf("%s check-update failed: %w: %s",
 			bin, err, strings.TrimSpace(stderr.String()))
 	}

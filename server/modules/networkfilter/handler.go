@@ -142,12 +142,12 @@ func (h *Handler) getPolicy(w http.ResponseWriter, r *http.Request) {
 }
 
 type createPolicyReq struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	TargetType  string `json:"target_type"`
-	TargetID    string `json:"target_id"`
-	IsEnabled   *bool  `json:"is_enabled"`
-	Priority    int    `json:"priority"`
+	Name        string  `json:"name"`
+	Description *string `json:"description"`
+	TargetType  string  `json:"target_type"`
+	TargetID    *string `json:"target_id"`
+	IsEnabled   *bool   `json:"is_enabled"`
+	Priority    int     `json:"priority"`
 }
 
 // updatePolicyReq is deliberately not createPolicyReq. A partial update has to
@@ -222,7 +222,11 @@ func (h *Handler) createPolicy(w http.ResponseWriter, r *http.Request) {
 	if req.TargetType == "" {
 		req.TargetType = "all"
 	}
-	if err := h.validateTarget(r.Context(), req.TargetType, req.TargetID); err != nil {
+	targetID := ""
+	if req.TargetID != nil {
+		targetID = *req.TargetID
+	}
+	if err := h.validateTarget(r.Context(), req.TargetType, targetID); err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -235,11 +239,18 @@ func (h *Handler) createPolicy(w http.ResponseWriter, r *http.Request) {
 	}
 
 	actorID := auth.UserIDFromContext(r.Context())
+	description := ""
+	if req.Description != nil {
+		description = *req.Description
+	}
+	if req.TargetID != nil {
+		targetID = *req.TargetID
+	}
 	policy := &FilterPolicy{
 		Name:        req.Name,
-		Description: req.Description,
+		Description: description,
 		TargetType:  req.TargetType,
-		TargetID:    req.TargetID,
+		TargetID:    targetID,
 		IsEnabled:   isEnabled,
 		Priority:    req.Priority,
 		CreatedBy:   actorID,

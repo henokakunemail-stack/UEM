@@ -44,6 +44,8 @@ func targetFixture(t *testing.T) (*Handler, *sqlx.DB) {
 	return h, database
 }
 
+func strPtr(s string) *string { return &s }
+
 func postPolicy(t *testing.T, h *Handler, body createPolicyReq) *httptest.ResponseRecorder {
 	t.Helper()
 	raw, err := json.Marshal(body)
@@ -66,7 +68,8 @@ func postPolicy(t *testing.T, h *Handler, body createPolicyReq) *httptest.Respon
 func TestPolicyTargetingAnUnknownDeviceIsRejected(t *testing.T) {
 	h, _ := targetFixture(t)
 
-	rec := postPolicy(t, h, createPolicyReq{Name: "typo", TargetType: "device", TargetID: "dev-aa"})
+	devID := "dev-aa"
+	rec := postPolicy(t, h, createPolicyReq{Name: "typo", TargetType: "device", TargetID: &devID})
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400: a policy aimed at a device that does not exist was "+
 			"stored and will silently match nothing (body: %s)", rec.Code, rec.Body.String())
@@ -78,7 +81,8 @@ func TestPolicyTargetingAnUnknownDeviceIsRejected(t *testing.T) {
 func TestPolicyTargetingAnUnknownGroupIsRejected(t *testing.T) {
 	h, _ := targetFixture(t)
 
-	rec := postPolicy(t, h, createPolicyReq{Name: "typo", TargetType: "group", TargetID: "grp-financ"})
+	grpID := "grp-financ"
+	rec := postPolicy(t, h, createPolicyReq{Name: "typo", TargetType: "group", TargetID: &grpID})
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400 (body: %s)", rec.Code, rec.Body.String())
 	}
@@ -115,7 +119,7 @@ func TestFleetWidePolicyNeedsNoTarget(t *testing.T) {
 	if rec := postPolicy(t, h, createPolicyReq{Name: "everyone"}); rec.Code != http.StatusCreated {
 		t.Fatalf("status = %d, want 201 (body: %s)", rec.Code, rec.Body.String())
 	}
-	if rec := postPolicy(t, h, createPolicyReq{Name: "everyone explicit", TargetType: "all", TargetID: "ignored"}); rec.Code != http.StatusCreated {
+	if rec := postPolicy(t, h, createPolicyReq{Name: "everyone explicit", TargetType: "all", TargetID: strPtr("ignored")}); rec.Code != http.StatusCreated {
 		t.Fatalf("status = %d, want 201: an explicit 'all' must still be accepted (body: %s)",
 			rec.Code, rec.Body.String())
 	}
@@ -125,8 +129,8 @@ func TestPolicyTargetingAKnownDeviceOrGroupIsAccepted(t *testing.T) {
 	h, _ := targetFixture(t)
 
 	for _, tc := range []createPolicyReq{
-		{Name: "one laptop", TargetType: "device", TargetID: "dev-a"},
-		{Name: "finance", TargetType: "group", TargetID: "grp-fin"},
+		{Name: "one laptop", TargetType: "device", TargetID: strPtr("dev-a")},
+		{Name: "finance", TargetType: "group", TargetID: strPtr("grp-fin")},
 	} {
 		if rec := postPolicy(t, h, tc); rec.Code != http.StatusCreated {
 			t.Errorf("%q: status = %d, want 201 (body: %s)", tc.Name, rec.Code, rec.Body.String())

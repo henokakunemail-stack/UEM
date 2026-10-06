@@ -194,8 +194,8 @@ func (c *linuxCollector) collectDisks() []inventory.Disk {
 		disks = append(disks, inventory.Disk{
 			Name:       mountpoint,
 			Filesystem: fstype,
-			TotalBytes: int64(st.Blocks) * int64(st.Bsize),
-			FreeBytes:  int64(st.Bavail) * int64(st.Bsize),
+			TotalBytes: int64(st.Blocks) * st.Bsize,
+			FreeBytes:  int64(st.Bavail) * st.Bsize,
 		})
 	}
 	return disks
