@@ -36,6 +36,29 @@ func dialAgent(t *testing.T) (server *websocket.Conn) {
 	return <-got
 }
 
+func TestDisconnectWithdrawsAndClosesAgentSocket(t *testing.T) {
+	server := dialAgent(t)
+	hub := NewHub()
+	c := hub.Register("dev-1", server)
+	if !hub.Online("dev-1") {
+		t.Fatal("registered device must be online")
+	}
+	hub.Disconnect("dev-1")
+	hub.Disconnect("dev-1") // already gone
+	if hub.Online("dev-1") {
+		t.Fatal("revoked device remains routable in the hub")
+	}
+	if err := c.ws.WriteMessage(websocket.TextMessage, []byte("still connected")); err == nil {
+		t.Fatal("revoked WebSocket is still writable")
+	}
+	// Old deferred cleanup cannot evict a new connection registered later.
+	next := hub.Register("dev-1", dialAgent(t))
+	hub.Unregister(c)
+	if hub.Get("dev-1") != next {
+		t.Fatal("old connection's cleanup removed the replacement")
+	}
+}
+
 // TestSendOnAConnBeingTornDownNeverPanics is the regression test for the only
 // path to total process death in the server.
 //

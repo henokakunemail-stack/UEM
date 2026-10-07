@@ -137,6 +137,19 @@ func (h *Hub) Register(deviceID string, ws *websocket.Conn) *Conn {
 	return c
 }
 
+// Disconnect withdraws a device's live connection after its credential is
+// revoked. Closing the socket unblocks the read loop, which owns the normal
+// cleanup; the send channel must not be closed here.
+func (h *Hub) Disconnect(deviceID string) {
+	h.mu.Lock()
+	c := h.conns[deviceID]
+	delete(h.conns, deviceID)
+	h.mu.Unlock()
+	if c != nil {
+		_ = c.ws.Close()
+	}
+}
+
 // Unregister removes a connection if it is still the registered one.
 func (h *Hub) Unregister(c *Conn) {
 	h.mu.Lock()

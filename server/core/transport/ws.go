@@ -151,7 +151,8 @@ func (h *WSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	dev, err := h.repo.FindBySecretHash(r.Context(), devicemgmt.HashToken(secret))
+	secretHash := devicemgmt.HashToken(secret)
+	dev, err := h.repo.FindBySecretHash(r.Context(), secretHash)
 	if errors.Is(err, devicemgmt.ErrNotFound) {
 		http.Error(w, "invalid device credentials", http.StatusUnauthorized)
 		return
@@ -174,6 +175,13 @@ func (h *WSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	c := h.hub.Register(deviceID, ws)
+	// Retire or rotation may have committed between the pre-upgrade lookup
+	// and Register; never leave that already-revoked socket in the hub.
+	if !h.credentialIsLive(r.Context(), deviceID, secretHash) {
+		h.hub.Unregister(c)
+		_ = ws.Close()
+		return
+	}
 
 	// done is closed by writePump when it stops. The cleanup below waits for
 	// that before closing the socket, so it must exist before the defer runs.
@@ -209,8 +217,15 @@ func (h *WSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	_ = audit.Log(r.Context(), h.db, "agent", deviceID, "agent.connect", deviceID, nil)
 
-	// Mark online as soon as the connection is authenticated.
-	_ = h.repo.UpdateStatus(r.Context(), deviceID, devicemgmt.StatusOnline, time.Now().UTC())
+	// Mark online only while the device is active. A concurrent retirement may
+	// have won after the credential recheck; do not dispatch queued work then.
+	if err := h.repo.UpdateStatus(r.Context(), deviceID, devicemgmt.StatusOnline, time.Now().UTC()); err != nil {
+		log.Warn().Err(err).Str("device", deviceID).Msg("refusing agent connection without active device")
+		return
+	}
+	if !h.credentialIsLive(r.Context(), deviceID, secretHash) {
+		return
+	}
 
 	// Flush whatever was queued while this device was away. After the status
 	// update, not before: the queue flush reads the release and sends on this
@@ -239,7 +254,7 @@ func (h *WSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// and marks the device offline. Waiting for done *here* as well would
 	// deadlock: closeSend is called from that same closure, which cannot run
 	// while this frame is still blocked.
-	h.readLoop(r.Context(), c, ws)
+	h.readLoop(r.Context(), c, ws, secretHash)
 }
 
 // readDeadline returns the read timeout used for the agent connection. Chosen
@@ -264,8 +279,21 @@ func (h *WSHandler) pingLoop(c *Conn) {
 	}
 }
 
+// credentialIsLive checks the current row, not the identity accepted when the
+// WebSocket first upgraded. Retirement and rotation both invalidate that row.
+func (h *WSHandler) credentialIsLive(ctx context.Context, deviceID, secretHash string) bool {
+	dev, err := h.repo.FindBySecretHash(ctx, secretHash)
+	if err != nil {
+		if !errors.Is(err, devicemgmt.ErrNotFound) {
+			log.Error().Err(err).Str("device", deviceID).Msg("check agent credential")
+		}
+		return false
+	}
+	return dev.ID == deviceID
+}
+
 // readLoop handles inbound agent messages until the connection breaks.
-func (h *WSHandler) readLoop(ctx context.Context, c *Conn, ws *websocket.Conn) {
+func (h *WSHandler) readLoop(ctx context.Context, c *Conn, ws *websocket.Conn, secretHash string) {
 	// A pong from the agent refreshes the read deadline, proving the
 	// connection is alive without relying on application-level heartbeats alone.
 	ws.SetPongHandler(func(string) error {
@@ -276,6 +304,9 @@ func (h *WSHandler) readLoop(ctx context.Context, c *Conn, ws *websocket.Conn) {
 		_, data, err := ws.ReadMessage()
 		if err != nil {
 			return // client closed or error
+		}
+		if !h.credentialIsLive(ctx, c.DeviceID, secretHash) {
+			return // revoked after upgrade; process no more frames
 		}
 		var env Envelope
 		if err := json.Unmarshal(data, &env); err != nil {

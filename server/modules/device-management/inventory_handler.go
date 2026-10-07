@@ -55,6 +55,7 @@ func NewInventoryHandler(repo *InventoryRepository, db *sqlx.DB, hub hubSender) 
 type hubSender interface {
 	Online(deviceID string) bool
 	SendTo(deviceID string, b []byte) bool
+	Disconnect(deviceID string)
 }
 
 func newInventoryHandler(repo *inventoryRepository, auditDB auditWriter, hub hubSender) *inventoryHandler {
@@ -306,6 +307,7 @@ func (h *inventoryHandler) retireDevice(w http.ResponseWriter, r *http.Request) 
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	h.hub.Disconnect(deviceID)
 	_ = h.auditDB.Log(r.Context(), "user", auth.UserIDFromContext(r.Context()),
 		"device.retire", deviceID, nil)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "retired"})

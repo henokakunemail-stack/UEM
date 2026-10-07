@@ -37,6 +37,7 @@ type offlineHub struct{}
 
 func (offlineHub) Online(string) bool         { return false }
 func (offlineHub) SendTo(string, []byte) bool { return false }
+func (offlineHub) Disconnect(string)          {}
 
 func newInventoryEnv(t *testing.T) (*httptest.Server, *sqlx.DB) {
 	t.Helper()
@@ -51,10 +52,7 @@ func newInventoryEnv(t *testing.T) (*httptest.Server, *sqlx.DB) {
 	invRepo := devicemgmt.NewInventoryRepository(d)
 
 	// The hub is offline for every device by construction.
-	var hub interface {
-		Online(string) bool
-		SendTo(string, []byte) bool
-	} = offlineHub{}
+	hub := offlineHub{}
 	invH := devicemgmt.NewInventoryHandler(invRepo, d, hub).
 		WithAuth(jwtSvc.RequireAuth)
 

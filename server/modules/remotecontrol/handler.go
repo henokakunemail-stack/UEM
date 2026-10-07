@@ -368,10 +368,25 @@ func (h *Handler) handleAgentWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Read screen frames from agent and forward to operator
+	// A retired or rotated device must not keep streaming on a socket that
+	// authenticated before the credential changed. Check again after attach to
+	// cover the handshake race, and before forwarding every subsequent frame.
+	secretHash := devicemgmt.HashToken(r.Header.Get("X-Device-Secret"))
+	credentialLive := func() bool {
+		dev, err := h.devices.FindBySecretHash(r.Context(), secretHash)
+		return err == nil && dev.ID == authenticatedDeviceID
+	}
+	if !credentialLive() {
+		h.relay.CloseRelay(sessionID)
+		return
+	}
 	for {
 		msgType, msg, err := ws.ReadMessage()
 		if err != nil {
+			break
+		}
+		if !credentialLive() {
+			h.relay.CloseRelay(sessionID)
 			break
 		}
 		if err := relay.ForwardAgentFrame(msgType, msg); err != nil {

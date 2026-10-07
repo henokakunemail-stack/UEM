@@ -77,13 +77,15 @@ func (r *inventoryRepository) getInventory(ctx context.Context, deviceID string)
 	return inv, nil
 }
 
-// retire removes a device from the fleet without deleting its row: the secret is
-// cleared so the agent can no longer authenticate, while audit references stay
+// retire removes a device from the fleet without deleting its row: the secret
+// and any unspent enrollment token are cleared, while audit references stay
 // resolvable. Returns ErrNotFound if the device does not exist.
 func (r *inventoryRepository) retire(ctx context.Context, id string) error {
 	res, err := r.db.ExecContext(ctx, `
 		UPDATE devices
-		SET status = ?, retired_at = ?, device_secret_hash = '', updated_at = ?
+		SET status = ?, retired_at = ?, device_secret_hash = '',
+		    enrollment_token_hash = NULL, enrollment_token_expires_at = NULL,
+		    updated_at = ?
 		WHERE id = ? AND retired_at IS NULL`,
 		StatusRetired, time.Now().UTC(), time.Now().UTC(), id)
 	if err != nil {

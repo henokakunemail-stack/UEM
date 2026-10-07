@@ -2,6 +2,7 @@ package devicemanagement
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"path/filepath"
 	"testing"
@@ -35,6 +36,39 @@ func seedPendingToken(t *testing.T, d *sqlx.DB, id string, expires *time.Time) s
 		t.Fatalf("seed pending token for %s: %v", id, err)
 	}
 	return plain
+}
+
+func TestRetireInvalidatesPendingEnrollmentAndDeviceCredentials(t *testing.T) {
+	ctx := context.Background()
+	d := newExpiryDB(t)
+	repo := NewRepository(d)
+	lifecycle := newInventoryRepository(d)
+	token := seedPendingToken(t, d, "pending", nil)
+	if err := lifecycle.retire(ctx, "pending"); err != nil {
+		t.Fatal(err)
+	}
+	var stored sql.NullString
+	if err := d.Get(&stored, `SELECT enrollment_token_hash FROM devices WHERE id = 'pending'`); err != nil {
+		t.Fatal(err)
+	}
+	if stored.Valid {
+		t.Fatal("retire left an enrollment token that could mint a new credential")
+	}
+	if _, err := repo.findByEnrollmentTokenHash(ctx, HashToken(token)); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("retired token lookup = %v, want ErrNotFound", err)
+	}
+	if err := repo.ConsumeEnrollmentToken(ctx, HashToken(token), HashToken("new-secret")); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("retired token consume = %v, want ErrNotFound", err)
+	}
+
+	// Even if an old credential hash is restored by a concurrent write, the
+	// retired flag itself must block authentication at the repository boundary.
+	if _, err := d.Exec(`UPDATE devices SET device_secret_hash = ? WHERE id = 'pending'`, HashToken("old-secret")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.FindBySecretHash(ctx, HashToken("old-secret")); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("retired device secret lookup = %v, want ErrNotFound", err)
+	}
 }
 
 // An enrollment token that nobody used used to stay valid forever. The endpoint

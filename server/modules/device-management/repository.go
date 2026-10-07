@@ -113,7 +113,7 @@ func (r *Repository) ListPaged(ctx context.Context, status, site string, limit, 
 // UpdateStatus sets status and last_seen_at.
 func (r *Repository) UpdateStatus(ctx context.Context, id, status string, lastSeen time.Time) error {
 	res, err := r.db.ExecContext(ctx, `
-		UPDATE devices SET status = ?, last_seen_at = ?, updated_at = ? WHERE id = ?`,
+		UPDATE devices SET status = ?, last_seen_at = ?, updated_at = ? WHERE id = ? AND retired_at IS NULL`,
 		status, lastSeen, time.Now().UTC(), id)
 	if err != nil {
 		return fmt.Errorf("update status %s: %w", id, err)
@@ -162,7 +162,7 @@ func (r *Repository) ConsumeEnrollmentToken(ctx context.Context, tokenHash, secr
 	res, err := r.db.ExecContext(ctx, `
 		UPDATE devices SET device_secret_hash = ?, enrollment_token_hash = NULL,
 		                   status = 'offline', updated_at = ?
-		WHERE enrollment_token_hash = ?
+		WHERE enrollment_token_hash = ? AND retired_at IS NULL
 		  AND (enrollment_token_expires_at IS NULL OR enrollment_token_expires_at > ?)`,
 		secretHash, time.Now().UTC(), tokenHash, time.Now().UTC())
 	if err != nil {
@@ -186,7 +186,7 @@ func (r *Repository) findByEnrollmentTokenHash(ctx context.Context, tokenHash st
 	var d Device
 	err := r.db.GetContext(ctx, &d, `
 		SELECT * FROM devices
-		WHERE enrollment_token_hash = ?
+		WHERE enrollment_token_hash = ? AND retired_at IS NULL
 		  AND (enrollment_token_expires_at IS NULL OR enrollment_token_expires_at > ?)`,
 		tokenHash, time.Now().UTC())
 	if errors.Is(err, sql.ErrNoRows) {
@@ -202,7 +202,7 @@ func (r *Repository) findByEnrollmentTokenHash(ctx context.Context, tokenHash st
 // Used to authenticate agent WebSocket connections.
 func (r *Repository) FindBySecretHash(ctx context.Context, secretHash string) (Device, error) {
 	var d Device
-	err := r.db.GetContext(ctx, &d, `SELECT * FROM devices WHERE device_secret_hash = ?`, secretHash)
+	err := r.db.GetContext(ctx, &d, `SELECT * FROM devices WHERE device_secret_hash = ? AND retired_at IS NULL`, secretHash)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Device{}, ErrNotFound
 	}

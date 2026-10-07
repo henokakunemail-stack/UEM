@@ -47,6 +47,7 @@ type offlineHub struct{}
 
 func (offlineHub) Online(string) bool         { return false }
 func (offlineHub) SendTo(string, []byte) bool { return false }
+func (offlineHub) Disconnect(string)          {}
 
 // TestDiffInventoryNoChange checks that an identical snapshot produces no
 // audit-worthy change: the common case, which must stay out of the audit trail.
