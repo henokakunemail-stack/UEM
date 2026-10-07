@@ -198,6 +198,25 @@ func (r *Repository) findByEnrollmentTokenHash(ctx context.Context, tokenHash st
 	return d, nil
 }
 
+// ReissueEnrollmentToken rotates credentials for an existing row and mints a new
+// one-time token in one conditional write. The old secret cannot reconnect as
+// soon as the write commits. A retired row cannot be resurrected by reissuing.
+func (r *Repository) ReissueEnrollmentToken(ctx context.Context, id, tokenHash, placeholderSecretHash string, expiresAt time.Time) error {
+	res, err := r.db.ExecContext(ctx, `
+		UPDATE devices SET enrollment_token_hash = ?, enrollment_token_expires_at = ?,
+		                   device_secret_hash = ?, status = 'offline', updated_at = ?
+		WHERE id = ? AND retired_at IS NULL`,
+		tokenHash, expiresAt, placeholderSecretHash, time.Now().UTC(), id)
+	if err != nil {
+		return fmt.Errorf("reissue enrollment token %s: %w", id, err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // FindBySecretHash looks up a device by its hashed persistent secret.
 // Used to authenticate agent WebSocket connections.
 func (r *Repository) FindBySecretHash(ctx context.Context, secretHash string) (Device, error) {

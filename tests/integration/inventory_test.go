@@ -188,6 +188,16 @@ func TestE2EInventoryLifecycle(t *testing.T) {
 		t.Fatal("restore must not resurrect the old secret; re-enrollment is required")
 	}
 
+	// --- re-enroll the restored row through the reissue endpoint ---
+	reissued := invPost(t, ts.URL+"/api/devices/"+deviceID+"/enroll-token", adminTok, nil)
+	token, _ := reissued["enrollment_token"].(string)
+	if token == "" || reissued["device_id"] != deviceID {
+		t.Fatalf("reissue must return a one-time token for the same device, got %v", reissued)
+	}
+	if code := invPostCode(t, ts.URL+"/api/devices/does-not-exist/enroll-token", adminTok, nil); code != http.StatusNotFound {
+		t.Fatalf("reissue for unknown device: expected 404, got %d", code)
+	}
+
 	// --- collect while offline must answer 202, never "sent" ---
 	res = invPost(t, ts.URL+"/api/devices/"+deviceID+"/inventory/collect", adminTok, nil)
 	if res["status"] != "queued" {

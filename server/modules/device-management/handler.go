@@ -34,6 +34,7 @@ func (h *Handler) Register(r chi.Router) {
 		r.With(h.jwt.RequireAuth, rbac.RequireRole(rbac.RoleViewer)).Get("/devices/{id}", h.getDevice)
 		// Creating enrollment tokens is admin-only.
 		r.With(h.jwt.RequireAuth, rbac.RequireRole(rbac.RoleAdmin)).Post("/devices/enroll-token", h.createEnrollToken)
+		r.With(h.jwt.RequireAuth, rbac.RequireRole(rbac.RoleAdmin)).Post("/devices/{id}/enroll-token", h.enrollExisting)
 		r.With(h.jwt.RequireAuth, rbac.RequireRole(rbac.RoleTechnician)).Get("/audit-logs", h.listAudit)
 	})
 }
@@ -148,6 +149,30 @@ type createEnrollTokenResp struct {
 	DeviceID        string    `json:"device_id"`
 	EnrollmentToken string    `json:"enrollment_token"`
 	ExpiresAt       time.Time `json:"expires_at"`
+}
+
+func (h *Handler) issueEnrollmentToken() (plaintext, hash string, expiresAt time.Time) {
+	plaintext = GenerateToken()
+	hash = HashToken(plaintext) // consumed to NULL once the agent enrolls
+	return plaintext, hash, time.Now().UTC().Add(h.ttl)
+}
+
+// enrollExisting issues a token for an already known row. It is the re-entry
+// path after retire/restore or a lost credential exchange, not a new agent.
+func (h *Handler) enrollExisting(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	plain, tokenHash, expiresAt := h.issueEnrollmentToken()
+	if err := h.repo.ReissueEnrollmentToken(r.Context(), id, tokenHash, HashToken(GenerateToken()), expiresAt); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			writeErr(w, http.StatusNotFound, "device not found or retired")
+			return
+		}
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	actor := auth.UserIDFromContext(r.Context())
+	_ = audit.Log(r.Context(), h.db, "user", actor, "device.enroll_token_reissued", id, nil)
+	writeJSON(w, http.StatusOK, createEnrollTokenResp{DeviceID: id, EnrollmentToken: plain, ExpiresAt: expiresAt})
 }
 
 // createEnrollToken pre-registers a device and returns a one-time enrollment token

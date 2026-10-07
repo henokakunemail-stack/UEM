@@ -4,10 +4,12 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/audit"
+	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/auth"
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/httpguard"
 	"github.com/jmoiron/sqlx"
 	"github.com/rs/zerolog/log"
@@ -28,10 +30,37 @@ type chiRouter interface {
 type EnrollmentHandler struct {
 	repo *Repository
 	db   *sqlx.DB
+	// limiter throttles failed token guesses from one peer. Without it the
+	// endpoint is an oracle to mint device secrets by brute force.
+	limiter  *auth.IPRateLimiter
+	clientIP *auth.ClientIPResolver
 }
 
 func NewEnrollmentHandler(repo *Repository, db *sqlx.DB) *EnrollmentHandler {
-	return &EnrollmentHandler{repo: repo, db: db}
+	return &EnrollmentHandler{repo: repo, db: db,
+		limiter:  auth.NewIPRateLimiter(10, 1*time.Minute, 5*time.Minute),
+		clientIP: auth.NewClientIPResolver(nil),
+	}
+}
+
+// WithRateLimiter swaps the limiter (tests).
+func (h *EnrollmentHandler) WithRateLimiter(l *auth.IPRateLimiter) *EnrollmentHandler {
+	if h.limiter != nil {
+		h.limiter.Close()
+	}
+	h.limiter = l
+	return h
+}
+
+func (h *EnrollmentHandler) WithTrustedProxies(proxies []string) *EnrollmentHandler {
+	h.clientIP = auth.NewClientIPResolver(proxies)
+	return h
+}
+
+func (h *EnrollmentHandler) Close() {
+	if h.limiter != nil {
+		h.limiter.Close()
+	}
 }
 
 // Register mounts the enrollment endpoint. Accepts *http.ServeMux or chi mux.
@@ -88,10 +117,21 @@ func (h *EnrollmentHandler) enroll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	clientIP := h.clientIP.ClientIP(r)
+	if allowed, wait := h.limiter.IsAllowed(clientIP); !allowed {
+		writeErr(w, http.StatusTooManyRequests, "too many enrollment attempts; try again later")
+		_ = wait
+		return
+	}
+
 	tokenHash := HashToken(req.EnrollmentToken)
 	// Confirm the token is registered before minting a secret.
 	dev, err := h.repo.findByEnrollmentTokenHash(r.Context(), tokenHash)
 	if errors.Is(err, ErrNotFound) {
+		h.limiter.RecordFailure(clientIP)
+		_ = audit.Log(r.Context(), h.db, "agent", "", "device.enroll_failed", "", map[string]string{
+			"reason": "invalid or expired enrollment token", "ip": clientIP,
+		})
 		writeErr(w, http.StatusUnauthorized, "invalid or expired enrollment token")
 		return
 	}
@@ -104,10 +144,9 @@ func (h *EnrollmentHandler) enroll(w http.ResponseWriter, r *http.Request) {
 	plain := GenerateToken()
 	if err := h.repo.ConsumeEnrollmentToken(r.Context(), tokenHash, HashToken(plain)); err != nil {
 		if errors.Is(err, ErrNotFound) {
-			// The lookup above and this UPDATE are two statements, so a token that
-			// expired between them lands here instead of being enrolled. The agent
-			// gets the same refusal it would have got from the lookup, which is
-			// what makes the deadline real rather than advisory.
+			h.limiter.RecordFailure(clientIP)
+			// Lookup and consume are two statements: a token expiring between
+			// them lands here, so the deadline is real, not advisory.
 			writeErr(w, http.StatusUnauthorized, "invalid or expired enrollment token")
 			return
 		}

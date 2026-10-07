@@ -394,6 +394,7 @@ func buildServer(cfg config.Config, database *sqlx.DB) (*http.Server, func()) {
 
 	// Agent endpoints (authenticated by per-device secret, not JWT).
 	enrollH := devicemgmt.NewEnrollmentHandler(deviceRepo, database)
+	enrollH.WithTrustedProxies(cfg.TrustedProxies)
 	enrollH.Register(r)
 
 	// One origin policy, built once from ALLOWED_ORIGIN_DOMAINS, shared by every

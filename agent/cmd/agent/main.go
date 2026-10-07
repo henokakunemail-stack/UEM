@@ -163,10 +163,18 @@ func runAgent(serverURL, enrollToken, credsPath string, heartbeatSecs int) {
 			log.Fatal().Err(err).Msg("load existing credentials")
 		}
 		log.Info().Msg("enrolling with provided token")
-		creds, err = enrollment.Exchange(serverURL, enrollToken)
+		newCreds, err := enrollment.Exchange(serverURL, enrollToken)
 		if err != nil {
 			log.Fatal().Err(err).Msg("enrollment failed")
 		}
+		// A visible credential store that already points at a different device
+		// would be silently swapped for a new identity. Refuse unless the
+		// server returned the same device the machine already is.
+		if creds.DeviceID != "" && newCreds.DeviceID != creds.DeviceID {
+			log.Fatal().Str("stored", creds.DeviceID).Str("returned", newCreds.DeviceID).
+				Msg("refusing to overwrite credentials for a different device")
+		}
+		creds = newCreds
 		if err := enrollment.Save(credsPath, creds); err != nil {
 			log.Fatal().Err(err).Msg("persist credentials")
 		}
