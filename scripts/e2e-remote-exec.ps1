@@ -262,7 +262,9 @@ func main() {
     # socket takes a one-time ticket fetched over an authenticated request
     # instead. The ticket is spent by the handshake, which keeps the credential
     # out of the access log the way a query-string token never was.
-    $ticketResp = Invoke-RestMethod -Uri "$base/api/auth/ws-ticket?purpose=remote-exec" -Headers $adminHeaders
+    # -Method Post is not optional here: Invoke-RestMethod defaults to GET, the
+    # ticket issuer only answers POST, and a GET reports 405 instead of a ticket.
+    $ticketResp = Invoke-RestMethod -Method Post -Uri "$base/api/auth/ws-ticket?purpose=remote-exec" -Headers $adminHeaders
     $wsTicket = $ticketResp.ticket
     if (-not $wsTicket) { throw "Expected a ticket from /api/auth/ws-ticket" }
     $wsUri = [System.Uri]("ws://localhost:$port/api/devices/$deviceId/terminal/ws?ticket=$wsTicket&shell=powershell")

@@ -149,7 +149,9 @@ try {
     # The operator socket takes a one-time ticket, not a JWT: a query-string
     # token lands in the access log and stays valid for its whole TTL, while a
     # ticket is destroyed by the handshake that spends it.
-    $ticketResp = Invoke-RestMethod -Uri "$base/api/auth/ws-ticket?purpose=remote-desktop" -Headers $techHeaders
+    # -Method Post is not optional here: Invoke-RestMethod defaults to GET, the
+    # ticket issuer only answers POST, and a GET reports 405 instead of a ticket.
+    $ticketResp = Invoke-RestMethod -Method Post -Uri "$base/api/auth/ws-ticket?purpose=remote-desktop" -Headers $techHeaders
     $wsTicket = $ticketResp.ticket
     if (-not $wsTicket) { throw "Expected a ticket from /api/auth/ws-ticket" }
     $wsOperator = New-Object System.Net.WebSockets.ClientWebSocket
