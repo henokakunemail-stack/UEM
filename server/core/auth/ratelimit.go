@@ -270,24 +270,28 @@ func (r *ClientIPResolver) ClientIP(rq *http.Request) string {
 	return remoteHost(rq.RemoteAddr)
 }
 
-// forwardedFor takes the first address in the list, which is the one the
-// trusted proxy saw as the original client. A proxy appends to the right, so
-// entries to its left are progressively more remote and entries to its right
-// are what the request itself carried -- the ones an untrusted hop would have
-// written.
+// forwardedFor walks from the trusted peer toward the client. Nginx's
+// $proxy_add_x_forwarded_for appends its observed peer to the right of any
+// client-supplied header; taking the first entry would let that client pick a
+// new rate-limit key for every login attempt. Stop at the first untrusted hop.
 func (r *ClientIPResolver) forwardedFor(rq *http.Request) string {
-	if xff := rq.Header.Get("X-Forwarded-For"); xff != "" {
-		parts := strings.SplitN(xff, ",", 2)
-		ip := strings.TrimSpace(parts[0])
-		if ip != "" {
-			return ip
+	if values := rq.Header.Values("X-Forwarded-For"); len(values) != 0 {
+		parts := strings.Split(strings.Join(values, ","), ",")
+		for i := len(parts) - 1; i >= 0; i-- {
+			ip := strings.TrimSpace(parts[i])
+			if net.ParseIP(ip) == nil {
+				return "" // malformed chain: use the connection peer, not another header
+			}
+			if !r.isTrusted(ip) {
+				return ip
+			}
+			if i == 0 {
+				return ip
+			}
 		}
 	}
-	if xri := rq.Header.Get("X-Real-IP"); xri != "" {
-		ip := strings.TrimSpace(xri)
-		if ip != "" {
-			return ip
-		}
+	if ip := strings.TrimSpace(rq.Header.Get("X-Real-IP")); net.ParseIP(ip) != nil {
+		return ip
 	}
 	return ""
 }

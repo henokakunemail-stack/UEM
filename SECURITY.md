@@ -60,10 +60,12 @@ This platform was designed with the following threat model assumptions:
   rather than waiting out its own TTL.
 - **Forwarded-address trust**: `X-Forwarded-For` and `X-Real-IP` are honoured
   only when the connection came from a peer listed in `TRUSTED_PROXIES`
-  (loopback is always trusted). From anybody else the peer address is used,
-  which the remote end cannot choose for itself. Without this gate the login
-  rate limiter is bypassable by writing a fresh forwarding header on every
-  attempt, because every attempt then appears to come from a new address.
+  (loopback is always trusted). The forwarded chain is read right-to-left to
+  the first untrusted hop: nginx appends the actual peer to the right of any
+  client-supplied prefix, so the leftmost entry is not trustworthy. A malformed
+  chain falls back to the connection peer. Proxies must overwrite `X-Real-IP`
+  and append or overwrite `X-Forwarded-For`, never pass client-supplied headers
+  unchanged. From untrusted peers the headers are ignored entirely.
 - **Audit logging**: Every administrative action, command execution, remote
   desktop session, and enrollment event is recorded with actor, timestamp, and
   details.

@@ -229,13 +229,13 @@ func TestClientIP(t *testing.T) {
 			"want the peer address 10.0.0.1", ip)
 	}
 
-	// A trusted CIDR: the header is read, and the first entry wins.
+	// Nginx appends the real client to the right of a client-supplied value.
+	// The spoofed first entry must not become the rate-limit key.
 	trusted := httptest.NewRequest(http.MethodGet, "/", nil)
 	trusted.RemoteAddr = "192.0.2.99:12345"
 	trusted.Header.Set("X-Forwarded-For", "203.0.113.195, 70.41.3.18")
-	if ip := resolver.ClientIP(trusted); ip != "203.0.113.195" {
-		t.Fatalf("a trusted proxy's X-Forwarded-For was not honoured: got %q, "+
-			"want 203.0.113.195", ip)
+	if ip := resolver.ClientIP(trusted); ip != "70.41.3.18" {
+		t.Fatalf("spoofed X-Forwarded-For was trusted: got %q, want 70.41.3.18", ip)
 	}
 
 	// A trusted exact IP, and X-Real-IP instead of X-Forwarded-For.
@@ -245,6 +245,46 @@ func TestClientIP(t *testing.T) {
 	if ip := resolver.ClientIP(trustedExact); ip != "198.51.100.42" {
 		t.Fatalf("a trusted proxy's X-Real-IP was not honoured: got %q, "+
 			"want 198.51.100.42", ip)
+	}
+}
+
+func TestForgedForwardingCannotEvadeLoginLockout(t *testing.T) {
+	resolver := NewClientIPResolver([]string{"192.0.2.99"})
+	limiter := NewIPRateLimiter(2, time.Minute, time.Minute)
+	defer limiter.Close()
+	for _, fake := range []string{"10.0.0.1", "10.0.0.2"} {
+		req := httptest.NewRequest(http.MethodPost, "/api/auth/login", nil)
+		req.RemoteAddr = "192.0.2.99:12345"
+		req.Header.Set("X-Forwarded-For", fake+", 203.0.113.4")
+		limiter.RecordFailure(resolver.ClientIP(req))
+	}
+	if ok, _ := limiter.IsAllowed("203.0.113.4"); ok {
+		t.Fatal("changing a spoofed forwarding prefix evaded the lockout")
+	}
+}
+
+func TestClientIPWalksTrustedProxyChain(t *testing.T) {
+	resolver := NewClientIPResolver([]string{"192.0.2.0/24", "198.51.100.7"})
+	cases := []struct {
+		name   string
+		values []string
+		want   string
+	}{
+		{"two trusted hops", []string{"spoofed, 203.0.113.4, 198.51.100.7"}, "203.0.113.4"},
+		{"multiple header lines", []string{"spoofed", "203.0.113.4, 198.51.100.7"}, "203.0.113.4"},
+		{"malformed nearest hop", []string{"203.0.113.4, garbage"}, "192.0.2.99"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/api/auth/login", nil)
+			req.RemoteAddr = "192.0.2.99:12345"
+			for _, value := range tc.values {
+				req.Header.Add("X-Forwarded-For", value)
+			}
+			if got := resolver.ClientIP(req); got != tc.want {
+				t.Fatalf("ClientIP = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 
