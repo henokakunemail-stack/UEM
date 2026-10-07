@@ -307,6 +307,18 @@ jobs:
         run: ./packaging/windows/build-server.ps1 -Version "${{ github.run_number }}"
 
       - name: Restore the signing certificate
+        # ponytail: WINDOWS_CERTIFICATE is not provisioned yet, because signing
+        # is out of scope until there is something to distribute. This step is
+        # what notices, and its exit 1 is tolerated here only.
+        #
+        # The tolerance is deliberately step-level and deliberately here: the
+        # two build steps above are not marked continue-on-error, so an NSIS
+        # or a Go build failure still fails the run. A job-level flag would
+        # have swallowed exactly the build failures this job exists to catch.
+        # Delete this flag the day the secret is set; the signing step below
+        # then runs as a hard requirement, as it already does.
+        continue-on-error: true
+        id: restore_cert
         # The certificate never exists in the repository or in an artifact. It is
         # base64 in a repository secret and is materialised here, then deleted
         # unconditionally below so a failed step does not leave it on the
@@ -326,11 +338,18 @@ jobs:
           $path = Join-Path $env:RUNNER_TEMP "publisher.pfx"
           [IO.File]::WriteAllBytes($path, [Convert]::FromBase64String($secret))
           Write-Host "Signing certificate restored."
+          "has_cert=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
         env:
           WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
           WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
 
       - name: Sign and verify the installers
+        # Runs only when the previous step produced a certificate. Without this
+        # gate it would invoke signtool with an empty path while the secret is
+        # unset, and the error would read like a broken signing script rather
+        # than a missing secret. The step's own `success()` keeps a genuine
+        # cert-handling failure from being skipped past.
+        if: success() && steps.restore_cert.outputs.has_cert == 'true'
         shell: pwsh
         run: |
           ./packaging/windows/sign.ps1 `
@@ -354,6 +373,11 @@ jobs:
         run: Remove-Item -Force -ErrorAction SilentlyContinue "${{ runner.temp }}\publisher.pfx"
 
       - name: Upload the signed installers
+        # Gated on the same output as signing: the artifact is named
+        # signed-installers, so uploading unsigned builds under it would hand
+        # an operator an installer that was never verified against a
+        # certificate and looked indistinguishable from a signed one.
+        if: success() && steps.restore_cert.outputs.has_cert == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: signed-installers
