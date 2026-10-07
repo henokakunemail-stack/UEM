@@ -43,7 +43,6 @@ type Handler struct {
 	hub            HubDispatcher
 	relay          *TerminalRelay
 	audit          AuditLogger
-	jwtSvc         *auth.JWTService
 	authMiddleware func(http.Handler) http.Handler
 	devices        DeviceValidator
 	upgrader       websocket.Upgrader
@@ -54,7 +53,6 @@ func NewHandler(
 	hub HubDispatcher,
 	relay *TerminalRelay,
 	audit AuditLogger,
-	jwtSvc *auth.JWTService,
 	authMiddleware func(http.Handler) http.Handler,
 	devices DeviceValidator,
 	checkOrigin auth.OriginChecker,
@@ -67,7 +65,6 @@ func NewHandler(
 		hub:            hub,
 		relay:          relay,
 		audit:          audit,
-		jwtSvc:         jwtSvc,
 		authMiddleware: authMiddleware,
 		devices:        devices,
 		upgrader: websocket.Upgrader{
@@ -271,42 +268,33 @@ func (h *Handler) reportExecutionResult(w http.ResponseWriter, r *http.Request) 
 // refusal itself when the answer is no. It returns the claims only on success,
 // so a caller cannot forget to check the bool.
 //
-// A ticket is the intended credential: the console fetches one over an ordinary
-// authenticated request, so no JWT ever appears in a URL that gets logged,
-// cached, or sent in a Referer. The ?token= path stays for clients that have not
-// switched yet, and it is kept safe rather than merely tolerated -- a refresh
-// token is refused there, which is the one thing that path was missing.
+// A ticket is the only credential this socket accepts. The console fetches one
+// over an ordinary authenticated request, so no JWT ever appears in a URL that
+// gets logged, cached, or sent in a Referer.
+//
+// The ?token=<jwt> path that used to be accepted here is removed, not
+// deprecated. A browser cannot attach an Authorization header to a WebSocket,
+// which is why the ticket exists; the token path was the fallback that kept the
+// leak open, and it refused nothing on its own -- until kinds landed it accepted
+// a refresh token, which is a week of terminal access sitting in an access log.
 func (h *Handler) authenticateHandshake(w http.ResponseWriter, r *http.Request) (auth.Claims, bool) {
-	if ticket := auth.TicketFromRequest(r); ticket != "" {
-		userID, ok := auth.RedeemWebSocketTicket(r.Context(), ticket, auth.PurposeRemoteExec)
-		if !ok {
-			http.Error(w, "invalid or expired ticket", http.StatusUnauthorized)
-			return auth.Claims{}, false
-		}
-		// A ticket names a user, not a set of privileges, so the role is read
-		// from the live users row. Deriving it from anything the ticket carried
-		// would give the ticket a second, separately expiring copy of an
-		// authorisation decision.
-		claims, ok := auth.ClaimsForUser(r.Context(), auth.CurrentRoleReader(), userID)
-		if !ok {
-			http.Error(w, "invalid or expired ticket", http.StatusUnauthorized)
-			return auth.Claims{}, false
-		}
-		return claims, true
-	}
-
-	tokenStr := r.URL.Query().Get("token")
-	if tokenStr == "" {
-		http.Error(w, "missing authentication", http.StatusUnauthorized)
+	ticket := auth.TicketFromRequest(r)
+	if ticket == "" {
+		http.Error(w, "missing authentication ticket", http.StatusUnauthorized)
 		return auth.Claims{}, false
 	}
-	// ParseKind, not Parse: a refresh token presented as a Bearer credential
-	// would open a remote shell for its whole TTL. The handshake cannot carry
-	// the Authorization header that RequireAuth checks, so this is the only
-	// place that can refuse it.
-	claims, err := h.jwtSvc.ParseKind(tokenStr, auth.KindAccess)
-	if err != nil {
-		http.Error(w, "invalid authentication token", http.StatusUnauthorized)
+	userID, ok := auth.RedeemWebSocketTicket(r.Context(), ticket, auth.PurposeRemoteExec)
+	if !ok {
+		http.Error(w, "invalid or expired ticket", http.StatusUnauthorized)
+		return auth.Claims{}, false
+	}
+	// A ticket names a user, not a set of privileges, so the role is read
+	// from the live users row. Deriving it from anything the ticket carried
+	// would give the ticket a second, separately expiring copy of an
+	// authorisation decision.
+	claims, ok := auth.ClaimsForUser(r.Context(), auth.CurrentRoleReader(), userID)
+	if !ok {
+		http.Error(w, "invalid or expired ticket", http.StatusUnauthorized)
 		return auth.Claims{}, false
 	}
 	return claims, true

@@ -91,7 +91,6 @@ func execFixture(t *testing.T, online, accepts bool) (*chi.Mux, *sqlx.DB, *recor
 		&wedgedHub{online: online, accepts: accepts},
 		NewTerminalRelay(),
 		auditor,
-		auth.NewJWTService("exec-result-fixture-secret", time.Hour, 24*time.Hour),
 		func(n http.Handler) http.Handler { return n },
 		agentValidator{},
 		func(*http.Request) bool { return true },
@@ -490,7 +489,6 @@ func TestAnEmptyShellDefaultsToPowerShellAndTheTimeoutIsClamped(t *testing.T) {
 			hub := &capturingHub{}
 			h := NewHandler(NewRepository(execSchema(t)), hub, NewTerminalRelay(),
 				&recordingAudit{},
-				auth.NewJWTService("exec-normalisation-secret", time.Hour, 24*time.Hour),
 				func(n http.Handler) http.Handler { return n },
 				agentValidator{}, func(*http.Request) bool { return true })
 

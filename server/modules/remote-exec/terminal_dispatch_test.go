@@ -19,6 +19,7 @@ import (
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/auth"
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/db"
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/rbac"
+	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/wsticket"
 	devicemgmt "github.com/henokakunemail-stack/Endpoint-Manager/server/modules/device-management"
 )
 
@@ -112,12 +113,21 @@ func terminalFixture(t *testing.T, accepts bool) (*Handler, *sqlx.DB, *recording
 	database.MustExec(`INSERT INTO devices (id, hostname) VALUES ('dev-1','WEDGE-PC');`)
 	database.MustExec(`INSERT INTO users (id, username) VALUES ('u-1','tech');`)
 
-	// The ?token= path is exercised rather than the ticket path because it needs
-	// only a JWT service, whereas the ticket path reads package-level state in
-	// auth that a parallel test could also be setting. Both reach the same
-	// authenticateHandshake and the same send.
-	jwtSvc := auth.NewJWTService("test-secret-for-terminal-dispatch-only", time.Hour, 24*time.Hour)
-	tokenPair, err := jwtSvc.Issue("u-1", "tech", rbac.RoleTechnician)
+	// The ticket path is the only credential the handshake accepts now, so the
+	// fixture mints one the way the console does: over the same store the
+	// redeeming side reads. Package-level state in auth holds that store, and a
+	// parallel test could be swapping its own in, so the wiring is restored per
+	// test rather than assumed.
+	ticketDB, err := db.Open(filepath.Join(t.TempDir(), "tickets.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ticketDB.Close() })
+	store := wsticket.NewStore(ticketDB, 0)
+	auth.SetWebSocketTicketIssuer(store, fakeRoles{database})
+	t.Cleanup(func() { auth.SetWebSocketTicketIssuer(nil, nil) })
+
+	ticket, err := store.Issue(context.Background(), "u-1", auth.PurposeRemoteExec, wsticket.DefaultTTL)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,7 +138,6 @@ func terminalFixture(t *testing.T, accepts bool) (*Handler, *sqlx.DB, *recording
 		repo:    NewRepository(database),
 		relay:   NewTerminalRelay(),
 		hub:     hub,
-		jwtSvc:  jwtSvc,
 		devices: devicemgmt.NewRepository(database),
 		audit:   auditor,
 		// The test drives the production path: a real browser WebSocket against
@@ -136,12 +145,27 @@ func terminalFixture(t *testing.T, accepts bool) (*Handler, *sqlx.DB, *recording
 		upgrader: websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }},
 	}
 
-	return h, database, auditor, tokenPair.AccessToken
+	return h, database, auditor, ticket
+}
+
+// fakeRoles answers the role lookup a ticket redeems to, reading the users
+// table the fixture created. The production reader lives in auth and consults
+// the live users row; this one consults the same table in the test database.
+type fakeRoles struct{ db *sqlx.DB }
+
+func (r fakeRoles) RoleFor(_ context.Context, userID string) (string, string, error) {
+	var username string
+	if err := r.db.Get(&username, `SELECT username FROM users WHERE id = ?`, userID); err != nil {
+		return "", "", err
+	}
+	// The fixture's users table has no role column, so the technician role is
+	// reported for the user the ticket named. The handler still enforces it.
+	return username, rbac.RoleTechnician, nil
 }
 
 // dialTerminal opens the operator's half of the terminal socket against the
 // production handler, and returns the frames the server pushes to the browser.
-func dialTerminal(t *testing.T, h *Handler, accessToken string) <-chan string {
+func dialTerminal(t *testing.T, h *Handler, ticket string) <-chan string {
 	t.Helper()
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -153,7 +177,7 @@ func dialTerminal(t *testing.T, h *Handler, accessToken string) <-chan string {
 	t.Cleanup(srv.Close)
 
 	conn, _, err := websocket.DefaultDialer.Dial(
-		"ws"+strings.TrimPrefix(srv.URL, "http")+"?token="+accessToken, nil)
+		"ws"+strings.TrimPrefix(srv.URL, "http")+"?ticket="+ticket, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

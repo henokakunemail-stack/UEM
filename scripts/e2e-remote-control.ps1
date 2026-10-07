@@ -146,8 +146,14 @@ try {
 
     # 8. Connect Operator & Agent WebSockets to Relay
     Write-Host "`n7. Connecting Operator & Agent to Relay Pipeline..."
+    # The operator socket takes a one-time ticket, not a JWT: a query-string
+    # token lands in the access log and stays valid for its whole TTL, while a
+    # ticket is destroyed by the handshake that spends it.
+    $ticketResp = Invoke-RestMethod -Uri "$base/api/auth/ws-ticket?purpose=remote-desktop" -Headers $techHeaders
+    $wsTicket = $ticketResp.ticket
+    if (-not $wsTicket) { throw "Expected a ticket from /api/auth/ws-ticket" }
     $wsOperator = New-Object System.Net.WebSockets.ClientWebSocket
-    $opUri = [uri]"ws://localhost:$port/api/devices/$deviceId/remotecontrol/ws?token=$($techLogin.access_token)&session=$sessionId"
+    $opUri = [uri]"ws://localhost:$port/api/devices/$deviceId/remotecontrol/ws?ticket=$wsTicket&session=$sessionId"
     $wsOperator.ConnectAsync($opUri, $ctSource.Token).Wait(5000) | Out-Null
     if ($wsOperator.State -ne [System.Net.WebSockets.WebSocketState]::Open) {
         throw "Operator failed to connect to relay WebSocket"

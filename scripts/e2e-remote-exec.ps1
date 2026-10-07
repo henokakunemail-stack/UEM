@@ -258,7 +258,14 @@ func main() {
 
     # 10. Test 5: Live Interactive Terminal over WebSocket
     Write-Host "`n9. Verifying Live Interactive Terminal WebSocket Stream..."
-    $wsUri = [System.Uri]("ws://localhost:$port/api/devices/$deviceId/terminal/ws?token=$adminToken&shell=powershell")
+    # A browser cannot attach an Authorization header to a WebSocket, so the
+    # socket takes a one-time ticket fetched over an authenticated request
+    # instead. The ticket is spent by the handshake, which keeps the credential
+    # out of the access log the way a query-string token never was.
+    $ticketResp = Invoke-RestMethod -Uri "$base/api/auth/ws-ticket?purpose=remote-exec" -Headers $adminHeaders
+    $wsTicket = $ticketResp.ticket
+    if (-not $wsTicket) { throw "Expected a ticket from /api/auth/ws-ticket" }
+    $wsUri = [System.Uri]("ws://localhost:$port/api/devices/$deviceId/terminal/ws?ticket=$wsTicket&shell=powershell")
     $wsClient = New-Object System.Net.WebSockets.ClientWebSocket
     $cts = New-Object System.Threading.CancellationTokenSource(15000)
 

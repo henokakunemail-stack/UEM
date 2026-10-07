@@ -32,7 +32,6 @@ type Handler struct {
 	hub            Hub
 	devices        *devicemgmt.Repository
 	audit          AuditLogger
-	jwtSvc         *auth.JWTService
 	authMiddleware func(http.Handler) http.Handler
 	upgrader       websocket.Upgrader
 }
@@ -43,7 +42,6 @@ func NewHandler(
 	hub Hub,
 	devices *devicemgmt.Repository,
 	audit AuditLogger,
-	jwtSvc *auth.JWTService,
 	authMiddleware func(http.Handler) http.Handler,
 	checkOrigin auth.OriginChecker,
 ) *Handler {
@@ -56,7 +54,6 @@ func NewHandler(
 		hub:            hub,
 		devices:        devices,
 		audit:          audit,
-		jwtSvc:         jwtSvc,
 		authMiddleware: authMiddleware,
 		upgrader: websocket.Upgrader{
 			CheckOrigin: checkOrigin,
@@ -231,38 +228,29 @@ func (h *Handler) listSessions(w http.ResponseWriter, r *http.Request) {
 // authenticateHandshake decides who is opening a remote control socket and
 // writes the refusal itself when the answer is no.
 //
-// A ticket is the intended credential, for the same reason as on the terminal
-// socket: a browser cannot attach an Authorization header to a WebSocket, and a
-// credential in the query string is written to the access log, kept in history
-// and forwarded in Referer. The ?token= path stays for clients that have not
-// switched yet, but it now refuses a refresh token, which it previously
-// accepted -- a week-long credential that opened a remote desktop.
+// A ticket is the only credential this socket accepts, for the same reason as on
+// the terminal socket: a browser cannot attach an Authorization header to a
+// WebSocket, and a credential in the query string is written to the access log,
+// kept in history and forwarded in Referer.
+//
+// The ?token=<jwt> fallback is removed rather than left as a tolerated path. It
+// used to accept a refresh token -- a week-long credential that opened a remote
+// desktop and lived in every access log the proxy kept.
 func (h *Handler) authenticateHandshake(w http.ResponseWriter, r *http.Request) (auth.Claims, bool) {
 	const refuse = "unauthorized or insufficient privileges"
 
-	if ticket := auth.TicketFromRequest(r); ticket != "" {
-		userID, ok := auth.RedeemWebSocketTicket(r.Context(), ticket, auth.PurposeRemoteDesktop)
-		if !ok {
-			http.Error(w, refuse, http.StatusForbidden)
-			return auth.Claims{}, false
-		}
-		claims, ok := auth.ClaimsForUser(r.Context(), auth.CurrentRoleReader(), userID)
-		if !ok || claims.Role == rbac.RoleViewer {
-			http.Error(w, refuse, http.StatusForbidden)
-			return auth.Claims{}, false
-		}
-		return claims, true
-	}
-
-	token := r.URL.Query().Get("token")
-	if token == "" {
+	ticket := auth.TicketFromRequest(r)
+	if ticket == "" {
 		http.Error(w, refuse, http.StatusForbidden)
 		return auth.Claims{}, false
 	}
-	// The error is not echoed: distinguishing "forged" from "expired" from
-	// "wrong kind" turns the handshake into an oracle for what a prober holds.
-	claims, err := h.jwtSvc.ParseKind(token, auth.KindAccess)
-	if err != nil || claims.Role == rbac.RoleViewer {
+	userID, ok := auth.RedeemWebSocketTicket(r.Context(), ticket, auth.PurposeRemoteDesktop)
+	if !ok {
+		http.Error(w, refuse, http.StatusForbidden)
+		return auth.Claims{}, false
+	}
+	claims, ok := auth.ClaimsForUser(r.Context(), auth.CurrentRoleReader(), userID)
+	if !ok || claims.Role == rbac.RoleViewer {
 		http.Error(w, refuse, http.StatusForbidden)
 		return auth.Claims{}, false
 	}

@@ -939,8 +939,12 @@ export const api = {
   },
 
   // Reports Export URL Helper
+  //
+  // The URL carries no credential. fetchRaw attaches the Authorization header,
+  // which is the one place a token belongs: a query-string token lands in the
+  // access log, the browser history, and the Referer header of anything the
+  // page loads next.
   getReportExportUrl(reportType: 'inventory' | 'patches' | 'deployments' | 'audit', format: 'csv' | 'json'): string {
-    const token = getStoredToken()
-    return `/api/reports/${reportType}?format=${format}${token ? `&token=${encodeURIComponent(token)}` : ''}`
+    return `/api/reports/${reportType}?format=${format}`
   },
 }

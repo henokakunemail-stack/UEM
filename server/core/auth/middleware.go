@@ -71,13 +71,22 @@ func (s *JWTService) parseAccess(rawToken string) (Claims, error) {
 	return c, nil
 }
 
-// RequireAuth validates the Authorization: Bearer <token> header (or ?token= query parameter)
-// and stores the claims in the request context.
+// RequireAuth validates the Authorization: Bearer <token> header and stores the
+// claims in the request context.
 //
 // Every authenticated route runs through here, so this is the one place that
 // decides a refresh token cannot be an API credential. A refresh token replayed
 // as a Bearer would otherwise be a week of admin access that no logout and no
 // session revocation touches, which is the whole reason kinds were added.
+//
+// The credential is accepted from the header only. An earlier version also read
+// `?token=` from the query string, which put the JWT in the access log, the
+// browser history, and the Referer header of any subresource the page loaded --
+// every one of them a place a stolen token is read back out of. The query path
+// is gone rather than deprecated: the report export that needed it now sends the
+// header, and the two console builds that could still be holding a URL with a
+// token in it get a 401 and a re-login rather than a credential that leaks for
+// as long as anybody keeps the link.
 func (s *JWTService) RequireAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rawToken := ""
@@ -87,9 +96,6 @@ func (s *JWTService) RequireAuth(next http.Handler) http.Handler {
 			if len(parts) == 2 && strings.EqualFold(parts[0], "Bearer") {
 				rawToken = parts[1]
 			}
-		}
-		if rawToken == "" {
-			rawToken = r.URL.Query().Get("token")
 		}
 		if rawToken == "" {
 			http.Error(w, "missing authorization", http.StatusUnauthorized)

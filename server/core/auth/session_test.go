@@ -566,9 +566,13 @@ func TestRefreshTokenRejectedAsBearer(t *testing.T) {
 	if got := e.do(http.MethodGet, "/api/whoami", pair.AccessToken, nil).code; got != http.StatusOK {
 		t.Errorf("access token as Bearer: status %d, want 200", got)
 	}
-	// The query-parameter form is a Bearer by another name and must be refused
-	// identically, or the header check is trivially bypassed.
-	req, err := http.NewRequest(http.MethodGet, e.srv.URL+"/api/whoami?token="+pair.RefreshToken, nil)
+	// The query-parameter path no longer exists, so a refresh token cannot
+	// reach an API route that way at all. This is the regression test for that
+	// removal: an access token in the query string is refused too, which is
+	// what makes the removal safe rather than merely a change of channel. If
+	// the fallback ever comes back, this is the test that says why it should
+	// not.
+	req, err := http.NewRequest(http.MethodGet, e.srv.URL+"/api/whoami?token="+pair.AccessToken, nil)
 	if err != nil {
 		t.Fatalf("build request: %v", err)
 	}
@@ -578,7 +582,7 @@ func TestRefreshTokenRejectedAsBearer(t *testing.T) {
 	}
 	defer res.Body.Close()
 	if res.StatusCode != http.StatusUnauthorized {
-		t.Errorf("refresh token via ?token=: status %d, want 401", res.StatusCode)
+		t.Errorf("access token via ?token=: status %d, want 401; the query path must not accept any token", res.StatusCode)
 	}
 }
 
@@ -1147,9 +1151,11 @@ func TestKindlessTokenIsRefusedAsBearerOnceItIsOld(t *testing.T) {
 	}
 }
 
-// The same rejection has to apply to the ?token= fallback, which is the other
-// way a token reaches an API route without a header.
-func TestKindlessTokenIsRefusedOnTheQueryParamFallback(t *testing.T) {
+// The ?token= fallback is gone, so there is no second channel for a kindless
+// token to slip through. What is left to prove is that the one remaining
+// channel refuses it, which is what parseAccess is for -- the check does not
+// depend on which transport carried the token.
+func TestKindlessTokenIsRefusedEverywhere(t *testing.T) {
 	e := newEnv(t)
 	e.seedUser("alice", "pw-alice", rbac.RoleAdmin)
 
@@ -1168,7 +1174,15 @@ func TestKindlessTokenIsRefusedOnTheQueryParamFallback(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sign kindless token: %v", err)
 	}
+	// As a Bearer, the only channel that remains.
+	if res := e.do(http.MethodGet, "/api/whoami", signed, nil); res.code != http.StatusUnauthorized {
+		t.Errorf("a 48h-old kindless token authenticated as a Bearer: status %d, want 401", res.code)
+	}
+	// And in the query string, which no code path reads anymore. Refused for
+	// the absence of a header rather than for the token's age, which is the
+	// stronger property: nothing about the value matters because nothing
+	// inspects it.
 	if res := e.do(http.MethodGet, "/api/whoami?token="+signed, "", nil); res.code != http.StatusUnauthorized {
-		t.Errorf("a 48h-old kindless token authenticated via ?token=: status %d, want 401", res.code)
+		t.Errorf("a kindless token authenticated via ?token=: status %d, want 401", res.code)
 	}
 }

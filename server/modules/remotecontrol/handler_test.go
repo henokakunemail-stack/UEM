@@ -18,7 +18,7 @@ import (
 
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/auth"
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/db"
-	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/rbac"
+	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/wsticket"
 	devicemgmt "github.com/henokakunemail-stack/Endpoint-Manager/server/modules/device-management"
 )
 
@@ -84,8 +84,6 @@ func rcRouteFixture(t *testing.T) (*Handler, *sqlx.DB, *devicemgmt.Repository) {
 		now, devicemgmt.HashToken("dev-2-secret"), now, now)
 	database.MustExec(`INSERT INTO users (id, username) VALUES ('u-1','tech');`)
 
-	jwtSvc := auth.NewJWTService("remotecontrol-handler-fixture-secret", time.Hour, 24*time.Hour)
-
 	repo := NewRepository(database)
 	return &Handler{
 		repo:    repo,
@@ -93,7 +91,6 @@ func rcRouteFixture(t *testing.T) (*Handler, *sqlx.DB, *devicemgmt.Repository) {
 		hub:     &acceptingHub{},
 		devices: devicemgmt.NewRepository(database),
 		audit:   nullAuditor{},
-		jwtSvc:  jwtSvc,
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(*http.Request) bool { return true },
 		},
@@ -133,6 +130,46 @@ func mustExecDevices(t *testing.T, database *sqlx.DB) {
 		ended_at DATETIME,
 		created_at DATETIME NOT NULL
 	);`)
+}
+
+// issueTicket mints the one-time ticket the operator socket redeems, wiring the
+// store the way main.go does. The handshake accepts nothing else, so a test that
+// wants to reach the relay has to come through this path.
+//
+// The role is the live one the wired reader reports. The fixture's users table
+// carries no role column, so the reader here is the test's own and the role
+// asked for is the one it answers with.
+func issueTicket(t *testing.T, h *Handler, userID, role string) string {
+	t.Helper()
+
+	ticketDB, err := db.Open(filepath.Join(t.TempDir(), "rc-tickets.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ticketDB.Close() })
+
+	store := wsticket.NewStore(ticketDB, 0)
+	auth.SetWebSocketTicketIssuer(store, stubRoles{userID: role})
+	t.Cleanup(func() { auth.SetWebSocketTicketIssuer(nil, nil) })
+
+	ticket, err := store.Issue(context.Background(), userID, auth.PurposeRemoteDesktop, wsticket.DefaultTTL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ticket
+}
+
+// stubRoles answers the role lookup a redeemed ticket triggers. It reports the
+// role the test asked for rather than reading a column the fixture's users
+// table does not have.
+type stubRoles map[string]string
+
+func (r stubRoles) RoleFor(_ context.Context, userID string) (string, string, error) {
+	role, ok := r[userID]
+	if !ok {
+		return "", "", auth.ErrUserNotActive
+	}
+	return userID, role, nil
 }
 
 // startSessionRequest drives startSession over a real route so the chi URL param
@@ -380,10 +417,7 @@ func TestAViewerCannotOpenTheOperatorSocket(t *testing.T) {
 	hub := &acceptingHub{}
 	h.hub = hub
 
-	pair, err := h.jwtSvc.Issue("u-1", "viewer", rbac.RoleViewer)
-	if err != nil {
-		t.Fatal(err)
-	}
+	ticket := issueTicket(t, h, "u-1", "viewer")
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rctx := chi.NewRouteContext()
@@ -393,7 +427,7 @@ func TestAViewerCannotOpenTheOperatorSocket(t *testing.T) {
 	defer srv.Close()
 
 	_, resp, err := websocket.DefaultDialer.Dial(
-		"ws"+strings.TrimPrefix(srv.URL, "http")+"/?session=s1&token="+pair.AccessToken, nil)
+		"ws"+strings.TrimPrefix(srv.URL, "http")+"/?session=s1&ticket="+ticket, nil)
 	if err == nil {
 		t.Fatal("a viewer opened the remote control socket")
 	}
@@ -402,27 +436,41 @@ func TestAViewerCannotOpenTheOperatorSocket(t *testing.T) {
 	}
 }
 
-// TestAnOperatorSocketWithNoCredentialIsRefused, and the refresh-token case:
-// a refresh token is a week-long credential that would otherwise open a remote
-// desktop for its whole TTL.
+// TestAnOperatorSocketWithNoCredentialIsRefused, and the replayed-ticket case:
+// a ticket is single-use, so a second attempt with the same value is the
+// signature of a credential copied out of an access log.
 func TestAnOperatorSocketWithNoCredentialIsRefused(t *testing.T) {
 	h, _, _ := rcRouteFixture(t)
 	hub := &acceptingHub{}
 	h.hub = hub
 
-	pair, err := h.jwtSvc.Issue("u-1", "tech", rbac.RoleTechnician)
+	ticket := issueTicket(t, h, "u-1", "tech")
+
+	// Spend the ticket first, the way the real handshake does. A ticket that was
+	// never presented is not a replay -- it is an outstanding ticket, and
+	// refusing it would mean the store rejects valid credentials. The replay
+	// case is the second attempt with a value an access log already recorded.
+	srv0 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("id", "dev-1")
+		h.handleOperatorWS(w, r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, rctx)))
+	}))
+	conn0, _, err := websocket.DefaultDialer.Dial(
+		"ws"+strings.TrimPrefix(srv0.URL, "http")+"/?session=spent&ticket="+ticket, nil)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("the first use of the ticket was refused: %v", err)
 	}
+	_ = conn0.Close()
+	srv0.Close()
 
 	cases := []struct {
 		name  string
 		query string
 	}{
 		{"no credential at all", "session=s1"},
-		{"no session", "token=" + pair.AccessToken},
-		{"forged token", "session=s1&token=not.a.jwt"},
-		{"refresh token presented as a bearer credential", "session=s1&token=" + pair.RefreshToken},
+		{"no session", "ticket=" + ticket},
+		{"forged ticket", "session=s1&ticket=not-a-real-ticket"},
+		{"a spent ticket replayed", "session=s1&ticket=" + ticket},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -549,10 +597,7 @@ func TestAMalformedFrameFromTheOperatorIsIgnoredNotFatal(t *testing.T) {
 	}
 	h.relay.RegisterSession(session.ID, session.SessionMode)
 
-	pair, err := h.jwtSvc.Issue("u-1", "tech", rbac.RoleTechnician)
-	if err != nil {
-		t.Fatal(err)
-	}
+	ticket := issueTicket(t, h, "u-1", "tech")
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rctx := chi.NewRouteContext()
@@ -562,7 +607,7 @@ func TestAMalformedFrameFromTheOperatorIsIgnoredNotFatal(t *testing.T) {
 	defer srv.Close()
 
 	conn, _, err := websocket.DefaultDialer.Dial(
-		"ws"+strings.TrimPrefix(srv.URL, "http")+"/?session="+session.ID+"&token="+pair.AccessToken, nil)
+		"ws"+strings.TrimPrefix(srv.URL, "http")+"/?session="+session.ID+"&ticket="+ticket, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

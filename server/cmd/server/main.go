@@ -395,7 +395,7 @@ func buildServer(cfg config.Config, database *sqlx.DB) (*http.Server, func()) {
 	// Phase 5: remote command execution and interactive terminal relay.
 	remoteExecRepo := remoteexec.NewRepository(database)
 	termRelay := remoteexec.NewTerminalRelay()
-	remoteExecH := remoteexec.NewHandler(remoteExecRepo, hub, termRelay, &auditAdapter{db: database}, jwtSvc, jwtSvc.RequireAuth, deviceRepo, checkOrigin)
+	remoteExecH := remoteexec.NewHandler(remoteExecRepo, hub, termRelay, &auditAdapter{db: database}, jwtSvc.RequireAuth, deviceRepo, checkOrigin)
 
 	wsH := transport.NewWSHandler(hub, deviceRepo, database, cfg.AgentOfflineAfter).
 		WithInventory(invH).
@@ -465,7 +465,7 @@ func buildServer(cfg config.Config, database *sqlx.DB) (*http.Server, func()) {
 	// Phase 11: remote control & screen capture relay.
 	rcRepo := remotecontrol.NewRepository(database)
 	rcRelay := remotecontrol.NewRelayManager(rcRepo)
-	rcH := remotecontrol.NewHandler(rcRepo, rcRelay, hub, deviceRepo, &auditAdapter{db: database}, jwtSvc, jwtSvc.RequireAuth, checkOrigin)
+	rcH := remotecontrol.NewHandler(rcRepo, rcRelay, hub, deviceRepo, &auditAdapter{db: database}, jwtSvc.RequireAuth, checkOrigin)
 	rcH.Register(r)
 
 	// Phase 12: network & web filter security policies.

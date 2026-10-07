@@ -78,7 +78,7 @@ func newRemoteExecEnv(t *testing.T) (*httptest.Server, *sqlx.DB, *auth.JWTServic
 	// Convert hub to *transport.Hub if needed, or wrap. Here we provide the handler
 	// which accepts transport.Hub, so we can initialize a real Hub
 	realHub := transport.NewHub()
-	h := remoteexec.NewHandler(execRepo, realHub, relay, auditMock, jwtSvc, jwtSvc.RequireAuth, deviceRepo, nil)
+	h := remoteexec.NewHandler(execRepo, realHub, relay, auditMock, jwtSvc.RequireAuth, deviceRepo, nil)
 
 	r := chi.NewRouter()
 	h.Register(r)
