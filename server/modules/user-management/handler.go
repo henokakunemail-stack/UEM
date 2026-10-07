@@ -49,8 +49,9 @@ func NewHandler(repo *Repository, sessions SessionRevoker, audit AuditLogger, au
 //
 // This is the half of account control that does not happen by itself. Writing
 // is_active = 0 stops the next login; it does not reach a console that is
-// already signed in, because the access token it is holding verifies on its
-// signature alone and RequireAuth reads no row. Without this call, deactivating
+// already signed in, because the access token it is holding names a row in
+// auth_sessions that RequireAuth checks on every request -- so the row has to
+// be revoked, not just the account flagged. Without this call, deactivating
 // someone revokes their future but not their present, and a technician who was
 // dismissed keeps admin-grade API access until their token expires on its own.
 func (h *Handler) revokeSessions(r *http.Request, userID string) {

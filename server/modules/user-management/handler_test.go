@@ -614,16 +614,18 @@ func TestDeactivatedUserCannotLogIn(t *testing.T) {
 // TestADeactivatedUserLosesApiAccess is the one that matters, and the reason
 // this file exists.
 //
-// deactivating a user only writes is_active = 0. RequireAuth validates the JWT
-// signature and nothing else -- it reads no row, so an access token minted
-// before the deactivation keeps working until it expires on its own. With
-// ACCESS_TOKEN_TTL defaulting to 15m, a dismissed technician keeps admin-grade
-// API access for up to a quarter of an hour after an admin revoked their
-// account, and nothing in the request path notices.
+// deactivating a user only writes is_active = 0, which is enough to stop a
+// fresh login but says nothing about the access token a signed-in operator
+// already holds. RequireAuth checks the auth_sessions row named by the token's
+// sid, so deactivation has to revoke that row too -- otherwise the dismissed
+// operator's token keeps authorising requests until it expires on its own.
+// With ACCESS_TOKEN_TTL defaulting to 15m that is up to a quarter of an hour of
+// admin-grade API access after the account was revoked.
 //
-// The end-to-end version lives in server/core/auth/session_enforcement_test.go,
-// where the middleware itself is built; this is the module-local half, proving
-// the write happens and no session row is left behind to re-authorise them.
+// server/core/auth/session_test.go covers the other half -- the middleware
+// actually refusing a token whose row is revoked. This is the module-local
+// half, proving the write happens and no session row is left behind to
+// re-authorise them.
 func TestADeactivatedUserLosesApiAccess(t *testing.T) {
 	e := newEnv(t)
 	victim := e.seed("victim", "victim-password-1", rbac.RoleTechnician)
