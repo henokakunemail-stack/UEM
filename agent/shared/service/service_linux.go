@@ -35,27 +35,7 @@ func (m *linuxManager) Install() error {
 		return err
 	}
 
-	execCmd := exePath
-	if len(m.cfg.Arguments) > 0 {
-		execCmd += " " + strings.Join(m.cfg.Arguments, " ")
-	}
-
-	unitContent := fmt.Sprintf(`[Unit]
-Description=%s
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-ExecStart=%s
-Restart=always
-RestartSec=5s
-LimitNOFILE=65536
-KillMode=process
-
-[Install]
-WantedBy=multi-user.target
-`, m.cfg.DisplayName, execCmd)
+	unitContent := systemdUnit(m.cfg, exePath)
 
 	if err := os.WriteFile(m.unitPath(), []byte(unitContent), 0644); err != nil {
 		return fmt.Errorf("write systemd unit: %w (ensure root/sudo)", err)

@@ -31,10 +31,7 @@ func (m *windowsManager) Install() error {
 	}
 
 	// Build full binPath command line: "C:\path\to\agent.exe" arg1 arg2
-	binPath := fmt.Sprintf("\"%s\"", exePath)
-	if len(m.cfg.Arguments) > 0 {
-		binPath += " " + strings.Join(m.cfg.Arguments, " ")
-	}
+	binPath := windowsBinPath(m.cfg, exePath)
 
 	// Create service via sc.exe (Standard Windows Service Control Manager)
 	createArgs := []string{
