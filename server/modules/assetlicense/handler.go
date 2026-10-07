@@ -170,25 +170,54 @@ func (h *Handler) handleUpdateAsset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var updateReq HardwareAsset
-	if err := json.NewDecoder(r.Body).Decode(&updateReq); err != nil {
+	var req UpdateAssetRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
 		return
 	}
 
-	existing.AssetTag = updateReq.AssetTag
-	existing.DeviceID = updateReq.DeviceID
-	existing.ModelName = updateReq.ModelName
-	existing.SerialNumber = updateReq.SerialNumber
-	existing.Vendor = updateReq.Vendor
-	existing.Site = updateReq.Site
-	existing.Department = updateReq.Department
-	existing.AssignedUser = updateReq.AssignedUser
-	existing.PurchaseDate = updateReq.PurchaseDate
-	existing.PurchaseCost = updateReq.PurchaseCost
-	existing.WarrantyExpiresAt = updateReq.WarrantyExpiresAt
-	existing.Status = updateReq.Status
-	existing.Notes = updateReq.Notes
+	// Only the fields the client actually sent are copied; the rest keep the
+	// values the fetched row already holds. Without these guards the zero values
+	// a partial body decodes to would overwrite them.
+	if req.AssetTag != nil {
+		existing.AssetTag = *req.AssetTag
+	}
+	if req.DeviceID != nil {
+		existing.DeviceID = req.DeviceID
+	}
+	if req.ModelName != nil {
+		existing.ModelName = *req.ModelName
+	}
+	if req.SerialNumber != nil {
+		existing.SerialNumber = *req.SerialNumber
+	}
+	if req.Vendor != nil {
+		existing.Vendor = *req.Vendor
+	}
+	if req.Site != nil {
+		existing.Site = *req.Site
+	}
+	if req.Department != nil {
+		existing.Department = *req.Department
+	}
+	if req.AssignedUser != nil {
+		existing.AssignedUser = *req.AssignedUser
+	}
+	if req.PurchaseDate != nil {
+		existing.PurchaseDate = req.PurchaseDate
+	}
+	if req.PurchaseCost != nil {
+		existing.PurchaseCost = *req.PurchaseCost
+	}
+	if req.WarrantyExpiresAt != nil {
+		existing.WarrantyExpiresAt = req.WarrantyExpiresAt
+	}
+	if req.Status != nil {
+		existing.Status = *req.Status
+	}
+	if req.Notes != nil {
+		existing.Notes = *req.Notes
+	}
 
 	if !h.validDeviceRef(w, r, existing.DeviceID) {
 		return

@@ -150,6 +150,91 @@ func TestAnUnknownDeviceIsRefusedWithAMessageNotAForeignKeyError(t *testing.T) {
 	assertRefused(t, "update", upd)
 }
 
+// A partial body is the case the console does not make today but any other API
+// client can: retire an asset by sending only {"status":"retired"}. Decoding that
+// into the model would also write the zero value of every field the client
+// omitted, flattening the row and blanking asset_tag — which the create handler
+// requires, so the update route was silently saving rows create would refuse.
+func TestAPartialUpdateKeepsTheFieldsTheClientDidNotSend(t *testing.T) {
+	d, r := assetFixture(t)
+	seedDevice(t, d, "dev-1", "FIN-JKT-01")
+
+	purchased := time.Date(2024, time.January, 15, 0, 0, 0, 0, time.UTC)
+	warranty := time.Date(2027, time.January, 15, 0, 0, 0, 0, time.UTC)
+	rec := createAsset(t, r, `{"asset_tag":"AST-1","model_name":"Latitude 3420",`+
+		`"serial_number":"SN-1","vendor":"Dell","site":"HQ","department":"Finance",`+
+		`"assigned_user":"alice","purchase_cost":1299.50,"status":"in_use",`+
+		`"notes":"primary laptop","device_id":"dev-1"}`)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create: %d %s", rec.Code, rec.Body.String())
+	}
+	var created HardwareAsset
+	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	// The create response omits omitempty timestamps, so set them directly to
+	// have something to assert the update did not wipe.
+	if _, err := d.Exec(`UPDATE hardware_assets SET purchase_date = ?, warranty_expires_at = ? WHERE id = ?`,
+		purchased, warranty, created.ID); err != nil {
+		t.Fatalf("seed timestamps: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPut, "/api/assets/"+created.ID, strings.NewReader(`{"status":"retired"}`))
+	req = req.WithContext(rbac.WithRole(req.Context(), rbac.RoleTechnician))
+	route := chi.NewRouteContext()
+	route.URLParams.Add("id", created.ID)
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, route))
+	upd := httptest.NewRecorder()
+	r.ServeHTTP(upd, req)
+	if upd.Code != http.StatusOK {
+		t.Fatalf("update: %d %s", upd.Code, upd.Body.String())
+	}
+
+	var got HardwareAsset
+	if err := json.Unmarshal(upd.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode update: %v", err)
+	}
+	if got.Status != "retired" {
+		t.Errorf("status = %q, want retired", got.Status)
+	}
+	if got.AssetTag != "AST-1" {
+		t.Errorf("asset_tag = %q, want AST-1 — a partial update blanked it", got.AssetTag)
+	}
+	if got.ModelName != "Latitude 3420" {
+		t.Errorf("model_name = %q, want Latitude 3420", got.ModelName)
+	}
+	if got.SerialNumber != "SN-1" {
+		t.Errorf("serial_number = %q, want SN-1", got.SerialNumber)
+	}
+	if got.Vendor != "Dell" {
+		t.Errorf("vendor = %q, want Dell", got.Vendor)
+	}
+	if got.Site != "HQ" {
+		t.Errorf("site = %q, want HQ", got.Site)
+	}
+	if got.Department != "Finance" {
+		t.Errorf("department = %q, want Finance", got.Department)
+	}
+	if got.AssignedUser != "alice" {
+		t.Errorf("assigned_user = %q, want alice", got.AssignedUser)
+	}
+	if got.PurchaseCost != 1299.50 {
+		t.Errorf("purchase_cost = %v, want 1299.5", got.PurchaseCost)
+	}
+	if got.Notes != "primary laptop" {
+		t.Errorf("notes = %q, want primary laptop", got.Notes)
+	}
+	if got.DeviceID == nil || *got.DeviceID != "dev-1" {
+		t.Errorf("device_id = %v, want dev-1", got.DeviceID)
+	}
+	if got.PurchaseDate == nil || !got.PurchaseDate.Equal(purchased) {
+		t.Errorf("purchase_date = %v, want %v", got.PurchaseDate, purchased)
+	}
+	if got.WarrantyExpiresAt == nil || !got.WarrantyExpiresAt.Equal(warranty) {
+		t.Errorf("warranty_expires_at = %v, want %v", got.WarrantyExpiresAt, warranty)
+	}
+}
+
 func assertRefused(t *testing.T, name string, rec *httptest.ResponseRecorder) {
 	t.Helper()
 	if rec.Code != http.StatusBadRequest {

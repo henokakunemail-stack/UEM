@@ -34,6 +34,30 @@ type HardwareAsset struct {
 	DeviceHostname string `db:"device_hostname" json:"device_hostname"`
 }
 
+// UpdateAssetRequest mirrors the writable columns of HardwareAsset as pointers.
+//
+// encoding/json cannot tell "field omitted" from "field sent as the zero value",
+// so decoding a PUT body straight into the model means a partial body such as
+// {"status":"retired"} also writes asset_tag="", model_name="", purchase_cost=0
+// and every other field the client never sent. An API client other than the
+// console — which today always sends a full body — would silently flatten an
+// asset. A nil here means "leave the stored value alone".
+type UpdateAssetRequest struct {
+	AssetTag          *string    `json:"asset_tag"`
+	DeviceID          *string    `json:"device_id"`
+	ModelName         *string    `json:"model_name"`
+	SerialNumber      *string    `json:"serial_number"`
+	Vendor            *string    `json:"vendor"`
+	Site              *string    `json:"site"`
+	Department        *string    `json:"department"`
+	AssignedUser      *string    `json:"assigned_user"`
+	PurchaseDate      *time.Time `json:"purchase_date"`
+	PurchaseCost      *float64   `json:"purchase_cost"`
+	WarrantyExpiresAt *time.Time `json:"warranty_expires_at"`
+	Status            *string    `json:"status"`
+	Notes             *string    `json:"notes"`
+}
+
 type SoftwareLicense struct {
 	ID           string     `db:"id" json:"id"`
 	SoftwareName string     `db:"software_name" json:"software_name"`

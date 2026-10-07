@@ -116,9 +116,22 @@ func (h *Handler) getRule(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, rule)
 }
 
+// updateRuleReq mirrors createRuleReq but every field is a pointer. JSON
+// decoding cannot tell "omitted" from "sent as the zero value", so a plain
+// value struct would let {"is_enabled":false} blank the rule_type, severity
+// and threshold too. A nil field means the client did not send it.
+type updateRuleReq struct {
+	Name         *string  `json:"name"`
+	RuleType     *string  `json:"rule_type"`
+	ThresholdVal *float64 `json:"threshold_val"`
+	Severity     *string  `json:"severity"`
+	WebhookURL   *string  `json:"webhook_url"`
+	IsEnabled    *bool    `json:"is_enabled"`
+}
+
 func (h *Handler) updateRule(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	var req createRuleReq
+	var req updateRuleReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid request body")
 		return
@@ -130,12 +143,24 @@ func (h *Handler) updateRule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rule.Name = req.Name
-	rule.RuleType = req.RuleType
-	rule.ThresholdVal = req.ThresholdVal
-	rule.Severity = req.Severity
-	rule.WebhookURL = req.WebhookURL
-	rule.IsEnabled = req.IsEnabled
+	if req.Name != nil {
+		rule.Name = *req.Name
+	}
+	if req.RuleType != nil {
+		rule.RuleType = *req.RuleType
+	}
+	if req.ThresholdVal != nil {
+		rule.ThresholdVal = *req.ThresholdVal
+	}
+	if req.Severity != nil {
+		rule.Severity = *req.Severity
+	}
+	if req.WebhookURL != nil {
+		rule.WebhookURL = *req.WebhookURL
+	}
+	if req.IsEnabled != nil {
+		rule.IsEnabled = *req.IsEnabled
+	}
 
 	if err := h.repo.UpdateRule(r.Context(), rule); err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())

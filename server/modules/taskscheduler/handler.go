@@ -136,9 +136,28 @@ func (h *Handler) getScript(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, s)
 }
 
+// updateScriptReq is createScriptReq with every field optional.
+//
+// The create handler legitimately requires name, script_type and script_content,
+// so those stay non-nil there. Sharing that struct here made every PUT an
+// implicit full overwrite: JSON decoding cannot distinguish an omitted field
+// from one sent as its zero value, so a body naming only the name wrote an empty
+// type, an empty body and a zero timeout alongside it. UpdateScript recomputes
+// the SHA256 over whatever content it is handed, so the blanked row still
+// matched its own hash -- the integrity column reported nothing, and the next
+// rename silently emptied the script the fleet was running.
+type updateScriptReq struct {
+	Name           *string `json:"name"`
+	Description    *string `json:"description"`
+	ScriptType     *string `json:"script_type"`
+	ScriptContent  *string `json:"script_content"`
+	DefaultArgs    *string `json:"default_args"`
+	TimeoutSeconds *int    `json:"timeout_seconds"`
+}
+
 func (h *Handler) updateScript(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	var req createScriptReq
+	var req updateScriptReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid json")
 		return
@@ -150,12 +169,24 @@ func (h *Handler) updateScript(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.Name = req.Name
-	s.Description = req.Description
-	s.ScriptType = req.ScriptType
-	s.ScriptContent = req.ScriptContent
-	s.DefaultArgs = req.DefaultArgs
-	s.TimeoutSeconds = req.TimeoutSeconds
+	if req.Name != nil {
+		s.Name = *req.Name
+	}
+	if req.Description != nil {
+		s.Description = *req.Description
+	}
+	if req.ScriptType != nil {
+		s.ScriptType = *req.ScriptType
+	}
+	if req.ScriptContent != nil {
+		s.ScriptContent = *req.ScriptContent
+	}
+	if req.DefaultArgs != nil {
+		s.DefaultArgs = *req.DefaultArgs
+	}
+	if req.TimeoutSeconds != nil {
+		s.TimeoutSeconds = *req.TimeoutSeconds
+	}
 
 	if err := h.repo.UpdateScript(r.Context(), s); err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
@@ -287,15 +318,31 @@ func (h *Handler) getSchedule(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, s)
 }
 
+// updateScheduleReq is separate from createScheduleReq because an update has to
+// mean "change what was sent". Every field is a pointer for that reason: JSON
+// decoding cannot distinguish an omitted key from a key sent as its zero value,
+// so plain values would make {"name":"x"} also blank the script, the target, the
+// expression and disable the schedule. A nil is the only signal for "leave it".
+type updateScheduleReq struct {
+	Name         *string `json:"name"`
+	Description  *string `json:"description"`
+	ScriptID     *string `json:"script_id"`
+	TargetType   *string `json:"target_type"`
+	TargetID     *string `json:"target_id"`
+	ScheduleType *string `json:"schedule_type"`
+	ScheduleExpr *string `json:"schedule_expr"`
+	IsEnabled    *bool   `json:"is_enabled"`
+}
+
 func (h *Handler) updateSchedule(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	var req createScheduleReq
+	var req updateScheduleReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid json")
 		return
 	}
-	if req.ScheduleType != "" && !isRunnableScheduleType(req.ScheduleType) {
-		writeErr(w, http.StatusBadRequest, "schedule_type must be interval: "+strconv.Quote(req.ScheduleType)+" is a trigger the scheduler does not run")
+	if req.ScheduleType != nil && !isRunnableScheduleType(*req.ScheduleType) {
+		writeErr(w, http.StatusBadRequest, "schedule_type must be interval: "+strconv.Quote(*req.ScheduleType)+" is a trigger the scheduler does not run")
 		return
 	}
 
@@ -305,14 +352,49 @@ func (h *Handler) updateSchedule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.Name = req.Name
-	s.Description = req.Description
-	s.ScriptID = req.ScriptID
-	s.TargetType = req.TargetType
-	s.TargetID = req.TargetID
-	s.ScheduleType = req.ScheduleType
-	s.ScheduleExpr = req.ScheduleExpr
-	s.IsEnabled = req.IsEnabled
+	// The script the update points at has to resolve. createSchedule checks the
+	// same thing; this is the other path a bad id reaches the column, and once it
+	// is there TriggerSchedule fails the GetScriptByID on every fire from then on
+	// -- a schedule that looks armed and can never run. Checked after the
+	// schedule itself is known to exist, so a request against a missing schedule
+	// reports the 404 rather than a complaint about the script it never had.
+	var newScript *ScriptTemplate
+	if req.ScriptID != nil {
+		newScript, err = h.repo.GetScriptByID(r.Context(), *req.ScriptID)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, "referenced script does not exist")
+			return
+		}
+	}
+
+	if req.Name != nil {
+		s.Name = *req.Name
+	}
+	if req.Description != nil {
+		s.Description = *req.Description
+	}
+	if req.ScriptID != nil {
+		s.ScriptID = *req.ScriptID
+		// The joined name in the response is denormalised from the old script, so
+		// it has to move with the id or the console shows one script's id under
+		// another script's name.
+		s.ScriptName = newScript.Name
+	}
+	if req.TargetType != nil {
+		s.TargetType = *req.TargetType
+	}
+	if req.TargetID != nil {
+		s.TargetID = *req.TargetID
+	}
+	if req.ScheduleType != nil {
+		s.ScheduleType = *req.ScheduleType
+	}
+	if req.ScheduleExpr != nil {
+		s.ScheduleExpr = *req.ScheduleExpr
+	}
+	if req.IsEnabled != nil {
+		s.IsEnabled = *req.IsEnabled
+	}
 
 	if err := h.repo.UpdateSchedule(r.Context(), s); err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
