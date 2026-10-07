@@ -104,6 +104,10 @@ services:
     environment:
       # The console is same-origin behind the proxy. Only list other origins here.
       ALLOWED_ORIGIN_DOMAINS: ""
+      # Caddy is the peer, and it is on its own network as "caddy". Trust it by
+      # name or the X-Forwarded-For it sets is ignored and the login rate limiter
+      # sees every attempt as one address. A CIDR works too: 172.16.0.0/12.
+      TRUSTED_PROXIES: caddy
       HTTP_ADDR: 0.0.0.0:8443
       DB_PATH: /data/endpoint-mgmt.db
     volumes:

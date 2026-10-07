@@ -101,6 +101,33 @@ func (s *SessionStore) Get(ctx context.Context, jti string) (*Session, error) {
 	return &sess, nil
 }
 
+// IsLive answers the question every authenticated request asks: does this
+// session still authorise anything? It is the read RequireAuth makes, so it is
+// a single indexed lookup on the primary key rather than a full row decode --
+// it returns a bool and reads two columns, because it runs on every API call
+// and nothing else about the row is needed there.
+//
+// A missing row is false, not an error. A session row is deleted only by
+// PurgeExpired after expiry, and an access token whose session is gone is a
+// token that has outlived its session, which means refusing it rather than
+// treating it as legacy. The distinction from a real read failure matters:
+// errors fail closed at the caller, but they are also reported, so an outage is
+// visible instead of looking like a fleet-wide logout.
+func (s *SessionStore) IsLive(ctx context.Context, jti string) (bool, error) {
+	var ok int
+	err := s.db.GetContext(ctx, &ok, `
+		SELECT 1 FROM auth_sessions
+		WHERE jti = ? AND revoked = 0 AND expires_at > ?`,
+		jti, time.Now().UTC())
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 // Rotate consumes oldJTI and creates its replacement in a single transaction.
 //
 // The two halves are one unit on purpose. Marking the old row revoked without

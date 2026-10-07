@@ -114,10 +114,15 @@ func (e *env) call(method, path, role, body string) *httptest.ResponseRecorder {
 // wires it -- session store included, because without one the handler refuses
 // the request for an unrelated reason and any assertion about is_active becomes
 // vacuous.
+//
+// It also wires the trusted-proxy resolver the way main.go does, because a
+// login without it resolves every caller to an untrusted peer and would rate
+// limit the loopback test client once the resolver started caring.
 func (e *env) loginAs(username, password string) *httptest.ResponseRecorder {
 	e.t.Helper()
 	h := auth.NewLoginHandler(e.db, e.jwt)
 	h.WithSessionStore(e.sessions)
+	h.WithTrustedProxies(nil)
 	r := chi.NewRouter()
 	h.Register(r)
 
@@ -125,6 +130,58 @@ func (e *env) loginAs(username, password string) *httptest.ResponseRecorder {
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(string(body))))
 	return rec
+}
+
+// liveAccessToken logs in over the real login route and hands back the access
+// token a real console ends up with -- one whose sid names a row in
+// auth_sessions. e.call mints sid-less tokens, which RequireAuth still accepts
+// for backward compatibility, and a revocation test needs the kind that
+// revocation actually reaches.
+func (e *env) liveAccessToken(username, password string) string {
+	e.t.Helper()
+	rec := e.loginAs(username, password)
+	if rec.Code != http.StatusOK {
+		e.t.Fatalf("login as %s: %d %s", username, rec.Code, rec.Body.String())
+	}
+	var pair struct {
+		AccessToken string `json:"access_token"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &pair); err != nil {
+		e.t.Fatalf("decode token pair: %v", err)
+	}
+	return pair.AccessToken
+}
+
+// getWith runs a GET against e.r carrying an explicit token, so a test can
+// replay the same credential after the state underneath it has changed.
+func (e *env) getWith(token, path string) *httptest.ResponseRecorder {
+	e.t.Helper()
+	req := httptest.NewRequest(http.MethodGet, path, nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	e.r.ServeHTTP(rec, req)
+	return rec
+}
+
+// strictEnv builds an env whose RequireAuth checks the session table, the way
+// production does. Its router is separate from newEnv's because the existing
+// tests mint sid-less tokens that would otherwise stop authenticating, and
+// because a route registered twice on one chi mux is the one that was
+// registered first.
+//
+// It also carries a /api/whoami route with no role requirement, so a test can
+// ask "is this token still authenticated" without dragging in a role check that
+// answers 403 for an unrelated reason.
+func strictEnv(t *testing.T) *env {
+	t.Helper()
+	e := newEnv(t)
+	e.jwt = e.jwt.WithSessionStore(e.sessions)
+	e.r = chi.NewRouter()
+	NewHandler(NewRepository(e.db), e.sessions, e.audit, e.jwt.RequireAuth).Register(e.r)
+	e.r.With(e.jwt.RequireAuth).Get("/api/whoami", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]string{"user_id": auth.UserIDFromContext(r.Context())})
+	})
+	return e
 }
 
 func (e *env) hashOf(id string) string {
@@ -435,6 +492,90 @@ func TestAnAdminCannotDeactivateTheirOwnAccount(t *testing.T) {
 	rec := e.call("DELETE", "/api/users/actor", rbac.RoleAdmin, "")
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400\nbody: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestADemotedUsersSessionsAreRevoked is the role-change half of revocation.
+// rbac.RequireRole reads the role off the token, not the users row, so the row
+// and the token can disagree for as long as a token minted under the old role
+// is unexpired. A technician demoted to viewer keeps terminal access through
+// that window; the fix is the same one deactivation already uses.
+func TestADemotedUsersSessionsAreRevoked(t *testing.T) {
+	e := strictEnv(t)
+	victim := e.seed("victim", "victim-password-1", rbac.RoleTechnician)
+
+	// The victim is signed in and holding a live token, as they would be.
+	token := e.liveAccessToken("victim", "victim-password-1")
+	if rec := e.getWith(token, "/api/whoami"); rec.Code != http.StatusOK {
+		t.Fatalf("the victim's live token before the demotion: %d %s",
+			rec.Code, rec.Body.String())
+	}
+
+	// Demote via the admin route, the way an operator does.
+	body, _ := json.Marshal(map[string]string{"role": rbac.RoleViewer})
+	if rec := e.call("PUT", "/api/users/"+victim, rbac.RoleAdmin, string(body)); rec.Code != http.StatusOK {
+		t.Fatalf("demote = %d, want 200\nbody: %s", rec.Code, rec.Body.String())
+	}
+	if e.roleOf(victim) != rbac.RoleViewer {
+		t.Fatalf("role after demotion = %q", e.roleOf(victim))
+	}
+
+	// The session is gone, so the token the victim is holding stops working.
+	var live int
+	if err := e.db.Get(&live,
+		`SELECT COUNT(*) FROM auth_sessions WHERE user_id = ? AND revoked = 0`, victim); err != nil {
+		t.Fatal(err)
+	}
+	if live != 0 {
+		t.Errorf("%d live session(s) remain after a role change; the old role "+
+			"is still on the token in the victim's browser", live)
+	}
+	if rec := e.getWith(token, "/api/whoami"); rec.Code != http.StatusUnauthorized {
+		t.Errorf("the pre-demotion token still authenticated after the role "+
+			"change: status %d, want 401", rec.Code)
+	}
+}
+
+// TestARoleChangeThatDoesNotChangeTheRoleRevokesNothing: revoking on every
+// update would sign a user out because an admin corrected a display name. The
+// trigger is the role actually differing, and the check reads the row before
+// the write to see what it is changing from.
+func TestARoleChangeThatDoesNotChangeTheRoleRevokesNothing(t *testing.T) {
+	e := newEnv(t)
+	victim := e.seed("victim", "victim-password-1", rbac.RoleTechnician)
+
+	// A same-role update, which is what an admin sends to fix a display name.
+	body, _ := json.Marshal(map[string]string{"role": rbac.RoleTechnician})
+	if rec := e.call("PUT", "/api/users/"+victim, rbac.RoleAdmin, string(body)); rec.Code != http.StatusOK {
+		t.Fatalf("update = %d, want 200\nbody: %s", rec.Code, rec.Body.String())
+	}
+
+	var live int
+	if err := e.db.Get(&live,
+		`SELECT COUNT(*) FROM auth_sessions WHERE user_id = ? AND revoked = 0`, victim); err != nil {
+		t.Fatal(err)
+	}
+	if live != 0 {
+		t.Errorf("%d session(s) revoked by a no-op role update", live)
+	}
+}
+
+// TestAnAdminCannotChangeTheirOwnRole: the demotion would sign the operator out
+// of the console they are making the request from. deactivateUser refuses the
+// same thing for the same reason, and the update route is where a
+// self-demotion would otherwise slip through, because it takes the role from
+// the body rather than from is_active.
+func TestAnAdminCannotChangeTheirOwnRole(t *testing.T) {
+	e := newEnv(t)
+	e.seedWithID(actorID, "actor", "actor-password-1", rbac.RoleAdmin)
+
+	body, _ := json.Marshal(map[string]string{"role": rbac.RoleViewer})
+	rec := e.call("PUT", "/api/users/"+actorID, rbac.RoleAdmin, string(body))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("self-demotion = %d, want 400\nbody: %s", rec.Code, rec.Body.String())
+	}
+	if e.roleOf(actorID) != rbac.RoleAdmin {
+		t.Errorf("role was changed despite the refusal: %q", e.roleOf(actorID))
 	}
 }
 

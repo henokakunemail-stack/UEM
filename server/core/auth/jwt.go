@@ -42,10 +42,28 @@ type JWTService struct {
 	secret          []byte
 	accessTokenTTL  time.Duration
 	refreshTokenTTL time.Duration
+	// sessions is the server-side authority behind every access token. nil means
+	// RequireAuth trusts the signature alone, which is the pre-session behaviour
+	// and what the tests that build a JWTService directly still exercise.
+	sessions *SessionStore
 }
 
 func NewJWTService(secret string, accessTTL, refreshTTL time.Duration) *JWTService {
 	return &JWTService{secret: []byte(secret), accessTokenTTL: accessTTL, refreshTokenTTL: refreshTTL}
+}
+
+// WithSessionStore wires the session table into RequireAuth. Without it a token
+// verifies on its signature for as long as it is unexpired, and nothing an
+// administrator does -- deactivating the account, demoting the role, revoking
+// the session -- reaches a console that is already holding one.
+//
+// This must be the same store login writes to. A second store against the same
+// table is a second connection pool, but a second store against a different
+// database is a second source of truth, and revocation would quietly stop
+// applying to the tokens the middleware accepts.
+func (s *JWTService) WithSessionStore(store *SessionStore) *JWTService {
+	s.sessions = store
+	return s
 }
 
 // TokenPair holds both issued tokens.

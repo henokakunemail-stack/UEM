@@ -48,6 +48,11 @@ func newEnv(t *testing.T) *env {
 	t.Cleanup(func() { d.Close() })
 
 	jwtSvc := NewJWTService(testSecret, 15*time.Minute, time.Hour)
+	// The store is wired here for the same reason main wires it: without it
+	// RequireAuth trusts the signature alone and nothing an operator does to a
+	// session reaches a console that already holds a token. Tests that need the
+	// pre-session behaviour construct their own service.
+	jwtSvc = jwtSvc.WithSessionStore(NewSessionStore(d, time.Hour))
 	r := chi.NewRouter()
 	h := NewLoginHandler(d, jwtSvc)
 	t.Cleanup(h.Close)
@@ -712,13 +717,25 @@ func TestListSessionsOnlyShowsCallersOwn(t *testing.T) {
 
 func TestListSessionsReturnsEmptyArrayNotNull(t *testing.T) {
 	e := newEnv(t)
-	e.seedUser("alice", "pw-alice", rbac.RoleAdmin)
+	userID := e.seedUser("alice", "pw-alice", rbac.RoleAdmin)
 	pair := e.login("alice", "pw-alice")
-	if err := NewSessionStore(e.db, time.Hour).Revoke(context.Background(), e.jtiOf(pair.RefreshToken)); err != nil {
+	store := NewSessionStore(e.db, time.Hour)
+	if err := store.Revoke(context.Background(), e.jtiOf(pair.RefreshToken)); err != nil {
 		t.Fatalf("revoke: %v", err)
 	}
 
-	res := e.do(http.MethodGet, "/api/auth/sessions", pair.AccessToken, nil)
+	// The access token from the session just revoked is dead, which is what
+	// revocation is for. A kindless, sessionless token is the one credential
+	// that still authenticates a user with no live row -- the console's
+	// backward-compat path -- and it is what reaches the endpoint here, so what
+	// is being asserted is the rendering of an empty list, not the ability to
+	// keep using a revoked session.
+	legacy, err := e.jwt.Issue(userID, "alice", rbac.RoleAdmin)
+	if err != nil {
+		t.Fatalf("issue legacy token: %v", err)
+	}
+
+	res := e.do(http.MethodGet, "/api/auth/sessions", legacy.AccessToken, nil)
 	if res.code != http.StatusOK {
 		t.Fatalf("list sessions: status %d, body %s", res.code, res.body)
 	}
@@ -1184,5 +1201,97 @@ func TestKindlessTokenIsRefusedEverywhere(t *testing.T) {
 	// inspects it.
 	if res := e.do(http.MethodGet, "/api/whoami?token="+signed, "", nil); res.code != http.StatusUnauthorized {
 		t.Errorf("a kindless token authenticated via ?token=: status %d, want 401", res.code)
+	}
+}
+
+// TestRevokedSessionKillsTheAccessToken is the P0.2 regression: a JWT verifies
+// on its own signature, and before the session store was wired into RequireAuth
+// that was the whole authorisation. Signing out, disabling the account, or
+// demoting the role wrote a row that nothing on the request path read, so the
+// access token kept working until its own 15 minutes ran out -- and a token a
+// thief lifted from a browser is exactly the token those 15 minutes matter for.
+func TestRevokedSessionKillsTheAccessToken(t *testing.T) {
+	e := newEnv(t)
+	e.seedUser("alice", "pw-alice", rbac.RoleAdmin)
+	pair := e.login("alice", "pw-alice")
+
+	// Sanity: the token works before anything is revoked.
+	if res := e.do(http.MethodGet, "/api/whoami", pair.AccessToken, nil); res.code != http.StatusOK {
+		t.Fatalf("live session: /api/whoami status %d, want 200", res.code)
+	}
+
+	// Revoke the way logout does.
+	jti := e.jtiOf(pair.RefreshToken)
+	if err := NewSessionStore(e.db, time.Hour).Revoke(context.Background(), jti); err != nil {
+		t.Fatalf("revoke: %v", err)
+	}
+
+	// The access token has not expired; the token is not forged. The session is
+	// gone, and that has to be enough.
+	if res := e.do(http.MethodGet, "/api/whoami", pair.AccessToken, nil); res.code != http.StatusUnauthorized {
+		t.Errorf("after revoking its session, the access token still authenticated: "+
+			"status %d, body %s", res.code, res.body)
+	}
+}
+
+// TestRevokeAllForUserKillsEveryAccessToken covers the mass case: an operator
+// deactivating an account does not get to wait out a token per browser.
+func TestRevokeAllForUserKillsEveryAccessToken(t *testing.T) {
+	e := newEnv(t)
+	userID := e.seedUser("alice", "pw-alice", rbac.RoleAdmin)
+	phone := e.login("alice", "pw-alice")
+	laptop := e.login("alice", "pw-alice")
+
+	if err := NewSessionStore(e.db, time.Hour).RevokeAllForUser(context.Background(), userID); err != nil {
+		t.Fatalf("revoke all: %v", err)
+	}
+
+	for name, tok := range map[string]string{"phone": phone.AccessToken, "laptop": laptop.AccessToken} {
+		if res := e.do(http.MethodGet, "/api/whoami", tok, nil); res.code != http.StatusUnauthorized {
+			t.Errorf("%s kept working after RevokeAllForUser: status %d, body %s",
+				name, res.code, res.body)
+		}
+	}
+}
+
+// TestASessionlessTokenSurvivesTheRevocationCheck pins the backward-compat
+// property the check has to keep: a token with no sid predates sessions, and
+// refusing it would sign out every console that upgraded mid-session. The
+// access TTL already bounds it, so expiry is the honest deadline.
+func TestASessionlessTokenSurvivesTheRevocationCheck(t *testing.T) {
+	e := newEnv(t)
+	userID := e.seedUser("alice", "pw-alice", rbac.RoleAdmin)
+
+	legacy, err := e.jwt.Issue(userID, "alice", rbac.RoleAdmin)
+	if err != nil {
+		t.Fatalf("issue sessionless token: %v", err)
+	}
+
+	// Wipe every session the user holds. If the check were "any sid must exist",
+	// this would be the test that fails.
+	if err := NewSessionStore(e.db, time.Hour).RevokeAllForUser(context.Background(), userID); err != nil {
+		t.Fatalf("revoke all: %v", err)
+	}
+
+	if res := e.do(http.MethodGet, "/api/whoami", legacy.AccessToken, nil); res.code != http.StatusOK {
+		t.Errorf("a sessionless token was refused: status %d, want 200", res.code)
+	}
+}
+
+// TestARevokedSessionCannotReissueItsOwnTicket: the WebSocket ticket endpoint
+// sits behind RequireAuth, so a session the operator just revoked must not be
+// able to mint a fresh one-way credential for a terminal either.
+func TestARevokedSessionCannotReissueItsOwnTicket(t *testing.T) {
+	e := newEnv(t)
+	e.seedUser("alice", "pw-alice", rbac.RoleAdmin)
+	pair := e.login("alice", "pw-alice")
+
+	if err := NewSessionStore(e.db, time.Hour).Revoke(context.Background(), e.jtiOf(pair.RefreshToken)); err != nil {
+		t.Fatalf("revoke: %v", err)
+	}
+
+	if res := e.do(http.MethodPost, "/api/auth/ws-ticket?purpose=remote-exec", pair.AccessToken, nil); res.code != http.StatusUnauthorized {
+		t.Errorf("a revoked session minted a WebSocket ticket: status %d, body %s",
+			res.code, res.body)
 	}
 }

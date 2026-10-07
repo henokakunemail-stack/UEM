@@ -88,6 +88,8 @@ ENROLLMENT_TTL=30m
 BACKUP_INTERVAL=1h
 BACKUP_RETAIN=24
 BACKUP_DIR=/opt/endpoint-mgmt/data/backups
+# HTTP_ADDR di atas sudah 127.0.0.1, jadi nginx di localhost dipercaya otomatis.
+# Isi hanya kalau nginx ada di mesin lain: TRUSTED_PROXIES=10.0.0.4
 EOF"
 
 sudo chmod 600 /opt/endpoint-mgmt/.env
@@ -168,6 +170,21 @@ sudo ln -sf /etc/nginx/sites-available/mgmt.perusahaan.com /etc/nginx/sites-enab
 sudo rm -f /etc/nginx/sites-enabled/default
 sudo nginx -t && sudo systemctl reload nginx
 ```
+
+Template ini sudah mengatur `X-Real-IP` dan `X-Forwarded-For`, tapi server
+hanya membaca header itu bila koneksi datang dari peer yang ada di
+`TRUSTED_PROXIES`. Nginx dan server biasanya satu kotak, jadi loopback
+(127.0.0.1) sudah dipercaya secara default dan tidak perlu konfigurasi
+tambahan. Kalau nginx ada di mesin lain, daftarkan alamatnya:
+
+```bash
+# Di EnvironmentFile server (/etc/endpoint-mgmt/config/.env)
+TRUSTED_PROXIES=10.0.0.4
+```
+
+Tanpa itu, header diabaikan dan rate limiter login melihat semua request
+nginx sebagai satu alamat — yang berarti pembatasan brute-force tidak
+berlaku per-klien.
 
 #### Langkah 7: Konfigurasi Firewall UFW
 ```bash

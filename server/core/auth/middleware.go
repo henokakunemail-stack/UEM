@@ -6,6 +6,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rs/zerolog/log"
+
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/rbac"
 )
 
@@ -87,6 +89,13 @@ func (s *JWTService) parseAccess(rawToken string) (Claims, error) {
 // header, and the two console builds that could still be holding a URL with a
 // token in it get a 401 and a re-login rather than a credential that leaks for
 // as long as anybody keeps the link.
+//
+// When a SessionStore is wired in (WithSessionStore), the token's `sid` must
+// also name a live row. Without that check a signature is the whole
+// authorisation: deactivating a user, demoting them, or revoking their session
+// would leave the access token they already hold working until its own 15
+// minutes ran out, and an access token a thief lifted from a browser is exactly
+// the token that 15 minutes matters for.
 func (s *JWTService) RequireAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rawToken := ""
@@ -105,6 +114,34 @@ func (s *JWTService) RequireAuth(next http.Handler) http.Handler {
 		if err != nil {
 			http.Error(w, "invalid or expired token", http.StatusUnauthorized)
 			return
+		}
+		// The session check is the difference between a token that is valid and
+		// one that is still authorised. It runs on every authenticated request,
+		// so it has to stay cheap: auth_sessions.jti is the primary key, and
+		// this is one indexed point lookup.
+		//
+		// A token with no sid predates sessions and is trusted as-is; revoking
+		// it would sign out every console that upgraded mid-session, and its
+		// access-TTL is already short. An unset store means the same thing for
+		// callers that never wired one in, and for the tests that construct a
+		// JWTService directly.
+		if s.sessions != nil && claims.SessionID != "" {
+			ok, err := s.sessions.IsLive(r.Context(), claims.SessionID)
+			if err != nil {
+				// A broken read must not become an open door. Refusing is the
+				// fail-closed choice; the health of the database is already
+				// observable elsewhere, and a degraded but authenticated API is
+				// worse than one that answers 503.
+				log.Error().Err(err).
+					Str("session_id", claims.SessionID).
+					Msg("auth: read auth_sessions failed; refusing the request")
+				writeErr(w, http.StatusServiceUnavailable, "session store unavailable")
+				return
+			}
+			if !ok {
+				http.Error(w, "invalid or expired token", http.StatusUnauthorized)
+				return
+			}
 		}
 		ctx := r.Context()
 		ctx = context.WithValue(ctx, CtxUserID, claims.UserID)

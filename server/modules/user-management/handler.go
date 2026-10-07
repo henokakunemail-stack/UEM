@@ -188,6 +188,33 @@ func (h *Handler) updateUser(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// A role change has to be read before the write, because the row afterwards
+	// no longer says what it used to. It is one lookup, and it is the difference
+	// between "this user was promoted, so their old sessions are stale" and
+	// "this user was renamed, so nothing has to go".
+	//
+	// An admin demoting or deactivating their own account is refused the way
+	// deactivateUser refuses it: the request is the one that would sign the
+	// operator out of the console they are making it from, which is a lockout
+	// dressed as an edit. Promoting yourself is allowed -- an admin making
+	// another admin does not lose anything, and is the shape of a legitimate
+	// first-deploy handover.
+	if req.Role != nil || (req.IsActive != nil && !*req.IsActive) {
+		prior, err := h.repo.GetByID(r.Context(), id)
+		if err != nil {
+			if errors.Is(err, ErrNotFound) {
+				writeErr(w, http.StatusNotFound, "user not found")
+				return
+			}
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if prior.ID == auth.UserIDFromContext(r.Context()) && req.Role != nil && *req.Role != prior.Role {
+			writeErr(w, http.StatusBadRequest, "cannot change your own role; ask another admin")
+			return
+		}
+	}
+
 	if err := h.repo.Update(r.Context(), id, req); err != nil {
 		if errors.Is(err, ErrNotFound) {
 			writeErr(w, http.StatusNotFound, "user not found")
@@ -206,6 +233,16 @@ func (h *Handler) updateUser(w http.ResponseWriter, r *http.Request) {
 
 	actorID := auth.UserIDFromContext(r.Context())
 	_ = h.audit.Log(r.Context(), "user", actorID, "user.update", id, map[string]string{})
+
+	// A role change revokes for the same reason refresh checks the role: the
+	// token carries the old one, and rbac.RequireRole reads the claim, not the
+	// row. Without this a viewer promoted to technician has to wait out an
+	// access token to actually become one, and a technician demoted to viewer
+	// keeps terminal access for the same 15 minutes -- which is long enough to
+	// matter and exactly the window a dismissed employee would use.
+	if req.Role != nil || (req.IsActive != nil && !*req.IsActive) {
+		h.revokeSessions(r, id)
+	}
 
 	updated, err := h.repo.GetByID(r.Context(), id)
 	if err != nil {

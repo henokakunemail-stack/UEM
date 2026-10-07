@@ -33,6 +33,10 @@ type LoginHandler struct {
 	jwt      *JWTService
 	sessions *SessionStore
 	limiter  *IPRateLimiter
+	// clientIP resolves the caller's address for the rate limiter and for the
+	// session record. It honours the forwarding headers only from a trusted
+	// peer, so an attacker cannot rotate X-Forwarded-For to dodge the lockout.
+	clientIP *ClientIPResolver
 }
 
 func NewLoginHandler(db *sqlx.DB, jwt *JWTService) *LoginHandler {
@@ -41,6 +45,7 @@ func NewLoginHandler(db *sqlx.DB, jwt *JWTService) *LoginHandler {
 		jwt:      jwt,
 		sessions: NewSessionStore(db, jwt.refreshTokenTTL),
 		limiter:  NewIPRateLimiter(5, 1*time.Minute, 5*time.Minute),
+		clientIP: NewClientIPResolver(nil),
 	}
 }
 
@@ -57,6 +62,14 @@ func (h *LoginHandler) WithRateLimiter(l *IPRateLimiter) *LoginHandler {
 // the token TTL the store was built with.
 func (h *LoginHandler) WithSessionStore(s *SessionStore) *LoginHandler {
 	h.sessions = s
+	return h
+}
+
+// WithTrustedProxies configures which peers may set the forwarding headers.
+// main calls it from TRUSTED_PROXIES; a nil or empty list still trusts
+// loopback, so a single-box deployment works unconfigured.
+func (h *LoginHandler) WithTrustedProxies(proxies []string) *LoginHandler {
+	h.clientIP = NewClientIPResolver(proxies)
 	return h
 }
 
@@ -113,7 +126,7 @@ func (h *LoginHandler) Register(mux any) {
 }
 
 func (h *LoginHandler) login(w http.ResponseWriter, r *http.Request) {
-	clientIP := ClientIP(r)
+	clientIP := h.clientIP.ClientIP(r)
 	if allowed, wait := h.limiter.IsAllowed(clientIP); !allowed {
 		waitSec := int(wait.Seconds()) + 1
 		w.Header().Set("Retry-After", strconv.Itoa(waitSec))
@@ -187,13 +200,25 @@ func (h *LoginHandler) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.sessions.Create(r.Context(), u.ID, u.Username, u.Role, jti,
-		r.UserAgent(), ClientIP(r)); err != nil {
+		r.UserAgent(), h.clientIP.ClientIP(r)); err != nil {
 		log.Error().Err(err).Msg("create auth session")
 		writeErr(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 
 	h.limiter.RecordSuccess(clientIP)
+	// Stamped after the credential check, so a failed login never refreshes
+	// last_login_at. The column is what the console shows as "last seen on the
+	// console" and what an operator reads during an incident, and a failure
+	// touching it would read as a successful sign-in.
+	//
+	// The error is not fatal. A user authenticated correctly and a column we
+	// could not write is an operational annoyance, not a reason to answer 500
+	// and send them back to the login screen they just cleared.
+	if _, err := h.db.ExecContext(r.Context(),
+		`UPDATE users SET last_login_at = ? WHERE id = ?`, time.Now().UTC(), u.ID); err != nil {
+		log.Warn().Err(err).Str("user_id", u.ID).Msg("stamp last_login_at")
+	}
 	_ = audit.Log(r.Context(), h.db, "user", u.ID, "auth.login", u.ID, nil)
 	writeJSON(w, http.StatusOK, pair)
 }

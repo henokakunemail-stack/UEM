@@ -316,6 +316,19 @@ func buildServer(cfg config.Config, database *sqlx.DB) (*http.Server, func()) {
 	deviceRepo := devicemgmt.NewRepository(database)
 	hub := transport.NewHub()
 
+	// One session store, wired into RequireAuth and into login. jwtSvc is built
+	// first because the rest of this function takes its middleware, and it is
+	// handed the store afterwards; the store is still authoritative for every
+	// authenticated route, because the middleware does not capture anything at
+	// construction time and reads the store per request.
+	//
+	// This has to be the same store login writes to. A second store against the
+	// same table is a second connection pool, but a second store against a
+	// different database is a second source of truth, and revocation would
+	// quietly stop applying to the tokens the middleware accepts.
+	sessionStore := auth.NewSessionStore(database, cfg.RefreshTokenTTL)
+	jwtSvc = jwtSvc.WithSessionStore(sessionStore)
+
 	// Phase 2: inventory receiver + HTTP routes. The handler needs the hub both to
 	// answer "is this device online" and to deliver the collect request; the
 	// routes need the real JWT middleware, injected here to avoid a package-level
@@ -364,14 +377,9 @@ func buildServer(cfg config.Config, database *sqlx.DB) (*http.Server, func()) {
 		})
 
 	// Admin console auth (public endpoints).
-	// One store, shared. It is the same table the login handler writes, the
-	// WebSocket ticket issuer reads, and user-management revokes against, so a
-	// second instance would be a second source of truth about the same sessions
-	// rather than a second connection.
-	sessionStore := auth.NewSessionStore(database, cfg.RefreshTokenTTL)
-
 	loginH := auth.NewLoginHandler(database, jwtSvc)
 	loginH.WithSessionStore(sessionStore)
+	loginH.WithTrustedProxies(cfg.TrustedProxies)
 	loginH.Register(r)
 
 	// WebSocket handshakes cannot carry an Authorization header, so the console
@@ -442,6 +450,19 @@ func buildServer(cfg config.Config, database *sqlx.DB) (*http.Server, func()) {
 	// Background loops that run for the life of the process. The cancel is owned
 	// by the cleanup closure at the end of this function; see the note there.
 	bgCtx, stopBackground := context.WithCancel(context.Background())
+
+	// Expired session rows are reaped on a timer rather than at login. They are
+	// only deleted after expiry, so the interval is a cleanliness knob, not a
+	// correctness one: a late purge leaves the table a little larger and changes
+	// nothing about which token works, and IsLive already refuses anything past
+	// expires_at.
+	//
+	// Hourly is not a tuned value. The table grows by one row per login plus one
+	// per refresh, and every one of those rows is beyond its TTL when it goes;
+	// anything from hourly to daily is fine, and hourly keeps a fleet that
+	// refreshes constantly from accumulating a week's worth of dead rows between
+	// sweeps.
+	go purgeSessions(bgCtx, sessionStore, time.Hour)
 
 	// Phase 9: alerting & notification engine.
 	alertRepo := alerting.NewRepository(database)
@@ -646,6 +667,26 @@ func buildServer(cfg config.Config, database *sqlx.DB) (*http.Server, func()) {
 		stopBackground()
 	}
 	return srv, cleanup
+}
+
+// purgeSessions deletes auth_sessions rows past their TTL, on a timer, for the
+// life of the process. It logs failures rather than exiting: the loop's own
+// health is visible through the error itself, and stopping a cleanup loop on a
+// transient SQLITE_BUSY would turn one slow write into no cleanup at all until
+// the next restart.
+func purgeSessions(ctx context.Context, store *auth.SessionStore, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if err := store.PurgeExpired(ctx); err != nil {
+				log.Error().Err(err).Msg("purge expired auth sessions")
+			}
+		}
+	}
 }
 
 // bootstrapAdmin creates the default admin if no users exist yet.

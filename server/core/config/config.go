@@ -58,6 +58,19 @@ type Config struct {
 	//
 	// Trade-off: rotating it needs a server restart.
 	LDAPBindPassword string
+
+	// TrustedProxies are the peer addresses allowed to set X-Forwarded-For and
+	// X-Real-IP. ClientIP honours those headers only when the connection came
+	// from one of these; from anybody else it reads RemoteAddr, which the peer
+	// cannot forge.
+	//
+	// Empty means loopback only, which is the default that stays safe on a bare
+	// deployment. Behind nginx or Caddy the operator lists the proxy's address
+	// here, and an attacker who can set the header is then still capped by
+	// their own address. Comma-separated in TRUSTED_PROXIES, and each entry may
+	// be a plain IP ("10.0.0.4") or a CIDR ("10.0.0.0/8"), so a whole internal
+	// subnet can be named without enumerating load-balancer replicas.
+	TrustedProxies []string
 }
 
 // Load reads configuration from environment variables with sane defaults.
@@ -78,6 +91,7 @@ func Load() (Config, error) {
 		BackupInterval:       getDuration("BACKUP_INTERVAL", time.Hour),
 		BackupRetain:         getEnvInt("BACKUP_RETAIN", 24),
 		AllowedOriginDomains: getCSVEnv("ALLOWED_ORIGIN_DOMAINS"),
+		TrustedProxies:       getCSVEnv("TRUSTED_PROXIES"),
 		LogLevel:             getEnv("LOG_LEVEL", "info"),
 		LogFile:              getEnv("LOG_FILE", ""),
 		LogTailLines:         getEnvInt("LOG_TAIL_LINES", 2000),

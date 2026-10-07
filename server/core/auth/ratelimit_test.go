@@ -206,24 +206,75 @@ func TestNewOriginChecker_EmptyListTrustsNothingExtra(t *testing.T) {
 	}
 }
 
+// TestClientIP covers the three cases the resolver has to get right. The
+// untrusted-header case is the one that used to be a security hole: the old
+// ClientIP read X-Forwarded-For unconditionally, so a brute-force run that set
+// a fresh value on every request saw every attempt as a new address and the
+// lockout never armed.
 func TestClientIP(t *testing.T) {
+	// 10.0.0.1 is not loopback and is not in the list, so its headers are ignored.
+	resolver := NewClientIPResolver([]string{"192.0.2.0/24", "198.51.100.7"})
+
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.RemoteAddr = "10.0.0.1:12345"
 
-	if ip := ClientIP(req); ip != "10.0.0.1" {
-		t.Fatalf("expected 10.0.0.1, got %q", ip)
+	if ip := resolver.ClientIP(req); ip != "10.0.0.1" {
+		t.Fatalf("expected the peer address 10.0.0.1, got %q", ip)
 	}
 
-	// With X-Forwarded-For
+	// An untrusted peer's forwarded header is not consulted at all.
 	req.Header.Set("X-Forwarded-For", "203.0.113.195, 70.41.3.18")
-	if ip := ClientIP(req); ip != "203.0.113.195" {
-		t.Fatalf("expected 203.0.113.195, got %q", ip)
+	if ip := resolver.ClientIP(req); ip != "10.0.0.1" {
+		t.Fatalf("an untrusted peer's X-Forwarded-For was honoured: got %q, "+
+			"want the peer address 10.0.0.1", ip)
 	}
 
-	// With X-Real-IP
-	req.Header.Del("X-Forwarded-For")
-	req.Header.Set("X-Real-IP", "198.51.100.42")
-	if ip := ClientIP(req); ip != "198.51.100.42" {
-		t.Fatalf("expected 198.51.100.42, got %q", ip)
+	// A trusted CIDR: the header is read, and the first entry wins.
+	trusted := httptest.NewRequest(http.MethodGet, "/", nil)
+	trusted.RemoteAddr = "192.0.2.99:12345"
+	trusted.Header.Set("X-Forwarded-For", "203.0.113.195, 70.41.3.18")
+	if ip := resolver.ClientIP(trusted); ip != "203.0.113.195" {
+		t.Fatalf("a trusted proxy's X-Forwarded-For was not honoured: got %q, "+
+			"want 203.0.113.195", ip)
+	}
+
+	// A trusted exact IP, and X-Real-IP instead of X-Forwarded-For.
+	trustedExact := httptest.NewRequest(http.MethodGet, "/", nil)
+	trustedExact.RemoteAddr = "198.51.100.7:12345"
+	trustedExact.Header.Set("X-Real-IP", "198.51.100.42")
+	if ip := resolver.ClientIP(trustedExact); ip != "198.51.100.42" {
+		t.Fatalf("a trusted proxy's X-Real-IP was not honoured: got %q, "+
+			"want 198.51.100.42", ip)
+	}
+}
+
+// TestLoopbackIsAlwaysTrusted: a single-box deployment puts a proxy on the same
+// host as the server, and TRUSTED_PROXIES is empty in that setup by default.
+// Loopback has to keep working, or the default configuration rate-limits the
+// console by treating every request as coming from an untrusted peer.
+func TestLoopbackIsAlwaysTrusted(t *testing.T) {
+	resolver := NewClientIPResolver(nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "127.0.0.1:12345"
+	req.Header.Set("X-Forwarded-For", "203.0.113.195")
+	if ip := resolver.ClientIP(req); ip != "203.0.113.195" {
+		t.Fatalf("loopback without TRUSTED_PROXIES did not honour the header: "+
+			"got %q, want 203.0.113.195", ip)
+	}
+}
+
+// TestMalformedTrustedProxyEntriesAreSkipped: one bad entry in TRUSTED_PROXIES
+// is one misconfigured address. Refusing to start over it would turn a typo
+// into an outage, so the bad entry is dropped and the good ones still apply.
+func TestMalformedTrustedProxyEntriesAreSkipped(t *testing.T) {
+	resolver := NewClientIPResolver([]string{"not-an-ip", "192.0.2.0/24"})
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "192.0.2.5:12345"
+	req.Header.Set("X-Forwarded-For", "203.0.113.195")
+	if ip := resolver.ClientIP(req); ip != "203.0.113.195" {
+		t.Fatalf("a valid entry after a malformed one was not honoured: got %q, "+
+			"want 203.0.113.195", ip)
 	}
 }

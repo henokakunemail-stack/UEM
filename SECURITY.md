@@ -52,6 +52,18 @@ This platform was designed with the following threat model assumptions:
 - **Role-based access control**: Console operators are `admin`, `technician`,
   or `viewer`. Administrative actions and sensitive data exports require
   `admin` role.
+- **Server-side session authority**: A console JWT is not self-authorising. The
+  access token names a row in `auth_sessions`, and every authenticated request
+  checks that the row is still live. Signing out, deactivating an account,
+  resetting a password, or changing a role revokes the affected sessions, and
+  the access token the console already holds stops working on its next request
+  rather than waiting out its own TTL.
+- **Forwarded-address trust**: `X-Forwarded-For` and `X-Real-IP` are honoured
+  only when the connection came from a peer listed in `TRUSTED_PROXIES`
+  (loopback is always trusted). From anybody else the peer address is used,
+  which the remote end cannot choose for itself. Without this gate the login
+  rate limiter is bypassable by writing a fresh forwarding header on every
+  attempt, because every attempt then appears to come from a new address.
 - **Audit logging**: Every administrative action, command execution, remote
   desktop session, and enrollment event is recorded with actor, timestamp, and
   details.
@@ -64,6 +76,11 @@ Deployers must ensure:
   The installer generates one automatically.
 - `ALLOWED_ORIGIN_DOMAINS` is set only if the web console is served from a
   different hostname than the API. Leaving it empty is the safe default.
+- `TRUSTED_PROXIES` lists the reverse proxy addresses that may set the
+  forwarded-address headers. Leaving it empty trusts loopback only; set it to
+  the proxy's IP or CIDR (e.g. `10.0.0.0/8`) when nginx or Caddy terminates the
+  connection, or the rate limiter will see every proxied request as the same
+  address and the forwarded address will be ignored.
 - TLS certificates are valid, rotated before expiry, and private keys are
   stored with restrictive permissions (root-only read).
 - The server database directory (`/opt/endpoint-mgmt/data` by default) is

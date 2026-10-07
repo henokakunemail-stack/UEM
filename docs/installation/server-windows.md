@@ -98,6 +98,11 @@ BACKUP_DIR=C:/EndpointMgmt/data/backups
 
 # Domain origin konsol (opsional jika konsol diakses dari domain terpisah):
 # ALLOWED_ORIGIN_DOMAINS=mgmt.perusahaan.com
+
+# Reverse proxy (IIS/Caddy/nginx) di depan server? Daftarkan alamat/_CIDR-nya
+# di sini, jika tidak header X-Forwarded-For diabaikan dan rate limiter login
+# melihat semua request proxy sebagai satu alamat:
+# TRUSTED_PROXIES=127.0.0.1
 "@
 
 $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
