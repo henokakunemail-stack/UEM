@@ -183,15 +183,20 @@ func TestConcurrentConsumeHasOneWinner(t *testing.T) {
 func TestExpiredTicketRejected(t *testing.T) {
 	s, d := newStore(t)
 	ctx := context.Background()
-	ticket := issue(t, s, subject, purpose, 30*time.Millisecond)
+	// The TTL is generous rather than short because the first consume has to
+	// win the race with expiry, and a 30ms window loses that race on a loaded
+	// runner. Expiry itself is forced below, at the point the test needs it.
+	ticket := issue(t, s, subject, purpose, DefaultTTL)
 
 	if _, _, err := s.Consume(ctx, ticket); err != nil {
 		t.Fatalf("consume before expiry: %v", err)
 	}
 
-	// A second ticket, left to go stale.
-	stale := issue(t, s, subject, purpose, 30*time.Millisecond)
-	time.Sleep(120 * time.Millisecond)
+	// A second ticket, forced into the expired state rather than waited out:
+	// a sleep long enough to guarantee it is also long enough for the first
+	// consume above to have gone stale, which inverts the assertion.
+	stale := issue(t, s, subject, purpose, DefaultTTL)
+	expireTicket(t, d, stale)
 	if _, _, err := s.Consume(ctx, stale); !errors.Is(err, ErrUnknownTicket) {
 		t.Errorf("consume after expiry: err = %v, want %v", err, ErrUnknownTicket)
 	}
