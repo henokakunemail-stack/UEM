@@ -14,6 +14,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -210,8 +211,8 @@ func TestAgentEngineManifestVerification(t *testing.T) {
 
 	hasher := protocol.ReleaseManifest{
 		Version:                 "1.0.0",
-		OSName:                  "windows",
-		Arch:                    "amd64",
+		OSName:                  runtime.GOOS,
+		Arch:                    runtime.GOARCH,
 		SHA256Checksum:          "",
 		Size:                    int64(len(validPEBinary)),
 		URL:                     "/download",
