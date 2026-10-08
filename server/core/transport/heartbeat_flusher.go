@@ -17,8 +17,13 @@ type HeartbeatFlusher struct {
 	interval time.Duration
 	pending  map[string]time.Time
 	mu       sync.Mutex
-	stop     chan struct{}
-	done     chan struct{}
+	// flushMu serialises the batch swap against itself. mu guards the map, but
+	// it is released for the whole duration of the write, so without this a
+	// second Flush could start a transaction while the first one holds the
+	// write lock -- and the loser would drop its batch on the floor.
+	flushMu sync.Mutex
+	stop    chan struct{}
+	done    chan struct{}
 }
 
 // NewHeartbeatFlusher creates and starts a background heartbeat flusher.
@@ -79,10 +84,19 @@ func (f *HeartbeatFlusher) PendingCount() int {
 }
 
 // Flush synchronously writes all buffered heartbeats to the database inside a single transaction.
+//
+// A failed flush is not a lost flush. The batch is handed back to pending so the
+// next tick retries it, which means the only thing a write-lock collision can
+// cost is a delayed online status -- never a permanently stale one. Dropping
+// the batch instead would make a transient SQLITE_BUSY indistinguishable from
+// ten thousand devices that stopped reporting.
 func (f *HeartbeatFlusher) Flush() {
 	if f == nil || f.db == nil {
 		return
 	}
+	f.flushMu.Lock()
+	defer f.flushMu.Unlock()
+
 	f.mu.Lock()
 	if len(f.pending) == 0 {
 		f.mu.Unlock()
@@ -102,7 +116,8 @@ func (f *HeartbeatFlusher) Flush() {
 	now := time.Now().UTC()
 	tx, err := f.db.BeginTxx(ctx, nil)
 	if err != nil {
-		log.Error().Err(err).Msg("heartbeat flusher: begin tx")
+		log.Error().Err(err).Int("devices", len(batch)).Msg("heartbeat flusher: begin tx, batch requeued")
+		f.requeue(batch)
 		return
 	}
 	defer tx.Rollback()
@@ -112,20 +127,60 @@ func (f *HeartbeatFlusher) Flush() {
 		SET status = 'online', last_seen_at = ?, updated_at = ?
 		WHERE id = ? AND retired_at IS NULL`)
 	if err != nil {
-		log.Error().Err(err).Msg("heartbeat flusher: prepare stmt")
+		log.Error().Err(err).Int("devices", len(batch)).Msg("heartbeat flusher: prepare stmt, batch requeued")
+		f.requeue(batch)
 		return
 	}
 	defer stmt.Close()
 
+	// A per-device failure is collected rather than logged and abandoned. The
+	// transaction is rolled back on this path, so every device is either
+	// written or retried; a partial commit would drop the failed ones with no
+	// record that they were ever seen.
+	var failed map[string]time.Time
 	for id, lastSeen := range batch {
 		if _, err := stmt.ExecContext(ctx, lastSeen, now, id); err != nil {
 			log.Warn().Err(err).Str("device", id).Msg("heartbeat flusher: update device")
+			if failed == nil {
+				failed = make(map[string]time.Time, 1)
+			}
+			failed[id] = lastSeen
 		}
+	}
+	if len(failed) > 0 {
+		f.requeue(failed)
 	}
 
 	if err := tx.Commit(); err != nil {
-		log.Error().Err(err).Msg("heartbeat flusher: commit batch")
+		log.Error().Err(err).Int("devices", len(batch)).Msg("heartbeat flusher: commit batch, batch requeued")
+		f.requeue(batch)
 	}
+}
+
+// requeue returns a failed batch to pending so the next flush retries it.
+//
+// A heartbeat that arrived while the flush was in flight is newer than the one
+// being requeued, so it wins: replaying the stale timestamp would move
+// last_seen_at backwards and make a live device look like it went quiet during
+// the retry.
+//
+// ponytail: Remove (a disconnect) cannot reach a batch that is already in
+// flight, so a device that drops while a flush is failing is written online
+// one extra time. That is bounded by the offline sweep, which marks it offline
+// again on the next pass -- the same window the pre-requeue code already had.
+// A tombstone set would close it exactly; add one if the sweep interval ever
+// stops being the backstop.
+func (f *HeartbeatFlusher) requeue(batch map[string]time.Time) {
+	if f == nil || len(batch) == 0 {
+		return
+	}
+	f.mu.Lock()
+	for id, ts := range batch {
+		if cur, ok := f.pending[id]; !ok || ts.After(cur) {
+			f.pending[id] = ts
+		}
+	}
+	f.mu.Unlock()
 }
 
 // Close gracefully flushes all pending heartbeats and terminates the background loop.

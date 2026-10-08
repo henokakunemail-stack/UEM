@@ -183,5 +183,9 @@ func TestHeartbeatFlusher_SustainedHeartbeatCycles(t *testing.T) {
 }
 
 func init() {
-	logger.Init("disabled", "")
+	// Errors stay rendered. At "disabled" zerolog's constructor discards every
+	// log.Error, which is exactly the level that hid the batch-loss bug: the
+	// flusher failed, said nothing, and the failure was found only by an
+	// unrelated count assertion. A noisy suite is cheaper than a silent one.
+	logger.Init("error", "")
 }
