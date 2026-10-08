@@ -27,6 +27,7 @@ import (
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/auth"
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/config"
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/db"
+	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/httpguard"
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/logger"
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/rbac"
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/transport"
@@ -400,6 +401,12 @@ func buildServer(cfg config.Config, database *sqlx.DB) (*http.Server, func()) {
 	maintH := maintenance.NewHandler(maintRepo, hub, &auditAdapter{db: database}, jwtSvc.RequireAuth, deviceRepo)
 
 	r := chi.NewRouter()
+
+	// Security headers on all responses.
+	// CSP: default-src 'self' allows same-origin scripts/styles/fonts;
+	// style-src 'unsafe-inline' needed for inline styles in the embedded SPA.
+	r.Use(httpguard.SecurityHeaders(httpguard.DefaultSecurityHeaders(cfg.TLSCertFile != "" && cfg.TLSKeyFile != "")))
+
 	r.Get("/readyz", func(w http.ResponseWriter, r *http.Request) {
 		if err := database.PingContext(r.Context()); err != nil {
 			writeJSON(w, http.StatusServiceUnavailable, map[string]any{"status": "degraded", "error": "database unreachable: " + err.Error()})
@@ -641,6 +648,8 @@ func buildServer(cfg config.Config, database *sqlx.DB) (*http.Server, func()) {
 		Addr:              cfg.HTTPAddr,
 		Handler:           r,
 		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      60 * time.Second,
 		IdleTimeout:       120 * time.Second,
 		TLSConfig: &tls.Config{
 			MinVersion: tls.VersionTLS12,

@@ -36,6 +36,7 @@ func (h *Handler) Register(r chi.Router) {
 		r.With(h.jwt.RequireAuth, rbac.RequireRole(rbac.RoleAdmin)).Post("/devices/enroll-token", h.createEnrollToken)
 		r.With(h.jwt.RequireAuth, rbac.RequireRole(rbac.RoleAdmin)).Post("/devices/{id}/enroll-token", h.enrollExisting)
 		r.With(h.jwt.RequireAuth, rbac.RequireRole(rbac.RoleTechnician)).Get("/audit-logs", h.listAudit)
+		r.With(h.jwt.RequireAuth, rbac.RequireRole(rbac.RoleTechnician)).Get("/audit-logs/verify", h.verifyAuditChain)
 	})
 }
 
@@ -238,6 +239,18 @@ func (h *Handler) listAudit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"logs": entries, "count": len(entries)})
+}
+
+func (h *Handler) verifyAuditChain(w http.ResponseWriter, r *http.Request) {
+	report, err := audit.VerifyChain(r.Context(), h.db)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	_ = audit.Log(r.Context(), h.db, "user",
+		auth.UserIDFromContext(r.Context()), "audit.verify", "",
+		map[string]any{"ok": report.OK, "checked": report.Checked})
+	writeJSON(w, http.StatusOK, report)
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {
