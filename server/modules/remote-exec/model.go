@@ -24,6 +24,7 @@ const (
 	ExecStatusCompleted = "completed"
 	ExecStatusFailed    = "failed"
 	ExecStatusTimeout   = "timeout"
+	ExecStatusCancelled = "cancelled"
 
 	TermStatusActive = "active"
 	TermStatusClosed = "closed"

@@ -78,6 +78,9 @@ func (h *Handler) Register(r chi.Router) {
 	r.With(h.authMiddleware, rbac.RequireRole(rbac.RoleTechnician)).
 		Post("/api/devices/{id}/exec", h.executeCommand)
 
+	r.With(h.authMiddleware, rbac.RequireRole(rbac.RoleTechnician)).
+		Post("/api/devices/{id}/executions/{execId}/cancel", h.cancelExecution)
+
 	r.With(h.authMiddleware).
 		Get("/api/devices/{id}/executions", h.listExecutions)
 
@@ -219,6 +222,73 @@ func (h *Handler) getExecution(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, exec)
+}
+
+// cancelExecution attempts to cancel a running command by sending a cancel
+// message to the agent via WebSocket. The agent will kill the process and
+// report back with status "cancelled". The repository guards against
+// overwriting terminal states (completed, failed, timeout, cancelled).
+func (h *Handler) cancelExecution(w http.ResponseWriter, r *http.Request) {
+	deviceID := chi.URLParam(r, "id")
+	execID := chi.URLParam(r, "execId")
+
+	// Verify device exists and execution belongs to it
+	exec, err := h.repo.GetExecution(r.Context(), execID)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			writeErr(w, http.StatusNotFound, "execution not found")
+			return
+		}
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if exec.DeviceID != deviceID {
+		writeErr(w, http.StatusNotFound, "execution not found")
+		return
+	}
+
+	// Check if already in terminal state
+	if exec.Status == ExecStatusCompleted || exec.Status == ExecStatusFailed ||
+		exec.Status == ExecStatusTimeout || exec.Status == ExecStatusCancelled {
+		writeErr(w, http.StatusConflict, fmt.Sprintf("execution already %s", exec.Status))
+		return
+	}
+
+	// Device must be online to receive cancel
+	if h.hub == nil || !h.hub.Online(deviceID) {
+		writeErr(w, http.StatusConflict, "device is offline")
+		return
+	}
+
+	actorID := auth.UserIDFromContext(r.Context())
+
+	// Send cancel command to agent
+	cancelEnv := transport.Envelope{
+		Type:    transport.TypeCommand,
+		ID:      execID,
+		Command: "exec.cancel",
+		Payload: map[string]any{"execution_id": execID},
+	}
+	cancelBytes, err := json.Marshal(cancelEnv)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "failed to encode cancel command")
+		return
+	}
+
+	if !h.hub.SendTo(deviceID, cancelBytes) {
+		writeErr(w, http.StatusConflict, "failed to dispatch cancel to device socket")
+		return
+	}
+
+	_ = h.audit.Log(r.Context(), "user", actorID, "remote_exec.cancel", deviceID, map[string]string{
+		"execution_id": execID,
+	})
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":       "cancel_dispatched",
+		"execution_id": execID,
+		"message":      "Cancel command sent to agent. The agent will terminate the process and report back with status 'cancelled'.",
+	})
 }
 
 func (h *Handler) reportExecutionResult(w http.ResponseWriter, r *http.Request) {

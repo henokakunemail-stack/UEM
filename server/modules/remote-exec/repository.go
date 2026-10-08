@@ -85,7 +85,8 @@ func (r *Repository) UpdateExecutionResult(ctx context.Context, deviceID string,
 	query := `
 		UPDATE remote_executions
 		SET status = ?, exit_code = ?, output = ?, error_message = ?, completed_at = ?
-		WHERE id = ? AND device_id = ?`
+		WHERE id = ? AND device_id = ?
+		  AND status NOT IN ('completed', 'failed', 'timeout', 'cancelled')`
 	res, err := r.db.ExecContext(ctx, query,
 		report.Status, report.ExitCode, report.Output, report.ErrorMessage, now,
 		report.ExecutionID, deviceID,
@@ -93,9 +94,10 @@ func (r *Repository) UpdateExecutionResult(ctx context.Context, deviceID string,
 	if err != nil {
 		return err
 	}
-	// No rows means either that no such execution exists or that it belongs to
-	// another device. Both answer the same way, so this cannot be used to
-	// enumerate which execution ids the fleet has.
+	// No rows means either that no such execution exists, that it belongs to
+	// another device, or that it is already in a terminal state. All three
+	// answer the same way, so this cannot be used to enumerate which execution
+	// ids the fleet has.
 	n, _ := res.RowsAffected()
 	if n == 0 {
 		return ErrNotFound

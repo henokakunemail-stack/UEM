@@ -344,6 +344,18 @@ func runAgent(serverURL, enrollToken, credsPath string, heartbeatSecs int) {
 		return map[string]string{"status": "dispatched"}
 	})
 
+	dispatcher.Register("exec.cancel", func(ctx context.Context, command, id string, payload json.RawMessage) any {
+		var p struct {
+			ExecutionID string `json:"execution_id"`
+		}
+		_ = json.Unmarshal(payload, &p)
+		if p.ExecutionID == "" {
+			p.ExecutionID = id
+		}
+		remoteexec.HandleCancel(p.ExecutionID)
+		return map[string]string{"status": "cancel_dispatched"}
+	})
+
 	dispatcher.Register("term.open", func(ctx context.Context, command, id string, payload json.RawMessage) any {
 		var p struct {
 			SessionID string `json:"session_id"`

@@ -230,3 +230,25 @@ func (r *Repository) FindBySecretHash(ctx context.Context, secretHash string) (D
 	}
 	return d, nil
 }
+
+// RotateDeviceSecret replaces the device's secret hash with a new one.
+// The old secret immediately stops working for new connections. Returns
+// the new plaintext secret so the admin can deliver it (e.g., via re-enroll).
+func (r *Repository) RotateDeviceSecret(ctx context.Context, id string) (string, error) {
+	// Generate new secret
+	newPlain := GenerateToken()
+	newHash := HashToken(newPlain)
+
+	res, err := r.db.ExecContext(ctx, `
+		UPDATE devices SET device_secret_hash = ?, status = 'offline', updated_at = ?
+		WHERE id = ? AND retired_at IS NULL`,
+		newHash, time.Now().UTC(), id)
+	if err != nil {
+		return "", fmt.Errorf("rotate device secret %s: %w", id, err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return "", ErrNotFound
+	}
+	return newPlain, nil
+}

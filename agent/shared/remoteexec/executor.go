@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/rs/zerolog/log"
@@ -30,7 +31,7 @@ type ExecPayload struct {
 
 type ExecReport struct {
 	ExecutionID  string  `json:"execution_id"`
-	Status       string  `json:"status"` // completed, failed, timeout
+	Status       string  `json:"status"` // completed, failed, timeout, cancelled
 	ExitCode     *int    `json:"exit_code,omitempty"`
 	Output       *string `json:"output,omitempty"`
 	ErrorMessage *string `json:"error_message,omitempty"`
@@ -39,6 +40,13 @@ type ExecReport struct {
 type CommandRunner interface {
 	RunCommand(ctx context.Context, shell, command string) (exitCode int, output string, err error)
 }
+
+// runningCommands tracks active command executions by execution_id
+// so they can be cancelled via exec.cancel command.
+var (
+	runningCommandsMu sync.Mutex
+	runningCommands   = make(map[string]context.CancelFunc)
+)
 
 // ToHTTPURL normalizes ws:// and wss:// to http:// and https://.
 func ToHTTPURL(serverURL string) string {
@@ -114,6 +122,17 @@ func ExecuteAndReport(ctx context.Context, serverURL, deviceID, deviceSecret str
 	execCtx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
+	// Register this execution so it can be cancelled
+	runningCommandsMu.Lock()
+	runningCommands[payload.ExecutionID] = cancel
+	runningCommandsMu.Unlock()
+
+	defer func() {
+		runningCommandsMu.Lock()
+		delete(runningCommands, payload.ExecutionID)
+		runningCommandsMu.Unlock()
+	}()
+
 	runner := newPlatformRunner()
 	exitCode, output, err := runner.RunCommand(execCtx, payload.Shell, payload.Command)
 
@@ -127,6 +146,10 @@ func ExecuteAndReport(ctx context.Context, serverURL, deviceID, deviceSecret str
 		if errors.Is(execCtx.Err(), context.DeadlineExceeded) {
 			rep.Status = "timeout"
 			errMsg := fmt.Sprintf("execution timed out after %v", timeout)
+			rep.ErrorMessage = &errMsg
+		} else if errors.Is(execCtx.Err(), context.Canceled) {
+			rep.Status = "cancelled"
+			errMsg := "execution cancelled by operator"
 			rep.ErrorMessage = &errMsg
 		} else {
 			rep.Status = "failed"
@@ -151,4 +174,18 @@ func ExecuteAndReport(ctx context.Context, serverURL, deviceID, deviceSecret str
 	defer reportCancel()
 
 	return ReportResult(reportCtx, serverURL, deviceID, deviceSecret, payload.ReportURL, rep)
+}
+
+// HandleCancel processes an exec.cancel command for a running execution.
+func HandleCancel(executionID string) {
+	runningCommandsMu.Lock()
+	cancelFn, ok := runningCommands[executionID]
+	runningCommandsMu.Unlock()
+
+	if ok {
+		log.Info().Str("exec_id", executionID).Msg("cancelling execution")
+		cancelFn()
+	} else {
+		log.Info().Str("exec_id", executionID).Msg("cancel requested but execution not found or already finished")
+	}
 }

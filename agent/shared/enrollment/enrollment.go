@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"time"
 
 	"github.com/henokakunemail-stack/Endpoint-Manager/agent/shared/transport"
@@ -71,7 +73,25 @@ func Save(path string, c Credentials) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, b, 0o600)
+	if err := os.WriteFile(path, b, 0o600); err != nil {
+		return err
+	}
+	// On Windows, tighten ACL to SYSTEM + Administrators only.
+	// This is best-effort; failure is non-fatal because default perms are 0600.
+	if runtime.GOOS == "windows" {
+		restrictToSystemAndAdmins(path)
+	}
+	return nil
+}
+
+// restrictToSystemAndAdmins applies a restrictive DACL on Windows so that
+// only SYSTEM and Administrators can read the credentials file.
+// It is a no-op on non-Windows platforms.
+func restrictToSystemAndAdmins(path string) {
+	// Use icacls to set explicit ACL: SYSTEM:(OI)(CI)F, BUILTIN\Administrators:(OI)(CI)F
+	// /inheritance:r removes inherited ACEs, then we grant full control to the two principals.
+	// This prevents regular users from reading the device secret.
+	_ = exec.Command("icacls", path, "/inheritance:r", "/grant:r", "SYSTEM:(OI)(CI)F", "/grant:r", "BUILTIN\\Administrators:(OI)(CI)F").Run()
 }
 
 // ErrNotEnrolled means the agent has not enrolled yet (no local credentials).

@@ -35,6 +35,7 @@ func (h *Handler) Register(r chi.Router) {
 		// Creating enrollment tokens is admin-only.
 		r.With(h.jwt.RequireAuth, rbac.RequireRole(rbac.RoleAdmin)).Post("/devices/enroll-token", h.createEnrollToken)
 		r.With(h.jwt.RequireAuth, rbac.RequireRole(rbac.RoleAdmin)).Post("/devices/{id}/enroll-token", h.enrollExisting)
+		r.With(h.jwt.RequireAuth, rbac.RequireRole(rbac.RoleAdmin)).Post("/devices/{id}/rotate-secret", h.rotateDeviceSecret)
 		r.With(h.jwt.RequireAuth, rbac.RequireRole(rbac.RoleTechnician)).Get("/audit-logs", h.listAudit)
 		r.With(h.jwt.RequireAuth, rbac.RequireRole(rbac.RoleTechnician)).Get("/audit-logs/verify", h.verifyAuditChain)
 	})
@@ -174,6 +175,29 @@ func (h *Handler) enrollExisting(w http.ResponseWriter, r *http.Request) {
 	actor := auth.UserIDFromContext(r.Context())
 	_ = audit.Log(r.Context(), h.db, "user", actor, "device.enroll_token_reissued", id, nil)
 	writeJSON(w, http.StatusOK, createEnrollTokenResp{DeviceID: id, EnrollmentToken: plain, ExpiresAt: expiresAt})
+}
+
+// rotateDeviceSecret replaces the device's persistent secret with a new one.
+// The old secret immediately stops working for new connections. The new secret
+// is returned so the admin can deliver it to the agent (via re-enrollment).
+func (h *Handler) rotateDeviceSecret(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	newPlain, err := h.repo.RotateDeviceSecret(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			writeErr(w, http.StatusNotFound, "device not found or retired")
+			return
+		}
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	actor := auth.UserIDFromContext(r.Context())
+	_ = audit.Log(r.Context(), h.db, "user", actor, "device.secret_rotated", id, nil)
+	writeJSON(w, http.StatusOK, map[string]string{
+		"device_id":     id,
+		"device_secret": newPlain,
+		"message":       "Device secret rotated. The old secret is now invalid. Use the new secret for re-enrollment.",
+	})
 }
 
 // createEnrollToken pre-registers a device and returns a one-time enrollment token
