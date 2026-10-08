@@ -25,33 +25,33 @@ const (
 
 // Fine-grained permission constants mapped to minimum role levels.
 const (
-	PermDevicesRead          = "devices.read"
-	PermDevicesManage        = "devices.manage"
-	PermCommandsExecute      = "commands.execute"
-	PermTerminalOpen         = "terminal.open"
-	PermDesktopControl       = "desktop.control"
+	PermDevicesRead         = "devices.read"
+	PermDevicesManage       = "devices.manage"
+	PermCommandsExecute     = "commands.execute"
+	PermTerminalOpen        = "terminal.open"
+	PermDesktopControl      = "desktop.control"
 	PermAgentUpdateDispatch = "agent_update.dispatch"
 	PermAgentUpdateManage   = "agent_update.manage"
-	PermSoftwareDeploy       = "software.deploy"
-	PermSoftwareManage       = "software.manage"
-	PermPatchScan            = "patch.scan"
-	PermPatchDeploy          = "patch.deploy"
-	PermUserManage           = "user.manage"
+	PermSoftwareDeploy      = "software.deploy"
+	PermSoftwareManage      = "software.manage"
+	PermPatchScan           = "patch.scan"
+	PermPatchDeploy         = "patch.deploy"
+	PermUserManage          = "user.manage"
 )
 
 var permToRole = map[string]string{
-	PermDevicesRead:          RoleViewer,
-	PermDevicesManage:        RoleAdmin,
-	PermCommandsExecute:      RoleTechnician,
-	PermTerminalOpen:         RoleTechnician,
-	PermDesktopControl:       RoleTechnician,
+	PermDevicesRead:         RoleViewer,
+	PermDevicesManage:       RoleAdmin,
+	PermCommandsExecute:     RoleTechnician,
+	PermTerminalOpen:        RoleTechnician,
+	PermDesktopControl:      RoleTechnician,
 	PermAgentUpdateDispatch: RoleTechnician,
 	PermAgentUpdateManage:   RoleAdmin,
-	PermSoftwareDeploy:       RoleTechnician,
-	PermSoftwareManage:       RoleAdmin,
-	PermPatchScan:            RoleTechnician,
-	PermPatchDeploy:          RoleTechnician,
-	PermUserManage:           RoleAdmin,
+	PermSoftwareDeploy:      RoleTechnician,
+	PermSoftwareManage:      RoleAdmin,
+	PermPatchScan:           RoleTechnician,
+	PermPatchDeploy:         RoleTechnician,
+	PermUserManage:          RoleAdmin,
 }
 
 var rank = map[string]int{

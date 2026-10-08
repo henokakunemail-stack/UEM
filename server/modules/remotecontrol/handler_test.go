@@ -630,6 +630,7 @@ func TestOperatorCannotConnectToAnotherOperatorsSession(t *testing.T) {
 	}
 	_ = conn.Close()
 }
+
 // it likes. One bad frame must not end a live desktop.
 func TestAMalformedFrameFromTheOperatorIsIgnoredNotFatal(t *testing.T) {
 	h, _, _ := rcRouteFixture(t)
