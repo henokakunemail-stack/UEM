@@ -35,7 +35,14 @@ Enterprise-grade, central endpoint management and security compliance platform a
 4. **High-Concurrency SQLite WAL Engine**:
    - Write-Ahead Logging (`PRAGMA journal_mode=WAL;`).
    - `PRAGMA busy_timeout=5000;`, `PRAGMA foreign_keys=ON;`, and `PRAGMA synchronous=NORMAL;`.
-   - Single-writer pool (`SetMaxOpenConns(1)`) prevents database lock contention while allowing unlimited concurrent readers.
+   - Connection pool of 16 open / 4 idle, sized for the reads rather than serialised behind one connection — a console page issues several queries at once, and putting them in a line is what turns a slow write into a page timeout.
+   - Write transactions take SQLite's write lock at `BEGIN` (`_txlock=immediate`) rather than at first write, so a batch that reads then writes is one atomic unit instead of a transaction built on a read that has already gone stale.
+
+5. **Optional PostgreSQL Backend**:
+   - SQLite stays the default and requires nothing: one binary, one file, no services. The single-binary standalone deployment is unchanged.
+   - Set `DB_URL` to a `postgres://` connection string (and optionally `DB_DRIVER=postgres`) to run on PostgreSQL instead. `DB_PATH` is ignored in that mode.
+   - The 21 migrations are written once in SQLite dialect and translated on the way out — `DATETIME` → `TIMESTAMPTZ`, `INSERT OR IGNORE` → `INSERT ... ON CONFLICT DO NOTHING`, `?` → `$N` — so the two backends cannot drift apart across releases.
+   - **Currently covers the schema and migration path.** The server's own query call sites still pass `?` straight to the driver rather than through `db.Rebind`, so running the full request path against PostgreSQL is not yet supported.
 
 ---
 
@@ -141,7 +148,7 @@ actually found.
 │   │   ├── audit/                  # Tamper-evident audit logging service
 │   │   ├── auth/                   # JWT, session store, login, rate limiting, origin policy
 │   │   ├── config/                 # Environment-driven runtime configuration
-│   │   ├── db/                     # SQLite WAL engine & sequential migrations (0001-0017)
+│   │   ├── db/                     # SQLite WAL engine & sequential migrations (0001-0021)
 │   │   ├── httpguard/              # Request body size limits
 │   │   ├── logger/                 # zerolog setup and in-memory log tail
 │   │   ├── rbac/                   # Role-Based Access Control context utilities

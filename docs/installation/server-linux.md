@@ -219,8 +219,43 @@ sudo journalctl -u endpoint-mgmt -f
 
 Server Go secara otomatis menjalankan backup online SQLite berkala (`VACUUM INTO`) tanpa mengunci transaksi agen:
 - **Lokasi Backup**: `/opt/endpoint-mgmt/data/backups/`
-- **Format Nama**: `endpoint-mgmt-backup-YYYYMMDD-HHMMSS.db`
+- **Format Nama**: `endpoint-mgmt-<YYYYMMDD>T<HHMMSS>Z.db` (UTC, contoh `endpoint-mgmt-20261008T091500Z.db`)
 - **Konfigurasi Retensi**: Diatur melalui `BACKUP_INTERVAL=1h` dan `BACKUP_RETAIN=24` (menyimpan 24 jam backup snapshot terakhir).
+
+### Backup Manual via CLI
+
+Untuk backup di luar jadwal, atau sebelum upgrade:
+
+```bash
+sudo systemctl stop endpoint-mgmt          # lihat catatan di bawah
+sudo -u endpoint-mgmt /opt/endpoint-mgmt/endpoint-mgmt-server \
+  -env-file /opt/endpoint-mgmt/server.env \
+  -backup /opt/endpoint-mgmt/data/backups/manual-$(date -u +%Y%m%dT%H%M%SZ).db
+sudo systemctl start endpoint-mgmt
+```
+
+### Restore Manual via CLI
+
+```bash
+# 1. WAJIB hentikan service lebih dulu
+sudo systemctl stop endpoint-mgmt
+
+# 2. Restore (source = file backup, dest = DB_PATH aktif)
+sudo -u endpoint-mgmt /opt/endpoint-mgmt/endpoint-mgmt-server \
+  -env-file /opt/endpoint-mgmt/server.env \
+  -restore /opt/endpoint-mgmt/data/backups/endpoint-mgmt-20261008T091500Z.db
+
+# 3. Jalankan lagi service
+sudo systemctl start endpoint-mgmt
+```
+
+Beberapa hal yang perlu diketahui sebelum menjalankan restore:
+
+- **Service harus berhenti.** Database yang sedang dibuka tidak bisa diganti — di Windows error-nya `ERROR_SHARING_VIOLATION`, di Linux `rename ...: device or resource busy`. Restore pada service yang sedang berjalan akan gagal, dan pada Windows pesan errornya terlihat seperti database rusak padahal tidak.
+- **Restore memvalidasi source dulu** dengan `PRAGMA quick_check`. File yang korup atau terpotong ditolak sebelum sempat menimpa database yang sehat.
+- **File backup sumber tidak diubah.** Restore memvalidasi lewat salinan sementara, jadi artefak read-only tetap read-only — tidak ada migrasi yang berjalan di atasnya.
+- **File `-wal` dan `-shm` di samping database aktif dihapus.** Sidecar itu milik database yang sedang diganti; membiarkannya membuat frame lama diterapkan di atas hasil restore.
+- **Passing `-env-file` itu wajib saat dijalankan lewat service.** Tanpa itu, `DB_PATH` jatuh ke default relatif `data/endpoint-mgmt.db` dan restore akan membuat database baru di sana, bukan yang Anda maksud.
 
 ### Verifikasi Integritas File Backup:
 ```bash
@@ -228,7 +263,7 @@ Server Go secara otomatis menjalankan backup online SQLite berkala (`VACUUM INTO
 ls -lth /opt/endpoint-mgmt/data/backups/
 
 # Cek integritas database snapshot menggunakan sqlite3 CLI (jika terpasang)
-sqlite3 /opt/endpoint-mgmt/data/backups/endpoint-mgmt-backup-*.db "PRAGMA integrity_check;"
+sqlite3 /opt/endpoint-mgmt/data/backups/endpoint-mgmt-*.db "PRAGMA integrity_check;"
 ```
 
 ---

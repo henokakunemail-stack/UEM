@@ -14,11 +14,11 @@ Aplikasi secara keseluruhan hanya boleh disebut "siap production" jika:
 
 ---
 
-## Ringkasan jujur (bukti dijalankan ulang hari ini, 2026-09-23)
+## Ringkasan jujur (bukti dijalankan ulang, 2026-10-08)
 
 | Pemeriksaan | Hasil aktual |
 |---|---|
-| `go test ./...` | **50 PASS**, 0 gagal, 0 skip |
+| `go test ./...` | **36 paket PASS**, 0 gagal, 8 paket tanpa test |
 | `go vet ./...` | **Bersih** — 0 warning |
 | Build server (`./server/cmd/server`) | OK — single-binary (18.3 MB) dengan embedded Web Console SPA |
 | Build agent Windows | OK |
@@ -50,7 +50,7 @@ Aplikasi secara keseluruhan hanya boleh disebut "siap production" jika:
 | Core / Infra | `TESTED (STAGING)` | ✅ Ya — live binary | Config, DB+migrasi 0001/0002/0003/0004, logger, bootstrap. 8 cek live E2E lulus (regresi bersih). |
 | Auth (JWT, bcrypt, login) | `TESTED (STAGING)` | ✅ Ya | Login + token replay ditolak (401) terverifikasi live. TLS siap diaktifkan (set `TLS_CERT_FILE` + `TLS_KEY_FILE`). Password bootstrap dari `ADMIN_PASSWORD` env var atau random generated. |
 | RBAC | `TESTED (STAGING)` | ✅ Ya | Hierarki viewer<technician<admin terverifikasi (403/201 live). |
-| Transport (WS, hub, offline) | `TESTED (STAGING)` | ✅ Ya | Outbound-only; offline detection cepat; command queue survive disconnect. Hub **in-memory** → single-node only, belum bisa horizontal scale. |
+| Transport (WS, hub, offline) | `TESTED (STAGING)` | ✅ Ya | Outbound-only; offline detection cepat; command queue survive disconnect. Hub **in-memory** → single-node only, belum bisa horizontal scale. Catatan operasional: heartbeat flusher dan sweep offline sama-sama competing untuk SQLite write lock yang sama; flusher sekarang me-requeue batch yang gagal tulis, jadi tabrakan lock hanya menunda status online, tidak pernah membuangnya permanen. |
 | Audit Log | `TESTED (STAGING)` | ✅ Ya | Terverifikasi live termasuk aksi package upload dan deployment. NULL scan error diperbaiki dengan COALESCE. |
 | Agent — Windows | `TESTED (STAGING)` | ✅ Ya — binary asli | Enroll + connect + command nyata + installer runner (`msiexec`, `exe`, `powershell`). Diuji pada host Windows x64; query CIM inventaris sesuai dengan kelas WMI standar. |
 | Agent — Linux | `CODE COMPLETE (UNTESTED)` | ❌ Build saja | Cross-compile linux/amd64 + linux/arm64 sukses. Runner `dpkg`, `rpm`, `/bin/sh` siap. Belum diuji di mesin Linux nyata (WSL/Docker mati). |

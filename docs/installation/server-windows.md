@@ -249,8 +249,42 @@ Get-Content -Path "C:\EndpointMgmt\logs\server.log" -Tail 30 -Wait
 
 Server secara otomatis membuat backup online SQLite snapshot via engine `VACUUM INTO` setiap jam:
 - Lokasi: `C:\EndpointMgmt\data\backups\`
-- Format: `endpoint-mgmt-backup-YYYYMMDD-HHMMSS.db`
+- Format: `endpoint-mgmt-<YYYYMMDD>T<HHMMSS>Z.db` (UTC, contoh `endpoint-mgmt-20261008T091500Z.db`)
 - Retensi: Ditentukan oleh parameter `BACKUP_RETAIN=24` (24 backup terakhir disimpan, file lama otomatis dibersihkan).
+
+### Backup Manual via CLI
+
+```powershell
+Stop-Service EndpointMgmtServer
+& "C:\EndpointMgmt\bin\endpoint-mgmt-server.exe" `
+  -env-file "C:\EndpointMgmt\server.env" `
+  -backup "C:\EndpointMgmt\data\backups\manual-$(Get-Date -AsUTC -Format 'yyyyMMddTHHmmssZ').db"
+Start-Service EndpointMgmtServer
+```
+
+### Restore Manual via CLI
+
+```powershell
+# 1. WAJIB hentikan service lebih dulu -- database yang sedang dibuka
+#    tidak bisa diganti di Windows (ERROR_SHARING_VIOLATION)
+Stop-Service EndpointMgmtServer
+
+# 2. Restore (source = file backup, dest = DB_PATH aktif)
+& "C:\EndpointMgmt\bin\endpoint-mgmt-server.exe" `
+  -env-file "C:\EndpointMgmt\server.env" `
+  -restore "C:\EndpointMgmt\data\backups\endpoint-mgmt-20261008T091500Z.db"
+
+# 3. Jalankan lagi service
+Start-Service EndpointMgmtServer
+```
+
+Sebelum menjalankan restore, perhatikan:
+
+- **Service harus berhenti.** Ini bukan rekomendasi, tapi syarat. Go dan SQLite membuka file database tanpa `FILE_SHARE_DELETE`, jadi Windows menolak penggantian file yang sedang dibuka dengan `ERROR_SHARING_VIOLATION`. Pesan error itu terlihat seperti database rusak, padahal tidak — dan именно itu kondisi paling umum penyebabnya.
+- **Restore memvalidasi source dulu** dengan `PRAGMA quick_check`, dan menolak file korup atau terpotong sebelum sempat menimpa database yang sehat.
+- **File backup sumber tidak diubah.** Validasi berjalan di salinan sementara, jadi artefak read-only tetap read-only.
+- **File `-wal` dan `-shm` di samping database aktif dihapus.** Sidecar itu milik database yang diganti; membiarkannya membuat frame lama menimpa hasil restore secara diam-diam.
+- **Passing `-env-file` itu wajib saat service.** Tanpa itu, `DB_PATH` jatuh ke default relatif `data\endpoint-mgmt.db` dan restore akan membuat database baru di sana, bukan yang Anda maksud.
 
 ### Verifikasi Backup di PowerShell:
 ```powershell

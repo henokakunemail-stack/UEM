@@ -59,14 +59,18 @@ Kenyataannya, **RAM dan CPU bukan satu-satunya pembatas — I/O database adalah.
 
 ```go
 // server/core/db/db.go
-d.SetMaxOpenConns(1)  // intentional: SQLite single-writer
+d.SetMaxOpenConns(16)  // sized for reads; writes serialise inside SQLite
+d.SetMaxIdleConns(4)
 ```
 
-Server ini memakai SQLite dalam mode WAL dengan **satu koneksi** untuk menghindari `SQLITE_BUSY`. Ini pilihan yang tepat untuk 10.000 endpoint — bukan pembatas yang perlu dipecahkan, tapi **pembatas yang perlu dipahami**:
+Server ini memakai SQLite dalam mode WAL dengan **pool 16 koneksi**. Tulisannya serial, tapi itu konsekuensi SQLite, bukan pilihan konfigurasi: hanya satu writer pada satu waktu, dan `busy_timeout=5000` membuat penulisan yang membentrokan lock menunggu alih-alih gagal seketika. Pool sengaja diperlebar agar pembacaan paralel (satu halaman console memicu beberapa query sekaligus) tidak mengantre di belakang satu writer yang lambat.
 
-- **Tidak ada penulis lain**: hanya satu goroutine menulis pada satu waktu. Proses (misalnya `sqlite3` CLI, atau `VACUUM` eksternal) akan memblokir sampai writer selesai.
-- **Backup online aman**: `VACUUM INTO` berjalan pada koneksi yang sama, jadi tidak ada race dengan writer.
-- **Jangan** menjalankan query SQL manual (`sqlite3 endpoint-mgmt.db "SELECT ..."`) saat server sedang produksi — mengunci database dan menghentikan semua writes.
+Yang perlu dipahami:
+
+- **Hanya satu writer pada satu waktu.** Pool 16 bukan 16 penulis — setiap transaksi yang menulis ambil write lock, jadi 15 sisanya menunggu. `_txlock=immediate` membuat lock diambil di `BEGIN`, bukan di write pertama, supaya batch yang baca-lalu-tulis jadi satu unit atomik.
+- **Tabrakan write lock itu nyata dan sudah ditangani.** Heartbeat flusher dan sweep offline sama-sama menulis ke file yang sama. Flusher sekarang mengembalikan batch ke antrean kalau transaksinya gagal, jadi tabrakan hanya **menunda** status online — tidak pernah membuangnya permanen.
+- **Backup online aman**: `VACUUM INTO` mengambil read lock dan menulis image konsisten, tanpa menghentikan server.
+- **Jangan** menjalankan query SQL manual (`sqlite3 endpoint-mgmt.db "SELECT ..."`) saat server sedang produksi — menulis akan mengunci database dan menghentikan semua writes selama `busy_timeout`.
 
 Dengan konfigurasi ini, **10.000 endpoint pada satu server adalah realistis** dan didukung secara arsitektur. Yang perlu dipantau adalah latensi query, bukan RAM.
 
