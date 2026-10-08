@@ -197,11 +197,15 @@ func TestAgentEngineManifestVerification(t *testing.T) {
 		t.Fatalf("generate key: %v", err)
 	}
 
-	// Dummy server returning valid executable file bytes
+	// Dummy server returning valid executable file bytes for runtime.GOOS
 	validPEBinary := make([]byte, 0x100)
-	validPEBinary[0], validPEBinary[1] = 'M', 'Z'
-	binary.LittleEndian.PutUint32(validPEBinary[0x3c:], 0x80)
-	copy(validPEBinary[0x80:], []byte{'P', 'E', 0, 0})
+	if runtime.GOOS == "windows" {
+		validPEBinary[0], validPEBinary[1] = 'M', 'Z'
+		binary.LittleEndian.PutUint32(validPEBinary[0x3c:], 0x80)
+		copy(validPEBinary[0x80:], []byte{'P', 'E', 0, 0})
+	} else {
+		copy(validPEBinary[0:], []byte{0x7f, 'E', 'L', 'F'})
+	}
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
