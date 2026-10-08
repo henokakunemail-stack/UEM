@@ -78,7 +78,7 @@ func TestAColumnIsSkippedOnlyWhenTheSchemaAlreadyHasIt(t *testing.T) {
 	}
 	defer tx.Rollback()
 
-	body, err := skipPresentColumns(tx, string(stmt))
+	body, err := skipPresentColumns(tx, dialectFor("sqlite"), string(stmt))
 	if err != nil {
 		t.Fatalf("skipPresentColumns: %v", err)
 	}
@@ -97,7 +97,7 @@ func TestAColumnIsSkippedOnlyWhenTheSchemaAlreadyHasIt(t *testing.T) {
 
 	// A column that is not there yet has to be left in place.
 	missing := `ALTER TABLE devices ADD COLUMN probe_absent TEXT;`
-	kept, err := skipPresentColumns(tx, missing)
+	kept, err := skipPresentColumns(tx, dialectFor("sqlite"), missing)
 	if err != nil {
 		t.Fatalf("skipPresentColumns on a missing column: %v", err)
 	}
@@ -108,7 +108,7 @@ func TestAColumnIsSkippedOnlyWhenTheSchemaAlreadyHasIt(t *testing.T) {
 	// A statement the pattern does not match passes through byte for byte, so an
 	// unrecognised form fails exactly as it did before rather than vanishing.
 	unrecognised := `ALTER TABLE devices RENAME COLUMN retired_at TO retired_on;`
-	passthrough, err := skipPresentColumns(tx, unrecognised)
+	passthrough, err := skipPresentColumns(tx, dialectFor("sqlite"), unrecognised)
 	if err != nil {
 		t.Fatalf("skipPresentColumns on an unrecognised statement: %v", err)
 	}

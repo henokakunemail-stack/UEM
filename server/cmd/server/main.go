@@ -162,12 +162,28 @@ func main() {
 
 // run boots the database, the router and the background workers, then blocks
 // until a stop is signalled or the service handler cancels it.
+// openDatabase connects using whichever backend the configuration selects.
+//
+// A configured DB_URL wins over DBDriver, and a configured DBDriver wins over
+// the SQLite default -- so setting DB_DRIVER=postgres alone, with the URL in a
+// variable the operator forgot, fails with a connection error naming the
+// database rather than silently starting against an empty SQLite file.
+func openDatabase(cfg config.Config) (*sqlx.DB, error) {
+	if cfg.DBURL != "" {
+		return db.OpenWithDriver(cfg.DBDriver, cfg.DBURL)
+	}
+	if d := strings.ToLower(cfg.DBDriver); d != "" && d != "sqlite" {
+		return nil, fmt.Errorf("DB_DRIVER=%s needs DB_URL to be set", cfg.DBDriver)
+	}
+	return db.Open(cfg.DBPath)
+}
+
 func run(cfg config.Config, stopService *context.CancelFunc) error {
 	logger.Init(cfg.LogLevel, cfg.LogFile)
 
-	database, err := db.Open(cfg.DBPath)
+	database, err := openDatabase(cfg)
 	if err != nil {
-		log.Fatal().Err(err).Str("db", cfg.DBPath).Msg("open database")
+		log.Fatal().Err(err).Str("driver", cfg.DBDriver).Msg("open database")
 	}
 	defer database.Close()
 

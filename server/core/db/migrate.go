@@ -25,10 +25,15 @@ var migrations fs.FS = migrationsFS
 // Migrate applies all embedded SQL migrations in order, recording applied versions
 // in schema_migrations so each script is executed exactly once.
 func Migrate(d *sqlx.DB) error {
-	if _, err := d.Exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
-		version TEXT PRIMARY KEY,
-		applied_at DATETIME NOT NULL
-	)`); err != nil {
+	return MigrateWithDialect(d, dialectFor(d.DriverName()))
+}
+
+// MigrateWithDialect applies the migrations using an explicit dialect. Migrate
+// infers it from the driver's own name; this form exists so a caller that
+// registered the same database under a name the inference does not recognise
+// can still be migrated.
+func MigrateWithDialect(d *sqlx.DB, dia dialect) error {
+	if _, err := d.Exec(dia.schemaMigrationsDDL()); err != nil {
 		return fmt.Errorf("create schema_migrations: %w", err)
 	}
 
@@ -50,7 +55,7 @@ func Migrate(d *sqlx.DB) error {
 	// has no restore point at all -- and that is the one migration whose damage
 	// a transactional apply cannot undo, because a script that succeeds when it
 	// should not have is committed by definition.
-	if err := snapshotBeforeMigrate(d, files); err != nil {
+	if err := snapshotBeforeMigrate(d, dia, files); err != nil {
 		return err
 	}
 
@@ -85,7 +90,7 @@ func Migrate(d *sqlx.DB) error {
 		// fails tells us nothing about whether the migration ran, and reading it
 		// as "not applied" is how an already-applied script gets applied twice.
 		var exists int
-		if err := tx.Get(&exists, `SELECT COUNT(*) FROM schema_migrations WHERE version = ?`, name); err != nil {
+		if err := tx.Get(&exists, dia.q(`SELECT COUNT(*) FROM schema_migrations WHERE version = ?`), name); err != nil {
 			_ = tx.Rollback()
 			return fmt.Errorf("check migration %s: %w", name, err)
 		}
@@ -102,17 +107,17 @@ func Migrate(d *sqlx.DB) error {
 		// behind with nothing recording that the script had run -- and it is the
 		// state that used to make the server unstartable. Dropping the statement
 		// whose intent is already satisfied is what lets such a database migrate.
-		body, err := skipPresentColumns(tx, string(stmt))
+		body, err := skipPresentColumns(tx, dia, string(stmt))
 		if err != nil {
 			_ = tx.Rollback()
 			return fmt.Errorf("check migration %s: %w", name, err)
 		}
 
-		if _, err := tx.Exec(body); err != nil {
+		if _, err := tx.Exec(dia.translate(body)); err != nil {
 			_ = tx.Rollback()
 			return fmt.Errorf("apply migration %s: %w", name, err)
 		}
-		if _, err := tx.Exec(`INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)`,
+		if _, err := tx.Exec(dia.q(`INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)`),
 			name, time.Now().UTC()); err != nil {
 			_ = tx.Rollback()
 			return fmt.Errorf("record migration %s: %w", name, err)
@@ -138,11 +143,18 @@ func Migrate(d *sqlx.DB) error {
 // already recorded is a restart, and one where none is recorded is new. Only the
 // middle -- applied migrations plus pending ones -- is an upgrade.
 //
-// Files are named pre-migrate-<timestamp>.db, which StartBackupJob's prefix
-// filter does not match, so the retention window never prunes them. An upgrade
-// is rare enough that a handful of files accumulating is the cheaper trade than
-// the one that gets pruned at the worst moment.
-func snapshotBeforeMigrate(d *sqlx.DB, files []string) error {
+// Skipped entirely on PostgreSQL, and that is a real gap rather than an
+// oversight. SQLite's snapshot is VACUUM INTO, which needs a file path it can
+// derive from pragma_database_list; PostgreSQL's equivalent needs a server-side
+// destination it does not know, because the database has no local file to name.
+// Wiring that up means a pg_dump invocation or a server-side directory, which is
+// a deployment decision rather than a code detail. The operator who chose
+// PostgreSQL is expected to have scheduled their own backups, and an upgrade
+// that fails is recoverable in a way a silently corrupted upgrade is not.
+func snapshotBeforeMigrate(d *sqlx.DB, dia dialect, files []string) error {
+	if dia.postgres {
+		return nil
+	}
 	var applied int
 	if err := d.Get(&applied, `SELECT COUNT(*) FROM schema_migrations`); err != nil {
 		return fmt.Errorf("count applied migrations: %w", err)
@@ -187,11 +199,11 @@ var addColumnRe = regexp.MustCompile(`(?i)^\s*ALTER\s+TABLE\s+(\w+)\s+ADD\s+COLU
 // see the actual schema.
 //
 // Only the two captured names are used, and only to run a bound parameterised
-// lookup against pragma_table_info; no part of the migration text reaches the
+// lookup against the catalog; no part of the migration text reaches the
 // database as a query. A statement the pattern does not match is passed through
 // untouched, so an unrecognised form fails exactly as it did before rather than
 // being silently dropped.
-func skipPresentColumns(tx *sqlx.Tx, script string) (string, error) {
+func skipPresentColumns(tx *sqlx.Tx, dia dialect, script string) (string, error) {
 	if !strings.Contains(strings.ToUpper(script), "ADD COLUMN") {
 		return script, nil
 	}
@@ -206,8 +218,7 @@ func skipPresentColumns(tx *sqlx.Tx, script string) (string, error) {
 		}
 
 		var present int
-		if err := tx.Get(&present,
-			`SELECT COUNT(*) FROM pragma_table_info(?) WHERE name = ?`, m[1], m[2]); err != nil {
+		if err := tx.Get(&present, dia.q(dia.columnExistsQuery()), m[1], m[2]); err != nil {
 			return "", fmt.Errorf("inspect %s.%s: %w", m[1], m[2], err)
 		}
 		if present > 0 {

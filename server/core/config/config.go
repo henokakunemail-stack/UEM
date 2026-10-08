@@ -11,7 +11,12 @@ import (
 
 // Config is the server runtime configuration. Loaded once at startup.
 type Config struct {
-	HTTPAddr        string // HTTP listen address, e.g. ":8443"
+	HTTPAddr string // HTTP listen address, e.g. ":8443"
+	// DBDriver selects the database: "sqlite" (the default, and the single-binary
+	// standalone mode) or "postgres". Left empty it is inferred from DBURL.
+	DBDriver string
+	// DBURL is a PostgreSQL connection string. Empty means SQLite, using DBPath.
+	DBURL           string
 	DBPath          string // SQLite database file path
 	JWTSecret       string // secret used to sign JWTs
 	AccessTokenTTL  time.Duration
@@ -113,6 +118,8 @@ func Load() (Config, error) {
 	dbPath := DBPathOrDefault()
 	cfg := Config{
 		HTTPAddr:             getEnv("HTTP_ADDR", ":8443"),
+		DBDriver:             getEnv("DB_DRIVER", ""),
+		DBURL:                getEnv("DB_URL", ""),
 		DBPath:               dbPath,
 		JWTSecret:            getEnv("JWT_SECRET", ""),
 		LDAPBindPassword:     getEnv("LDAP_BIND_PASSWORD", ""),

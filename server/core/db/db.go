@@ -27,6 +27,14 @@ const (
 	maxIdleConns = 4
 )
 
+// PostgreSQL serialises writes properly and has no single-writer limit the way
+// SQLite does, so the pool is sized for concurrency rather than for avoiding
+// lock contention.
+const (
+	pgMaxOpenConns = 25
+	pgMaxIdleConns = 10
+)
+
 // dsn builds the connection string.
 //
 // Every setting lives here, in the DSN, rather than in an Exec after Open, and
@@ -89,25 +97,31 @@ func Open(dbPath string) (*sqlx.DB, error) {
 }
 
 // OpenWithDriver creates/opens a database with the specified driver and DSN, applying migrations.
+//
+// The driver may be omitted or a bare URL may be given instead, in which case
+// it is inferred. "pgx" is deliberately not accepted: this binary links
+// lib/pq, which registers itself as "postgres", so naming "pgx" would fail at
+// open with `sql: unknown driver "pgx"` -- an error that reads like a missing
+// dependency rather than a config typo.
 func OpenWithDriver(driverName, dsnStr string) (*sqlx.DB, error) {
-	if driverName == "postgres" || driverName == "pgx" || strings.HasPrefix(dsnStr, "postgres://") || strings.HasPrefix(dsnStr, "postgresql://") {
-		drv := driverName
-		if drv == "" {
-			drv = "postgres"
-		}
-		d, err := sqlx.Open(drv, dsnStr)
+	if driverName == "" || strings.HasPrefix(dsnStr, "postgres://") || strings.HasPrefix(dsnStr, "postgresql://") {
+		driverName = "postgres"
+	}
+
+	if driverName == "postgres" {
+		d, err := sqlx.Open("postgres", dsnStr)
 		if err != nil {
 			return nil, fmt.Errorf("open postgres: %w", err)
 		}
-		d.SetMaxOpenConns(25)
-		d.SetMaxIdleConns(10)
+		d.SetMaxOpenConns(pgMaxOpenConns)
+		d.SetMaxIdleConns(pgMaxIdleConns)
 		d.SetConnMaxIdleTime(5 * time.Minute)
 
 		if err := d.Ping(); err != nil {
 			d.Close()
 			return nil, fmt.Errorf("ping db: %w", err)
 		}
-		if err := Migrate(d); err != nil {
+		if err := MigrateWithDialect(d, dialectFor(driverName)); err != nil {
 			d.Close()
 			return nil, err
 		}
