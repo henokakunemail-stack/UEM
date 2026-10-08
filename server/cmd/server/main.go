@@ -344,6 +344,14 @@ func buildServer(cfg config.Config, database *sqlx.DB) (*http.Server, func()) {
 	maintH := maintenance.NewHandler(maintRepo, hub, &auditAdapter{db: database}, jwtSvc.RequireAuth, deviceRepo)
 
 	r := chi.NewRouter()
+	r.Get("/readyz", func(w http.ResponseWriter, r *http.Request) {
+		if err := database.PingContext(r.Context()); err != nil {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]any{"status": "degraded", "error": "database unreachable: " + err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"status": "ready", "database": "ok", "agents_online": hub.Count()})
+	})
+
 	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "agents_online": hub.Count()})
 	})

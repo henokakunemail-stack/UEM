@@ -641,3 +641,37 @@ func balancedCallArgs(s string) string {
 	}
 	return s
 }
+
+func TestHealthzAndReadyzEndpoints(t *testing.T) {
+	dir := t.TempDir()
+	database, err := db.Open(filepath.Join(dir, "health.db"))
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	t.Cleanup(func() { database.Close() })
+
+	cfg := testConfig(t)
+	srv, stopBackground := buildServer(cfg, database)
+	t.Cleanup(stopBackground)
+
+	ts := httptest.NewServer(srv.Handler)
+	t.Cleanup(ts.Close)
+
+	for _, path := range []string{"/healthz", "/readyz"} {
+		resp, err := http.Get(ts.URL + path)
+		if err != nil {
+			t.Fatalf("GET %s: %v", path, err)
+		}
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("GET %s status = %d, want 200", path, resp.StatusCode)
+		}
+		var body map[string]any
+		if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+			t.Errorf("GET %s decode json: %v", path, err)
+		}
+		resp.Body.Close()
+		if body["status"] != "ok" && body["status"] != "ready" {
+			t.Errorf("GET %s status field = %v", path, body["status"])
+		}
+	}
+}
