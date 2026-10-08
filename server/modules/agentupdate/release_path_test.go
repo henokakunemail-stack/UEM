@@ -147,7 +147,7 @@ func TestUploadReleaseRejectsAHopefulVersionAndWritesNothing(t *testing.T) {
 	defer d.Close()
 
 	h := NewHandler(NewRepository(d), transport.NewHub(), nil, noopAuditor{}, storeDir,
-		func(n http.Handler) http.Handler { return n })
+		func(n http.Handler) http.Handler { return n }, "")
 
 	body := &bytes.Buffer{}
 	mw := multipart.NewWriter(body)

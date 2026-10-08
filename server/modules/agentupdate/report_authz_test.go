@@ -47,7 +47,7 @@ func newReportFixture(t *testing.T) (http.Handler, *sqlx.DB) {
 
 	repo := NewRepository(database)
 	h := NewHandler(repo, nil, devicemgmt.NewRepository(database), discardAuditor{},
-		t.TempDir(), func(next http.Handler) http.Handler { return next })
+		t.TempDir(), func(next http.Handler) http.Handler { return next }, "")
 	if err := repo.CreateUpdateTask(context.Background(), &DeviceUpdateTask{
 		ID: "task-B", DeviceID: "device-B",
 		FromVersion: "1.0.0", TargetVersion: "2.0.0", Status: "pending",

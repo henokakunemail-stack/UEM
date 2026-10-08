@@ -123,7 +123,7 @@ func newQueueFixture(t *testing.T, online bool) *queueFixture {
 				// derives this from the session, which these tests do not build.
 				next.ServeHTTP(w, r.WithContext(rbac.WithRole(r.Context(), rbac.RoleAdmin)))
 			})
-		})
+		}, "")
 
 	r := chi.NewRouter()
 	h.Register(r)

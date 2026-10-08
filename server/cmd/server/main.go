@@ -497,7 +497,9 @@ func buildServer(cfg config.Config, database *sqlx.DB) (*http.Server, func()) {
 
 	// Phase 13: agent self-update & rollout management.
 	updateRepo := agentupdate.NewRepository(database)
-	updateH := agentupdate.NewHandler(updateRepo, hub, deviceRepo, &auditAdapter{db: database}, "./data/agent-releases", jwtSvc.RequireAuth)
+	updateH := agentupdate.NewHandler(updateRepo, hub, deviceRepo, &auditAdapter{db: database},
+		"./data/agent-releases", jwtSvc.RequireAuth, cfg.UpdateMinimumVersion).
+		WithSigningPublicKey(cfg.UpdateSigningPublicKey, cfg.UpdateMinimumVersion)
 	updateH.Register(r)
 
 	// Queued updates are delivered when the device reconnects, not when the

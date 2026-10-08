@@ -1,0 +1,58 @@
+name: Sign Release Manifest
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_id:
+        description: 'The agent release ID to sign'
+        required: true
+        type: string
+      server_url:
+        description: 'Target UEM Server URL (e.g. https://uem.example.com)'
+        required: true
+        type: string
+      minimum_supported_version:
+        description: 'Minimum supported version floor (e.g. 0.1.0)'
+        required: false
+        type: string
+        default: ''
+
+jobs:
+  sign:
+    name: Sign agent release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Fetch release & sign manifest
+        shell: bash
+        env:
+          ED25519_PRIVATE_KEY: ${{ secrets.ED25519_PRIVATE_KEY }}
+          ADMIN_API_TOKEN: ${{ secrets.UEM_ADMIN_API_TOKEN }}
+          RELEASE_ID: ${{ inputs.release_id }}
+          SERVER_URL: ${{ inputs.server_url }}
+          MIN_VERSION: ${{ inputs.minimum_supported_version }}
+        run: |
+          set -euo pipefail
+          if [ -z "${ED25519_PRIVATE_KEY}" ]; then
+            echo "::error::ED25519_PRIVATE_KEY secret is required"
+            exit 1
+          fi
+
+          # Fetch release details from server
+          REL_JSON=$(curl -sf -H "Authorization: Bearer ${ADMIN_API_TOKEN}" "${SERVER_URL}/api/agent-updates/releases/${RELEASE_ID}")
+          echo "Release fetched: ${REL_JSON}"
+
+          # Construct canonical manifest & sign using Go script / CLI
+          go run ./scripts/signmanifest \
+            --private-key "${ED25519_PRIVATE_KEY}" \
+            --release-json "${REL_JSON}" \
+            --min-version "${MIN_VERSION}" \
+            --server-url "${SERVER_URL}" \
+            --token "${ADMIN_API_TOKEN}"

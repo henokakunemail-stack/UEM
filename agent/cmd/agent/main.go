@@ -27,6 +27,7 @@ import (
 	"github.com/henokakunemail-stack/Endpoint-Manager/agent/shared/inventory"
 	"github.com/henokakunemail-stack/Endpoint-Manager/agent/shared/maintenance"
 	"github.com/henokakunemail-stack/Endpoint-Manager/agent/shared/networkfilter"
+	"github.com/henokakunemail-stack/Endpoint-Manager/agent/shared/osinfo"
 	"github.com/henokakunemail-stack/Endpoint-Manager/agent/shared/patch"
 	"github.com/henokakunemail-stack/Endpoint-Manager/agent/shared/remotecontrol"
 	"github.com/henokakunemail-stack/Endpoint-Manager/agent/shared/remoteexec"
@@ -624,6 +625,10 @@ func runAgent(serverURL, enrollToken, credsPath string, heartbeatSecs int) {
 
 	// Phase 13: Agent Self-Update & Rollout
 	updateEngine := update.NewEngine(targetServerURL, creds.DeviceID, creds.DeviceSecret)
+	// The key this agent verifies release manifests against resolves now, not at
+	// the first update: a misconfiguration surfaces in the startup log beside
+	// everything else instead of inside a task an operator dispatches later.
+	updateEngine.InitTrust(context.Background(), osinfo.Version)
 
 	dispatcher.Register("update.apply", func(ctx context.Context, command, id string, payload json.RawMessage) any {
 		var params update.UpdateParams

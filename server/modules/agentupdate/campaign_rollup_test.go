@@ -43,7 +43,7 @@ func newCampaignFixture(t *testing.T, devices []string) *campaignFixture {
 	}
 
 	h := NewHandler(repo, nil, devicemgmt.NewRepository(database), discardAuditor{},
-		t.TempDir(), func(next http.Handler) http.Handler { return next })
+		t.TempDir(), func(next http.Handler) http.Handler { return next }, "")
 
 	tasks := map[string]string{}
 	for _, id := range devices {

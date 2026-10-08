@@ -16,6 +16,9 @@ import (
 // race with another reconnect. It is not a failure: the work is done.
 var ErrAlreadyDispatched = errors.New("update task already dispatched")
 
+// ErrReleaseNotFound means a release id named by a caller has no row.
+var ErrReleaseNotFound = errors.New("agent release not found")
+
 // ErrTaskAlreadyFinished means the row already reached a terminal status, so
 // a nonterminal report cannot move it. It is deliberately a separate value
 // from ErrAlreadyDispatched: that one says the work was already handed to the
@@ -25,17 +28,24 @@ var ErrAlreadyDispatched = errors.New("update task already dispatched")
 var ErrTaskAlreadyFinished = errors.New("update task already reached a final status")
 
 type AgentRelease struct {
-	ID             string    `db:"id" json:"id"`
-	Version        string    `db:"version" json:"version"`
-	OSName         string    `db:"os_name" json:"os_name"`
-	Arch           string    `db:"arch" json:"arch"`
-	FilePath       string    `db:"file_path" json:"file_path"`
-	FileSize       int64     `db:"file_size" json:"file_size"`
-	SHA256Checksum string    `db:"sha256_checksum" json:"sha256_checksum"`
-	Changelog      string    `db:"changelog" json:"changelog"`
-	IsActive       bool      `db:"is_active" json:"is_active"`
-	UploadedBy     string    `db:"uploaded_by" json:"uploaded_by"`
-	CreatedAt      time.Time `db:"created_at" json:"created_at"`
+	ID                      string     `db:"id" json:"id"`
+	Version                 string     `db:"version" json:"version"`
+	OSName                  string     `db:"os_name" json:"os_name"`
+	Arch                    string     `db:"arch" json:"arch"`
+	FilePath                string     `db:"file_path" json:"file_path"`
+	FileSize                int64      `db:"file_size" json:"file_size"`
+	SHA256Checksum          string     `db:"sha256_checksum" json:"sha256_checksum"`
+	Changelog               string     `db:"changelog" json:"changelog"`
+	IsActive                bool       `db:"is_active" json:"is_active"`
+	UploadedBy              string     `db:"uploaded_by" json:"uploaded_by"`
+	CreatedAt               time.Time  `db:"created_at" json:"created_at"`
+	PublishedAt             *time.Time `db:"published_at" json:"published_at,omitempty"`
+	MinimumSupportedVersion string     `db:"minimum_supported_version" json:"minimum_supported_version"`
+	// Ed25519Signature is a base64 detached signature over the canonical
+	// release manifest. Blank for releases uploaded before signing existed;
+	// agents built with a trusted key refuse those rather than install them.
+	Ed25519Signature string `db:"ed25519_signature" json:"ed25519_signature"`
+	DownloadURL      string `db:"download_url" json:"download_url"`
 }
 
 // AgentReleaseDTO is the console-facing shape of a release. It is separate from
@@ -43,32 +53,46 @@ type AgentRelease struct {
 // http.ServeFile needs, but shipping it to the browser would leak the server's
 // directory layout for no benefit. The console only ever needs the name.
 type AgentReleaseDTO struct {
-	ID             string    `json:"id"`
-	Version        string    `json:"version"`
-	OSName         string    `json:"os_name"`
-	Arch           string    `json:"arch"`
-	FileName       string    `json:"file_name"`
-	FileSize       int64     `json:"file_size"`
-	SHA256Checksum string    `json:"sha256_checksum"`
-	Changelog      string    `json:"changelog"`
-	IsActive       bool      `json:"is_active"`
-	UploadedBy     string    `json:"uploaded_by"`
-	CreatedAt      time.Time `json:"created_at"`
+	ID                      string     `json:"id"`
+	Version                 string     `json:"version"`
+	OSName                  string     `json:"os_name"`
+	Arch                    string     `json:"arch"`
+	FileName                string     `json:"file_name"`
+	FileSize                int64      `json:"file_size"`
+	SHA256Checksum          string     `json:"sha256_checksum"`
+	Changelog               string     `json:"changelog"`
+	IsActive                bool       `json:"is_active"`
+	UploadedBy              string     `json:"uploaded_by"`
+	CreatedAt               time.Time  `json:"created_at"`
+	PublishedAt             *time.Time `json:"published_at,omitempty"`
+	MinimumSupportedVersion string     `json:"minimum_supported_version"`
+	Ed25519Signature        string     `json:"ed25519_signature"`
+	DownloadURL             string     `json:"download_url"`
+	// Signed reports whether a signature is on the row. The console shows it
+	// because an unsigned release is installable only by agents built without
+	// a trusted key, and an operator looking at the list needs to see which
+	// rows those are.
+	Signed bool `json:"signed"`
 }
 
 func (a AgentRelease) toDTO() AgentReleaseDTO {
 	return AgentReleaseDTO{
-		ID:             a.ID,
-		Version:        a.Version,
-		OSName:         a.OSName,
-		Arch:           a.Arch,
-		FileName:       filepath.Base(a.FilePath),
-		FileSize:       a.FileSize,
-		SHA256Checksum: a.SHA256Checksum,
-		Changelog:      a.Changelog,
-		IsActive:       a.IsActive,
-		UploadedBy:     a.UploadedBy,
-		CreatedAt:      a.CreatedAt,
+		ID:                      a.ID,
+		Version:                 a.Version,
+		OSName:                  a.OSName,
+		Arch:                    a.Arch,
+		FileName:                filepath.Base(a.FilePath),
+		FileSize:                a.FileSize,
+		SHA256Checksum:          a.SHA256Checksum,
+		Changelog:               a.Changelog,
+		IsActive:                a.IsActive,
+		UploadedBy:              a.UploadedBy,
+		CreatedAt:               a.CreatedAt,
+		PublishedAt:             a.PublishedAt,
+		MinimumSupportedVersion: a.MinimumSupportedVersion,
+		Ed25519Signature:        a.Ed25519Signature,
+		DownloadURL:             a.DownloadURL,
+		Signed:                  a.Ed25519Signature != "",
 	}
 }
 
@@ -124,16 +148,44 @@ func (r *Repository) CreateRelease(ctx context.Context, release *AgentRelease) e
 	query := `
 		INSERT INTO agent_releases (
 			id, version, os_name, arch, file_path, file_size, sha256_checksum,
-			changelog, is_active, uploaded_by, created_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			changelog, is_active, uploaded_by, created_at,
+			published_at, minimum_supported_version, ed25519_signature, download_url
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
 	_, err := r.db.ExecContext(ctx, query,
 		release.ID, release.Version, release.OSName, release.Arch, release.FilePath,
 		release.FileSize, release.SHA256Checksum, release.Changelog, release.IsActive,
 		release.UploadedBy, release.CreatedAt,
+		release.PublishedAt, release.MinimumSupportedVersion, release.Ed25519Signature,
+		release.DownloadURL,
 	)
 	if err != nil {
 		return fmt.Errorf("create release: %w", err)
+	}
+	return nil
+}
+
+// SignRelease stores the signature and the fields the signature covers. The
+// caller has already produced the signature off-box with a private key this
+// server never holds; this write only records what the signer said.
+//
+// The columns move together because the signature covers exactly this set.
+// Writing the signature without the floor it certifies, or the floor without
+// the signature that certifies it, would leave a row whose parts disagree
+// about what an agent is being asked to trust.
+func (r *Repository) SignRelease(ctx context.Context, id, signature, minimumSupportedVersion, downloadURL string, publishedAt time.Time) error {
+	res, err := r.db.ExecContext(ctx, `
+		UPDATE agent_releases
+		SET ed25519_signature = ?, minimum_supported_version = ?,
+		    download_url = ?, published_at = ?
+		WHERE id = ?`,
+		signature, minimumSupportedVersion, downloadURL, publishedAt.UTC(), id)
+	if err != nil {
+		return fmt.Errorf("sign release %s: %w", id, err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrReleaseNotFound
 	}
 	return nil
 }

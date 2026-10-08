@@ -71,6 +71,30 @@ type Config struct {
 	// be a plain IP ("10.0.0.4") or a CIDR ("10.0.0.0/8"), so a whole internal
 	// subnet can be named without enumerating load-balancer replicas.
 	TrustedProxies []string
+
+	// UpdateSigningPublicKey is the base64 Ed25519 public key whose signature
+	// an agent demands on a release manifest before it will install it.
+	//
+	// Only the public half lives here. The private key stays on the signing
+	// host -- the CI job or the offline box that produced the signature -- and
+	// never on the server that serves the artifact, which is the whole point of
+	// signing: a server that is fully compromised cannot ship a binary of its
+	// own choosing, because it cannot make a signature the fleet was built to
+	// accept.
+	//
+	// Empty means the server cannot attest a signature, and the sign endpoint
+	// refuses rather than recording one it has no way to check. Agents are
+	// unaffected: they trust the key they were built with, not this value.
+	UpdateSigningPublicKey string
+
+	// UpdateMinimumVersion is the fleet-wide floor on agent versions. A release
+	// may declare its own minimum on top of this, and the stricter of the two
+	// applies. It exists for the "every supported version is at least X"
+	// decision that is not a property of any one release -- for example when a
+	// version has to be banned fleet-wide and the releases below it are not
+	// being re-signed. Agents that were built with a trusted key enforce it;
+	// /api/agent/config publishes it to operators and tooling.
+	UpdateMinimumVersion string
 }
 
 // Load reads configuration from environment variables with sane defaults.
@@ -92,9 +116,15 @@ func Load() (Config, error) {
 		BackupRetain:         getEnvInt("BACKUP_RETAIN", 24),
 		AllowedOriginDomains: getCSVEnv("ALLOWED_ORIGIN_DOMAINS"),
 		TrustedProxies:       getCSVEnv("TRUSTED_PROXIES"),
-		LogLevel:             getEnv("LOG_LEVEL", "info"),
-		LogFile:              getEnv("LOG_FILE", ""),
-		LogTailLines:         getEnvInt("LOG_TAIL_LINES", 2000),
+		// Read verbatim rather than trimmed: a whitespace typo in a base64 key is
+		// a misconfiguration an operator wants reported, and trimming it here
+		// would turn "the wrong key is recorded" into "a key is recorded and
+		// nothing verifies against it", which is far harder to diagnose.
+		UpdateSigningPublicKey: os.Getenv("UPDATE_SIGNING_PUBLIC_KEY"),
+		UpdateMinimumVersion:   strings.TrimSpace(getEnv("UPDATE_MINIMUM_VERSION", "")),
+		LogLevel:               getEnv("LOG_LEVEL", "info"),
+		LogFile:                getEnv("LOG_FILE", ""),
+		LogTailLines:           getEnvInt("LOG_TAIL_LINES", 2000),
 	}
 	if cfg.JWTSecret == "" {
 		return cfg, fmt.Errorf("JWT_SECRET must be set (generate one, e.g. 32+ random bytes)")

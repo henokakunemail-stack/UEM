@@ -2,7 +2,9 @@ package agentupdate
 
 import (
 	"context"
+	"crypto/ed25519"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -17,6 +19,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/rs/zerolog/log"
 
+	"github.com/henokakunemail-stack/Endpoint-Manager/protocol"
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/auth"
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/rbac"
 	devicemgmt "github.com/henokakunemail-stack/Endpoint-Manager/server/modules/device-management"
@@ -48,6 +51,11 @@ type Handler struct {
 	auditor    Auditor
 	storageDir string
 	authMw     func(http.Handler) http.Handler
+	// publicKey is the release-signing key this server records signatures for.
+	// Nil when UPDATE_SIGNING_PUBLIC_KEY is unset, in which case the sign
+	// endpoint refuses rather than storing a signature it has no way to check.
+	publicKey           ed25519.PublicKey
+	minimumAgentVersion string
 }
 
 func NewHandler(
@@ -57,22 +65,70 @@ func NewHandler(
 	auditor Auditor,
 	storageDir string,
 	authMw func(http.Handler) http.Handler,
+	minimumAgentVersion string,
 ) *Handler {
 	_ = os.MkdirAll(storageDir, 0755)
 	return &Handler{
-		repo:       repo,
-		hub:        hub,
-		deviceRepo: deviceRepo,
-		auditor:    auditor,
-		storageDir: storageDir,
-		authMw:     authMw,
+		repo:                repo,
+		hub:                 hub,
+		deviceRepo:          deviceRepo,
+		auditor:             auditor,
+		storageDir:          storageDir,
+		authMw:              authMw,
+		minimumAgentVersion: minimumAgentVersion,
 	}
+}
+
+// WithSigningPublicKey trusts the base64 Ed25519 public key whose signatures
+// this server records, and sets the fleet-wide version floor it publishes.
+//
+// Both are deployment inputs. The key is the server's copy of the public half
+// only; the private key never reaches this process, which is what makes a
+// recorded signature worth more to an agent than the checksum that ships with
+// it. An unset or unusable key yields a nil key and a warning rather than a
+// startup failure, because a fleet that has not generated a key pair yet still
+// has to be able to start and serve unsigned releases.
+func (h *Handler) WithSigningPublicKey(b64 string, minimumAgentVersion string) *Handler {
+	h.minimumAgentVersion = minimumAgentVersion
+	if b64 == "" {
+		log.Warn().Msg("UPDATE_SIGNING_PUBLIC_KEY is not set: releases cannot be signed, " +
+			"and agents built with a trusted key will refuse every release this server uploads")
+		return h
+	}
+	key, err := loadPublicKey(b64)
+	if err != nil {
+		log.Error().Err(err).Msg("UPDATE_SIGNING_PUBLIC_KEY is set but unusable; " +
+			"signing stays disabled until it holds a valid base64 Ed25519 public key")
+		return h
+	}
+	h.publicKey = key
+	log.Info().Msg("release signature verification is enabled")
+	return h
+}
+
+// loadPublicKey decodes the operator's base64 Ed25519 public key. A key that is
+// the wrong length decodes to a zero key that would verify nothing, and base64
+// padding noise is the most likely typo, so both are reported by name.
+func loadPublicKey(b64 string) (ed25519.PublicKey, error) {
+	raw, err := base64.StdEncoding.DecodeString(b64)
+	if err != nil {
+		return nil, fmt.Errorf("decode UPDATE_SIGNING_PUBLIC_KEY: %w", err)
+	}
+	if len(raw) != ed25519.PublicKeySize {
+		return nil, fmt.Errorf("UPDATE_SIGNING_PUBLIC_KEY is %d bytes, want %d",
+			len(raw), ed25519.PublicKeySize)
+	}
+	return ed25519.PublicKey(raw), nil
 }
 
 func (h *Handler) Register(r chi.Router) {
 	// Agent endpoints (secret/token verified or device authenticated)
 	r.Post("/api/agent/devices/{id}/update/report", h.handleAgentReport)
 	r.Get("/api/agent/releases/{id}/download", h.handleAgentDownload)
+	// /api/agent/config is unauthenticated by design: it publishes the release
+	// signing key and the fleet version floor, which an agent needs before it
+	// has any reason to trust a download, and it carries nothing sensitive.
+	r.Get("/api/agent/config", h.handleAgentConfig)
 
 	// Operator Console API
 	r.Group(func(cr chi.Router) {
@@ -83,6 +139,11 @@ func (h *Handler) Register(r chi.Router) {
 		cr.With(rbac.RequireRole(rbac.RoleViewer)).Get("/api/agent-updates/releases/{id}", h.handleGetRelease)
 		cr.With(rbac.RequireRole(rbac.RoleViewer)).Get("/api/agent-updates/releases/{id}/download", h.handleDownloadRelease)
 		cr.With(rbac.RequireRole(rbac.RoleAdmin)).Post("/api/agent-updates/releases", h.handleUploadRelease)
+		// Signing is its own permission from upload because the two are done by
+		// different people in different places: the release is uploaded from the
+		// console, and the signature comes from the signing host that holds the
+		// private key. Neither grant implies the other.
+		cr.With(rbac.RequireRole(rbac.RoleAdmin)).Post("/api/agent-updates/releases/{id}/sign", h.handleSignRelease)
 
 		// Campaigns
 		cr.With(rbac.RequireRole(rbac.RoleViewer)).Get("/api/agent-updates/campaigns", h.handleListCampaigns)
@@ -148,16 +209,17 @@ func (h *Handler) handleUploadRelease(w http.ResponseWriter, r *http.Request) {
 	actorID := auth.UserIDFromContext(r.Context())
 
 	release := &AgentRelease{
-		ID:             relID,
-		Version:        version,
-		OSName:         osName,
-		Arch:           arch,
-		FilePath:       destPath,
-		FileSize:       written,
-		SHA256Checksum: checksum,
-		Changelog:      changelog,
-		IsActive:       true,
-		UploadedBy:     actorID,
+		ID:                      relID,
+		Version:                 version,
+		OSName:                  osName,
+		Arch:                    arch,
+		FilePath:                destPath,
+		FileSize:                written,
+		SHA256Checksum:          checksum,
+		Changelog:               changelog,
+		IsActive:                true,
+		UploadedBy:              actorID,
+		MinimumSupportedVersion: r.FormValue("minimum_supported_version"),
 	}
 
 	if err := h.repo.CreateRelease(r.Context(), release); err != nil {
@@ -174,6 +236,128 @@ func (h *Handler) handleUploadRelease(w http.ResponseWriter, r *http.Request) {
 	})
 
 	writeJSON(w, http.StatusCreated, release.toDTO())
+}
+
+// handleSignRelease records a signature a signing host produced off-box.
+//
+// The server never holds the private key, so it cannot make this signature --
+// it can only check one. That ordering is what the endpoint enforces: the
+// caller's manifest is rebuilt server-side from the release row and the
+// signature is verified against the deployed public key before anything is
+// written. A signature that does not verify is rejected, and so is a signature
+// that verifies but covers a manifest that does not match the row, because
+// either one would let a caller attach a real signature from a different
+// artifact to a release of its own choosing.
+//
+// The caller still names its own manifest fields, so a signing job that has the
+// wrong artifact path or the wrong floor fails loudly here rather than silently
+// certifying the wrong thing. Only the signature itself is not an input: it is
+// checked, never trusted.
+func (h *Handler) handleSignRelease(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if h.publicKey == nil {
+		// Fail closed with the reason, because this is the one endpoint whose
+		// whole purpose is to attest, and 500 would read as "the server is
+		// broken" when the real state is "this deployment cannot sign yet".
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+			"error": "release signing is not configured on this server (UPDATE_SIGNING_PUBLIC_KEY)",
+		})
+		return
+	}
+
+	var req struct {
+		Signature               string `json:"signature"`
+		MinimumSupportedVersion string `json:"minimum_supported_version"`
+		DownloadURL             string `json:"download_url"`
+		PublishedAt             string `json:"published_at"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
+		return
+	}
+	if req.Signature == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "signature is required"})
+		return
+	}
+
+	rel, err := h.repo.GetRelease(r.Context(), id)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "release not found"})
+		return
+	}
+
+	publishedAt := time.Now().UTC()
+	if req.PublishedAt != "" {
+		publishedAt, err = time.Parse(time.RFC3339, req.PublishedAt)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{
+				"error": "published_at must be RFC3339, e.g. 2026-10-07T12:00:00Z",
+			})
+			return
+		}
+	}
+
+	// Rebuild the manifest the way the agent will, from the row the caller is
+	// asking to sign. The signature is verified against exactly this, so a
+	// caller whose local manifest disagrees with the row -- a stale artifact, a
+	// different release id, a checksum from a file it has not re-hashed -- gets
+	// a rejection naming the field, not a recorded signature over something
+	// else.
+	want := manifestForRelease(rel, req.DownloadURL, publishedAt)
+	want.MinimumSupportedVersion = req.MinimumSupportedVersion
+	if err := want.Verify(h.publicKey, req.Signature); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": "signature does not verify against this release's manifest: " + err.Error(),
+		})
+		return
+	}
+
+	if err := h.repo.SignRelease(r.Context(), id, req.Signature,
+		req.MinimumSupportedVersion, req.DownloadURL, publishedAt); err != nil {
+		if errors.Is(err, ErrReleaseNotFound) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "release not found"})
+			return
+		}
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	actorID := auth.UserIDFromContext(r.Context())
+	_ = h.auditor.Log(r.Context(), "user", actorID, "agent_update.release_signed", id, map[string]string{
+		"version":                   rel.Version,
+		"minimum_supported_version": req.MinimumSupportedVersion,
+		"download_url":              req.DownloadURL,
+	})
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"release_id":                id,
+		"signed":                    true,
+		"minimum_supported_version": req.MinimumSupportedVersion,
+		"download_url":              req.DownloadURL,
+		"published_at":              publishedAt.UTC().Format(time.RFC3339),
+	})
+}
+
+// handleAgentConfig publishes the release-trust configuration an agent needs
+// before it has any reason to trust a download. Unauthenticated, because it
+// contains only public material: the signing key the fleet's releases are
+// stamped with, and the oldest version this deployment still supports.
+//
+// The key here is advisory for an operator or a provisioning tool. An agent
+// that was built with a key embedded does not fetch or honour this value --
+// trusting the server for the key that is supposed to constrain the server
+// would defeat the point. Agents that were not built with one read the checksum
+// alone, which is what they did before this endpoint existed.
+func (h *Handler) handleAgentConfig(w http.ResponseWriter, r *http.Request) {
+	publicKey := ""
+	if h.publicKey != nil {
+		publicKey = base64.StdEncoding.EncodeToString(h.publicKey)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"public_key":              publicKey,
+		"minimum_agent_version":   h.minimumAgentVersion,
+		"signature_required_hint": publicKey != "",
+	})
 }
 
 func (h *Handler) handleListReleases(w http.ResponseWriter, r *http.Request) {
@@ -465,9 +649,20 @@ func (h *Handler) SendTask(ctx context.Context, task *DeviceUpdateTask, rel *Age
 	payload := map[string]any{
 		"task_id":         task.ID,
 		"target_version":  task.TargetVersion,
-		"download_url":    fmt.Sprintf("/api/agent/releases/%s/download", rel.ID),
+		"download_url":    releaseDownloadURL(rel),
 		"sha256_checksum": rel.SHA256Checksum,
 		"file_size":       rel.FileSize,
+	}
+	// The signed manifest rides along with the artifact reference. An agent that
+	// was built with a trusted key verifies it before it swaps its own
+	// executable; one that was not ignores it and falls back to the checksum
+	// alone. See engine.verifyManifest for why a missing manifest on a
+	// key-carrying agent is a refusal rather than a fallback.
+	if rel.Ed25519Signature != "" {
+		payload["manifest"] = protocol.SignedManifest{
+			Manifest:  manifestForRelease(rel, releaseDownloadURL(rel), publishedAtOf(rel)),
+			Signature: rel.Ed25519Signature,
+		}
 	}
 	msg, err := json.Marshal(map[string]any{
 		"type":    "command",
