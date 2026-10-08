@@ -85,7 +85,9 @@ type agentConfig struct {
 // material and requires none.
 func (e *Engine) fetchAgentConfig(ctx context.Context) (agentConfig, error) {
 	var out agentConfig
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, e.serverURL+"/api/agent/config", nil)
+	reqCtx, cancel := context.WithTimeout(ctx, oneRequestTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, e.serverURL+"/api/agent/config", nil)
 	if err != nil {
 		return out, err
 	}
