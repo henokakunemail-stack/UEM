@@ -23,10 +23,50 @@ const (
 	RoleAdmin      = "admin"
 )
 
+// Fine-grained permission constants mapped to minimum role levels.
+const (
+	PermDevicesRead          = "devices.read"
+	PermDevicesManage        = "devices.manage"
+	PermCommandsExecute      = "commands.execute"
+	PermTerminalOpen         = "terminal.open"
+	PermDesktopControl       = "desktop.control"
+	PermAgentUpdateDispatch = "agent_update.dispatch"
+	PermAgentUpdateManage   = "agent_update.manage"
+	PermSoftwareDeploy       = "software.deploy"
+	PermSoftwareManage       = "software.manage"
+	PermPatchScan            = "patch.scan"
+	PermPatchDeploy          = "patch.deploy"
+	PermUserManage           = "user.manage"
+)
+
+var permToRole = map[string]string{
+	PermDevicesRead:          RoleViewer,
+	PermDevicesManage:        RoleAdmin,
+	PermCommandsExecute:      RoleTechnician,
+	PermTerminalOpen:         RoleTechnician,
+	PermDesktopControl:       RoleTechnician,
+	PermAgentUpdateDispatch: RoleTechnician,
+	PermAgentUpdateManage:   RoleAdmin,
+	PermSoftwareDeploy:       RoleTechnician,
+	PermSoftwareManage:       RoleAdmin,
+	PermPatchScan:            RoleTechnician,
+	PermPatchDeploy:          RoleTechnician,
+	PermUserManage:           RoleAdmin,
+}
+
 var rank = map[string]int{
 	RoleViewer:     1,
 	RoleTechnician: 2,
 	RoleAdmin:      3,
+}
+
+// RequirePermission checks whether the context role holds the given fine-grained permission.
+func RequirePermission(permission string) func(http.Handler) http.Handler {
+	minRole, ok := permToRole[permission]
+	if !ok {
+		panic("rbac: unknown permission " + permission)
+	}
+	return RequireRole(minRole)
 }
 
 // RequireRole returns middleware allowing roles with rank >= minRole.

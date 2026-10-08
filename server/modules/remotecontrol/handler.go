@@ -168,6 +168,19 @@ func (h *Handler) stopSession(w http.ResponseWriter, r *http.Request) {
 	sessionID := chi.URLParam(r, "sessionId")
 	deviceID := chi.URLParam(r, "id")
 
+	session, err := h.repo.GetSessionByID(r.Context(), sessionID)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, "session not found")
+		return
+	}
+
+	operatorID := auth.UserIDFromContext(r.Context())
+	role := rbac.RoleFromContext(r.Context())
+	if session.OperatorID != operatorID && role != rbac.RoleAdmin {
+		writeErr(w, http.StatusForbidden, "forbidden: session belongs to another operator")
+		return
+	}
+
 	// Closing the relay is not enough. The agent's capture loop is a 10 fps
 	// ticker that only stops when the socket it writes to fails or when it is
 	// told to, and nothing told it: the server had no rc.stop dispatch at all,
@@ -196,7 +209,6 @@ func (h *Handler) stopSession(w http.ResponseWriter, r *http.Request) {
 
 	h.relay.CloseRelay(sessionID)
 
-	operatorID := auth.UserIDFromContext(r.Context())
 	_ = h.audit.Log(r.Context(), "user", operatorID, "remotecontrol.session_stop", sessionID, map[string]string{
 		"device_id": deviceID,
 	})
@@ -264,12 +276,23 @@ func (h *Handler) handleOperatorWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The claims are not used past this point: the relay identifies the operator
-	// by session id, and the role check has already happened. Binding the
-	// operator to the authenticated user is left to the session record, which
-	// startSession created, rather than reconstructed here.
-	if _, ok := h.authenticateHandshake(w, r); !ok {
+	claims, ok := h.authenticateHandshake(w, r)
+	if !ok {
 		return // the refusal is already written
+	}
+
+	session, err := h.repo.GetSessionByID(r.Context(), sessionID)
+	if err != nil {
+		http.Error(w, "session not found", http.StatusNotFound)
+		return
+	}
+	if session.Status != "active" {
+		http.Error(w, "session is not active", http.StatusGone)
+		return
+	}
+	if claims.UserID != session.OperatorID && claims.Role != rbac.RoleAdmin {
+		http.Error(w, "forbidden: session belongs to another operator", http.StatusForbidden)
+		return
 	}
 
 	ws, err := h.upgrader.Upgrade(w, r, nil)

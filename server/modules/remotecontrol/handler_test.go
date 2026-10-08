@@ -445,6 +445,12 @@ func TestAnOperatorSocketWithNoCredentialIsRefused(t *testing.T) {
 	h.hub = hub
 
 	ticket := issueTicket(t, h, "u-1", "tech")
+	_ = h.repo.CreateSession(context.Background(), &RemoteControlSession{
+		ID:          "spent",
+		DeviceID:    "dev-1",
+		OperatorID:  "u-1",
+		SessionMode: "full_control",
+	})
 
 	// Spend the ticket first, the way the real handshake does. A ticket that was
 	// never presented is not a replay -- it is an outstanding ticket, and
@@ -584,7 +590,46 @@ func TestTheOwningDeviceStillAttaches(t *testing.T) {
 	}
 }
 
-// TestAMalformedFrameFromTheOperatorIsIgnoredNotFatal: a browser sends whatever
+// TestOperatorCannotConnectToAnotherOperatorsSession verifies that a session
+// created by u-1 cannot be connected to by u-2 (technician), but can be accessed
+// by an admin.
+func TestOperatorCannotConnectToAnotherOperatorsSession(t *testing.T) {
+	h, database, _ := rcRouteFixture(t)
+	h.hub = &acceptingHub{}
+	database.MustExec(`INSERT INTO users (id, username) VALUES ('u-2','other-tech');`)
+
+	session := &RemoteControlSession{ID: "s-owner-1", DeviceID: "dev-1", OperatorID: "u-1", SessionMode: "full_control"}
+	if err := h.repo.CreateSession(context.Background(), session); err != nil {
+		t.Fatal(err)
+	}
+	h.relay.RegisterSession(session.ID, session.SessionMode)
+
+	ticketUser2 := issueTicket(t, h, "u-2", "tech")
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("id", "dev-1")
+		h.handleOperatorWS(w, r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, rctx)))
+	}))
+	defer srv.Close()
+
+	// Technician u-2 tries to connect to u-1's session -> must fail 403
+	_, _, err := websocket.DefaultDialer.Dial(
+		"ws"+strings.TrimPrefix(srv.URL, "http")+"/?session="+session.ID+"&ticket="+ticketUser2, nil)
+	if err == nil {
+		t.Fatal("expected 403 Forbidden when technician u-2 connects to u-1's session, but dial succeeded")
+	}
+
+	// Admin user can connect to u-1's session
+	database.MustExec(`INSERT INTO users (id, username) VALUES ('u-admin','admin-user');`)
+	ticketAdmin := issueTicket(t, h, "u-admin", "admin")
+	conn, _, err := websocket.DefaultDialer.Dial(
+		"ws"+strings.TrimPrefix(srv.URL, "http")+"/?session="+session.ID+"&ticket="+ticketAdmin, nil)
+	if err != nil {
+		t.Fatalf("expected admin to be able to connect to session, but got: %v", err)
+	}
+	_ = conn.Close()
+}
 // it likes. One bad frame must not end a live desktop.
 func TestAMalformedFrameFromTheOperatorIsIgnoredNotFatal(t *testing.T) {
 	h, _, _ := rcRouteFixture(t)
