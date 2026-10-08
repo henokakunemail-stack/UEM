@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -163,13 +164,13 @@ func Backup(dbPath, destPath string) error {
 }
 
 // Restore validates the SQLite database at sourcePath and atomically replaces destPath.
+//
+// Validation runs against a throwaway copy, never against sourcePath. Opening
+// the backup with a normal handle makes SQLite run migrations against it and
+// write a -wal beside it, so a read-only artefact of a restore silently becomes
+// a modified one; a temp copy has none of those consequences for the operator's
+// only remaining copy of their data.
 func Restore(sourcePath, destPath string) error {
-	restored, err := Open(sourcePath)
-	if err != nil {
-		return fmt.Errorf("invalid source database %s: %w", sourcePath, err)
-	}
-	_ = restored.Close()
-
 	if dir := filepath.Dir(destPath); dir != "" && dir != "." {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return fmt.Errorf("create dest dir %s: %w", dir, err)
@@ -177,18 +178,81 @@ func Restore(sourcePath, destPath string) error {
 	}
 
 	tmpPath := destPath + fmt.Sprintf(".tmp-%d", time.Now().UnixNano())
-	data, err := os.ReadFile(sourcePath)
-	if err != nil {
-		return fmt.Errorf("read source file: %w", err)
+	cleanup := func() { _ = os.Remove(tmpPath) }
+
+	if err := copyFile(sourcePath, tmpPath); err != nil {
+		cleanup()
+		return err
+	}
+	if err := quickCheck(tmpPath); err != nil {
+		cleanup()
+		return err
 	}
 
-	if err := os.WriteFile(tmpPath, data, 0o600); err != nil {
-		return fmt.Errorf("write temp restore file: %w", err)
+	// The sidecars belong to the database being replaced, not to the one being
+	// installed. Leaving them behind is the worst case in this function: SQLite
+	// validates a WAL frame against that WAL's own header and salts, never
+	// against the main file, so a stale -wal replays as valid and silently
+	// overwrites the restored content with the previous database's pages. It
+	// only bites when the last connection did not close cleanly, which is
+	// exactly the moment a restore is most likely to be run.
+	for _, sidecar := range []string{destPath + "-wal", destPath + "-shm"} {
+		if err := os.Remove(sidecar); err != nil && !os.IsNotExist(err) {
+			cleanup()
+			return fmt.Errorf("remove stale %s: %w", filepath.Base(sidecar), err)
+		}
 	}
 
 	if err := os.Rename(tmpPath, destPath); err != nil {
-		_ = os.Remove(tmpPath)
-		return fmt.Errorf("replace dest db: %w", err)
+		cleanup()
+		// On Windows this is overwhelmingly a running server, not a broken file:
+		// neither Go's syscall.Open nor SQLite's winOpen pass FILE_SHARE_DELETE,
+		// so an open database cannot be replaced. The bare errno reads like data
+		// loss, so name the action that actually fixes it.
+		return fmt.Errorf("replace dest db %s: %w\n"+
+			"  if the server is running, stop it first (an open database cannot be replaced)", destPath, err)
+	}
+	return nil
+}
+
+// quickCheck reports whether the SQLite database at path is structurally sound.
+func quickCheck(path string) error {
+	d, err := sqlx.Open("sqlite", path)
+	if err != nil {
+		return fmt.Errorf("open restore candidate: %w", err)
+	}
+	defer d.Close()
+
+	var result string
+	if err := d.Get(&result, "PRAGMA quick_check"); err != nil {
+		return fmt.Errorf("validate %s: %w", filepath.Base(path), err)
+	}
+	if result != "ok" {
+		return fmt.Errorf("source database %s is corrupt: %s", filepath.Base(path), result)
+	}
+	return nil
+}
+
+// copyFile streams src to dst. Databases are copied in chunks rather than with
+// os.ReadFile because a restore should not need the whole file resident in RAM
+// to move it, and a production console database is measured in gigabytes.
+func copyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return fmt.Errorf("read source file: %w", err)
+	}
+	defer in.Close()
+
+	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return fmt.Errorf("write temp restore file: %w", err)
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		out.Close()
+		return fmt.Errorf("copy source file: %w", err)
+	}
+	if err := out.Close(); err != nil {
+		return fmt.Errorf("close temp restore file: %w", err)
 	}
 	return nil
 }

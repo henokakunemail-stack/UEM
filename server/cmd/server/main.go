@@ -54,6 +54,13 @@ import (
 // services with one name is an install-time collision, not a shared config.
 const serviceName = "endpoint-mgmt-server"
 
+// dbPathForBackup resolves the database path for -backup and -restore.
+//
+// It reads only DB_PATH, and only after -env-file has been applied, because
+// both flags run on a stopped server where the environment block may be empty.
+// Routing this through config.Load would refuse to run without a JWT_SECRET.
+func dbPathForBackup() string { return config.DBPathOrDefault() }
+
 func main() {
 	// A management server that has to be started by hand after every reboot is
 	// not a management server, so it runs under the same OS service abstraction
@@ -74,30 +81,38 @@ func main() {
 	flag.StringVar(&restorePath, "restore", "", "restore database from source file to active DB path")
 	flag.Parse()
 
-	if backupPath != "" {
-		cfg, err := config.Load()
-		if err != nil {
-			println("config load error:", err.Error())
+	// A service launched by the SCM inherits nothing from the operator's
+	// shell, so its configuration has to arrive by a path the SCM does carry.
+	// This is read before anything that needs a database path -- including
+	// -backup and -restore. Reading it after them meant a restore issued on a
+	// service host resolved the relative default data/endpoint-mgmt.db, created
+	// a fresh database there, and reported success against the wrong file.
+	if envFile != "" {
+		if err := loadEnvFile(envFile); err != nil {
+			println("env-file error:", err.Error())
 			os.Exit(1)
 		}
-		if err := db.Backup(cfg.DBPath, backupPath); err != nil {
-			println("backup error:", err.Error())
-			os.Exit(1)
-		}
-		println("backup created successfully at:", backupPath)
-		return
 	}
-	if restorePath != "" {
-		cfg, err := config.Load()
-		if err != nil {
-			println("config load error:", err.Error())
-			os.Exit(1)
+
+	if backupPath != "" || restorePath != "" {
+		// Deliberately not config.Load(): backup and restore are offline
+		// maintenance on a stopped server, and requiring JWT_SECRET to reach
+		// the database path would block the one operation an operator has when
+		// the server will not start.
+		dbPath := dbPathForBackup()
+		if backupPath != "" {
+			if err := db.Backup(dbPath, backupPath); err != nil {
+				println("backup error:", err.Error())
+				os.Exit(1)
+			}
+			println("backup created successfully at:", backupPath)
+			return
 		}
-		if err := db.Restore(restorePath, cfg.DBPath); err != nil {
+		if err := db.Restore(restorePath, dbPath); err != nil {
 			println("restore error:", err.Error())
 			os.Exit(1)
 		}
-		println("database restored successfully from:", restorePath, "to:", cfg.DBPath)
+		println("database restored successfully from:", restorePath, "to:", dbPath)
 		return
 	}
 
@@ -105,17 +120,11 @@ func main() {
 		handleServiceAction(serviceAction, httpAddr, envFile)
 		return
 	}
-	// A service launched by the SCM inherits nothing from the operator's
-	// shell, so its configuration has to arrive by a path the SCM does carry.
+	// The installer cannot invent a secret without shipping a CScript
+	// dependency that does not exist on Linux, and baking one into a public
+	// installer would be publishing it. So the file ships with the key
+	// present and empty, and the first run fills it in.
 	if envFile != "" {
-		if err := loadEnvFile(envFile); err != nil {
-			println("env-file error:", err.Error())
-			os.Exit(1)
-		}
-		// The installer cannot invent a secret without shipping a CScript
-		// dependency that does not exist on Linux, and baking one into a public
-		// installer would be publishing it. So the file ships with the key
-		// present and empty, and the first run fills it in.
 		if err := ensureJWTSecret(envFile); err != nil {
 			println("secret error:", err.Error())
 			os.Exit(1)

@@ -97,9 +97,20 @@ type Config struct {
 	UpdateMinimumVersion string
 }
 
+// DBPathOrDefault returns the configured database path without requiring the
+// rest of the configuration to be valid.
+//
+// Load rejects a missing JWT_SECRET, and backup/restore are exactly the
+// operations an operator runs on a stopped server -- often a server that will
+// not start in the first place. Routing them through Load would make the
+// recovery path depend on the thing that is broken.
+func DBPathOrDefault() string {
+	return getEnv("DB_PATH", "data/endpoint-mgmt.db")
+}
+
 // Load reads configuration from environment variables with sane defaults.
 func Load() (Config, error) {
-	dbPath := getEnv("DB_PATH", "data/endpoint-mgmt.db")
+	dbPath := DBPathOrDefault()
 	cfg := Config{
 		HTTPAddr:             getEnv("HTTP_ADDR", ":8443"),
 		DBPath:               dbPath,
