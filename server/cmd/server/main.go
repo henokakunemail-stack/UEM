@@ -64,11 +64,42 @@ func main() {
 		httpAddr      string
 		envFile       string
 		serviceAction string
+		backupPath    string
+		restorePath   string
 	)
 	flag.StringVar(&httpAddr, "addr", "", "HTTP listen address override (default from HTTP_ADDR, else :8443)")
 	flag.StringVar(&envFile, "env-file", "", "read KEY=VALUE runtime settings from a file (used by the service, which has no environment block)")
 	flag.StringVar(&serviceAction, "service", "", "OS service management action (install|uninstall|start|stop|status)")
+	flag.StringVar(&backupPath, "backup", "", "take a WAL-safe hot backup of the database to the specified path")
+	flag.StringVar(&restorePath, "restore", "", "restore database from source file to active DB path")
 	flag.Parse()
+
+	if backupPath != "" {
+		cfg, err := config.Load()
+		if err != nil {
+			println("config load error:", err.Error())
+			os.Exit(1)
+		}
+		if err := db.Backup(cfg.DBPath, backupPath); err != nil {
+			println("backup error:", err.Error())
+			os.Exit(1)
+		}
+		println("backup created successfully at:", backupPath)
+		return
+	}
+	if restorePath != "" {
+		cfg, err := config.Load()
+		if err != nil {
+			println("config load error:", err.Error())
+			os.Exit(1)
+		}
+		if err := db.Restore(restorePath, cfg.DBPath); err != nil {
+			println("restore error:", err.Error())
+			os.Exit(1)
+		}
+		println("database restored successfully from:", restorePath, "to:", cfg.DBPath)
+		return
+	}
 
 	if serviceAction != "" {
 		handleServiceAction(serviceAction, httpAddr, envFile)

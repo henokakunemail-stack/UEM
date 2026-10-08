@@ -5,9 +5,11 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/jmoiron/sqlx"
+	_ "github.com/lib/pq"  // PostgreSQL driver
 	_ "modernc.org/sqlite" // pure-Go SQLite driver, no cgo
 )
 
@@ -83,39 +85,51 @@ func DSNForPath(dbPath string) string {
 // Open creates/opens the SQLite database and applies migrations.
 // Uses WAL mode + busy_timeout for concurrent reader/writer access.
 func Open(dbPath string) (*sqlx.DB, error) {
-	// Make sure the data directory exists (e.g. ./data).
-	if dir := filepath.Dir(dbPath); dir != "" && dir != "." {
+	return OpenWithDriver("sqlite", dsn(dbPath))
+}
+
+// OpenWithDriver creates/opens a database with the specified driver and DSN, applying migrations.
+func OpenWithDriver(driverName, dsnStr string) (*sqlx.DB, error) {
+	if driverName == "postgres" || driverName == "pgx" || strings.HasPrefix(dsnStr, "postgres://") || strings.HasPrefix(dsnStr, "postgresql://") {
+		drv := driverName
+		if drv == "" {
+			drv = "postgres"
+		}
+		d, err := sqlx.Open(drv, dsnStr)
+		if err != nil {
+			return nil, fmt.Errorf("open postgres: %w", err)
+		}
+		d.SetMaxOpenConns(25)
+		d.SetMaxIdleConns(10)
+		d.SetConnMaxIdleTime(5 * time.Minute)
+
+		if err := d.Ping(); err != nil {
+			d.Close()
+			return nil, fmt.Errorf("ping db: %w", err)
+		}
+		if err := Migrate(d); err != nil {
+			d.Close()
+			return nil, err
+		}
+		return d, nil
+	}
+
+	// SQLite default
+	rawPath := dsnStr
+	if idx := strings.Index(dsnStr, "?"); idx != -1 {
+		rawPath = dsnStr[:idx]
+	}
+	if dir := filepath.Dir(rawPath); dir != "" && dir != "." {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return nil, fmt.Errorf("create db dir %s: %w", dir, err)
 		}
 	}
 
-	d, err := sqlx.Open("sqlite", dsn(dbPath))
+	d, err := sqlx.Open("sqlite", dsnStr)
 	if err != nil {
-		return nil, fmt.Errorf("open sqlite %s: %w", dbPath, err)
+		return nil, fmt.Errorf("open sqlite %s: %w", dsnStr, err)
 	}
-	// WAL lets readers run while a writer holds the write lock, so the pool is
-	// sized for concurrent reads rather than serialised through one connection.
-	//
-	// The single-writer rule still holds, but it is enforced by SQLite itself
-	// plus the busy_timeout in the DSN, not by collapsing the pool to one
-	// connection. Collapsing it was what made every `Connx` call a deadlock
-	// waiting on a connection the caller already held, and there is no way to
-	// hold a dedicated connection out of a one-connection pool: the *sql.Conn
-	// comes from the same pool. Readers also stop being able to make progress
-	// while a batch transaction runs, which is the shape a 10k-endpoint fleet
-	// turns into a stalled console.
-	//
-	// Writers serialise on SQLite's write lock. busy_timeout is what bounds how
-	// long a writer waits, and every transaction in this codebase is a batch
-	// that commits well inside that, so a collision resolves into a wait rather
-	// than a dropped write.
 	d.SetMaxOpenConns(maxOpenConns)
-	// Nothing here holds a transaction across a request, so an idle connection
-	// can be returned to the pool and a later one opened to serve a different
-	// request. Without this the pool would grow to hold the whole concurrency
-	// spike for the process's lifetime, and each connection is its own SQLite
-	// page cache against the same file.
 	d.SetMaxIdleConns(maxIdleConns)
 	d.SetConnMaxIdleTime(5 * time.Minute)
 

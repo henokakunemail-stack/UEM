@@ -147,3 +147,48 @@ func StartBackupJob(ctx context.Context, d *sqlx.DB, cfg BackupConfig, onError f
 		}
 	}
 }
+
+// Backup takes an online hot snapshot of the database at dbPath and saves it to destPath.
+func Backup(dbPath, destPath string) error {
+	d, err := Open(dbPath)
+	if err != nil {
+		return fmt.Errorf("open source db for backup: %w", err)
+	}
+	defer d.Close()
+
+	if err := Snapshot(d, destPath); err != nil {
+		return fmt.Errorf("backup failed: %w", err)
+	}
+	return nil
+}
+
+// Restore validates the SQLite database at sourcePath and atomically replaces destPath.
+func Restore(sourcePath, destPath string) error {
+	restored, err := Open(sourcePath)
+	if err != nil {
+		return fmt.Errorf("invalid source database %s: %w", sourcePath, err)
+	}
+	_ = restored.Close()
+
+	if dir := filepath.Dir(destPath); dir != "" && dir != "." {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return fmt.Errorf("create dest dir %s: %w", dir, err)
+		}
+	}
+
+	tmpPath := destPath + fmt.Sprintf(".tmp-%d", time.Now().UnixNano())
+	data, err := os.ReadFile(sourcePath)
+	if err != nil {
+		return fmt.Errorf("read source file: %w", err)
+	}
+
+	if err := os.WriteFile(tmpPath, data, 0o600); err != nil {
+		return fmt.Errorf("write temp restore file: %w", err)
+	}
+
+	if err := os.Rename(tmpPath, destPath); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("replace dest db: %w", err)
+	}
+	return nil
+}

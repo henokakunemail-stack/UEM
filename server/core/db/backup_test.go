@@ -191,3 +191,42 @@ func TestDefaultBackupConfig(t *testing.T) {
 		t.Errorf("Retain = %d", cfg.Retain)
 	}
 }
+
+func TestBackupAndRestore_CLIHelpers(t *testing.T) {
+	dir := t.TempDir()
+	liveDB := filepath.Join(dir, "live.db")
+	backupDB := filepath.Join(dir, "backup.db")
+	restoredDB := filepath.Join(dir, "restored.db")
+
+	d, err := Open(liveDB)
+	if err != nil {
+		t.Fatalf("open live db: %v", err)
+	}
+	seedTestDevice(t, d, "CLI-DEVICE-01")
+	_ = d.Close()
+
+	// 1. Run Backup helper
+	if err := Backup(liveDB, backupDB); err != nil {
+		t.Fatalf("Backup helper failed: %v", err)
+	}
+
+	// 2. Run Restore helper to restoredDB
+	if err := Restore(backupDB, restoredDB); err != nil {
+		t.Fatalf("Restore helper failed: %v", err)
+	}
+
+	// 3. Verify restoredDB content
+	checkDB, err := Open(restoredDB)
+	if err != nil {
+		t.Fatalf("open restored db: %v", err)
+	}
+	defer checkDB.Close()
+
+	var count int
+	if err := checkDB.Get(&count, `SELECT COUNT(*) FROM devices WHERE hostname = 'CLI-DEVICE-01'`); err != nil {
+		t.Fatalf("query restored db: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("expected 1 device in restored db, got %d", count)
+	}
+}
