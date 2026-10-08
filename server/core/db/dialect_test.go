@@ -103,13 +103,6 @@ func TestDialect_PlaceholderIsNotRewrittenHere(t *testing.T) {
 	}
 }
 
-func safeSlice(s string) string {
-	if len(s) < 70 {
-		return s
-	}
-	return s[40:70]
-}
-
 func migrationNames(t *testing.T) []string {
 	t.Helper()
 	entries, err := fs.ReadDir(migrations, "migrations")
