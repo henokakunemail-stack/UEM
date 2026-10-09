@@ -6,12 +6,15 @@ import "time"
 // switches on, so they are defined once here and mirrored — with a compile-time
 // check on the agent side — rather than spelled as bare strings at every hop.
 const (
-	TaskCleanupTemp    = "cleanup_temp"
-	TaskDiskCheck      = "disk_check"
-	TaskMemoryHygiene  = "memory_hygiene"
-	TaskFullScan       = "full_scan"
-	TaskLogMaintenance = "log_maintenance"
-	TaskServiceCleanup = "service_cleanup"
+	TaskCleanupTemp     = "cleanup_temp"
+	TaskDiskCheck       = "disk_check"
+	TaskMemoryHygiene   = "memory_hygiene"
+	TaskFullScan        = "full_scan"
+	TaskLogMaintenance  = "log_maintenance"
+	TaskServiceCleanup  = "service_cleanup"
+	TaskFlushDNS        = "flush_dns"
+	TaskSecurityAudit   = "security_audit"
+	TaskSystemIntegrity = "system_integrity"
 )
 
 // TaskOrder is the order the console renders the task chooser in. Disk check
@@ -21,6 +24,9 @@ var TaskOrder = []string{
 	TaskCleanupTemp,
 	TaskDiskCheck,
 	TaskMemoryHygiene,
+	TaskFlushDNS,
+	TaskSecurityAudit,
+	TaskSystemIntegrity,
 	TaskLogMaintenance,
 	TaskServiceCleanup,
 	TaskFullScan,
@@ -97,6 +103,24 @@ var TaskCatalog = map[string]TaskInfo{
 		ID:          TaskServiceCleanup,
 		Label:       "Stale Service & Orphan Cleanup",
 		Description: "Reports services and scheduled tasks that appear orphaned or are stuck in a stopped/stopped-disabled state, and clears orphaned install directories left by previous software deployments.",
+		Disruptive:  false,
+	},
+	TaskFlushDNS: {
+		ID:          TaskFlushDNS,
+		Label:       "DNS & Network Cache Flush",
+		Description: "Flushes the operating system DNS resolver cache and clears stale client lookup entries. Resolves domain lookup failures and stale IP routing without dropping connections.",
+		Disruptive:  false,
+	},
+	TaskSecurityAudit: {
+		ID:          TaskSecurityAudit,
+		Label:       "Security & Antivirus Posture Audit",
+		Description: "Audits endpoint protection status, real-time antivirus engine, definition signature freshness, active threat detections, and host firewall posture.",
+		Disruptive:  false,
+	},
+	TaskSystemIntegrity: {
+		ID:          TaskSystemIntegrity,
+		Label:       "System File Integrity Scan",
+		Description: "Online, non-destructive operating system file integrity check. Scans for corrupted OS components and system libraries without requiring a reboot.",
 		Disruptive:  false,
 	},
 	TaskFullScan: {

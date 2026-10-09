@@ -144,13 +144,30 @@ func (e *Engine) writeHosts(domains []string) (int, error) {
 	if len(domains) > 0 {
 		sb.WriteString(MarkerBegin + "\n")
 		sb.WriteString("# Managed by Endpoint Management Platform - DO NOT EDIT MANUALLY\n")
+		seen := make(map[string]bool)
 		for _, d := range domains {
 			domain := normalizeDomain(d)
 			if domain == "" || strings.HasPrefix(domain, "#") {
 				continue
 			}
-			fmt.Fprintf(&sb, "0.0.0.0 %s\n", domain)
 			appliedCount++
+
+			var variants []string
+			if strings.HasPrefix(domain, "www.") {
+				root := strings.TrimPrefix(domain, "www.")
+				variants = []string{domain, root}
+			} else {
+				variants = []string{domain, "www." + domain}
+			}
+
+			for _, v := range variants {
+				if seen[v] {
+					continue
+				}
+				seen[v] = true
+				fmt.Fprintf(&sb, "0.0.0.0 %s\n", v)
+				fmt.Fprintf(&sb, ":: %s\n", v)
+			}
 		}
 		sb.WriteString(MarkerEnd + "\n")
 	}

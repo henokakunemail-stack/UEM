@@ -26,6 +26,9 @@ func TestMirrorsMatchServer(t *testing.T) {
 		{TaskMemoryHygiene, srv.TaskMemoryHygiene},
 		{TaskLogMaintenance, srv.TaskLogMaintenance},
 		{TaskServiceCleanup, srv.TaskServiceCleanup},
+		{TaskFlushDNS, srv.TaskFlushDNS},
+		{TaskSecurityAudit, srv.TaskSecurityAudit},
+		{TaskSystemIntegrity, srv.TaskSystemIntegrity},
 		{TaskFullScan, srv.TaskFullScan},
 	}
 	for _, p := range pairs {
@@ -102,14 +105,15 @@ func TestAllowedRejectsUnknown(t *testing.T) {
 	}
 	for _, good := range []string{
 		TaskCleanupTemp, TaskDiskCheck, TaskMemoryHygiene,
-		TaskLogMaintenance, TaskServiceCleanup, TaskFullScan,
+		TaskLogMaintenance, TaskServiceCleanup, TaskFlushDNS,
+		TaskSecurityAudit, TaskSystemIntegrity, TaskFullScan,
 	} {
 		if !Allowed(good) {
 			t.Errorf("allowlist rejected valid task type %q", good)
 		}
 	}
-	if len(allowed) != 6 {
-		t.Errorf("allowlist size = %d, want 6", len(allowed))
+	if len(allowed) != 9 {
+		t.Errorf("allowlist size = %d, want 9", len(allowed))
 	}
 	assertDistinctMirrors() // keeps golangci-lint's `unused` check green
 }
@@ -777,4 +781,33 @@ func jsonTags(t reflect.Type) map[string]string {
 		out[f.Name] = f.Tag.Get("json")
 	}
 	return out
+}
+
+func TestAppendSecondaryLogDoesNotFailStep(t *testing.T) {
+	acc := stepOutcome{
+		output:     "primary cleanup completed: freed 100MB",
+		exitCode:   0,
+		bytesFreed: 104857600,
+	}
+
+	secTimeout := stepOutcome{
+		output:   "command exceeded the 1m30s limit and was stopped",
+		exitCode: 1,
+		timedOut: true,
+	}
+
+	res := appendSecondaryLog(acc, secTimeout, "Clear-RecycleBin")
+
+	if res.exitCode != 0 {
+		t.Errorf("appendSecondaryLog set exitCode = %d, want 0", res.exitCode)
+	}
+	if res.timedOut {
+		t.Errorf("appendSecondaryLog set timedOut = true, want false")
+	}
+	if !strings.Contains(res.output, "warning: Clear-RecycleBin timed out") {
+		t.Errorf("appendSecondaryLog output missing warning note, got %q", res.output)
+	}
+	if res.bytesFreed != 104857600 {
+		t.Errorf("bytesFreed = %d, want 104857600", res.bytesFreed)
+	}
 }

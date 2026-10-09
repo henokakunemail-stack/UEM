@@ -62,11 +62,21 @@ export const DeviceDetailModal: React.FC<DeviceDetailModalProps> = ({ device, on
   const [uninstalling, setUninstalling] = useState(false)
   const canUninstall = usePermission().can('technician')
 
+  const [activeUninstall, setActiveUninstall] = useState<{
+    name: string
+    status: 'sending' | 'running' | 'done' | 'failed'
+    message?: string
+  } | null>(null)
+  const [confirmError, setConfirmError] = useState<string | null>(null)
+
   // The collect poll, and the collected_at it is waiting for. See handleCollect:
   // the snapshot's own timestamp is the only completion signal that cannot be
   // faked by a clock, because it only moves when the agent uploads a new one.
   const pollRef = useRef<number | null>(null)
   const [collecting, setCollecting] = useState(false)
+
+  const uninstallPollRef = useRef<number | null>(null)
+  const graceTimerRef = useRef<number | null>(null)
 
   // Idempotent: called from the poll body on success, on the timeout, from the
   // cleanup effect, and from the error path. Clearing an already-cleared
@@ -76,6 +86,17 @@ export const DeviceDetailModal: React.FC<DeviceDetailModalProps> = ({ device, on
     if (pollRef.current !== null) {
       window.clearInterval(pollRef.current)
       pollRef.current = null
+    }
+  }, [])
+
+  const stopUninstallPolling = useCallback(() => {
+    if (uninstallPollRef.current !== null) {
+      window.clearInterval(uninstallPollRef.current)
+      uninstallPollRef.current = null
+    }
+    if (graceTimerRef.current !== null) {
+      window.clearTimeout(graceTimerRef.current)
+      graceTimerRef.current = null
     }
   }, [])
 
@@ -105,11 +126,18 @@ export const DeviceDetailModal: React.FC<DeviceDetailModalProps> = ({ device, on
   // `if (!device) return null` below, because a hook after an early return is
   // conditional, and React will refuse to render the modal at all once it sees
   // the hook count change between renders.
-  useEffect(() => stopPolling, [stopPolling])
+  useEffect(() => {
+    return () => {
+      stopPolling()
+      stopUninstallPolling()
+    }
+  }, [stopPolling, stopUninstallPolling])
 
   if (!device) return null
 
-  const handleCollect = async () => {
+  const handleCollect = async (opts?: { preserveBanner?: boolean } | React.MouseEvent) => {
+    const preserveBanner =
+      opts && 'preserveBanner' in opts ? Boolean(opts.preserveBanner) : false
     const deviceId = device.id
     // Read the timestamp BEFORE asking for a collection. Anything that arrives
     // afterwards with this value unchanged is the snapshot we already had, and
@@ -118,7 +146,9 @@ export const DeviceDetailModal: React.FC<DeviceDetailModalProps> = ({ device, on
     const before = inventory?.collected_at ?? null
 
     setCollecting(true)
-    setActionMsg(null)
+    if (!preserveBanner) {
+      setActionMsg(null)
+    }
     try {
       const res = await api.collectInventory(deviceId)
       // 202 queued means the endpoint was offline between render and click. The
@@ -133,7 +163,9 @@ export const DeviceDetailModal: React.FC<DeviceDetailModalProps> = ({ device, on
         return
       }
 
-      setActionMsg('Collection dispatched. Waiting for the agent to report a new snapshot...')
+      if (!preserveBanner) {
+        setActionMsg('Collection dispatched. Waiting for the agent to report a new snapshot...')
+      }
 
       let ticks = 0
       stopPolling()
@@ -169,6 +201,24 @@ export const DeviceDetailModal: React.FC<DeviceDetailModalProps> = ({ device, on
 
         stopPolling()
         setCollecting(false)
+        setActiveUninstall((current) => {
+          if (!current) return null
+          const stillThere = updated.software.some(
+            (s) => s.name.toLowerCase() === current.name.toLowerCase()
+          )
+          if (stillThere) {
+            return {
+              name: current.name,
+              status: 'failed',
+              message: `Uninstall finished, but "${current.name}" was still detected in device inventory. Software may still be present on endpoint.`,
+            }
+          }
+          return {
+            name: current.name,
+            status: 'done',
+            message: `"${current.name}" was successfully removed from device inventory.`,
+          }
+        })
         setActionMsg(
           `Snapshot collected: ${updated.software.length} program(s) reported at ` +
             `${new Date(updated.collected_at).toLocaleTimeString()}.`
@@ -192,33 +242,91 @@ export const DeviceDetailModal: React.FC<DeviceDetailModalProps> = ({ device, on
     }
   }
 
-  // Submitting an uninstall deliberately does NOT refresh the inventory.
-  //
-  // The snapshot only changes once the agent runs its next collection, and the
-  // uninstall has not even started yet -- the server answered when the command
-  // was handed over, not when anything was removed. Refetching here would
-  // redraw the identical row and read as "nothing happened" or, worse, invite
-  // pressing the button again. The operator is told to press Collect Inventory
-  // instead, which now waits for a genuinely new snapshot rather than assuming
-  // one is already there after three seconds.
   const handleUninstall = async () => {
     if (!uninstallTarget) return
     const name = uninstallTarget.name
     setUninstalling(true)
+    setConfirmError(null)
+    setActiveUninstall({
+      name,
+      status: 'sending',
+      message: `Sending uninstall request for "${name}" to ${device.hostname}...`,
+    })
+
     try {
-      await api.uninstallDeviceSoftware(device.id, name)
-      setActionMsg(
-        `Uninstall request for "${name}" was sent to ${device.hostname}. ` +
-          `The agent runs it silently and refuses if no verified silent command exists. ` +
-          `The request was accepted for delivery, which is not a removal: use Collect ` +
-          `Inventory to collect a new inventory, and the program will only be gone from this ` +
-          `list if the agent actually removed it.`
-      )
+      const res = await api.uninstallDeviceSoftware(device.id, name)
+      // Success dispatch: close confirmation modal, show running status
       setUninstallTarget(null)
+      setUninstalling(false)
+      setActiveUninstall({
+        name,
+        status: 'running',
+        message: `Uninstall request for "${name}" sent to ${device.hostname}. Running silent uninstaller...`,
+      })
+
+      // Poll command result to display verified outcome to operator
+      const cmdId = res.command_id
+      let attempts = 0
+      const maxAttempts = 20
+
+      stopUninstallPolling()
+      uninstallPollRef.current = window.setInterval(async () => {
+        attempts++
+        try {
+          const cmd = await api.getDeviceCommand(device.id, cmdId)
+          if (cmd.status === 'done' || cmd.status === 'failed') {
+            stopUninstallPolling()
+            let resultText = ''
+            if (cmd.result) {
+              try {
+                const parsed = JSON.parse(cmd.result)
+                resultText = parsed.result || cmd.result
+              } catch {
+                resultText = cmd.result
+              }
+            }
+            if (cmd.status === 'done') {
+              setActiveUninstall({
+                name,
+                status: 'done',
+                message: `Uninstall completed: ${resultText || name}`,
+              })
+              // Wait 2s grace delay for Windows registry cleanup before re-collecting
+              graceTimerRef.current = window.setTimeout(() => {
+                handleCollect({ preserveBanner: true })
+              }, 2000)
+            } else {
+              setActiveUninstall({
+                name,
+                status: 'failed',
+                message: `Uninstall refused or failed: ${resultText || name}`,
+              })
+            }
+          } else if (attempts >= maxAttempts) {
+            stopUninstallPolling()
+            setActiveUninstall({
+              name,
+              status: 'failed',
+              message:
+                `Uninstall request for "${name}" is still executing on ${device.hostname}. ` +
+                `Use Collect Inventory to refresh the software list once completed.`,
+            })
+          }
+        } catch {
+          if (attempts >= maxAttempts) {
+            stopUninstallPolling()
+            setActiveUninstall({
+              name,
+              status: 'failed',
+              message: `Failed to query uninstall status for "${name}".`,
+            })
+          }
+        }
+      }, 1500)
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Request failed'
-      setActionMsg(`Uninstall of "${name}" was not sent: ${msg}`)
-    } finally {
+      setConfirmError(`Uninstall of "${name}" was not sent: ${msg}`)
+      setActiveUninstall(null)
       setUninstalling(false)
     }
   }
@@ -301,7 +409,7 @@ export const DeviceDetailModal: React.FC<DeviceDetailModalProps> = ({ device, on
           <button
             type="button"
             className="btn btn-primary"
-            onClick={handleCollect}
+            onClick={() => handleCollect()}
             disabled={collecting || device.status !== 'online'}
           >
             <RefreshCw size={14} className={collecting ? 'spinning' : ''} />
@@ -356,7 +464,7 @@ export const DeviceDetailModal: React.FC<DeviceDetailModalProps> = ({ device, on
             <button
               type="button"
               className="btn btn-primary"
-              onClick={handleCollect}
+              onClick={() => handleCollect()}
               disabled={collecting || device.status !== 'online'}
             >
               Collect Inventory
@@ -463,6 +571,27 @@ export const DeviceDetailModal: React.FC<DeviceDetailModalProps> = ({ device, on
                     onChange={(e) => setSoftwareSearch(e.target.value)}
                   />
                 </div>
+
+                {activeUninstall && (
+                  <div
+                    className={`action-notification in-pane ${
+                      activeUninstall.status === 'failed' ? 'error' : ''
+                    }`}
+                    role="status"
+                  >
+                    {activeUninstall.status === 'sending' ||
+                    activeUninstall.status === 'running' ? (
+                      <RefreshCw size={16} className="spinning" />
+                    ) : (
+                      <Info size={16} />
+                    )}
+                    <span>
+                      {activeUninstall.message ||
+                        `Uninstalling ${activeUninstall.name}...`}
+                    </span>
+                  </div>
+                )}
+
                 <DataTable label="Installed software">
                   <table>
                     <thead>
@@ -485,33 +614,102 @@ export const DeviceDetailModal: React.FC<DeviceDetailModalProps> = ({ device, on
                           </td>
                         </tr>
                       ) : (
-                        filteredSoftware.map((s, idx) => (
-                          <tr key={`${s.name}-${idx}`}>
-                            <td>
-                              <strong>{s.name}</strong>
-                            </td>
-                            <td>{s.version || '—'}</td>
-                            <td>{s.publisher || '—'}</td>
-                            {canUninstall && (
-                              <td className="text-right">
-                                <button
-                                  type="button"
-                                  className="btn btn-danger-outline btn-sm"
-                                  aria-label={`Uninstall ${s.name}`}
-                                  disabled={device.status !== 'online'}
-                                  title={
-                                    device.status !== 'online'
-                                      ? 'Endpoint is offline'
-                                      : 'Request silent uninstall'
-                                  }
-                                  onClick={() => setUninstallTarget(s)}
+                        filteredSoftware.map((s, idx) => {
+                          const isTarget = activeUninstall?.name === s.name
+                          const isUninstallInProgress =
+                            activeUninstall?.status === 'sending' ||
+                            activeUninstall?.status === 'running'
+
+                          return (
+                            <tr key={`${s.name}-${idx}`}>
+                              <td>
+                                <div
+                                  style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '0.5rem',
+                                    flexWrap: 'wrap',
+                                  }}
                                 >
-                                  <Trash2 size={15} />
-                                </button>
+                                  <strong>{s.name}</strong>
+                                  {isTarget && (
+                                    <>
+                                      {isUninstallInProgress && (
+                                        <span
+                                          className="status-pill warning"
+                                          style={{
+                                            display: 'inline-flex',
+                                            alignItems: 'center',
+                                            gap: '0.25rem',
+                                            padding: '0.125rem 0.5rem',
+                                            fontSize: '0.75rem',
+                                          }}
+                                        >
+                                          <RefreshCw size={11} className="spinning" />
+                                          <span>Uninstalling...</span>
+                                        </span>
+                                      )}
+                                      {activeUninstall.status === 'done' && (
+                                        <span
+                                          className="status-pill online"
+                                          style={{
+                                            padding: '0.125rem 0.5rem',
+                                            fontSize: '0.75rem',
+                                          }}
+                                        >
+                                          Uninstalled
+                                        </span>
+                                      )}
+                                      {activeUninstall.status === 'failed' && (
+                                        <span
+                                          className="status-pill danger"
+                                          style={{
+                                            padding: '0.125rem 0.5rem',
+                                            fontSize: '0.75rem',
+                                          }}
+                                        >
+                                          Failed
+                                        </span>
+                                      )}
+                                    </>
+                                  )}
+                                </div>
                               </td>
-                            )}
-                          </tr>
-                        ))
+                              <td>{s.version || '—'}</td>
+                              <td>{s.publisher || '—'}</td>
+                              {canUninstall && (
+                                <td className="text-right">
+                                  <button
+                                    type="button"
+                                    className="btn btn-danger-outline btn-sm"
+                                    aria-label={`Uninstall ${s.name}`}
+                                    disabled={
+                                      device.status !== 'online' ||
+                                      isUninstallInProgress
+                                    }
+                                    title={
+                                      device.status !== 'online'
+                                        ? 'Endpoint is offline'
+                                        : isUninstallInProgress
+                                        ? 'Uninstall in progress'
+                                        : 'Request silent uninstall'
+                                    }
+                                    onClick={() => {
+                                      setUninstallTarget(s)
+                                      setConfirmError(null)
+                                    }}
+                                  >
+                                    {isTarget && isUninstallInProgress ? (
+                                      <RefreshCw size={15} className="spinning" />
+                                    ) : (
+                                      <Trash2 size={15} />
+                                    )}
+                                  </button>
+                                </td>
+                              )}
+                            </tr>
+                          )
+                        })
                       )}
                     </tbody>
                   </table>
@@ -565,7 +763,10 @@ export const DeviceDetailModal: React.FC<DeviceDetailModalProps> = ({ device, on
       <Modal
         open={uninstallTarget !== null}
         onClose={() => {
-          if (!uninstalling) setUninstallTarget(null)
+          if (!uninstalling) {
+            setUninstallTarget(null)
+            setConfirmError(null)
+          }
         }}
         size="md"
         title={
@@ -579,7 +780,10 @@ export const DeviceDetailModal: React.FC<DeviceDetailModalProps> = ({ device, on
             <button
               type="button"
               className="btn btn-secondary"
-              onClick={() => setUninstallTarget(null)}
+              onClick={() => {
+                setUninstallTarget(null)
+                setConfirmError(null)
+              }}
               disabled={uninstalling}
             >
               Cancel
@@ -595,6 +799,16 @@ export const DeviceDetailModal: React.FC<DeviceDetailModalProps> = ({ device, on
           </>
         }
       >
+        {confirmError && (
+          <div
+            className="action-notification error in-pane"
+            role="alert"
+            style={{ marginBottom: '1rem' }}
+          >
+            <Info size={16} />
+            <span>{confirmError}</span>
+          </div>
+        )}
         <p>
           Send an uninstall request to{' '}
           <strong>{device.hostname}</strong> for:

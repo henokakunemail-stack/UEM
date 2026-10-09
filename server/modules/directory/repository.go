@@ -182,6 +182,13 @@ func (r *Repository) GetConfig(ctx context.Context) (*Config, bool, error) {
 	return &c, true, nil
 }
 
+func boolToInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
 // UpsertConfig writes the config, keeping the row's id and created_at. There is
 // exactly one config by design — a second directory is a different server, not
 // a second setting on this one.
@@ -213,7 +220,7 @@ func (r *Repository) UpsertConfig(ctx context.Context, c *Config) error {
 			source = excluded.source, updated_by = excluded.updated_by,
 			updated_at = excluded.updated_at
 	`,
-		c.ID, c.Host, c.Port, c.UseTLS, c.BaseDN, c.BindDN, c.SearchFilter,
+		c.ID, c.Host, c.Port, boolToInt(c.UseTLS), c.BaseDN, c.BindDN, c.SearchFilter,
 		c.Source, c.UpdatedBy, c.CreatedAt, c.UpdatedAt,
 	)
 	if err != nil {

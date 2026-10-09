@@ -85,6 +85,13 @@ func (r *Repository) GetRuleByID(ctx context.Context, id string) (*AlertRule, er
 	return &rule, nil
 }
 
+func boolToInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
 func (r *Repository) CreateRule(ctx context.Context, rule *AlertRule) error {
 	now := time.Now().UTC()
 	if rule.ID == "" {
@@ -98,7 +105,7 @@ func (r *Repository) CreateRule(ctx context.Context, rule *AlertRule) error {
 			id, name, rule_type, threshold_val, severity, webhook_url, is_enabled, created_by, created_at, updated_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, rule.ID, rule.Name, rule.RuleType, rule.ThresholdVal, rule.Severity, rule.WebhookURL,
-		rule.IsEnabled, rule.CreatedBy, rule.CreatedAt, rule.UpdatedAt)
+		boolToInt(rule.IsEnabled), rule.CreatedBy, rule.CreatedAt, rule.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf("create alert rule: %w", err)
 	}
@@ -113,7 +120,7 @@ func (r *Repository) UpdateRule(ctx context.Context, rule *AlertRule) error {
 			webhook_url = ?, is_enabled = ?, updated_at = ?
 		WHERE id = ?
 	`, rule.Name, rule.RuleType, rule.ThresholdVal, rule.Severity,
-		rule.WebhookURL, rule.IsEnabled, rule.UpdatedAt, rule.ID)
+		rule.WebhookURL, boolToInt(rule.IsEnabled), rule.UpdatedAt, rule.ID)
 	if err != nil {
 		return fmt.Errorf("update alert rule: %w", err)
 	}

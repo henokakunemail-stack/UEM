@@ -124,6 +124,7 @@ func newPackageFixture(t *testing.T, hub HubDispatcher) *packageFixture {
 	r := chi.NewRouter()
 	r.Get("/api/software/packages", h.listPackages)
 	r.Get("/api/software/packages/{id}", h.getPackage)
+	r.Put("/api/software/packages/{id}", h.updatePackage)
 	r.Post("/api/software/packages", h.uploadPackage)
 	r.Delete("/api/software/packages/{id}", h.deletePackage)
 	r.Get("/api/software/deployments", h.listDeployments)
@@ -376,6 +377,39 @@ func TestThePackageListReadsAsAnArray(t *testing.T) {
 	}
 	if got := strings.TrimSpace(rec.Body.String()); got != "[]" {
 		t.Errorf("empty list body = %s, want []", got)
+	}
+}
+
+// TestUpdatePackageUpdatesSwitches verifies PUT /api/software/packages/{id} updates
+// name, version, install_args, and uninstall_args.
+func TestUpdatePackageUpdatesSwitches(t *testing.T) {
+	f := newPackageFixture(t, &liveHub{})
+	pkg := seedPackage(t, f, "pkg-update-switches", "/quiet", "")
+
+	body := `{"name":"Contoso Pro","version":"3.0.0","install_args":"/qn /norestart","uninstall_args":"/qn"}`
+	rec := f.do(t, http.MethodPut, "/api/software/packages/"+pkg.ID, body)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200\nbody: %s", rec.Code, rec.Body.String())
+	}
+
+	var updated SoftwarePackage
+	if err := json.Unmarshal(rec.Body.Bytes(), &updated); err != nil {
+		t.Fatal(err)
+	}
+	if updated.Name != "Contoso Pro" || updated.Version != "3.0.0" {
+		t.Errorf("expected updated name/version, got %+v", updated)
+	}
+	if updated.InstallArgs != "/qn /norestart" || updated.UninstallArgs != "/qn" {
+		t.Errorf("expected updated args, got install=%q uninstall=%q", updated.InstallArgs, updated.UninstallArgs)
+	}
+
+	// Verify persistence in DB
+	stored, err := (&Repository{db: f.db}).GetPackage(context.Background(), pkg.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.InstallArgs != "/qn /norestart" || stored.UninstallArgs != "/qn" {
+		t.Errorf("stored args mismatch: %+v", stored)
 	}
 }
 

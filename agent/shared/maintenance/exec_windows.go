@@ -50,6 +50,12 @@ func runStepOS(ctx context.Context, step string) (stepOutcome, error) {
 		return windowsLogMaintenance(ctx)
 	case TaskServiceCleanup:
 		return windowsServiceCleanup(ctx)
+	case TaskFlushDNS:
+		return windowsFlushDNS(ctx)
+	case TaskSecurityAudit:
+		return windowsSecurityAudit(ctx)
+	case TaskSystemIntegrity:
+		return windowsSystemIntegrity(ctx)
 	}
 	// Unreachable: Run checks Allowed() before calling this. Present so a
 	// future step constant added to `allowed` without an OS branch fails
@@ -138,9 +144,9 @@ func windowsCleanupTemp(ctx context.Context) (stepOutcome, error) {
 	// success, not a failure, and without it appendLog promotes the non-zero
 	// code into the step's own exitCode, which then fails cleanup_temp on
 	// every machine whose recycle bin happens to be empty.
-	out = appendLog(out, run(ctx, "powershell.exe",
+	out = appendSecondaryLog(out, run(ctx, "powershell.exe",
 		"-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command",
-		"Clear-RecycleBin -Force -ErrorAction SilentlyContinue; exit 0"))
+		"Clear-RecycleBin -Force -Confirm:$false -ErrorAction SilentlyContinue; exit 0"), "Clear-RecycleBin")
 
 	// Component store cleanup. Dism.exe is absent on Windows Home, so it is
 	// LookPath-guarded rather than treated as a failure.
@@ -151,7 +157,7 @@ func windowsCleanupTemp(ctx context.Context) (stepOutcome, error) {
 	// it on a larger host would fail the whole step for a store that is
 	// perfectly healthy.
 	if p, err := exec.LookPath("Dism.exe"); err == nil {
-		out = appendLog(out, runLong(ctx, p, "/Online", "/Cleanup-Image", "/StartComponentCleanup"))
+		out = appendSecondaryLog(out, runLong(ctx, p, "/Online", "/Cleanup-Image", "/StartComponentCleanup"), "Dism.exe")
 	} else {
 		out = appendLog(out, stepOutcome{output: "Dism.exe not present; component store cleanup skipped", exitCode: 0})
 	}
@@ -454,3 +460,31 @@ func countFiles(root string, minAge time.Duration) (int, error) {
 	}
 	return n, nil
 }
+
+func windowsFlushDNS(ctx context.Context) (stepOutcome, error) {
+	out := stepOutcome{}
+	flush := run(ctx, "ipconfig.exe", "/flushdns")
+	out = appendLog(out, flush)
+	cache := run(ctx, "powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
+		"Clear-DnsClientCache -ErrorAction SilentlyContinue; $c = Get-DnsClientCache -ErrorAction SilentlyContinue; Write-Output ('Remaining cached DNS entries: ' + @($c).Count)")
+	out = appendSecondaryLog(out, cache, "Clear-DnsClientCache")
+	return out, nil
+}
+
+func windowsSecurityAudit(ctx context.Context) (stepOutcome, error) {
+	out := stepOutcome{}
+	mp := run(ctx, "powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
+		`$mp = Get-MpComputerStatus -ErrorAction SilentlyContinue; if ($mp) { Write-Output ('Antivirus Enabled: ' + $mp.AntivirusEnabled); Write-Output ('RealTime Protection: ' + $mp.RealTimeProtectionEnabled); Write-Output ('Signature Updated: ' + $mp.AntivirusSignatureLastUpdated); Write-Output ('Quick Scan Age (days): ' + $mp.QuickScanAge) } else { Write-Output 'Windows Defender status unavailable' }; $threats = @(Get-MpThreat -ErrorAction SilentlyContinue | Where-Object { $_.IsActive }); if ($threats.Count -gt 0) { Write-Output ('Active threats detected: ' + $threats.Count) } else { Write-Output 'No active threats detected.' }`)
+	out = appendLog(out, mp)
+	fw := run(ctx, "netsh.exe", "advfirewall", "show", "allprofiles", "state")
+	out = appendSecondaryLog(out, fw, "firewall profile audit")
+	return out, nil
+}
+
+func windowsSystemIntegrity(ctx context.Context) (stepOutcome, error) {
+	out := stepOutcome{}
+	scan := run(ctx, "dism.exe", "/Online", "/Cleanup-Image", "/CheckHealth")
+	out = appendLog(out, scan)
+	return out, nil
+}
+

@@ -1793,6 +1793,22 @@ body {
   color: #93c5fd;
 }
 
+.action-notification.error {
+  background-color: rgba(239, 68, 68, 0.15);
+  border-bottom-color: rgba(239, 68, 68, 0.3);
+  color: #fca5a5;
+}
+
+.action-notification.in-pane {
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  border-radius: var(--radius-md);
+  padding: 0.75rem 1rem;
+}
+
+.action-notification.in-pane.error {
+  border-color: rgba(239, 68, 68, 0.3);
+}
+
 /* Specs in Modal */
 .spec-grid {
   display: grid;

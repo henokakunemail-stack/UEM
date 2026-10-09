@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Link, NavLink, useLocation } from 'react-router-dom'
-import { Activity, Bell, Boxes, CalendarClock, ChevronDown, ChevronRight, FileChartColumn, Globe, History, KeyRound, LayoutDashboard, LogOut, Menu, Monitor, Package, Rocket, ScreenShare, ScrollText, Settings, ShieldCheck, Terminal, Users, Wrench, X, type LucideIcon } from 'lucide-react'
+import { Activity, Bell, Boxes, CalendarClock, ChevronDown, ChevronRight, FileChartColumn, Globe, History, KeyRound, LayoutDashboard, LogOut, Menu, Monitor, Package, Rocket, ScreenShare, ScrollText, Settings, ShieldCheck, Users, Wrench, X, type LucideIcon } from 'lucide-react'
 import { useAuth } from '../../context/AuthContext'
 import { ThemeToggle } from '../../context/ThemeContext'
 import { usePermission } from '../../hooks/usePermission'
@@ -24,7 +24,6 @@ const groups: { label: string; items: NavItem[] }[] = [
       { label: 'Deployments', path: '/software/deployments', icon: Rocket },
     ] },
     { label: 'Task scheduler', path: '/scheduler', icon: CalendarClock, children: [
-      { label: 'Scripts', path: '/scheduler/scripts', icon: Terminal },
       { label: 'Schedules', path: '/scheduler/schedules', icon: CalendarClock },
       { label: 'Run history', path: '/scheduler/runs', icon: History },
     ] },

@@ -3,8 +3,10 @@
 package software
 
 import (
+	"context"
 	"fmt"
 	"os/exec"
+	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -69,10 +71,11 @@ func newProcessTree() (*processTree, error) {
 //     console to share, and a detached child is awkward to reason about on
 //     shutdown.
 func (t *processTree) prepare(cmd *exec.Cmd) {
-	cmd.SysProcAttr = &windows.SysProcAttr{
-		HideWindow:    true,
-		CreationFlags: windows.CREATE_NO_WINDOW,
+	if cmd.SysProcAttr == nil {
+		cmd.SysProcAttr = &windows.SysProcAttr{}
 	}
+	cmd.SysProcAttr.HideWindow = true
+	cmd.SysProcAttr.CreationFlags |= windows.CREATE_NO_WINDOW
 }
 
 // attach adds the started process to the job.
@@ -119,5 +122,73 @@ func (t *processTree) close() {
 	if t.job != 0 {
 		_ = windows.CloseHandle(t.job)
 		t.job = 0
+	}
+}
+
+// jobObjectBasicAccountingInformation mirrors the Windows SDK structure
+// queried with JobObjectBasicAccountingInformation.
+type jobObjectBasicAccountingInformation struct {
+	TotalUserTime             int64
+	TotalKernelTime           int64
+	ThisPeriodTotalUserTime   int64
+	ThisPeriodTotalKernelTime int64
+	TotalPageFaultCount       uint32
+	TotalProcesses            uint32
+	ActiveProcesses           uint32
+	TotalTerminatedProcesses  uint32
+}
+
+// activeProcesses reports the number of processes currently executing in this job.
+func (t *processTree) activeProcesses() (uint32, error) {
+	if t.job == 0 {
+		return 0, nil
+	}
+	var info jobObjectBasicAccountingInformation
+	var returnLen uint32
+	err := windows.QueryInformationJobObject(
+		t.job,
+		windows.JobObjectBasicAccountingInformation,
+		uintptr(unsafe.Pointer(&info)),
+		uint32(unsafe.Sizeof(info)),
+		&returnLen,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return info.ActiveProcesses, nil
+}
+
+// waitForDescendants waits for all child processes in the job object to exit.
+// Many Windows installers and uninstallers (e.g. NSIS, InstallShield, bootstrapper stubs)
+// spawn a detached child worker from %TEMP% and have the initial launcher exit with 0.
+// If tree.close() runs immediately upon parent exit, KILL_ON_JOB_CLOSE terminates the worker
+// process mid-flight. Waiting until ActiveProcesses == 0 allows the child to complete.
+func (t *processTree) waitForDescendants(ctx context.Context) error {
+	if t.job == 0 {
+		return nil
+	}
+	const maxDescendantWait = 5 * time.Minute
+	deadline := time.Now().Add(maxDescendantWait)
+
+	ticker := time.NewTicker(250 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		active, err := t.activeProcesses()
+		if err != nil || active == 0 {
+			return nil
+		}
+
+		if time.Now().After(deadline) {
+			t.kill(nil)
+			return fmt.Errorf("installer child processes did not exit within %v", maxDescendantWait)
+		}
+
+		select {
+		case <-ctx.Done():
+			t.kill(nil)
+			return ctx.Err()
+		case <-ticker.C:
+		}
 	}
 }

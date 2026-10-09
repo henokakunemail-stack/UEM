@@ -34,6 +34,12 @@ func runStepOS(ctx context.Context, step string) (stepOutcome, error) {
 		return darwinLogMaintenance(ctx)
 	case TaskServiceCleanup:
 		return darwinServiceCleanup(ctx)
+	case TaskFlushDNS:
+		return darwinFlushDNS(ctx)
+	case TaskSecurityAudit:
+		return darwinSecurityAudit(ctx)
+	case TaskSystemIntegrity:
+		return darwinSystemIntegrity(ctx)
 	}
 	return stepOutcome{output: "no darwin implementation for step " + step, exitCode: 1},
 		fmt.Errorf("unsupported step %q on darwin", step)
@@ -130,7 +136,7 @@ func darwinLogMaintenance(ctx context.Context) (stepOutcome, error) {
 	// that an entitlement problem would be the same confident wrong answer the
 	// elevation message used to be.
 	erase := runLong(ctx, "/usr/bin/log", "erase", "--keep", darwinLogKeepWindow)
-	out = appendLog(out, erase)
+	out = appendSecondaryLog(out, erase, "unified log erase")
 	if erase.exitCode != 0 {
 		out = appendLog(out, stepOutcome{
 			output:   "unified log erase did not complete (insufficient entitlement?); retained",
@@ -239,3 +245,24 @@ func userHome() string {
 	}
 	return h
 }
+
+func darwinFlushDNS(ctx context.Context) (stepOutcome, error) {
+	out := stepOutcome{}
+	out = appendLog(out, run(ctx, "/usr/bin/dscacheutil", "-flushcache"))
+	out = appendSecondaryLog(out, run(ctx, "/usr/bin/killall", "-HUP", "mDNSResponder"), "mDNSResponder")
+	return out, nil
+}
+
+func darwinSecurityAudit(ctx context.Context) (stepOutcome, error) {
+	out := stepOutcome{}
+	out = appendLog(out, run(ctx, "/usr/sbin/spctl", "--status"))
+	out = appendSecondaryLog(out, run(ctx, "/usr/bin/csrutil", "status"), "csrutil")
+	return out, nil
+}
+
+func darwinSystemIntegrity(ctx context.Context) (stepOutcome, error) {
+	out := stepOutcome{}
+	out = appendLog(out, run(ctx, "/usr/sbin/diskutil", "apfs", "list"))
+	return out, nil
+}
+

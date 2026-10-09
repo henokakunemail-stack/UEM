@@ -59,6 +59,13 @@ func NewID() string {
 	return hex.EncodeToString(b)
 }
 
+func boolToInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
 func (r *Repository) CreatePolicy(ctx context.Context, p *FilterPolicy) error {
 	now := time.Now().UTC()
 	if p.ID == "" {
@@ -75,7 +82,7 @@ func (r *Repository) CreatePolicy(ctx context.Context, p *FilterPolicy) error {
 	`
 	_, err := r.db.ExecContext(ctx, query,
 		p.ID, p.Name, p.Description, p.TargetType, p.TargetID,
-		p.IsEnabled, p.Priority, p.CreatedBy, p.CreatedAt, p.UpdatedAt,
+		boolToInt(p.IsEnabled), p.Priority, p.CreatedBy, p.CreatedAt, p.UpdatedAt,
 	)
 	if err != nil {
 		return fmt.Errorf("create filter policy: %w", err)
@@ -125,7 +132,7 @@ func (r *Repository) UpdatePolicy(ctx context.Context, p *FilterPolicy) error {
 	`
 	res, err := r.db.ExecContext(ctx, query,
 		p.Name, p.Description, p.TargetType, p.TargetID,
-		p.IsEnabled, p.Priority, p.UpdatedAt, p.ID,
+		boolToInt(p.IsEnabled), p.Priority, p.UpdatedAt, p.ID,
 	)
 	if err != nil {
 		return fmt.Errorf("update filter policy: %w", err)

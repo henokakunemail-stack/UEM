@@ -36,6 +36,12 @@ func runStepOS(ctx context.Context, step string) (stepOutcome, error) {
 		return linuxLogMaintenance(ctx)
 	case TaskServiceCleanup:
 		return linuxServiceCleanup(ctx)
+	case TaskFlushDNS:
+		return linuxFlushDNS(ctx)
+	case TaskSecurityAudit:
+		return linuxSecurityAudit(ctx)
+	case TaskSystemIntegrity:
+		return linuxSystemIntegrity(ctx)
 	}
 	return stepOutcome{output: "no linux implementation for step " + step, exitCode: 1},
 		fmt.Errorf("unsupported step %q on linux", step)
@@ -88,7 +94,7 @@ func linuxCleanupTemp(ctx context.Context) (stepOutcome, error) {
 		{"pacman", "-Scc", "--noconfirm"},
 	} {
 		if p, err := exec.LookPath(pm[0]); err == nil {
-			out = appendLog(out, run(ctx, p, pm[1:]...))
+			out = appendSecondaryLog(out, run(ctx, p, pm[1:]...), pm[0])
 		}
 	}
 	// A package cache clean moves bytes out of the local disk, but that happens
@@ -138,7 +144,7 @@ func linuxMemoryHygiene(ctx context.Context) (stepOutcome, error) {
 
 	// zramctl --reset-all reclaims the compressed swap devices' backing pages.
 	if p, err := exec.LookPath("zramctl"); err == nil {
-		out = appendLog(out, run(ctx, p, "--reset-all"))
+		out = appendSecondaryLog(out, run(ctx, p, "--reset-all"), "zramctl")
 	}
 	return out, nil
 }
@@ -233,3 +239,43 @@ func userCacheDir() string {
 	}
 	return filepath.Join(home, ".cache")
 }
+
+func linuxFlushDNS(ctx context.Context) (stepOutcome, error) {
+	out := stepOutcome{}
+	if p, err := exec.LookPath("resolvectl"); err == nil {
+		out = appendLog(out, run(ctx, p, "flush-caches"))
+	} else if p, err := exec.LookPath("systemd-resolve"); err == nil {
+		out = appendLog(out, run(ctx, p, "--flush-caches"))
+	} else if p, err := exec.LookPath("nscd"); err == nil {
+		out = appendLog(out, run(ctx, p, "-i", "hosts"))
+	} else {
+		out = appendLog(out, stepOutcome{output: "no local DNS caching service found to flush (resolvectl/systemd-resolve/nscd)", exitCode: 0})
+	}
+	return out, nil
+}
+
+func linuxSecurityAudit(ctx context.Context) (stepOutcome, error) {
+	out := stepOutcome{}
+	if p, err := exec.LookPath("ufw"); err == nil {
+		out = appendLog(out, run(ctx, p, "status"))
+	} else if p, err := exec.LookPath("iptables"); err == nil {
+		out = appendLog(out, run(ctx, p, "-L", "-n"))
+	} else if p, err := exec.LookPath("nft"); err == nil {
+		out = appendLog(out, run(ctx, p, "list", "ruleset"))
+	}
+	if p, err := exec.LookPath("systemctl"); err == nil {
+		out = appendSecondaryLog(out, run(ctx, p, "is-active", "auditd", "apparmor", "firewalld"), "security services")
+	}
+	return out, nil
+}
+
+func linuxSystemIntegrity(ctx context.Context) (stepOutcome, error) {
+	out := stepOutcome{}
+	if p, err := exec.LookPath("systemctl"); err == nil {
+		out = appendLog(out, run(ctx, p, "--failed"))
+	} else {
+		out = appendLog(out, stepOutcome{output: "systemctl unavailable for integrity audit", exitCode: 0})
+	}
+	return out, nil
+}
+

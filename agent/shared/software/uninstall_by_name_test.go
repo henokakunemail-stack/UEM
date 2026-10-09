@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // These tests cover the decision that decides whether anything runs at all:
@@ -334,6 +335,92 @@ func TestRebootRequiredExitIsReadOffTheExitCodeNotTheError(t *testing.T) {
 	native := &installedProgram{UninstallString: `C:\Program Files\App\uninstall.exe`}
 	if isRebootRequiredExit(native, 3010) {
 		t.Error("isRebootRequiredExit(native, 3010) = true, want false: 3010 is an msiexec code")
+	}
+}
+
+func TestResolveSilentArgsInnoSetupFallback(t *testing.T) {
+	cases := []struct {
+		name    string
+		program *installedProgram
+	}{
+		{
+			name: "by framework tag",
+			program: &installedProgram{
+				Name:            "Git",
+				UninstallString: `C:\Program Files\Git\unins001.exe`,
+				Framework:       "inno",
+			},
+		},
+		{
+			name: "by unins filename prefix",
+			program: &installedProgram{
+				Name:            "VS Code",
+				UninstallString: `C:\Program Files\Microsoft VS Code\unins000.exe`,
+			},
+		},
+	}
+
+	want := []string{"/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			args, err := resolveSilentArgs(tc.program)
+			if err != nil {
+				t.Fatalf("resolveSilentArgs refused Inno Setup uninstaller: %v", err)
+			}
+			if len(args) != len(want) {
+				t.Fatalf("resolveSilentArgs returned %v, want %v", args, want)
+			}
+			for i := range want {
+				if args[i] != want[i] {
+					t.Errorf("arg %d = %q, want %q", i, args[i], want[i])
+				}
+			}
+		})
+	}
+}
+
+func TestResolveSilentArgsNSISFallback(t *testing.T) {
+	p := &installedProgram{
+		Name:            "VLC media player",
+		UninstallString: `C:\Program Files\VideoLAN\VLC\uninstall.exe`,
+	}
+	args, err := resolveSilentArgs(p)
+	if err != nil {
+		t.Fatalf("resolveSilentArgs refused NSIS uninstaller: %v", err)
+	}
+	if len(args) != 1 || args[0] != "/S" {
+		t.Fatalf("resolveSilentArgs returned %v, want [/S]", args)
+	}
+}
+
+func TestVerifyUninstalledSucceedsWhenProgramGone(t *testing.T) {
+	prev := findInstalledFn
+	t.Cleanup(func() { findInstalledFn = prev })
+
+	findInstalledFn = func(ctx context.Context, name string) ([]*installedProgram, error) {
+		return nil, nil
+	}
+
+	ctx := context.Background()
+	if err := verifyUninstalled(ctx, "Notepad++"); err != nil {
+		t.Fatalf("verifyUninstalled failed unexpectedly: %v", err)
+	}
+}
+
+func TestVerifyUninstalledFailsWhenProgramRemains(t *testing.T) {
+	prev := findInstalledFn
+	t.Cleanup(func() { findInstalledFn = prev })
+
+	findInstalledFn = func(ctx context.Context, name string) ([]*installedProgram, error) {
+		return []*installedProgram{{Name: "Notepad++"}}, nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+
+	err := verifyUninstalled(ctx, "Notepad++")
+	if err == nil {
+		t.Fatal("verifyUninstalled should have failed when program remains")
 	}
 }
 

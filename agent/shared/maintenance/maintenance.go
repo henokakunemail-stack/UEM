@@ -28,12 +28,15 @@ import (
 )
 
 const (
-	TaskCleanupTemp    = "cleanup_temp"
-	TaskDiskCheck      = "disk_check"
-	TaskMemoryHygiene  = "memory_hygiene"
-	TaskLogMaintenance = "log_maintenance"
-	TaskServiceCleanup = "service_cleanup"
-	TaskFullScan       = "full_scan"
+	TaskCleanupTemp     = "cleanup_temp"
+	TaskDiskCheck       = "disk_check"
+	TaskMemoryHygiene   = "memory_hygiene"
+	TaskLogMaintenance  = "log_maintenance"
+	TaskServiceCleanup  = "service_cleanup"
+	TaskFlushDNS        = "flush_dns"
+	TaskSecurityAudit   = "security_audit"
+	TaskSystemIntegrity = "system_integrity"
+	TaskFullScan        = "full_scan"
 )
 
 // Agent-facing report statuses. These are the six TaskStatus* values the
@@ -51,12 +54,15 @@ const (
 // map, not a slice, so the lookup is an exact key comparison: case, whitespace
 // and separator variants are all misses.
 var allowed = map[string]struct{}{
-	TaskCleanupTemp:    {},
-	TaskDiskCheck:      {},
-	TaskMemoryHygiene:  {},
-	TaskLogMaintenance: {},
-	TaskServiceCleanup: {},
-	TaskFullScan:       {},
+	TaskCleanupTemp:     {},
+	TaskDiskCheck:       {},
+	TaskMemoryHygiene:   {},
+	TaskLogMaintenance:  {},
+	TaskServiceCleanup:  {},
+	TaskFlushDNS:        {},
+	TaskSecurityAudit:   {},
+	TaskSystemIntegrity: {},
+	TaskFullScan:        {},
 }
 
 // fullScanSteps is the step order for full_scan. The agent posts 'running'
@@ -630,6 +636,8 @@ func stepTimeout(step string) time.Duration {
 		return 30 * time.Minute
 	case TaskCleanupTemp, TaskLogMaintenance, TaskFullScan:
 		return 20 * time.Minute
+	case TaskSystemIntegrity:
+		return 10 * time.Minute
 	case TaskMemoryHygiene:
 		return 2 * time.Minute
 	default:
@@ -847,6 +855,40 @@ func appendLog(acc stepOutcome, out stepOutcome) stepOutcome {
 	return acc
 }
 
+// appendSecondaryLog folds an auxiliary or optional tool outcome into the
+// accumulating step outcome. Unlike appendLog, a non-zero exit code or timeout
+// in a secondary tool logs a warning note to the transcript without failing
+// the overall step or setting acc.exitCode/acc.timedOut.
+func appendSecondaryLog(acc stepOutcome, out stepOutcome, name string) stepOutcome {
+	if out.output != "" {
+		if acc.output == "" {
+			acc.output = out.output
+		} else {
+			acc.output += "\n" + out.output
+		}
+	}
+	if out.bytesFreed != 0 {
+		acc.bytesFreed += out.bytesFreed
+	}
+	if out.rebootNeeded {
+		acc.rebootNeeded = true
+	}
+	if out.exitCode != 0 || out.timedOut {
+		var warn string
+		if out.timedOut {
+			warn = fmt.Sprintf("warning: %s timed out and was stopped; primary cleanup succeeded", name)
+		} else {
+			warn = fmt.Sprintf("warning: %s failed (exit %d); primary cleanup succeeded", name, out.exitCode)
+		}
+		if acc.output == "" {
+			acc.output = warn
+		} else {
+			acc.output += "\n" + warn
+		}
+	}
+	return acc
+}
+
 // assertDistinctMirrors fails the build if a copy-paste typo makes two mirrors
 // equal. Referenced from maintenance_test.go so golangci-lint's `unused` check
 // does not flag it.
@@ -858,6 +900,9 @@ func assertDistinctMirrors() {
 	case TaskMemoryHygiene:
 	case TaskLogMaintenance:
 	case TaskServiceCleanup:
+	case TaskFlushDNS:
+	case TaskSecurityAudit:
+	case TaskSystemIntegrity:
 	case TaskFullScan:
 	}
 }

@@ -331,6 +331,16 @@ export const api = {
     })
   },
 
+  async updatePackage(
+    id: string,
+    data: { name?: string; version?: string; install_args?: string; uninstall_args?: string }
+  ): Promise<SoftwarePackageDTO> {
+    return request<SoftwarePackageDTO>(`/api/software/packages/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    })
+  },
+
   async deletePackage(id: string): Promise<{ status: string }> {
     return request<{ status: string }>(`/api/software/packages/${id}`, {
       method: 'DELETE',
@@ -385,6 +395,33 @@ export const api = {
         body: JSON.stringify({ software_name: softwareName }),
       }
     )
+  },
+
+  async getDeviceCommand(
+    deviceId: string,
+    commandId: string
+  ): Promise<{
+    id: string
+    device_id: string
+    command_type: string
+    payload: string
+    status: string
+    result?: string
+    created_at: string
+    sent_at?: string
+    completed_at?: string
+  }> {
+    return request<{
+      id: string
+      device_id: string
+      command_type: string
+      payload: string
+      status: string
+      result?: string
+      created_at: string
+      sent_at?: string
+      completed_at?: string
+    }>(`/api/devices/${deviceId}/commands/${commandId}`)
   },
 
   // Remote Execution APIs (Phase 5)

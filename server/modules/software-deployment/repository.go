@@ -41,6 +41,19 @@ func (r *Repository) CreateAgentCommand(ctx context.Context, id, deviceID, comma
 	return err
 }
 
+// GetAgentCommand retrieves a single agent command by its id and device_id.
+func (r *Repository) GetAgentCommand(ctx context.Context, id, deviceID string) (*AgentCommand, error) {
+	var cmd AgentCommand
+	err := r.db.GetContext(ctx, &cmd, `
+		SELECT id, device_id, command_type, payload, status, result, created_at, sent_at, completed_at
+		FROM agent_commands
+		WHERE id = ? AND device_id = ?`, id, deviceID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	return &cmd, err
+}
+
 // CreatePackage inserts a new package into the software_packages table.
 func (r *Repository) CreatePackage(ctx context.Context, p SoftwarePackage) error {
 	query := `
@@ -83,6 +96,20 @@ func (r *Repository) ListPackages(ctx context.Context) ([]SoftwarePackage, error
 func (r *Repository) DeletePackage(ctx context.Context, id string) error {
 	query := `DELETE FROM software_packages WHERE id = ?`
 	res, err := r.db.ExecContext(ctx, query, id)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// UpdatePackageArgs updates metadata and install/uninstall switches for a package.
+func (r *Repository) UpdatePackageArgs(ctx context.Context, id, name, version, installArgs, uninstallArgs string) error {
+	query := `UPDATE software_packages SET name = ?, version = ?, install_args = ?, uninstall_args = ?, updated_at = ? WHERE id = ?`
+	res, err := r.db.ExecContext(ctx, query, name, version, installArgs, uninstallArgs, time.Now().UTC(), id)
 	if err != nil {
 		return err
 	}
@@ -283,7 +310,8 @@ func (r *Repository) ListDeployments(ctx context.Context) ([]SoftwareDeployment,
 		FROM software_deployments d
 		LEFT JOIN software_packages p ON d.package_id = p.id
 		LEFT JOIN deployment_tasks t ON d.id = t.deployment_id
-		GROUP BY d.id
+		GROUP BY d.id, d.package_id, d.action, d.name, d.target_type, d.target_id, d.created_by, d.status,
+			d.created_at, d.completed_at, p.name, p.version
 		ORDER BY d.created_at DESC`
 
 	deps := []SoftwareDeployment{}
@@ -309,7 +337,8 @@ func (r *Repository) GetDeployment(ctx context.Context, id string) (SoftwareDepl
 		LEFT JOIN software_packages p ON d.package_id = p.id
 		LEFT JOIN deployment_tasks t ON d.id = t.deployment_id
 		WHERE d.id = ?
-		GROUP BY d.id`
+		GROUP BY d.id, d.package_id, d.action, d.name, d.target_type, d.target_id, d.created_by, d.status,
+			d.created_at, d.completed_at, p.name, p.version`
 
 	var dep SoftwareDeployment
 	err := r.db.GetContext(ctx, &dep, query, id)

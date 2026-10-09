@@ -130,6 +130,18 @@ type DeploymentTask struct {
 	Site     string `db:"site" json:"site,omitempty"`
 }
 
+type AgentCommand struct {
+	ID          string     `db:"id" json:"id"`
+	DeviceID    string     `db:"device_id" json:"device_id"`
+	CommandType string     `db:"command_type" json:"command_type"`
+	Payload     string     `db:"payload" json:"payload"`
+	Status      string     `db:"status" json:"status"`
+	Result      *string    `db:"result" json:"result,omitempty"`
+	CreatedAt   time.Time  `db:"created_at" json:"created_at"`
+	SentAt      *time.Time `db:"sent_at" json:"sent_at,omitempty"`
+	CompletedAt *time.Time `db:"completed_at" json:"completed_at,omitempty"`
+}
+
 type CreateDeploymentRequest struct {
 	Name       string `json:"name"`
 	PackageID  string `json:"package_id"`

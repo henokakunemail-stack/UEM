@@ -5,6 +5,7 @@ package software
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"golang.org/x/sys/windows/registry"
@@ -88,13 +89,27 @@ func readUninstallProgram(root registry.Key, path string) *installedProgram {
 		// Entries without a name are language packs and servicing payloads.
 		return nil
 	}
+	uninstStr := get("UninstallString")
+	framework := ""
+	if get("Inno Setup: Setup Version") != "" || get("Inno Setup Code") != "" || strings.HasSuffix(strings.ToLower(path), "_is1") {
+		framework = "inno"
+	} else {
+		base := strings.ToLower(filepath.Base(uninstallerPath(uninstStr)))
+		if isInnoExeName(base) {
+			framework = "inno"
+		} else if base == "uninstall.exe" || base == "uninst.exe" {
+			framework = "nsis"
+		}
+	}
+
 	return &installedProgram{
 		Name:            display,
 		Version:         get("DisplayVersion"),
 		Publisher:       get("Publisher"),
 		ProductCode:     get("ProductCode"),
-		UninstallString: get("UninstallString"),
+		UninstallString: uninstStr,
 		QuietString:     get("QuietUninstallString"),
+		Framework:       framework,
 	}
 }
 

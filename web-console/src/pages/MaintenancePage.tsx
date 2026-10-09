@@ -824,7 +824,11 @@ export const MaintenancePage: React.FC = () => {
         message={
           selectedTask
             ? `"${selectedTask.label}" is flagged disruptive by the server and may interrupt users on every targeted device.\n\n${selectedTask.description}\n\nContinue with target "${
-                newRun.target_type === 'all' ? 'all devices' : newRun.target_id
+                newRun.target_type === 'all'
+                  ? 'all devices'
+                  : newRun.target_type === 'group'
+                  ? groups.find((g) => g.id === newRun.target_id)?.name || newRun.target_id
+                  : devices.find((d) => d.id === newRun.target_id)?.hostname || newRun.target_id
               }"?`
             : ''
         }

@@ -246,6 +246,13 @@ func nextRunAt(s *TaskSchedule, from time.Time) *time.Time {
 	return &next
 }
 
+func boolToInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
 func (r *Repository) CreateSchedule(ctx context.Context, s *TaskSchedule) error {
 	now := time.Now().UTC()
 	if s.ID == "" {
@@ -262,7 +269,7 @@ func (r *Repository) CreateSchedule(ctx context.Context, s *TaskSchedule) error 
 			created_at, updated_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, s.ID, s.Name, s.Description, s.ScriptID, s.TargetType, s.TargetID,
-		s.ScheduleType, s.ScheduleExpr, s.IsEnabled, s.NextRunAt, s.CreatedBy,
+		s.ScheduleType, s.ScheduleExpr, boolToInt(s.IsEnabled), s.NextRunAt, s.CreatedBy,
 		s.CreatedAt, s.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf("create schedule: %w", err)
@@ -284,7 +291,7 @@ func (r *Repository) UpdateSchedule(ctx context.Context, s *TaskSchedule) error 
 			updated_at = ?
 		WHERE id = ?
 	`, s.Name, s.Description, s.ScriptID, s.TargetType, s.TargetID,
-		s.ScheduleType, s.ScheduleExpr, s.IsEnabled, s.NextRunAt, s.UpdatedAt, s.ID)
+		s.ScheduleType, s.ScheduleExpr, boolToInt(s.IsEnabled), s.NextRunAt, s.UpdatedAt, s.ID)
 	if err != nil {
 		return fmt.Errorf("update schedule: %w", err)
 	}

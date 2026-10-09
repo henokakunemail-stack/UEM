@@ -82,6 +82,11 @@ func UninstallByName(ctx context.Context, name string) (exitCode int, output str
 		return code, out + fmt.Sprintf(
 			"\n[uninstall completed; exit code %d means a reboot is required to finish]", code), nil
 	}
+	if runErr == nil {
+		if verifyErr := verifyUninstalled(ctx, target.Name); verifyErr != nil {
+			return code, out, verifyErr
+		}
+	}
 	return code, out, runErr
 }
 

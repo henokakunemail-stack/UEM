@@ -64,8 +64,8 @@ function SubtabPage({ section }: { section: 'software' | 'scheduler' | 'assets' 
       return tab === 'packages' || tab === 'deployments'
         ? <SoftwarePage activeTab={tab} onTabChange={onChange} /> : <Navigate to="/software/packages" replace />
     case 'scheduler':
-      return tab === 'scripts' || tab === 'schedules' || tab === 'runs'
-        ? <TasksSchedulerPage activeTab={tab} onTabChange={onChange} /> : <Navigate to="/scheduler/scripts" replace />
+      return tab === 'schedules' || tab === 'runs'
+        ? <TasksSchedulerPage activeTab={tab} onTabChange={onChange} /> : <Navigate to="/scheduler/schedules" replace />
     case 'assets':
       return tab === 'hardware' || tab === 'licenses'
         ? <AssetLicensePage activeTab={tab} onTabChange={onChange} /> : <Navigate to="/assets/hardware" replace />

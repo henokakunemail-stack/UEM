@@ -4,9 +4,11 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/jmoiron/sqlx"
@@ -138,6 +140,13 @@ func newID() string {
 	return hex.EncodeToString(b)
 }
 
+func boolToInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
 func (r *Repository) CreateRelease(ctx context.Context, release *AgentRelease) error {
 	if release.ID == "" {
 		release.ID = newID()
@@ -154,7 +163,7 @@ func (r *Repository) CreateRelease(ctx context.Context, release *AgentRelease) e
 	`
 	_, err := r.db.ExecContext(ctx, query,
 		release.ID, release.Version, release.OSName, release.Arch, release.FilePath,
-		release.FileSize, release.SHA256Checksum, release.Changelog, release.IsActive,
+		release.FileSize, release.SHA256Checksum, release.Changelog, boolToInt(release.IsActive),
 		release.UploadedBy, release.CreatedAt,
 		release.PublishedAt, release.MinimumSupportedVersion, release.Ed25519Signature,
 		release.DownloadURL,
@@ -523,5 +532,40 @@ func (r *Repository) ResolveTargetDevices(ctx context.Context, targetType, targe
 		return ids, err
 	default:
 		return nil, fmt.Errorf("unknown target type: %s", targetType)
+	}
+}
+
+// GetDeviceArch reads the architecture recorded in device_inventory, or falls back to "amd64".
+func (r *Repository) GetDeviceArch(ctx context.Context, deviceID string) string {
+	var osDetailStr string
+	err := r.db.GetContext(ctx, &osDetailStr, `SELECT os_detail FROM device_inventory WHERE device_id = ?`, deviceID)
+	if err != nil || osDetailStr == "" {
+		return "amd64"
+	}
+	var detail struct {
+		Architecture string `json:"architecture"`
+	}
+	if err := json.Unmarshal([]byte(osDetailStr), &detail); err != nil || detail.Architecture == "" {
+		return "amd64"
+	}
+	return normalizeArch(detail.Architecture)
+}
+
+func normalizeArch(raw string) string {
+	r := strings.ToLower(strings.TrimSpace(raw))
+	switch {
+	case strings.Contains(r, "arm64") || strings.Contains(r, "aarch64"):
+		return "arm64"
+	case strings.Contains(r, "amd64") || strings.Contains(r, "x86_64") || strings.Contains(r, "64-bit") || strings.Contains(r, "x64"):
+		return "amd64"
+	case strings.Contains(r, "386") || strings.Contains(r, "32-bit") || strings.Contains(r, "x86"):
+		return "386"
+	case strings.Contains(r, "arm"):
+		return "arm"
+	default:
+		if r != "" {
+			return r
+		}
+		return "amd64"
 	}
 }

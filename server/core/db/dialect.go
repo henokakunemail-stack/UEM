@@ -46,7 +46,7 @@ type dialect struct {
 // that merely names a driver nobody uses cannot start at all.
 func dialectFor(driverName string) dialect {
 	switch strings.ToLower(driverName) {
-	case "postgres", "postgresql":
+	case "postgres", "postgresql", "postgres-rebind":
 		return dialect{name: driverName, postgres: true}
 	default:
 		return dialect{name: "sqlite"}
@@ -120,6 +120,7 @@ func (d dialect) translate(script string) string {
 	}
 	s := script
 	s = datetimeTypeRe.ReplaceAllString(s, "TIMESTAMPTZ")
+	s = byteColumnsRe.ReplaceAllString(s, "${1} BIGINT")
 	// SQLite attaches the conflict clause to the INSERT keyword; PostgreSQL
 	// attaches it after the whole VALUES list. Both halves are matched in one
 	// pass so the clause lands at the end of the very statement it belongs to:
@@ -136,6 +137,9 @@ var (
 	// needed and none is done -- matching loosely here would risk rewriting a
 	// string literal that happens to contain the word.
 	datetimeTypeRe = regexp.MustCompile(`\bDATETIME\b`)
+	// Large capacity integer columns (RAM, sizes, bytes) require 64-bit BIGINT
+	// on PostgreSQL to avoid 32-bit integer overflow (error 22003).
+	byteColumnsRe = regexp.MustCompile(`(?i)\b(\w*(?:ram_bytes|size_bytes|file_size|bytes_transmitted|bytes_freed))\s+INTEGER\b`)
 	// INSERT OR IGNORE INTO <table> (<columns>) VALUES <values...>;
 	// Group 1 is the table, 2 the column list, 3 everything from VALUES up to
 	// but not including the terminating semicolon -- so the conflict clause

@@ -1,21 +1,17 @@
 import React, { useEffect, useState } from 'react'
 import {
   CalendarClock,
-  Code2,
-  FileCode,
   FileText,
   History,
   Laptop,
   Plus,
   RefreshCw,
-  Trash2,
   X,
 } from 'lucide-react'
 import { api } from '../services/api'
 import { useToast } from '../context/ToastContext'
 import { usePermission } from '../hooks/usePermission'
 import { DataTable } from '../components/ui/DataTable'
-import { ConfirmDialog } from '../components/ui/ConfirmDialog'
 import { Modal } from '../components/ui/Modal'
 import type { DeviceRunDTO, ScheduleDTO, ScriptDTO, TaskRunDTO } from '../types/api'
 
@@ -33,7 +29,7 @@ function describeInterval(expr: string): string {
   return `${mins}m`
 }
 
-export type SchedulerTab = 'scripts' | 'schedules' | 'runs'
+export type SchedulerTab = 'schedules' | 'runs'
 
 interface TasksSchedulerPageProps {
   activeTab: SchedulerTab
@@ -58,11 +54,6 @@ export const TasksSchedulerPage: React.FC<TasksSchedulerPageProps> = ({ activeTa
   const [viewRunDevices, setViewRunDevices] = useState<TaskRunDTO | null>(null)
   const [runDevices, setRunDevices] = useState<DeviceRunDTO[]>([])
   const [devicesLoading, setDevicesLoading] = useState(false)
-
-  // Script deletion moved off window.confirm so the dialog can hold a pending
-  // state while the request is in flight.
-  const [scriptPendingDelete, setScriptPendingDelete] = useState<{ id: string; name: string } | null>(null)
-  const [deletingScript, setDeletingScript] = useState(false)
 
   // Form states
   const [newScript, setNewScript] = useState({
@@ -128,37 +119,21 @@ export const TasksSchedulerPage: React.FC<TasksSchedulerPageProps> = ({ activeTa
   const handleCreateScript = async (e: React.FormEvent) => {
     e.preventDefault()
     try {
-      await api.createScript(newScript)
-      const successText = `Script '${newScript.name}' created successfully with SHA-256 hash.`
+      const created = await api.createScript(newScript)
+      const successText = `Script '${newScript.name}' created.`
       setMsg({ type: 'success', text: successText })
       toast.success(successText, 'Script Registered')
       setIsScriptModalOpen(false)
       setNewScript({ name: '', description: '', script_type: 'powershell', script_content: '' })
-      loadData()
+      await loadData()
+      if (created?.id) {
+        setNewSchedule((prev) => ({ ...prev, script_id: created.id }))
+      }
+      setIsScheduleModalOpen(true)
     } catch (err: any) {
       const errorText = err.message || 'Failed to create script'
       setMsg({ type: 'error', text: errorText })
       toast.error(errorText, 'Creation Failed')
-    }
-  }
-
-  const handleDeleteScript = async () => {
-    if (!scriptPendingDelete) return
-    const { id, name } = scriptPendingDelete
-    setDeletingScript(true)
-    try {
-      await api.deleteScript(id)
-      const infoText = `Script '${name}' deleted.`
-      setMsg({ type: 'success', text: infoText })
-      toast.info(infoText)
-      setScriptPendingDelete(null)
-      loadData()
-    } catch (err: any) {
-      const errorText = err.message || 'Failed to delete script'
-      setMsg({ type: 'error', text: errorText })
-      toast.error(errorText)
-    } finally {
-      setDeletingScript(false)
     }
   }
 
@@ -182,9 +157,9 @@ export const TasksSchedulerPage: React.FC<TasksSchedulerPageProps> = ({ activeTa
     <div className="page-container">
       <div className="page-header">
         <div>
-          <h2 className="page-title">Task Scheduler & Script Repository</h2>
+          <h2 className="page-title">Task Scheduler</h2>
           <p className="page-subtitle">
-            Automated maintenance scripts, recurring background jobs, and distributed fleet executions
+            Automated maintenance schedules, recurring background jobs, and fleet-wide execution history
           </p>
         </div>
         <div className="header-controls">
@@ -192,12 +167,6 @@ export const TasksSchedulerPage: React.FC<TasksSchedulerPageProps> = ({ activeTa
             <RefreshCw size={16} className={loading ? 'spinning' : ''} />
             <span>Refresh</span>
           </button>
-          {canAdmin && subTab === 'scripts' && (
-            <button type="button" className="btn btn-primary" onClick={() => setIsScriptModalOpen(true)}>
-              <Plus size={16} />
-              <span>New Script</span>
-            </button>
-          )}
           {canAdmin && subTab === 'schedules' && (
             <button type="button" className="btn btn-primary" onClick={() => setIsScheduleModalOpen(true)}>
               <Plus size={16} />
@@ -220,14 +189,6 @@ export const TasksSchedulerPage: React.FC<TasksSchedulerPageProps> = ({ activeTa
       <div className="tabs-nav">
         <button
           type="button"
-          className={`tab-btn ${subTab === 'scripts' ? 'active' : ''}`}
-          onClick={() => setSubTab('scripts')}
-        >
-          <Code2 size={16} />
-          <span>Script Repository ({scripts.length})</span>
-        </button>
-        <button
-          type="button"
           className={`tab-btn ${subTab === 'schedules' ? 'active' : ''}`}
           onClick={() => setSubTab('schedules')}
         >
@@ -244,70 +205,7 @@ export const TasksSchedulerPage: React.FC<TasksSchedulerPageProps> = ({ activeTa
         </button>
       </div>
 
-      {/* Tab 1: Script Repository */}
-      {subTab === 'scripts' && (
-        <div className="table-card">
-          <DataTable label="Scripts">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Script Name</th>
-                  <th>Shell Type</th>
-                  <th>Description</th>
-                  <th>SHA-256 Checksum</th>
-                  <th>Author</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {scripts.length === 0 ? (
-                  <tr>
-                    <td colSpan={6} className="text-center py-8 text-muted">
-                      No scripts in repository. Click "New Script" to create one.
-                    </td>
-                  </tr>
-                ) : (
-                  scripts.map((s) => (
-                    <tr key={s.id}>
-                      <td>
-                        <div className="font-semibold text-main">
-                          <FileCode size={16} className="text-primary" />{' '}
-                          <span>{s.name}</span>
-                        </div>
-                      </td>
-                      <td>
-                        <span className="os-badge">{s.script_type}</span>
-                      </td>
-                      <td>{s.description || '—'}</td>
-                      <td>
-                        <span className="font-mono text-sm text-dim" title={s.sha256_hash}>
-                          {s.sha256_hash ? s.sha256_hash.slice(0, 16) + '...' : '—'}
-                        </span>
-                      </td>
-                      <td>{s.created_by}</td>
-                      <td>
-                        {canAdmin && (
-                          <button
-                            type="button"
-                            className="btn-action text-danger"
-                            onClick={() => setScriptPendingDelete({ id: s.id, name: s.name })}
-                            title="Delete script"
-                          >
-                            <Trash2 size={14} />
-                            <span>Delete</span>
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </DataTable>
-        </div>
-      )}
-
-      {/* Tab 2: Schedules */}
+      {/* Tab 1: Schedules */}
       {subTab === 'schedules' && (
         <div className="table-card">
           <DataTable label="Schedules">
@@ -628,9 +526,25 @@ export const TasksSchedulerPage: React.FC<TasksSchedulerPageProps> = ({ activeTa
             />
           </div>
           <div className="form-group">
-            <label className="form-label" htmlFor="schedule-script">
-              Target Script
-            </label>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.25rem' }}>
+              <label className="form-label" htmlFor="schedule-script" style={{ marginBottom: 0 }}>
+                Target Script
+              </label>
+              {canAdmin && (
+                <button
+                  type="button"
+                  className="btn-action"
+                  style={{ fontSize: '0.75rem', padding: '2px 8px' }}
+                  onClick={() => {
+                    setIsScheduleModalOpen(false)
+                    setIsScriptModalOpen(true)
+                  }}
+                >
+                  <Plus size={12} />
+                  <span>Custom Script</span>
+                </button>
+              )}
+            </div>
             <select
               id="schedule-script"
               className="form-select"
@@ -721,20 +635,6 @@ export const TasksSchedulerPage: React.FC<TasksSchedulerPageProps> = ({ activeTa
           {viewLogRun?.output_log || viewLogRun?.error_message || '(No output recorded)'}
         </pre>
       </Modal>
-
-      <ConfirmDialog
-        open={scriptPendingDelete !== null}
-        title="Delete script"
-        message={
-          scriptPendingDelete
-            ? `Delete script '${scriptPendingDelete.name}'? Its schedules will stop resolving and this cannot be undone.`
-            : ''
-        }
-        confirmLabel="Delete"
-        pending={deletingScript}
-        onConfirm={handleDeleteScript}
-        onCancel={() => setScriptPendingDelete(null)}
-      />
     </div>
   )
 }

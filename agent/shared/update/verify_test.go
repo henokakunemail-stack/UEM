@@ -213,3 +213,13 @@ func TestAZeroLengthFileIsRejectedDirectly(t *testing.T) {
 		t.Error("a zero-length file was accepted as an executable")
 	}
 }
+
+func TestVerifySwappedBinaryTruncated(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "short.bin")
+	if err := os.WriteFile(p, []byte{0x7f, 'E'}, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := verifySwappedBinary(p); err == nil {
+		t.Error("a truncated file < 4 bytes was accepted")
+	}
+}

@@ -125,6 +125,9 @@ func runProcess(ctx context.Context, name string, args []string) runResult {
 		// Before, ctx.Err() was formatted as text and was unrecoverable.
 		return runResult{exitCode: -1, output: out, err: fmt.Errorf("%w after %w", ErrTimeout, ctx.Err())}
 	case waitErr == nil:
+		if err := tree.waitForDescendants(ctx); err != nil {
+			return runResult{exitCode: -1, output: out, err: err}
+		}
 		return runResult{exitCode: 0, output: out}
 	}
 

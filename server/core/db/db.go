@@ -108,8 +108,8 @@ func OpenWithDriver(driverName, dsnStr string) (*sqlx.DB, error) {
 		driverName = "postgres"
 	}
 
-	if driverName == "postgres" {
-		d, err := sqlx.Open("postgres", dsnStr)
+	if driverName == "postgres" || driverName == "postgresql" || driverName == "postgres-rebind" {
+		d, err := sqlx.Open("postgres-rebind", dsnStr)
 		if err != nil {
 			return nil, fmt.Errorf("open postgres: %w", err)
 		}
@@ -121,7 +121,7 @@ func OpenWithDriver(driverName, dsnStr string) (*sqlx.DB, error) {
 			d.Close()
 			return nil, fmt.Errorf("ping db: %w", err)
 		}
-		if err := MigrateWithDialect(d, dialectFor(driverName)); err != nil {
+		if err := MigrateWithDialect(d, dialectFor("postgres")); err != nil {
 			d.Close()
 			return nil, err
 		}

@@ -87,95 +87,6 @@ INSERT OR IGNORE INTO script_templates (
     id, name, description, script_type, script_content, sha256_hash,
     default_args, timeout_seconds, created_by, created_at, updated_at
 ) VALUES (
-    'd3f2c9e46a86c3d1e0b2f4a5c7d8e93',
-    'Clear Temp Files',
-    'Deletes files under the user and Windows temp folders and reports what was removed.',
-    'powershell',
-    '$paths = @($env:TEMP, ''C:\Windows\Temp'')   # edit this line: folders to clean
-$removed = 0
-$kept = 0
-
-foreach ($p in $paths) {
-    if (-not (Test-Path -LiteralPath $p)) { continue }
-
-    # Delete the children of the temp root one at a time rather than
-    # enumerating the whole tree first. A Get-ChildItem -Recurse pass builds
-    # the full file list before anything is deleted, and on a machine with a
-    # few hundred temp subfolders that scan alone outlasts the timeout.
-    # Remove-Item -Recurse walks the subtree itself and skips what it cannot
-    # open, so one locked file no longer costs a thrown exception.
-    $children = @(Get-ChildItem -LiteralPath $p -Force -ErrorAction SilentlyContinue)
-    foreach ($c in $children) {
-        # Capture the path first: inside a catch block $_ is the error record,
-        # not the item, so reading it there prints a blank.
-        $full = $c.FullName
-        try {
-            Remove-Item -LiteralPath $full -Recurse -Force -ErrorAction Stop
-            $removed++
-        } catch {
-            $kept++
-        }
-    }
-    Write-Output ($p + '': examined '' + $children.Count + '' entries'')
-}
-
-Write-Output (''Entries removed: '' + $removed)
-Write-Output (''Entries still locked: '' + $kept)',
-    'b1f952aa4a0d1366ac8c4706d691d9d3202533e0841ce18ba718d0cef191223b',
-    '',
-    300,
-    'system',
-    DATETIME('now'),
-    DATETIME('now')
-);
-
-INSERT OR IGNORE INTO script_templates (
-    id, name, description, script_type, script_content, sha256_hash,
-    default_args, timeout_seconds, created_by, created_at, updated_at
-) VALUES (
-    'e4a3d0f57b97d4e2f1c3a5b6d8e9f04',
-    'Flush DNS Cache',
-    'Flushes the Windows DNS resolver cache and prints the remaining entries.',
-    'powershell',
-    'ipconfig /flushdns
-$cache = Get-DnsClientCache -ErrorAction SilentlyContinue
-Write-Output (''Cached entries left: '' + @($cache).Count)
-$cache | Select-Object -First 50 Entry, Data | Format-Table -AutoSize',
-    '814c23e729bbba2f4003b4ef7e8e7b16e5fa76d48af0b0248a25bae1a4c323c9',
-    '',
-    60,
-    'system',
-    DATETIME('now'),
-    DATETIME('now')
-);
-
-INSERT OR IGNORE INTO script_templates (
-    id, name, description, script_type, script_content, sha256_hash,
-    default_args, timeout_seconds, created_by, created_at, updated_at
-) VALUES (
-    'f5b4e1a68ca8e5f302d4b6c7e9fa015',
-    'Check Disk Space',
-    'Lists every fixed drive with its size, free space and free percentage.',
-    'powershell',
-    'Get-CimInstance Win32_LogicalDisk -Filter ''DriveType=3'' |
-    Select-Object DeviceID,
-        @{Name=''SizeGB'';Expression={[math]::Round($_.Size / 1GB, 1)}},
-        @{Name=''FreeGB'';Expression={[math]::Round($_.FreeSpace / 1GB, 1)}},
-        @{Name=''FreePct'';Expression={if ($_.Size) { [math]::Round(100 * $_.FreeSpace / $_.Size, 1) } else { 0 }}} |
-    Sort-Object DeviceID |
-    Format-Table -AutoSize',
-    '8f53378426e19789964aeb00afe6ccb4ac0ca663e22f86269d2de0b867408f45',
-    '',
-    60,
-    'system',
-    DATETIME('now'),
-    DATETIME('now')
-);
-
-INSERT OR IGNORE INTO script_templates (
-    id, name, description, script_type, script_content, sha256_hash,
-    default_args, timeout_seconds, created_by, created_at, updated_at
-) VALUES (
     '06c5f2b79db9f6031e4c7d8f0ab126',
     'Netstat Listening Ports',
     'Shows the process holding a listening TCP port, or every listener when 0 is given.',
@@ -255,40 +166,6 @@ $rows | Sort-Object SizeGB -Descending | Format-Table -AutoSize',
     'e230f4df72ccce830f7d037575f971d137b5ac8a7f8bd12d16ce3a6a774fb7bb',
     '',
     900,
-    'system',
-    DATETIME('now'),
-    DATETIME('now')
-);
-
-INSERT OR IGNORE INTO script_templates (
-    id, name, description, script_type, script_content, sha256_hash,
-    default_args, timeout_seconds, created_by, created_at, updated_at
-) VALUES (
-    '39f825eadfec9346b7fa012c3de4569',
-    'Windows Defender Status',
-    'Reports Defender real time protection, signature age and any threat detections.',
-    'powershell',
-    '$mp = Get-MpComputerStatus -ErrorAction SilentlyContinue
-if (-not $mp) {
-    Write-Output ''Windows Defender cmdlets are unavailable on this device.''
-    exit 1
-}
-$mp | Select-Object AMServiceEnabled, AntivirusEnabled, RealTimeProtectionEnabled,
-    AntivirusSignatureLastUpdated, QuickScanAge, FullScanAge | Format-List
-
-# Get-MpThreatDetection lists every past detection, including ones Defender
-# already remediated, so a clean endpoint would still exit 1. Get-MpThreat
-# with IsActive is the set of threats that are still outstanding.
-$active = @(Get-MpThreat -ErrorAction SilentlyContinue | Where-Object { $_.IsActive })
-if ($active.Count -gt 0) {
-    Write-Output (''Active threats: '' + $active.Count)
-    $active | Select-Object ThreatID, IsActive, DidThreatExecute | Format-List
-    exit 1
-}
-Write-Output ''No active threats. Detections in the history have all been remediated.''',
-    '53d1818c4ca2dc8c78567bab46606102bc74dd41bc2b90d39de7ee019475252b',
-    '',
-    60,
     'system',
     DATETIME('now'),
     DATETIME('now')

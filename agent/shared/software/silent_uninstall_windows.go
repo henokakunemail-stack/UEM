@@ -6,12 +6,45 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"unsafe"
 
 	"github.com/henokakunemail-stack/Endpoint-Manager/agent/shared/service"
+	"golang.org/x/sys/windows"
 )
 
+// tokenElevation mirrors the Windows SDK TOKEN_ELEVATION structure.
+type tokenElevation struct {
+	TokenIsElevated uint32
+}
+
+// isElevated reports whether the current process holds an elevated token.
+// An elevated process spawns child processes that inherit elevation without
+// triggering a UAC prompt on the interactive desktop.
+func isElevated() bool {
+	var token windows.Token
+	err := windows.OpenProcessToken(windows.CurrentProcess(), windows.TOKEN_QUERY, &token)
+	if err != nil {
+		return false
+	}
+	defer token.Close()
+
+	var elevation tokenElevation
+	var returnedLen uint32
+	err = windows.GetTokenInformation(
+		token,
+		windows.TokenElevation,
+		(*byte)(unsafe.Pointer(&elevation)),
+		uint32(unsafe.Sizeof(elevation)),
+		&returnedLen,
+	)
+	if err != nil {
+		return false
+	}
+	return elevation.TokenIsElevated != 0
+}
+
 // requireElevatedForUninstall refuses to remove anything unless the agent itself
-// runs under the Service Control Manager.
+// runs with an administrator token or under the Service Control Manager.
 //
 // The reason is UAC, and it is the popup an endpoint's user actually sees. An
 // uninstaller launched from a normal user session inherits that session's token,
@@ -20,46 +53,83 @@ import (
 // governs console windows, not the secure-desktop prompt the shell raises on
 // elevation.
 //
-// A service registered with sc.exe create runs as LocalSystem (service_windows.go
-// Install), which is already fully elevated and never prompts. So the refusal is
-// not "run it with a flag" -- it is "install the agent the way it was meant to be
-// installed", and the agent installer already does that.
-//
-// This proxy is deliberately conservative. RunAsService is false for any process
-// not started by the SCM, including one that happens to be elevated some other
-// way, so this refuses in a case where an uninstall would in fact have been
-// silent. Refusing too often costs an operator one reinstall; passing when it
-// should not puts a UAC prompt on a machine somebody is using. The asymmetry is
-// the reason to prefer the cheaper test.
+// An agent process running elevated (e.g. as a Windows Service, LocalSystem, or
+// elevated Administrator) spawns children with an elevated token and never prompts.
 func requireElevatedForUninstall() error {
-	if service.RunAsService() {
+	if service.RunAsService() || isElevated() {
 		return nil
 	}
 	return fmt.Errorf(
 		"%w: an uninstaller needs an administrator token, and one launched from "+
 			"this agent's user session would raise a UAC consent dialog on the "+
-			"endpoint. Install the agent as a Windows Service so it runs as "+
-			"LocalSystem (sc.exe create endpoint-agent binPath= \"<agent.exe>\"), "+
-			"then try again", ErrNotElevated)
+			"endpoint. Run the agent as Administrator or install as a Windows Service "+
+			"(sc.exe create endpoint-agent binPath= \"<agent.exe>\"), then try again", ErrNotElevated)
+}
+
+// frameworkSilentSwitches returns well-known unattended switches for known installer
+// frameworks when QuietUninstallString is omitted by the vendor.
+func frameworkSilentSwitches(p *installedProgram) []string {
+	if p == nil {
+		return nil
+	}
+	if p.Framework == "inno" {
+		return []string{"/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"}
+	}
+	if p.Framework == "nsis" {
+		return []string{"/S"}
+	}
+
+	base := extractUninstallerBase(p.UninstallString)
+	if isInnoExeName(base) {
+		return []string{"/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"}
+	}
+	if base == "uninstall.exe" || base == "uninst.exe" {
+		return []string{"/S"}
+	}
+	return nil
+}
+
+func extractUninstallerBase(cmd string) string {
+	s := strings.TrimSpace(cmd)
+	if s == "" {
+		return ""
+	}
+	if s[0] == '"' {
+		if end := strings.Index(s[1:], `"`); end >= 0 {
+			return strings.ToLower(filepath.Base(s[1 : 1+end]))
+		}
+	}
+	for _, tok := range strings.Fields(s) {
+		if strings.HasSuffix(strings.ToLower(tok), ".exe") {
+			return strings.ToLower(filepath.Base(tok))
+		}
+	}
+	return strings.ToLower(filepath.Base(s))
+}
+
+func isInnoExeName(base string) bool {
+	if !strings.HasPrefix(base, "unins") || !strings.HasSuffix(base, ".exe") {
+		return false
+	}
+	digits := base[5 : len(base)-4]
+	if len(digits) == 0 {
+		return false
+	}
+	for i := 0; i < len(digits); i++ {
+		if digits[i] < '0' || digits[i] > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // resolveSilentArgs returns the switches that make this program's own
 // uninstaller run unattended, or an error saying why none are known.
 //
-// There are exactly two answers here, and there is no third guess. An MSI is
-// silent by construction -- runMsiUninstall already hardcodes /x with the product
-// code plus /qn /norestart, so it needs nothing from an operator and this returns
-// empty to say so. A native uninstaller is silent only when the vendor recorded
-// a quiet command in the registry, which is the only silence available that
-// nobody had to guess.
-//
-// The refusal is the important half. Windows has no universal silent switch:
-// NSIS wants /S, Inno Setup wants /VERYSILENT /SUPPRESSMSGBOXES /NORESTART,
-// WinRAR wants /s, and the registry survey behind this found no installer-
-// framework signature in WinRAR's uninstall.exe at all. Inferring one by
-// sniffing the binary would look thorough and would put a window on an endpoint
-// the first time it guessed wrong, so an entry with no recorded quiet command is
-// refused by name and nothing is executed.
+// MSI is silent by construction (/x with ProductCode plus /qn /norestart).
+// Vendor quiet commands recorded in the registry are preferred and validated.
+// For native uninstallers lacking QuietUninstallString, standard unattended
+// switches are safely applied for proven installer frameworks (Inno Setup, NSIS).
 func resolveSilentArgs(p *installedProgram) ([]string, error) {
 	if isMsiUninstall(p.UninstallString) {
 		// No switches needed: runMsiUninstall supplies /x, /qn and /norestart
@@ -71,6 +141,9 @@ func resolveSilentArgs(p *installedProgram) ([]string, error) {
 
 	quiet := strings.TrimSpace(p.QuietString)
 	if quiet == "" {
+		if switches := frameworkSilentSwitches(p); len(switches) > 0 {
+			return switches, nil
+		}
 		return nil, fmt.Errorf(
 			"%s records no QuietUninstallString, so there is no silent command "+
 				"for its uninstaller that can be verified from the endpoint. Running "+

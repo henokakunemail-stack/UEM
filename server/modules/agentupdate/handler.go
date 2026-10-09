@@ -488,22 +488,30 @@ func (h *Handler) handleStartCampaign(w http.ResponseWriter, r *http.Request) {
 	_ = h.repo.UpdateCampaignStatus(r.Context(), id, "in_progress")
 	actorID := auth.UserIDFromContext(r.Context())
 
-	dispatchedCount := 0
-	for _, devID := range deviceIDs {
-		dev, err := h.deviceRepo.GetByID(r.Context(), devID)
+	batchSize := campaign.BatchSize
+	if batchSize <= 0 {
+		batchSize = 25
+	}
+	staggerSec := campaign.StaggerIntervalSec
+	if staggerSec < 0 {
+		staggerSec = 0
+	}
+
+	dispatchDevice := func(ctx context.Context, devID string) bool {
+		dev, err := h.deviceRepo.GetByID(ctx, devID)
 		if err != nil {
-			continue
+			return false
 		}
 		if dev.AgentVersionString() == campaign.TargetVersion {
-			continue // already at target version
+			return false // already at target version
 		}
 
 		// Lookup release for this device OS and arch
-		arch := "amd64" // default
-		rel, err := h.repo.GetActiveReleaseForDevice(r.Context(), campaign.TargetVersion, dev.OSName, arch)
+		arch := h.repo.GetDeviceArch(ctx, devID)
+		rel, err := h.repo.GetActiveReleaseForDevice(ctx, campaign.TargetVersion, dev.OSName, arch)
 		if err != nil {
 			log.Warn().Err(err).Str("device", devID).Msg("no active release for device")
-			continue
+			return false
 		}
 
 		now := time.Now().UTC()
@@ -518,15 +526,54 @@ func (h *Handler) handleStartCampaign(w http.ResponseWriter, r *http.Request) {
 			Status:       TaskStatusPending,
 			DispatchedAt: &now,
 		}
-		if err := h.repo.CreateUpdateTask(r.Context(), task); err != nil {
-			continue
+		if err := h.repo.CreateUpdateTask(ctx, task); err != nil {
+			return false
 		}
 
 		if h.hub.Online(devID) {
-			if err := h.SendTask(r.Context(), task, rel); err == nil {
-				dispatchedCount++
+			if err := h.SendTask(ctx, task, rel); err == nil {
+				return true
 			}
 		}
+		return false
+	}
+
+	dispatchedCount := 0
+	firstBatchEnd := batchSize
+	if firstBatchEnd > len(deviceIDs) {
+		firstBatchEnd = len(deviceIDs)
+	}
+
+	for _, devID := range deviceIDs[:firstBatchEnd] {
+		if dispatchDevice(r.Context(), devID) {
+			dispatchedCount++
+		}
+	}
+
+	// If there are subsequent batches, process in background with stagger interval
+	if len(deviceIDs) > firstBatchEnd {
+		remainingIDs := append([]string(nil), deviceIDs[firstBatchEnd:]...)
+		campaignID := campaign.ID
+		go func() {
+			for i := 0; i < len(remainingIDs); i += batchSize {
+				if staggerSec > 0 {
+					time.Sleep(time.Duration(staggerSec) * time.Second)
+				}
+				// Verify campaign is still in progress
+				c, err := h.repo.GetCampaign(context.Background(), campaignID)
+				if err != nil || c.Status == "cancelled" || c.Status == "failed" {
+					log.Info().Str("campaign_id", campaignID).Msg("campaign halted or cancelled; stopping rollout waves")
+					return
+				}
+				end := i + batchSize
+				if end > len(remainingIDs) {
+					end = len(remainingIDs)
+				}
+				for _, devID := range remainingIDs[i:end] {
+					dispatchDevice(context.Background(), devID)
+				}
+			}
+		}()
 	}
 
 	_ = h.auditor.Log(r.Context(), "user", actorID, "agent_update.campaign_start", id, map[string]string{
@@ -561,7 +608,7 @@ func (h *Handler) handleDispatchDeviceUpdate(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	arch := "amd64"
+	arch := h.repo.GetDeviceArch(r.Context(), deviceID)
 	rel, err := h.repo.GetActiveReleaseForDevice(r.Context(), req.TargetVersion, dev.OSName, arch)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{
@@ -716,7 +763,7 @@ func (h *Handler) FlushPendingUpdates(ctx context.Context, deviceID string) erro
 		return nil
 	}
 
-	arch := "amd64" // same default the two dispatch paths use
+	arch := h.repo.GetDeviceArch(ctx, deviceID)
 	for _, task := range tasks {
 		rel, err := h.repo.GetActiveReleaseForDevice(ctx, task.TargetVersion, dev.OSName, arch)
 		if err != nil {

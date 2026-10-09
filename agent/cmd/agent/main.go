@@ -14,7 +14,9 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"os/signal"
+	"runtime"
 	"runtime/debug"
 	"strings"
 	"sync"
@@ -157,6 +159,14 @@ func runRCWorker(cfgArg, credsPath string) {
 
 func runAgent(serverURL, enrollToken, credsPath string, heartbeatSecs int) {
 	log.Info().Str("server", serverURL).Str("creds", credsPath).Msg("agent starting")
+
+	// Cleanup leftover backup binary from previous self-update
+	if execPath, err := os.Executable(); err == nil {
+		oldExec := execPath + ".old"
+		if _, err := os.Stat(oldExec); err == nil {
+			_ = os.Remove(oldExec)
+		}
+	}
 
 	creds, err := enrollment.Load(credsPath)
 	if enrollToken != "" {
@@ -654,7 +664,8 @@ func runAgent(serverURL, enrollToken, credsPath string, heartbeatSecs int) {
 			if err := updateEngine.ApplyUpdate(context.Background(), params); err != nil {
 				log.Error().Err(err).Str("task_id", params.TaskID).Msg("agent self-update failed")
 			} else {
-				log.Info().Str("task_id", params.TaskID).Str("version", params.TargetVersion).Msg("agent self-update completed successfully")
+				log.Info().Str("task_id", params.TaskID).Str("version", params.TargetVersion).Msg("agent self-update completed successfully; triggering process restart")
+				triggerRestart()
 			}
 		}()
 
@@ -814,4 +825,21 @@ func handleServiceAction(action, serverURL, credsPath string) {
 	default:
 		log.Fatal().Str("action", action).Msg("unknown service action (use install, uninstall, start, stop, or status)")
 	}
+}
+
+func triggerRestart() {
+	go func() {
+		time.Sleep(1500 * time.Millisecond) // allow HTTP progress report and WebSocket ACK to finish
+		execPath, err := os.Executable()
+		if err == nil && runtime.GOOS == "windows" {
+			if service.RunAsService() {
+				_ = exec.Command("cmd.exe", "/C", "timeout /t 2 /nobreak > NUL && sc.exe stop endpoint-agent && sc.exe start endpoint-agent").Start()
+			} else {
+				cmd := exec.Command(execPath, os.Args[1:]...)
+				_ = cmd.Start()
+			}
+		}
+		log.Info().Msg("exiting process to allow updated binary to run")
+		os.Exit(0)
+	}()
 }

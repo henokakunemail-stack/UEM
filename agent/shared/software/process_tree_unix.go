@@ -3,6 +3,7 @@
 package software
 
 import (
+	"context"
 	"os/exec"
 	"syscall"
 )
@@ -66,4 +67,8 @@ func (t *processTree) kill(cmd *exec.Cmd) {
 
 func (t *processTree) close() {
 	t.pgid = 0
+}
+
+func (t *processTree) waitForDescendants(ctx context.Context) error {
+	return nil
 }

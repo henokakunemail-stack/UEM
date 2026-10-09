@@ -15,6 +15,7 @@ import {
   AlertCircle,
   X,
   Server,
+  Edit2,
 } from 'lucide-react'
 import { useToast } from '../context/ToastContext'
 import { usePermission } from '../hooks/usePermission'
@@ -26,7 +27,24 @@ import type {
   SoftwarePackageDTO,
   SoftwareDeploymentDTO,
   DeploymentTaskDTO,
+  DeviceDTO,
+  DeviceGroupDTO,
 } from '../types/api'
+
+const INSTALL_ARG_PRESETS = [
+  { label: 'NSIS (/S)', args: '/S', desc: 'Case-sensitive uppercase. Notepad++, VLC' },
+  { label: 'Inno Setup (/VERYSILENT ...)', args: '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART', desc: 'VS Code, Git, etc.' },
+  { label: 'InstallShield (/s /v"/qn")', args: '/s /v"/qn"', desc: 'InstallShield packages' },
+  { label: 'Generic SFX (/s)', args: '/s', desc: 'WinRAR, 7-Zip SFX' },
+  { label: 'MSI wrapper (/quiet /norestart)', args: '/quiet /norestart', desc: 'MSI-wrapped installers' },
+]
+
+const UNINSTALL_ARG_PRESETS = [
+  { label: 'NSIS (/S)', args: '/S' },
+  { label: 'Inno Setup (/VERYSILENT ...)', args: '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART' },
+  { label: 'MSI (/qn /norestart)', args: '/qn /norestart' },
+  { label: 'InstallShield (/s)', args: '/s' },
+]
 
 type PackageType = 'msi' | 'exe' | 'deb' | 'rpm' | 'pkg' | 'script'
 
@@ -57,8 +75,21 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
   const [uploadOS, setUploadOS] = useState<'windows' | 'linux' | 'macos'>('windows')
   const [uploadType, setUploadType] = useState<PackageType>('msi')
   const [uploadInstallArgs, setUploadInstallArgs] = useState('')
+  const [uploadUninstallArgs, setUploadUninstallArgs] = useState('')
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [uploading, setUploading] = useState(false)
+
+  // Edit Package Arguments State
+  const [editingPackage, setEditingPackage] = useState<SoftwarePackageDTO | null>(null)
+  const [editName, setEditName] = useState('')
+  const [editVersion, setEditVersion] = useState('')
+  const [editInstallArgs, setEditInstallArgs] = useState('')
+  const [editUninstallArgs, setEditUninstallArgs] = useState('')
+  const [savingEdit, setSavingEdit] = useState(false)
+
+  // Endpoints and Groups
+  const [devices, setDevices] = useState<DeviceDTO[]>([])
+  const [groups, setGroups] = useState<DeviceGroupDTO[]>([])
 
   // The format is derived from the chosen file rather than asked for, because
   // the one field an operator can get wrong -- declaring an .exe as 'msi' --
@@ -100,6 +131,11 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
     [packages, deployPackageId]
   )
 
+  const selectedDevice = useMemo(
+    () => devices.find((d) => d.id === deployTargetId),
+    [devices, deployTargetId]
+  )
+
   // Task Details Modal State
   const [viewingDeployment, setViewingDeployment] = useState<SoftwareDeploymentDTO | null>(null)
   const [deploymentTasks, setDeploymentTasks] = useState<DeploymentTaskDTO[]>([])
@@ -114,12 +150,16 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
   const fetchData = useCallback(async () => {
     setLoading(true)
     try {
-      const [pkgs, deps] = await Promise.all([
+      const [pkgs, deps, devListRes, grpList] = await Promise.all([
         api.getPackages(),
         api.getDeployments(),
+        api.getDevices(100).catch(() => ({ devices: [] as DeviceDTO[] })),
+        api.getDeviceGroups().catch(() => [] as DeviceGroupDTO[]),
       ])
       setPackages(pkgs)
       setDeployments(deps)
+      setDevices(devListRes.devices || [])
+      setGroups(grpList || [])
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to fetch data'
       setStatusMsg({ type: 'error', text: msg })
@@ -155,6 +195,7 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
       formData.append('os_target', uploadOS)
       formData.append('package_type', uploadType)
       formData.append('install_args', uploadInstallArgs)
+      formData.append('uninstall_args', uploadUninstallArgs)
       formData.append('file', selectedFile)
 
       await api.uploadPackage(formData)
@@ -165,6 +206,7 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
       setUploadName('')
       setUploadVersion('')
       setUploadInstallArgs('')
+      setUploadUninstallArgs('')
       setSelectedFile(null)
       fetchData()
     } catch (err: unknown) {
@@ -173,6 +215,39 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
       toast.error(msg, 'Upload Failed')
     } finally {
       setUploading(false)
+    }
+  }
+
+  const handleSaveEdit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!editingPackage) return
+
+    if (editingPackage.package_type === 'exe' && editInstallArgs.trim() === '') {
+      const msg = 'Install arguments are required for .exe packages'
+      setStatusMsg({ type: 'error', text: msg })
+      toast.error(msg)
+      return
+    }
+
+    setSavingEdit(true)
+    try {
+      await api.updatePackage(editingPackage.id, {
+        name: editName,
+        version: editVersion,
+        install_args: editInstallArgs,
+        uninstall_args: editUninstallArgs,
+      })
+      const successText = `Package ${editName} updated successfully`
+      setStatusMsg({ type: 'success', text: successText })
+      toast.success(successText, 'Package Updated')
+      setEditingPackage(null)
+      fetchData()
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to update package'
+      setStatusMsg({ type: 'error', text: msg })
+      toast.error(msg, 'Update Failed')
+    } finally {
+      setSavingEdit(false)
     }
   }
 
@@ -200,6 +275,19 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
     e.preventDefault()
     if (!deployPackageId || !deployName) {
       setStatusMsg({ type: 'error', text: 'Please complete all required fields' })
+      return
+    }
+
+    if (deployTargetType === 'device' && !deployTargetId) {
+      const msg = 'Please select a target endpoint'
+      setStatusMsg({ type: 'error', text: msg })
+      toast.error(msg)
+      return
+    }
+    if (deployTargetType === 'group' && !deployTargetId) {
+      const msg = 'Please select a device group'
+      setStatusMsg({ type: 'error', text: msg })
+      toast.error(msg)
       return
     }
 
@@ -498,18 +586,39 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
                       <td className="text-right">
                         <div className="action-buttons">
                           {canDeploy && (
-                            <button
-                              type="button"
-                              className="btn btn-sm btn-secondary"
-                              onClick={() => {
-                                setDeployPackageId(pkg.id)
-                                setDeployName(`Deploy ${pkg.name} v${pkg.version}`)
-                                setShowDeployModal(true)
-                              }}
-                            >
-                              <Play size={14} />
-                              <span>Deploy</span>
-                            </button>
+                            <>
+                              <button
+                                type="button"
+                                className="btn btn-sm btn-secondary"
+                                title="Edit Switches"
+                                onClick={() => {
+                                  setEditingPackage(pkg)
+                                  setEditName(pkg.name)
+                                  setEditVersion(pkg.version)
+                                  setEditInstallArgs(pkg.install_args || '')
+                                  setEditUninstallArgs(pkg.uninstall_args || '')
+                                }}
+                              >
+                                <Edit2 size={14} />
+                                <span>Edit</span>
+                              </button>
+                              <button
+                                type="button"
+                                className="btn btn-sm btn-secondary"
+                                onClick={() => {
+                                  setDeployPackageId(pkg.id)
+                                  setDeployName(`Deploy ${pkg.name} v${pkg.version}`)
+                                  const onlineDev = devices.find((d) => d.status === 'online') || devices[0]
+                                  if (onlineDev && !deployTargetId) {
+                                    setDeployTargetId(onlineDev.id)
+                                  }
+                                  setShowDeployModal(true)
+                                }}
+                              >
+                                <Play size={14} />
+                                <span>Deploy</span>
+                              </button>
+                            </>
                           )}
                           {canAdmin && (
                             <button
@@ -770,22 +879,69 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
                 uploadType === 'msi'
                   ? '/qn /norestart'
                   : uploadType === 'exe'
-                    ? '/S   (NSIS) · /VERYSILENT (Inno Setup) · /s (WinRAR SFX)'
+                    ? '/S (NSIS) · /VERYSILENT (Inno Setup) · /s (WinRAR SFX)'
                     : ''
               }
               value={uploadInstallArgs}
               onChange={(e) => setUploadInstallArgs(e.target.value)}
             />
+            {uploadType === 'exe' && (
+              <div className="mt-2 flex flex-wrap gap-1.5 items-center">
+                <span className="text-xs text-dim mr-1">Presets:</span>
+                {INSTALL_ARG_PRESETS.map((preset) => (
+                  <button
+                    key={preset.label}
+                    type="button"
+                    className="btn btn-sm btn-secondary font-mono text-xs py-0.5 px-2"
+                    title={preset.desc}
+                    onClick={() => setUploadInstallArgs(preset.args)}
+                  >
+                    {preset.label}
+                  </button>
+                ))}
+              </div>
+            )}
             <span className="form-hint">
               {uploadType === 'exe'
-                ? 'Required. An .exe with no arguments opens a setup window on the endpoint and blocks there, so there is no safe default — the flag depends on which installer built it.'
+                ? 'Required. Case-sensitive: NSIS requires uppercase /S. Inno Setup requires /VERYSILENT /SUPPRESSMSGBOXES /NORESTART.'
                 : 'Leave blank to use the default silent flags.'}
             </span>
             {needsSilentArgs && selectedFile && (
               <span className="form-hint form-hint-error">
-                {selectedFile.name} has no silent-install arguments yet. Add them above before uploading.
+                {selectedFile.name} has no silent-install arguments yet. Click a preset above or enter arguments before uploading.
               </span>
             )}
+          </div>
+
+          <div className="form-group">
+            <label className="form-label" htmlFor="pkg-uninstall-args">
+              Silent Uninstall Arguments
+              <span className="text-xs text-dim ml-1">(enables remote removal)</span>
+            </label>
+            <input
+              id="pkg-uninstall-args"
+              type="text"
+              className="form-input font-mono"
+              placeholder={uploadType === 'msi' ? '/qn /norestart' : '/S or /VERYSILENT /SUPPRESSMSGBOXES /NORESTART'}
+              value={uploadUninstallArgs}
+              onChange={(e) => setUploadUninstallArgs(e.target.value)}
+            />
+            <div className="mt-2 flex flex-wrap gap-1.5 items-center">
+              <span className="text-xs text-dim mr-1">Presets:</span>
+              {UNINSTALL_ARG_PRESETS.map((preset) => (
+                <button
+                  key={preset.label}
+                  type="button"
+                  className="btn btn-sm btn-secondary font-mono text-xs py-0.5 px-2"
+                  onClick={() => setUploadUninstallArgs(preset.args)}
+                >
+                  {preset.label}
+                </button>
+              ))}
+            </div>
+            <span className="form-hint">
+              Used when remote software removal is dispatched. If blank, remote uninstallation will not be permitted.
+            </span>
           </div>
 
           <div className="form-group">
@@ -810,6 +966,136 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
                 {formatBytes(selectedFile.size)}
               </span>
             )}
+          </div>
+        </form>
+      </Modal>
+
+      {/* EDIT PACKAGE ARGUMENTS MODAL */}
+      <Modal
+        open={editingPackage !== null}
+        onClose={() => !savingEdit && setEditingPackage(null)}
+        title={editingPackage ? `Edit ${editingPackage.name} Switches` : 'Edit Package'}
+        size="md"
+        dismissible={!savingEdit}
+        footer={
+          <>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => setEditingPackage(null)}
+              disabled={savingEdit}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              form="edit-package-form"
+              className="btn btn-primary"
+              disabled={savingEdit}
+            >
+              {savingEdit ? (
+                <>
+                  <RefreshCw size={16} className="spinning" />
+                  <span>Saving...</span>
+                </>
+              ) : (
+                'Save Changes'
+              )}
+            </button>
+          </>
+        }
+      >
+        <form id="edit-package-form" onSubmit={handleSaveEdit}>
+          <div className="form-row">
+            <div className="form-group">
+              <label className="form-label" htmlFor="edit-pkg-name">
+                Package Name
+              </label>
+              <input
+                id="edit-pkg-name"
+                type="text"
+                className="form-input"
+                required
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+              />
+            </div>
+            <div className="form-group">
+              <label className="form-label" htmlFor="edit-pkg-version">
+                Version
+              </label>
+              <input
+                id="edit-pkg-version"
+                type="text"
+                className="form-input font-mono"
+                required
+                value={editVersion}
+                onChange={(e) => setEditVersion(e.target.value)}
+              />
+            </div>
+          </div>
+
+          <div className="form-group">
+            <label className="form-label" htmlFor="edit-pkg-args">
+              Silent Install Arguments
+              {editingPackage?.package_type === 'exe' && <span className="form-label-required">required for .exe</span>}
+            </label>
+            <input
+              id="edit-pkg-args"
+              type="text"
+              className="form-input font-mono"
+              required={editingPackage?.package_type === 'exe'}
+              value={editInstallArgs}
+              onChange={(e) => setEditInstallArgs(e.target.value)}
+            />
+            {editingPackage?.package_type === 'exe' && (
+              <div className="mt-2 flex flex-wrap gap-1.5 items-center">
+                <span className="text-xs text-dim mr-1">Presets:</span>
+                {INSTALL_ARG_PRESETS.map((preset) => (
+                  <button
+                    key={preset.label}
+                    type="button"
+                    className="btn btn-sm btn-secondary font-mono text-xs py-0.5 px-2"
+                    title={preset.desc}
+                    onClick={() => setEditInstallArgs(preset.args)}
+                  >
+                    {preset.label}
+                  </button>
+                ))}
+              </div>
+            )}
+            <span className="form-hint">
+              Case-sensitive switches used during unattended deployment (e.g. /S for NSIS).
+            </span>
+          </div>
+
+          <div className="form-group">
+            <label className="form-label" htmlFor="edit-pkg-uninstall-args">
+              Silent Uninstall Arguments
+            </label>
+            <input
+              id="edit-pkg-uninstall-args"
+              type="text"
+              className="form-input font-mono"
+              value={editUninstallArgs}
+              onChange={(e) => setEditUninstallArgs(e.target.value)}
+            />
+            <div className="mt-2 flex flex-wrap gap-1.5 items-center">
+              <span className="text-xs text-dim mr-1">Presets:</span>
+              {UNINSTALL_ARG_PRESETS.map((preset) => (
+                <button
+                  key={preset.label}
+                  type="button"
+                  className="btn btn-sm btn-secondary font-mono text-xs py-0.5 px-2"
+                  onClick={() => setEditUninstallArgs(preset.args)}
+                >
+                  {preset.label}
+                </button>
+              ))}
+            </div>
+            <span className="form-hint">
+              Required for software removal via Software Deployments.
+            </span>
           </div>
         </form>
       </Modal>
@@ -922,7 +1208,18 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
                 id="deploy-scope"
                 className="form-select"
                 value={deployTargetType}
-                onChange={(e) => setDeployTargetType(e.target.value as typeof deployTargetType)}
+                onChange={(e) => {
+                  const newType = e.target.value as typeof deployTargetType
+                  setDeployTargetType(newType)
+                  if (newType === 'device') {
+                    const online = devices.find((d) => d.status === 'online') || devices[0]
+                    setDeployTargetId(online ? online.id : '')
+                  } else if (newType === 'group') {
+                    setDeployTargetId(groups[0] ? groups[0].id : '')
+                  } else {
+                    setDeployTargetId('')
+                  }
+                }}
               >
                 <option value="all">All Compatible Devices</option>
                 <option value="group">Static Device Group</option>
@@ -931,17 +1228,96 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
             </div>
             <div className="form-group">
               <label className="form-label" htmlFor="deploy-target-id">
-                Target ID
+                {deployTargetType === 'device'
+                  ? 'Target Endpoint'
+                  : deployTargetType === 'group'
+                    ? 'Target Device Group'
+                    : 'Target Scope'}
               </label>
-              <input
-                id="deploy-target-id"
-                type="text"
-                className="form-input"
-                disabled={deployTargetType === 'all'}
-                placeholder={deployTargetType === 'all' ? '(Applies to all fleet)' : 'Enter Group ID or Device ID'}
-                value={deployTargetId}
-                onChange={(e) => setDeployTargetId(e.target.value)}
-              />
+              {deployTargetType === 'device' ? (
+                <>
+                  <select
+                    id="deploy-target-id"
+                    className="form-select"
+                    required
+                    value={deployTargetId}
+                    onChange={(e) => setDeployTargetId(e.target.value)}
+                  >
+                    <option value="" disabled>
+                      Select an endpoint...
+                    </option>
+                    {devices.map((d) => {
+                      const isOnline = d.status === 'online'
+                      const osMatch =
+                        !selectedDeployPkg?.os_target ||
+                        selectedDeployPkg.os_target.toLowerCase() === d.os_name.toLowerCase()
+                      return (
+                        <option key={d.id} value={d.id}>
+                          {isOnline ? '🟢' : '⚪'} {d.hostname} ({isOnline ? 'Online' : 'Offline'} · {d.os_name}
+                          {!osMatch ? ' · OS Mismatch' : ''})
+                        </option>
+                      )
+                    })}
+                  </select>
+                  {devices.length === 0 && (
+                    <span className="form-hint form-hint-error">
+                      No enrolled endpoints found. Agents must be registered first.
+                    </span>
+                  )}
+                  {selectedDevice && (
+                    <span className="form-hint">
+                      {selectedDevice.status === 'online' ? (
+                        <span className="text-success font-semibold">
+                          🟢 {selectedDevice.hostname} is online via WebSocket. Deployment will dispatch immediately.
+                        </span>
+                      ) : (
+                        <span className="text-warning">
+                          ⚪ {selectedDevice.hostname} is offline. Task will queue and execute when agent reconnects.
+                        </span>
+                      )}
+                      {selectedDeployPkg?.os_target &&
+                        selectedDeployPkg.os_target.toLowerCase() !== selectedDevice.os_name.toLowerCase() && (
+                          <div className="text-danger mt-1">
+                            ⚠️ Warning: Package targets <strong>{selectedDeployPkg.os_target}</strong>, but{' '}
+                            {selectedDevice.hostname} runs <strong>{selectedDevice.os_name}</strong>.
+                          </div>
+                        )}
+                    </span>
+                  )}
+                </>
+              ) : deployTargetType === 'group' ? (
+                <>
+                  <select
+                    id="deploy-target-id"
+                    className="form-select"
+                    required
+                    value={deployTargetId}
+                    onChange={(e) => setDeployTargetId(e.target.value)}
+                  >
+                    <option value="" disabled>
+                      Select a device group...
+                    </option>
+                    {groups.map((grp) => (
+                      <option key={grp.id} value={grp.id}>
+                        📁 {grp.name} ({grp.member_count} {grp.member_count === 1 ? 'device' : 'devices'})
+                      </option>
+                    ))}
+                  </select>
+                  {groups.length === 0 && (
+                    <span className="form-hint form-hint-error">
+                      No device groups exist. Create groups in Device Management or select Single Endpoint.
+                    </span>
+                  )}
+                </>
+              ) : (
+                <input
+                  id="deploy-target-id"
+                  type="text"
+                  className="form-input text-dim"
+                  disabled
+                  value={`All active ${selectedDeployPkg?.os_target || 'compatible'} endpoints in fleet`}
+                />
+              )}
             </div>
           </div>
 

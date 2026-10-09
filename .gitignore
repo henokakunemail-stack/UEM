@@ -57,3 +57,6 @@ pic/
 # Session-to-session handoff notes. Useful locally, noise in a public repo:
 # it describes what the next session should do rather than what the code is.
 progress.md
+
+# Log files
+*.log

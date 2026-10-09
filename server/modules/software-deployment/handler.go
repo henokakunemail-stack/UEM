@@ -127,6 +127,7 @@ func (h *Handler) Register(r chi.Router) {
 		r.With(rbac.RequireRole(rbac.RoleViewer)).Get("/api/software/packages", h.listPackages)
 		r.With(rbac.RequireRole(rbac.RoleViewer)).Get("/api/software/packages/{id}", h.getPackage)
 		r.With(rbac.RequireRole(rbac.RoleTechnician)).Post("/api/software/packages", h.uploadPackage)
+		r.With(rbac.RequireRole(rbac.RoleTechnician)).Put("/api/software/packages/{id}", h.updatePackage)
 		r.With(rbac.RequireRole(rbac.RoleAdmin)).Delete("/api/software/packages/{id}", h.deletePackage)
 
 		// Deployments
@@ -141,6 +142,7 @@ func (h *Handler) Register(r chi.Router) {
 		// package_id, and a program violating policy on an endpoint is by
 		// definition one nobody deployed from the catalog.
 		r.With(rbac.RequireRole(rbac.RoleTechnician)).Post("/api/devices/{id}/software/uninstall", h.uninstallDeviceSoftware)
+		r.With(rbac.RequireRole(rbac.RoleViewer)).Get("/api/devices/{id}/commands/{cmdId}", h.getDeviceCommand)
 	})
 
 	// Agent Endpoints (Authenticated via device header or unauthenticated download token)
@@ -328,6 +330,65 @@ func (h *Handler) deletePackage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
+type UpdatePackageRequest struct {
+	Name          string `json:"name"`
+	Version       string `json:"version"`
+	InstallArgs   string `json:"install_args"`
+	UninstallArgs string `json:"uninstall_args"`
+}
+
+func (h *Handler) updatePackage(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	var req UpdatePackageRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	pkg, err := h.repo.GetPackage(r.Context(), id)
+	if errors.Is(err, ErrNotFound) {
+		writeErr(w, http.StatusNotFound, "package not found")
+		return
+	}
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		name = pkg.Name
+	}
+	version := strings.TrimSpace(req.Version)
+	if version == "" {
+		version = pkg.Version
+	}
+
+	if pkg.PackageType == PkgTypeEXE && strings.TrimSpace(req.InstallArgs) == "" {
+		writeErr(w, http.StatusBadRequest, "install_args is required for an .exe package")
+		return
+	}
+
+	if err := h.repo.UpdatePackageArgs(r.Context(), id, name, version, req.InstallArgs, req.UninstallArgs); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	pkg.Name = name
+	pkg.Version = version
+	pkg.InstallArgs = req.InstallArgs
+	pkg.UninstallArgs = req.UninstallArgs
+
+	actorID := auth.UserIDFromContext(r.Context())
+	if h.audit != nil {
+		_ = h.audit.Log(r.Context(), "user", actorID, "software.update", id, map[string]string{
+			"package_name": name,
+		})
+	}
+
+	writeJSON(w, http.StatusOK, pkg)
 }
 
 func (h *Handler) createDeployment(w http.ResponseWriter, r *http.Request) {
@@ -609,6 +670,21 @@ func (h *Handler) uninstallDeviceSoftware(w http.ResponseWriter, r *http.Request
 		"command_id":    cmdID,
 		"software_name": name,
 	})
+}
+
+func (h *Handler) getDeviceCommand(w http.ResponseWriter, r *http.Request) {
+	deviceID := chi.URLParam(r, "id")
+	cmdID := chi.URLParam(r, "cmdId")
+	cmd, err := h.repo.GetAgentCommand(r.Context(), cmdID, deviceID)
+	if errors.Is(err, ErrNotFound) {
+		writeErr(w, http.StatusNotFound, "command not found")
+		return
+	}
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, cmd)
 }
 
 func (h *Handler) listDeployments(w http.ResponseWriter, r *http.Request) {

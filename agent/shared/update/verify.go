@@ -71,6 +71,19 @@ func verifySwappedBinary(path string) error {
 		return nil
 	}
 
+	if runtime.GOOS == "darwin" {
+		if n < 4 {
+			return errors.New("not a macOS executable: missing the Mach-O header")
+		}
+		magic := binary.BigEndian.Uint32(header[:4])
+		magicLE := binary.LittleEndian.Uint32(header[:4])
+		if magic == 0xfeedface || magic == 0xfeedfacf || magic == 0xcafebabe || magic == 0xcafebabf ||
+			magicLE == 0xfeedface || magicLE == 0xfeedfacf || magicLE == 0xcafebabe || magicLE == 0xcafebabf {
+			return nil
+		}
+		return errors.New("not a macOS executable: missing the Mach-O header")
+	}
+
 	// ELF: "\x7fELF".
 	if n < 4 || header[0] != 0x7f || header[1] != 'E' || header[2] != 'L' || header[3] != 'F' {
 		return errors.New("not an ELF executable: missing the ELF header")

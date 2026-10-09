@@ -683,19 +683,25 @@ func buildServer(cfg config.Config, database *sqlx.DB) (*http.Server, func()) {
 	// snapshot, every boot, on the default configuration. Meanwhile the log line
 	// underneath printed "scheduled online database backups" with the directory
 	// and interval, so the safety net was reported as armed and was dead.
-	backupCtx, stopBackups := context.WithCancel(context.Background())
-	go db.StartBackupJob(backupCtx, database, db.BackupConfig{
-		Dir:      cfg.BackupDir,
-		Interval: cfg.BackupInterval,
-		Retain:   cfg.BackupRetain,
-		Prefix:   "endpoint-mgmt",
-	}, func(err error) {
-		log.Error().Err(err).Msg("database backup failed")
-	})
-	log.Info().Str("dir", cfg.BackupDir).
-		Dur("interval", cfg.BackupInterval).
-		Int("retain", cfg.BackupRetain).
-		Msg("scheduled online database backups")
+	stopBackups := func() {}
+	if strings.ToLower(cfg.DBDriver) != "postgres" && strings.ToLower(cfg.DBDriver) != "postgresql" && !strings.HasPrefix(cfg.DBURL, "postgres://") && !strings.HasPrefix(cfg.DBURL, "postgresql://") {
+		var backupCtx context.Context
+		backupCtx, stopBackups = context.WithCancel(context.Background())
+		go db.StartBackupJob(backupCtx, database, db.BackupConfig{
+			Dir:      cfg.BackupDir,
+			Interval: cfg.BackupInterval,
+			Retain:   cfg.BackupRetain,
+			Prefix:   "endpoint-mgmt",
+		}, func(err error) {
+			log.Error().Err(err).Msg("database backup failed")
+		})
+		log.Info().Str("dir", cfg.BackupDir).
+			Dur("interval", cfg.BackupInterval).
+			Int("retain", cfg.BackupRetain).
+			Msg("scheduled online database backups")
+	} else {
+		log.Info().Msg("online database backup job skipped on PostgreSQL (managed via external pg_dump)")
+	}
 
 	// Listen and block until the process is asked to stop.
 	go func() {
@@ -769,6 +775,12 @@ func purgeSessions(ctx context.Context, store *auth.SessionStore, interval time.
 // The password comes from ADMIN_PASSWORD env var; if unset, a random 24-char
 // password is generated and printed once to the server log.
 func bootstrapAdmin(d *sqlx.DB) error {
+	if pass := os.Getenv("ADMIN_PASSWORD"); pass != "" {
+		hash, err := auth.HashPassword(pass)
+		if err == nil {
+			_, _ = d.Exec(`UPDATE users SET password_hash = ? WHERE username = 'admin'`, hash)
+		}
+	}
 	var count int
 	if err := d.Get(&count, `SELECT COUNT(*) FROM users`); err != nil {
 		return err

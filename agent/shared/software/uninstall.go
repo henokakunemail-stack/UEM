@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // UninstallPayload is what the server sends for a software.uninstall command.
@@ -73,7 +74,49 @@ func Uninstall(ctx context.Context, payload UninstallPayload) (exitCode int, out
 		return -1, "", err
 	}
 
-	return runPlatformUninstall(ctx, target, args)
+	exitCode, output, runErr := runPlatformUninstall(ctx, target, args)
+	if runErr != nil && isRebootRequiredExit(target, exitCode) {
+		return exitCode, output, nil
+	}
+	if runErr == nil {
+		if verifyErr := verifyUninstalled(ctx, target.Name); verifyErr != nil {
+			return exitCode, output, verifyErr
+		}
+	}
+	return exitCode, output, runErr
+}
+
+// findInstalledFn is indirected so tests can exercise verification without touching OS registry.
+var findInstalledFn = findInstalled
+
+// verifyUninstalled asserts that the target software was actually removed from
+// the endpoint. It re-queries findInstalled with bounded polling to give OS
+// caches and registry flushes a few seconds to settle. If the program remains
+// installed, it returns an error to prevent reporting false success.
+func verifyUninstalled(ctx context.Context, name string) error {
+	deadline := time.Now().Add(10 * time.Second)
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		found, err := findInstalledFn(ctx, name)
+		if err != nil {
+			return err
+		}
+		if len(found) == 0 {
+			return nil
+		}
+
+		if time.Now().After(deadline) {
+			return fmt.Errorf("%s remains registered on endpoint after uninstaller completed", name)
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
 }
 
 // resolveTarget finds the one installed program a name refers to, or refuses.
@@ -91,7 +134,7 @@ func Uninstall(ctx context.Context, payload UninstallPayload) (exitCode int, out
 //     program on a box that also has Edge WebView2 Runtime
 //   - several matches are reported, never guessed at; there is no undo
 func resolveTarget(ctx context.Context, packageName string) (*installedProgram, error) {
-	found, err := findInstalled(ctx, packageName)
+	found, err := findInstalledFn(ctx, packageName)
 	if err != nil {
 		return nil, err
 	}
@@ -161,6 +204,8 @@ type installedProgram struct {
 	// uninstall turns into an interactive one.
 	UninstallString string
 	QuietString     string
+	// Framework records an identified installer framework (e.g. "inno", "nsis").
+	Framework string
 	// PackageID is the platform-native identity (a dpkg name, an rpm label, a
 	// pkg receipt id) and is the only thing an OS-native uninstaller is invoked
 	// by. Empty on Windows, where the recorded command is the mechanism.
