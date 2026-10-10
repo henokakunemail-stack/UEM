@@ -299,7 +299,7 @@ export const NetworkFilterPage: React.FC = () => {
     }
     try {
       const created = await api.createFilterPolicy(newPolicy)
-      const text = `Policy '${created.name}' created. Add rules, then sync devices to enforce.`
+      const text = `Policy '${created.name}' created.`
       setMsg({ type: 'success', text })
       toast.success(text, 'Policy Created')
       setIsPolicyModalOpen(false)
@@ -389,7 +389,7 @@ export const NetworkFilterPage: React.FC = () => {
           : retargetForm.target_type === 'group'
             ? `group '${groupName(retargetForm.target_id)}'`
             : `'${deviceName(retargetForm.target_id)}'`
-      const text = `Policy '${retargeting.name}' now applies to ${scope}. Sync the affected devices to apply it.`
+      const text = `Policy '${retargeting.name}' now applies to ${scope}. Changes dispatched to online devices.`
       setMsg({ type: 'success', text })
       toast.success(text, 'Policy Re-targeted')
       setRetargeting(null)
@@ -407,7 +407,7 @@ export const NetworkFilterPage: React.FC = () => {
     setDeleting(true)
     try {
       await api.deleteFilterRule(id)
-      const text = `Rule '${pattern}' deleted. Devices keep the old list until their next sync.`
+      const text = `Rule '${pattern}' deleted. Access restored on online devices.`
       setMsg({ type: 'success', text })
       toast.info(text)
       setRulePendingDelete(null)

@@ -34,10 +34,12 @@ func (m *windowsManager) Install() error {
 	binPath := windowsBinPath(m.cfg, exePath)
 
 	// Create service via sc.exe (Standard Windows Service Control Manager)
+	// Explicitly assign obj= LocalSystem to guarantee maximum administrator/system privileges.
 	createArgs := []string{
 		"create", m.cfg.Name,
 		"binPath=", binPath,
 		"start=", "auto",
+		"obj=", "LocalSystem",
 		"DisplayName=", m.cfg.DisplayName,
 	}
 	if out, err := exec.Command("sc.exe", createArgs...).CombinedOutput(); err != nil {

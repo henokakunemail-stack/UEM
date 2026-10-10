@@ -117,6 +117,10 @@ func (r *TerminalRelay) AcceptTerminalData(ctx context.Context, deviceID string,
 		log.Debug().Str("session_id", sessionID).Msg("terminal data for unknown or closed session")
 		return nil
 	}
+	if sess.DeviceID != deviceID {
+		log.Warn().Str("session_id", sessionID).Str("expected_device", sess.DeviceID).Str("actual_device", deviceID).Msg("terminal data rejected: device mismatch")
+		return errors.New("terminal session does not belong to reporting device")
+	}
 	return sess.WriteToBrowser("term.data", data)
 }
 
@@ -125,6 +129,10 @@ func (r *TerminalRelay) AcceptTerminalClose(ctx context.Context, deviceID string
 	sess := r.Get(sessionID)
 	if sess == nil {
 		return nil
+	}
+	if sess.DeviceID != deviceID {
+		log.Warn().Str("session_id", sessionID).Str("expected_device", sess.DeviceID).Str("actual_device", deviceID).Msg("terminal close rejected: device mismatch")
+		return errors.New("terminal session does not belong to reporting device")
 	}
 	_ = sess.WriteToBrowser("term.close", "Shell process terminated by remote host.")
 	r.Unregister(sessionID)

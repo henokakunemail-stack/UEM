@@ -5,6 +5,7 @@
 !include "MUI2.nsh"
 !include "LogicLib.nsh"
 !include "nsDialogs.nsh"
+!include "FileFunc.nsh"
 
 ; --- General Settings ---
 Name "Endpoint Management Agent"
@@ -12,19 +13,17 @@ OutFile "EndpointAgent-Setup.exe"
 Unicode True
 RequestExecutionLevel admin
 
+!define SERVICE_NAME "endpoint-agent"
+!define SERVICE_KEY "Software\EndpointAgent"
+!define UNINSTALL_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\EndpointAgent"
+
 InstallDir "$PROGRAMFILES64\EndpointAgent"
-InstallDirRegKey HKLM "Software\EndpointAgent" "InstallDir"
+InstallDirRegKey HKLM "${SERVICE_KEY}" "InstallDir"
 
 ; --- Version Information ---
-; /DVERSION= and /DVERSION_NUM= are both passed by build.ps1, derived from the
-; repository's VERSION file. The defaults below keep a direct makensis run
-; from failing on undefined macros; they exist so the script compiles, not
-; because 1.0.0 is special anywhere else.
 !ifndef VERSION
   !define VERSION "1.0.0"
 !endif
-; VIProductVersion wants four numeric components, so the build script passes
-; 1.0.0 as 1.0.0.0 separately rather than rendering "${VERSION}.0" here.
 !ifndef VERSION_NUM
   !define VERSION_NUM "1.0.0.0"
 !endif
@@ -44,6 +43,7 @@ Var ServerURL
 Var LabelToken
 Var TextToken
 Var EnrollToken
+Var DATADIR
 
 ; --- Interface Settings ---
 !define MUI_ABORTWARNING
@@ -65,6 +65,14 @@ Page custom ServerConfigPage ServerConfigPageLeave
 ; --- Languages ---
 !insertmacro MUI_LANGUAGE "English"
 
+; ------------------------------------------------------------------------------
+; Path Resolution Macro
+; ------------------------------------------------------------------------------
+!macro ResolvePaths
+    SetShellVarContext all
+    StrCpy $DATADIR "$APPDATA\EndpointAgent"
+!macroend
+
 ; --- Custom Page: Server & Enrollment Configuration ---
 Function ServerConfigPage
     !insertmacro MUI_HEADER_TEXT "Server Configuration" "Enter central management server URL and optional enrollment token."
@@ -78,7 +86,7 @@ Function ServerConfigPage
     ${NSD_CreateLabel} 0 0 100% 12u "Management Server URL (HTTPS/WSS):"
     Pop $LabelServer
 
-    ${NSD_CreateText} 0 14u 100% 12u "https://mgmt.example.com"
+    ${NSD_CreateText} 0 14u 100% 12u "http://localhost:8443"
     Pop $TextServer
 
     ; Enrollment Token Label and Textbox
@@ -88,7 +96,7 @@ Function ServerConfigPage
     ${NSD_CreateText} 0 48u 100% 12u ""
     Pop $TextToken
 
-    ${NSD_CreateLabel} 0 70u 100% 24u "Note: If enrollment token is left empty, agent binary will be installed but service will not enroll automatically until token is provided via CLI."
+    ${NSD_CreateLabel} 0 70u 100% 24u "Note: If enrollment token is left empty, the agent service will be installed with Administrator (LocalSystem) rights and will enroll once a token is supplied."
     Pop $LabelToken
 
     nsDialogs::Show
@@ -106,18 +114,19 @@ FunctionEnd
 
 ; --- Installer Section ---
 Section "Install Agent" SecInstall
+    !insertmacro ResolvePaths
     SetOutPath "$INSTDIR"
 
     ; 1. Copy agent binary
     File "/oname=endpoint-agent.exe" "..\..\agent-windows-amd64.exe"
 
     ; 2. Ensure system-wide ProgramData directory exists for credentials
-    CreateDirectory "$COMMONAPPDATA\EndpointAgent"
+    CreateDirectory "$DATADIR"
 
     ; 3. Run Enrollment if token provided
     ${If} $EnrollToken != ""
         DetailPrint "Enrolling device with central server..."
-        nsExec::ExecToLog '"$INSTDIR\endpoint-agent.exe" -server "$ServerURL" -enroll "$EnrollToken" -creds "$COMMONAPPDATA\EndpointAgent\creds.json"'
+        nsExec::ExecToLog '"$INSTDIR\endpoint-agent.exe" -server "$ServerURL" -enroll "$EnrollToken" -creds "$DATADIR\creds.json"'
         Pop $0
         ${If} $0 != 0
             DetailPrint "Warning: Enrollment returned code $0. Service registration will continue."
@@ -126,16 +135,16 @@ Section "Install Agent" SecInstall
         ${EndIf}
     ${EndIf}
 
-    ; 4. Register Windows Service under Service Control Manager
-    DetailPrint "Registering Windows Service 'endpoint-agent'..."
-    nsExec::ExecToLog '"$INSTDIR\endpoint-agent.exe" -server "$ServerURL" -creds "$COMMONAPPDATA\EndpointAgent\creds.json" -service install'
+    ; 4. Register Windows Service under Service Control Manager (runs as LocalSystem)
+    DetailPrint "Registering Windows Service '${SERVICE_NAME}' as LocalSystem..."
+    nsExec::ExecToLog '"$INSTDIR\endpoint-agent.exe" -server "$ServerURL" -creds "$DATADIR\creds.json" -service install'
     Pop $0
     ${If} $0 != 0
         DetailPrint "Service install command exited with code $0"
     ${EndIf}
 
     ; 5. Start Windows Service
-    DetailPrint "Starting Windows Service 'endpoint-agent'..."
+    DetailPrint "Starting Windows Service '${SERVICE_NAME}'..."
     nsExec::ExecToLog '"$INSTDIR\endpoint-agent.exe" -service start'
     Pop $0
     ${If} $0 != 0
@@ -143,16 +152,17 @@ Section "Install Agent" SecInstall
     ${EndIf}
 
     ; 6. Write registry keys for uninstaller
-    WriteRegStr HKLM "Software\EndpointAgent" "InstallDir" "$INSTDIR"
-    WriteRegStr HKLM "Software\EndpointAgent" "ServerURL" "$ServerURL"
+    WriteRegStr HKLM "${SERVICE_KEY}" "InstallDir" "$INSTDIR"
+    WriteRegStr HKLM "${SERVICE_KEY}" "ServerURL" "$ServerURL"
+    WriteRegStr HKLM "${SERVICE_KEY}" "DataDir" "$DATADIR"
 
-    WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\EndpointAgent" "DisplayName" "Endpoint Management Agent"
-    WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\EndpointAgent" "UninstallString" '"$INSTDIR\uninstall.exe"'
-    WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\EndpointAgent" "DisplayIcon" '"$INSTDIR\endpoint-agent.exe"'
-    WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\EndpointAgent" "DisplayVersion" "${VERSION}"
-    WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\EndpointAgent" "Publisher" "Enterprise Endpoint Management"
-    WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\EndpointAgent" "NoModify" 1
-    WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\EndpointAgent" "NoRepair" 1
+    WriteRegStr HKLM "${UNINSTALL_KEY}" "DisplayName" "Endpoint Management Agent"
+    WriteRegStr HKLM "${UNINSTALL_KEY}" "UninstallString" '"$INSTDIR\uninstall.exe"'
+    WriteRegStr HKLM "${UNINSTALL_KEY}" "DisplayIcon" '"$INSTDIR\endpoint-agent.exe"'
+    WriteRegStr HKLM "${UNINSTALL_KEY}" "DisplayVersion" "${VERSION}"
+    WriteRegStr HKLM "${UNINSTALL_KEY}" "Publisher" "Enterprise Endpoint Management"
+    WriteRegDWORD HKLM "${UNINSTALL_KEY}" "NoModify" 1
+    WriteRegDWORD HKLM "${UNINSTALL_KEY}" "NoRepair" 1
 
     ; 7. Create Uninstaller
     WriteUninstaller "$INSTDIR\uninstall.exe"
@@ -162,11 +172,16 @@ SectionEnd
 
 ; --- Uninstaller Section ---
 Section "Uninstall"
-    DetailPrint "Stopping Windows Service 'endpoint-agent'..."
+    !insertmacro ResolvePaths
+
+    ; Move working directory out of install tree
+    SetOutPath "$TEMP"
+
+    DetailPrint "Stopping Windows Service '${SERVICE_NAME}'..."
     nsExec::ExecToLog '"$INSTDIR\endpoint-agent.exe" -service stop'
     Pop $0
 
-    DetailPrint "Removing Windows Service 'endpoint-agent'..."
+    DetailPrint "Removing Windows Service '${SERVICE_NAME}'..."
     nsExec::ExecToLog '"$INSTDIR\endpoint-agent.exe" -service uninstall'
     Pop $0
 
@@ -179,13 +194,13 @@ Section "Uninstall"
     RMDir "$INSTDIR"
 
     ; Clean up system credentials and log cache
-    Delete "$COMMONAPPDATA\EndpointAgent\creds.json"
-    Delete "$COMMONAPPDATA\EndpointAgent\*.log"
-    RMDir "$COMMONAPPDATA\EndpointAgent"
+    Delete "$DATADIR\creds.json"
+    Delete "$DATADIR\*.log"
+    RMDir /r "$DATADIR"
 
     ; Remove Registry entries
-    DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\EndpointAgent"
-    DeleteRegKey HKLM "Software\EndpointAgent"
+    DeleteRegKey HKLM "${UNINSTALL_KEY}"
+    DeleteRegKey HKLM "${SERVICE_KEY}"
 
     DetailPrint "Endpoint Agent uninstalled successfully."
 SectionEnd

@@ -458,11 +458,15 @@ func (h *WSHandler) handleCommandResult(ctx context.Context, c *Conn, env Envelo
 	if env.Status == "failed" {
 		status = "failed"
 	}
-	_, err := h.db.ExecContext(ctx, `
-		UPDATE agent_commands SET status = ?, completed_at = ?, result = ? WHERE id = ?`,
-		status, time.Now().UTC(), resultJSON, env.ID)
+	res, err := h.db.ExecContext(ctx, `
+		UPDATE agent_commands SET status = ?, completed_at = ?, result = ? WHERE id = ? AND device_id = ?`,
+		status, time.Now().UTC(), resultJSON, env.ID, c.DeviceID)
 	if err != nil {
 		log.Error().Err(err).Str("device", c.DeviceID).Str("cmd", env.ID).Msg("update command result")
+		return
+	}
+	if rows, _ := res.RowsAffected(); rows == 0 {
+		log.Warn().Str("device", c.DeviceID).Str("cmd", env.ID).Msg("command result ignored: no matching command for device")
 	}
 }
 

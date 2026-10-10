@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -57,6 +58,35 @@ func (s *Session) Live(now time.Time) bool {
 	return !s.Revoked && s.ExpiresAt.After(now)
 }
 
+type sessionCacheEntry struct {
+	live      bool
+	expiresAt time.Time
+}
+
+type sessionCache struct {
+	mu    sync.RWMutex
+	items map[string]sessionCacheEntry
+}
+
+var (
+	globalSessionCachesMu sync.Mutex
+	globalSessionCaches   = make(map[*sqlx.DB]*sessionCache)
+)
+
+func getSessionCache(db *sqlx.DB) *sessionCache {
+	if db == nil {
+		return &sessionCache{items: make(map[string]sessionCacheEntry)}
+	}
+	globalSessionCachesMu.Lock()
+	defer globalSessionCachesMu.Unlock()
+	c, ok := globalSessionCaches[db]
+	if !ok {
+		c = &sessionCache{items: make(map[string]sessionCacheEntry)}
+		globalSessionCaches[db] = c
+	}
+	return c
+}
+
 // SessionStore is the server-side authority for refresh tokens. The JWT says who
 // a caller is; only this table says whether they still are allowed to renew.
 type SessionStore struct {
@@ -65,10 +95,31 @@ type SessionStore struct {
 	// never outlive the token it backs, and so Rotate cannot be handed a caller
 	// that made the two disagree.
 	refreshTTL time.Duration
+	cache      *sessionCache
 }
 
 func NewSessionStore(db *sqlx.DB, refreshTTL time.Duration) *SessionStore {
-	return &SessionStore{db: db, refreshTTL: refreshTTL}
+	return &SessionStore{
+		db:         db,
+		refreshTTL: refreshTTL,
+		cache:      getSessionCache(db),
+	}
+}
+
+func (s *SessionStore) invalidateCache(jti string) {
+	if s.cache != nil {
+		s.cache.mu.Lock()
+		delete(s.cache.items, jti)
+		s.cache.mu.Unlock()
+	}
+}
+
+func (s *SessionStore) invalidateAllCache() {
+	if s.cache != nil {
+		s.cache.mu.Lock()
+		s.cache.items = make(map[string]sessionCacheEntry)
+		s.cache.mu.Unlock()
+	}
 }
 
 const sessionColumns = `jti, user_id, username, role, revoked, revoked_at, rotated_to,
@@ -114,16 +165,43 @@ func (s *SessionStore) Get(ctx context.Context, jti string) (*Session, error) {
 // errors fail closed at the caller, but they are also reported, so an outage is
 // visible instead of looking like a fleet-wide logout.
 func (s *SessionStore) IsLive(ctx context.Context, jti string) (bool, error) {
+	if s.cache != nil {
+		s.cache.mu.RLock()
+		if entry, ok := s.cache.items[jti]; ok && time.Now().UTC().Before(entry.expiresAt) {
+			s.cache.mu.RUnlock()
+			return entry.live, nil
+		}
+		s.cache.mu.RUnlock()
+	}
+
 	var ok int
 	err := s.db.GetContext(ctx, &ok, `
 		SELECT 1 FROM auth_sessions
 		WHERE jti = ? AND revoked = 0 AND expires_at > ?`,
 		jti, time.Now().UTC())
 	if errors.Is(err, sql.ErrNoRows) {
+		if s.cache != nil {
+			s.cache.mu.Lock()
+			s.cache.items[jti] = sessionCacheEntry{live: false, expiresAt: time.Now().UTC().Add(15 * time.Second)}
+			s.cache.mu.Unlock()
+		}
 		return false, nil
 	}
 	if err != nil {
 		return false, err
+	}
+	if s.cache != nil {
+		s.cache.mu.Lock()
+		if len(s.cache.items) > 10000 {
+			now := time.Now().UTC()
+			for k, v := range s.cache.items {
+				if now.After(v.expiresAt) {
+					delete(s.cache.items, k)
+				}
+			}
+		}
+		s.cache.items[jti] = sessionCacheEntry{live: true, expiresAt: time.Now().UTC().Add(15 * time.Second)}
+		s.cache.mu.Unlock()
 	}
 	return true, nil
 }
@@ -179,7 +257,11 @@ func (s *SessionStore) Rotate(ctx context.Context, oldJTI, newJTI string) error 
 		now, now, now.Add(s.refreshTTL), prev.CreatedIP); err != nil {
 		return err
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	s.invalidateCache(oldJTI)
+	return nil
 }
 
 // Revoke withdraws a single session. Revoking an already-revoked or unknown jti
@@ -198,6 +280,7 @@ func (s *SessionStore) RevokeForUser(ctx context.Context, jti, userID string) er
 }
 
 func (s *SessionStore) revoke(ctx context.Context, jti, userID string, scoped bool) error {
+	defer s.invalidateCache(jti)
 	query := `UPDATE auth_sessions SET revoked = 1, revoked_at = ? WHERE jti = ? AND revoked = 0`
 	args := []any{time.Now().UTC(), jti}
 	if scoped {
@@ -242,6 +325,7 @@ func (s *SessionStore) RevokeAllForUser(ctx context.Context, userID string) erro
 	if userID == "" {
 		return nil
 	}
+	defer s.invalidateAllCache()
 	_, err := s.db.ExecContext(ctx,
 		`UPDATE auth_sessions SET revoked = 1, revoked_at = ? WHERE user_id = ? AND revoked = 0`,
 		time.Now().UTC(), userID)
@@ -272,6 +356,7 @@ func (s *SessionStore) ListActive(ctx context.Context, userID string) ([]Session
 // row's expires_at is written at or after its token's exp, so nothing still
 // verifiable is ever removed.
 func (s *SessionStore) PurgeExpired(ctx context.Context) error {
+	defer s.invalidateAllCache()
 	_, err := s.db.ExecContext(ctx, `DELETE FROM auth_sessions WHERE expires_at <= ?`, time.Now().UTC())
 	return err
 }

@@ -1,6 +1,9 @@
 package httpguard
 
 import (
+	"bufio"
+	"errors"
+	"net"
 	"net/http"
 	"strings"
 )
@@ -30,6 +33,7 @@ func DefaultSecurityHeaders(isTLS bool) SecurityHeadersConfig {
 		FrameOptions:       "DENY",
 		ReferrerPolicy:     "no-referrer",
 		PermissionsPolicy:  "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()",
+		CSPPolicy:          "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' ws: wss:; frame-ancestors 'none'; object-src 'none'; base-uri 'self';",
 	}
 	if isTLS {
 		cfg.EnableHSTS = true
@@ -64,9 +68,13 @@ func SecurityHeaders(cfg SecurityHeadersConfig) func(http.Handler) http.Handler 
 				w.Header().Set("Strict-Transport-Security", "max-age="+itoa(cfg.HSTSMaxAge)+"; includeSubDomains")
 			}
 
-			// CSP: skip for WebSocket upgrade responses (status 101).
-			// The check is deferred to after next() because we don't know
-			// the status code yet. We wrap the ResponseWriter.
+			// Skip CSP wrapping for WebSocket upgrades: status 101 has no body
+			// and requires raw connection hijacking.
+			if strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
+				next.ServeHTTP(w, r)
+				return
+			}
+
 			if cfg.CSPPolicy != "" {
 				cspw := &cspResponseWriter{ResponseWriter: w, policy: cfg.CSPPolicy}
 				next.ServeHTTP(cspw, r)
@@ -84,6 +92,19 @@ type cspResponseWriter struct {
 	http.ResponseWriter
 	policy  string
 	written bool
+}
+
+func (c *cspResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	if hj, ok := c.ResponseWriter.(http.Hijacker); ok {
+		return hj.Hijack()
+	}
+	return nil, nil, errors.New("underlying ResponseWriter does not implement http.Hijacker")
+}
+
+func (c *cspResponseWriter) Flush() {
+	if fl, ok := c.ResponseWriter.(http.Flusher); ok {
+		fl.Flush()
+	}
 }
 
 func (c *cspResponseWriter) WriteHeader(statusCode int) {

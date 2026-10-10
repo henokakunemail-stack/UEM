@@ -238,6 +238,9 @@ Section "Install Server" SecInstall
             "The service was installed but did not start (exit $0). Check $ENVFILE."
     ${EndIf}
 
+    DetailPrint "Configuring Windows Firewall inbound rule..."
+    nsExec::ExecToLog 'netsh advfirewall firewall add rule name="Endpoint Management Server" dir=in action=allow protocol=TCP localport=8443 profile=any'
+
     WriteRegStr HKLM "${SERVICE_KEY}" "InstallDir" "$INSTDIR"
     WriteRegStr HKLM "${SERVICE_KEY}" "EnvFile" "$ENVFILE"
 
@@ -281,6 +284,9 @@ Section "Uninstall"
     nsExec::ExecToLog '"$INSTDIR\endpoint-server.exe" -service uninstall'
     Pop $0
     Sleep 1000
+
+    DetailPrint "Removing Windows Firewall rule..."
+    nsExec::ExecToLog 'netsh advfirewall firewall delete rule name="Endpoint Management Server"'
 
     ; The env file holds the signing secret and admin password: delete first
     Delete "$ENVFILE"

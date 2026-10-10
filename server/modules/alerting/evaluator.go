@@ -4,8 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/jmoiron/sqlx"
@@ -18,13 +21,81 @@ type Evaluator struct {
 	httpClient *http.Client
 }
 
+func isPrivateOrBlockedIP(ip net.IP) bool {
+	if ip == nil {
+		return true
+	}
+	if ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() ||
+		ip.IsInterfaceLocalMulticast() || ip.IsMulticast() || ip.IsUnspecified() || ip.IsPrivate() {
+		return true
+	}
+	// Check CGNAT (100.64.0.0/10) and 0.0.0.0/8
+	if ip4 := ip.To4(); ip4 != nil {
+		if ip4[0] == 0 {
+			return true
+		}
+		if ip4[0] == 100 && ip4[1] >= 64 && ip4[1] <= 127 {
+			return true
+		}
+		// 169.254.x.x link local / cloud metadata
+		if ip4[0] == 169 && ip4[1] == 254 {
+			return true
+		}
+		// 127.x.x.x
+		if ip4[0] == 127 {
+			return true
+		}
+	}
+	return false
+}
+
+func newSafeWebhookClient() *http.Client {
+	dialer := &net.Dialer{
+		Timeout: 5 * time.Second,
+	}
+	transport := &http.Transport{
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			host, port, err := net.SplitHostPort(addr)
+			if err != nil {
+				return nil, err
+			}
+			ips, err := net.DefaultResolver.LookupIP(ctx, "ip", host)
+			if err != nil {
+				return nil, err
+			}
+			if len(ips) == 0 {
+				return nil, fmt.Errorf("no IP address found for %s", host)
+			}
+			for _, ip := range ips {
+				if isPrivateOrBlockedIP(ip) {
+					return nil, fmt.Errorf("webhook destination %s resolves to blocked/private IP: %s", host, ip.String())
+				}
+			}
+			safeAddr := net.JoinHostPort(ips[0].String(), port)
+			return dialer.DialContext(ctx, network, safeAddr)
+		},
+		ResponseHeaderTimeout: 5 * time.Second,
+	}
+	return &http.Client{
+		Transport: transport,
+		Timeout:   10 * time.Second,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 3 {
+				return errors.New("too many redirects")
+			}
+			if req.URL.Scheme != "http" && req.URL.Scheme != "https" {
+				return fmt.Errorf("unsupported redirect scheme: %s", req.URL.Scheme)
+			}
+			return nil
+		},
+	}
+}
+
 func NewEvaluator(db *sqlx.DB, repo *Repository) *Evaluator {
 	return &Evaluator{
-		db:   db,
-		repo: repo,
-		httpClient: &http.Client{
-			Timeout: 5 * time.Second,
-		},
+		db:         db,
+		repo:       repo,
+		httpClient: newSafeWebhookClient(),
 	}
 }
 
@@ -202,6 +273,12 @@ func (e *Evaluator) evalCriticalPatches(ctx context.Context, rule *AlertRule, re
 
 func (e *Evaluator) dispatchWebhook(rule *AlertRule, inc *AlertIncident) {
 	if rule.WebhookURL == "" || inc == nil {
+		return
+	}
+
+	u, err := url.Parse(rule.WebhookURL)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
+		log.Warn().Str("url", rule.WebhookURL).Msg("dispatch alert webhook rejected: invalid scheme")
 		return
 	}
 

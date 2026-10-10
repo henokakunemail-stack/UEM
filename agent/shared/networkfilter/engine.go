@@ -88,10 +88,16 @@ func (e *Engine) ApplyBlockedDomains(domains []string) (count int, degraded stri
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	hostsCount, err := e.writeHosts(domains)
-	if err != nil {
+	// Verify hosts file path accessibility first. If hosts file layer fails,
+	// return immediately without touching the firewall layer.
+	if err := e.verifyHostsWritable(); err != nil {
 		return 0, "", err
 	}
+
+	// Clean out any prior managed blocklist from hosts file so local resolver
+	// is not poisoned by 0.0.0.0 sinkholes when resolving real public IPs.
+	e.cleanHostsManagedSection()
+	e.flushDNS()
 
 	blocked, resolveErrs, fwErr := applyFirewall(e.firewall, e.resolver, domains)
 	var warnings []string
@@ -100,6 +106,12 @@ func (e *Engine) ApplyBlockedDomains(domains []string) (count int, degraded stri
 			Msg("filter rule could not be resolved; its addresses are not blocked")
 		warnings = append(warnings, fmt.Sprintf("%s: %s", domain, msg))
 	}
+
+	hostsCount, err := e.writeHosts(domains)
+	if err != nil {
+		return 0, "", err
+	}
+
 	if fwErr != nil {
 		msg := describeFirewallError(fwErr)
 		log.Warn().Str("error", msg).Int("hosts_rules", hostsCount).
@@ -116,6 +128,68 @@ func (e *Engine) ApplyBlockedDomains(domains []string) (count int, degraded stri
 	log.Info().Int("hosts_rules", hostsCount).Int("addresses_blocked", blocked).
 		Str("path", e.hostsPath).Msg("network filter rules applied")
 	return hostsCount, "", nil
+}
+
+func (e *Engine) verifyHostsWritable() error {
+	fi, err := os.Stat(e.hostsPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("stat hosts file: %w", err)
+	}
+	if fi.IsDir() {
+		return fmt.Errorf("hosts path is a directory: %s", e.hostsPath)
+	}
+	f, err := os.OpenFile(e.hostsPath, os.O_WRONLY, 0644)
+	if err != nil {
+		return fmt.Errorf("open hosts file for writing: %w", err)
+	}
+	_ = f.Close()
+	return nil
+}
+
+func writeAtomic(targetPath string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(targetPath)
+	tmpFile, err := os.CreateTemp(dir, filepath.Base(targetPath)+".tmp.*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmpFile.Name()
+	defer func() {
+		_ = os.Remove(tmpName)
+	}()
+
+	if _, err := tmpFile.Write(data); err != nil {
+		_ = tmpFile.Close()
+		return err
+	}
+	if err := tmpFile.Sync(); err != nil {
+		_ = tmpFile.Close()
+		return err
+	}
+	if err := tmpFile.Close(); err != nil {
+		return err
+	}
+	if runtime.GOOS != "windows" {
+		if err := os.Chmod(tmpName, perm); err != nil {
+			return err
+		}
+	}
+	return os.Rename(tmpName, targetPath)
+}
+
+func (e *Engine) cleanHostsManagedSection() {
+	data, err := os.ReadFile(e.hostsPath)
+	if err != nil {
+		return
+	}
+	content := string(data)
+	if !strings.Contains(content, MarkerBegin) {
+		return
+	}
+	cleaned := removeManagedSection(content)
+	_ = writeAtomic(e.hostsPath, []byte(cleaned), 0644)
 }
 
 // writeHosts rewrites the managed section of the hosts file. It is the layer that
@@ -155,9 +229,12 @@ func (e *Engine) writeHosts(domains []string) (int, error) {
 			var variants []string
 			if strings.HasPrefix(domain, "www.") {
 				root := strings.TrimPrefix(domain, "www.")
-				variants = []string{domain, root}
+				variants = []string{domain, root, "m." + root}
+			} else if strings.HasPrefix(domain, "m.") {
+				root := strings.TrimPrefix(domain, "m.")
+				variants = []string{domain, root, "www." + root}
 			} else {
-				variants = []string{domain, "www." + domain}
+				variants = []string{domain, "www." + domain, "m." + domain}
 			}
 
 			for _, v := range variants {
@@ -172,8 +249,8 @@ func (e *Engine) writeHosts(domains []string) (int, error) {
 		sb.WriteString(MarkerEnd + "\n")
 	}
 
-	// Write atomically or write directly
-	if err := os.WriteFile(e.hostsPath, []byte(sb.String()), 0644); err != nil {
+	// Write atomically to avoid corruption on unexpected crashes
+	if err := writeAtomic(e.hostsPath, []byte(sb.String()), 0644); err != nil {
 		return 0, fmt.Errorf("write hosts file: %w", err)
 	}
 

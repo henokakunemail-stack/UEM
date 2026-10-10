@@ -32,17 +32,19 @@ Enterprise-grade, central endpoint management and security compliance platform a
    - The Go server binary embeds the compiled React 19 + TypeScript + Vite SPA directly via Go's standard `embed.FS` (`server/cmd/server/web_embed.go`).
    - Serves both REST/WebSocket APIs and the complete web console with client-side SPA routing fallback from a single self-contained executable.
 
-4. **High-Concurrency SQLite WAL Engine**:
+4. **High-Concurrency SQLite WAL Engine & Performance Hardening**:
    - Write-Ahead Logging (`PRAGMA journal_mode=WAL;`).
    - `PRAGMA busy_timeout=5000;`, `PRAGMA foreign_keys=ON;`, and `PRAGMA synchronous=NORMAL;`.
-   - Connection pool of 16 open / 4 idle, sized for the reads rather than serialised behind one connection — a console page issues several queries at once, and putting them in a line is what turns a slow write into a page timeout.
+   - Connection pool of 16 open / 4 idle (SQLite) and 25 open / 10 idle (PostgreSQL), with explicit lifetime limits (`SetConnMaxLifetime`: 1 hour SQLite, 30 min PostgreSQL; `SetConnMaxIdleTime`: 5 min) to prevent stale sockets across stateful proxies and firewalls.
+   - Hot query indexes (Phase 22): `idx_devices_secret_hash` for sub-second agent WebSocket frame validation, `idx_devices_enrollment_token` for fast enrollment consumption, composite `idx_devices_status_last_seen` and `idx_deploy_tasks_status_updated` for background sweepers, and `idx_audit_created_tail` for audit log queries.
+   - In-memory session cache: 15-second TTL read-through cache (`sync.RWMutex`) on `IsLive(ctx, jti)` checks in `auth_sessions`, eliminating redundant database roundtrips on every authenticated API call with instant invalidation on revocation.
    - Write transactions take SQLite's write lock at `BEGIN` (`_txlock=immediate`) rather than at first write, so a batch that reads then writes is one atomic unit instead of a transaction built on a read that has already gone stale.
 
 5. **Optional PostgreSQL Backend**:
    - SQLite stays the default and requires nothing: one binary, one file, no services. The single-binary standalone deployment is unchanged.
    - Set `DB_URL` to a `postgres://` connection string (and optionally `DB_DRIVER=postgres`) to run on PostgreSQL instead. `DB_PATH` is ignored in that mode.
-   - The 21 migrations are written once in SQLite dialect and translated on the way out — `DATETIME` → `TIMESTAMPTZ`, `INSERT OR IGNORE` → `INSERT ... ON CONFLICT DO NOTHING`, `?` → `$N` — so the two backends cannot drift apart across releases.
-   - **Currently covers the schema and migration path.** The server's own query call sites still pass `?` straight to the driver rather than through `db.Rebind`, so running the full request path against PostgreSQL is not yet supported.
+   - The 22 migrations are written once in SQLite dialect and translated on the way out — `DATETIME` → `TIMESTAMPTZ`, `INSERT OR IGNORE` → `INSERT ... ON CONFLICT DO NOTHING`, `?` → `$N` — so the two backends cannot drift apart across releases.
+   - Automatic rebind driver (`postgres-rebind`) transparently maps `?` parameters to `$1..$N` placeholders, providing full operational query compatibility across both backends.
 
 ---
 
@@ -148,8 +150,8 @@ actually found.
 │   │   ├── audit/                  # Tamper-evident audit logging service
 │   │   ├── auth/                   # JWT, session store, login, rate limiting, origin policy
 │   │   ├── config/                 # Environment-driven runtime configuration
-│   │   ├── db/                     # SQLite WAL engine & sequential migrations (0001-0021)
-│   │   ├── httpguard/              # Request body size limits
+│   │   ├── db/                     # SQLite WAL engine & sequential migrations (0001-0022)
+│   │   ├── httpguard/              # Request body size limits & security headers (CSP, HSTS)
 │   │   ├── logger/                 # zerolog setup and in-memory log tail
 │   │   ├── rbac/                   # Role-Based Access Control context utilities
 │   │   ├── transport/              # Hub WebSocket manager & agent dispatch
@@ -253,10 +255,8 @@ The installer writes the nginx site by substituting `__DOMAIN__` and
 
 ### Windows Server
 
-There is no scripted installer for Windows Server — the server binary is a
-plain console-free service binary. See
-[`docs/installation/server-windows.md`](docs/installation/server-windows.md)
-for the full procedure.
+- **GUI / Automated Installer**: Download `EndpointServer-Setup.exe` from GitHub Releases (built via `packaging/windows/build-server.ps1` and `packaging/windows/server.nsi`). The wizard configures the service, ports, data folder, generates a 32+ char `JWT_SECRET`, and registers the `endpoint-mgmt-server` Windows Service automatically.
+- **Manual Setup**: See [`docs/installation/server-windows.md`](docs/installation/server-windows.md) for step-by-step SCM service registration and firewall configuration.
 
 ### Container
 
@@ -277,15 +277,45 @@ docker run -d --name endpoint-mgmt \
   endpoint-mgmt-server
 ```
 
-`JWT_SECRET` has no default and the server refuses to start without it. Set it
+`JWT_SECRET` has no default and the server refuses to start without it (minimum 32 characters enforced). Set it
 to the same value on every restart, or every issued token is invalidated.
 
-### Full guides
+---
+
+## ⚡ Quick-Start: Server & Agent Installation
+
+See the complete [GitHub Release & Installation Guide](docs/installation/release-guide.md) for full distribution asset details.
+
+### 🖥️ Central Server Quick-Start
+
+| Platform | Recommended Installation Method | Command / Procedure |
+|---|---|---|
+| **Windows Server** | NSIS Setup Wizard (`EndpointServer-Setup.exe`) | Run installer as Admin → Follow GUI wizard (auto-provisions Windows Service on port `8443`). |
+| **Linux (Ubuntu/Debian)** | Automated Deploy Script (`deploy/install-ubuntu.sh`) | `sudo ./deploy/install-ubuntu.sh --domain uem.example.com` |
+| **Docker** | Distroless Container Image | `docker run -d -p 8443:8443 -e JWT_SECRET=$(openssl rand -hex 32) -e ADMIN_PASSWORD=... -v uem-data:/data endpoint-mgmt-server` |
+| **Source Build** | Go 1.23+ & Node.js | `cd web-console && npm run build && cd .. && go build -o endpoint-mgmt-server ./server/cmd/server` |
+
+### 📱 Endpoint Agent Quick-Start
+
+> **Prerequisite**: Generate an Enrollment Token in the Web Console (**Devices** → **Generate Enrollment Token**).
+
+| Platform | Recommended Installation Method | Command / Procedure |
+|---|---|---|
+| **Windows 10/11 / Server** | NSIS Setup Wizard (`EndpointAgent-Setup.exe`) | Run installer as Admin → Enter Server URL (`https://server:8443`) and Enrollment Token. |
+| **Windows (Mass/Silent)** | Command Line / GPO / Intune | `endpoint-agent.exe -server https://server:8443 -enroll <TOKEN>` then `-service install` and `-service start` |
+| **Linux (Debian/Ubuntu)** | Debian Package (`.deb`) | `sudo dpkg -i endpoint-agent_<ver>_amd64.deb` then `sudo endpoint-agent -server https://server:8443 -enroll <TOKEN>` |
+| **Linux (Standalone)** | Binary + systemd | `sudo endpoint-agent -server https://server:8443 -enroll <TOKEN>` then `-service install` and `-service start` |
+| **macOS (Intel & M-series)** | Apple Installer (`.pkg`) | Run `EndpointAgent-<ver>.pkg` then enroll via `sudo endpoint-agent -server https://server:8443 -enroll <TOKEN>` |
+
+### Full guides & documentation
 
 | Guide | Covers |
 |---|---|
+| [`docs/installation/release-guide.md`](docs/installation/release-guide.md) | **Complete GitHub Release packaging, download matrix, and installation guide** |
 | [`docs/installation/server-linux.md`](docs/installation/server-linux.md) | Ubuntu/Debian: systemd, TLS, firewall, backup verification, upgrade & rollback, hardening |
 | [`docs/installation/server-windows.md`](docs/installation/server-windows.md) | Windows Server: service registration, TLS, firewall, backup, upgrade |
+| [`docs/installation/agent-windows.md`](docs/installation/agent-windows.md) | Windows Agent: installation, silent deployment, service management |
+| [`docs/installation/agent-linux.md`](docs/installation/agent-linux.md) | Linux Agent: .deb package, systemd service, permissions |
 | [`deploy/README-UBUNTU-DEPLOY.md`](deploy/README-UBUNTU-DEPLOY.md) | Short-form Ubuntu quickstart |
 
 ---

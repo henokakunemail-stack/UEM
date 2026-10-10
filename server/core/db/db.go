@@ -116,6 +116,7 @@ func OpenWithDriver(driverName, dsnStr string) (*sqlx.DB, error) {
 		d.SetMaxOpenConns(pgMaxOpenConns)
 		d.SetMaxIdleConns(pgMaxIdleConns)
 		d.SetConnMaxIdleTime(5 * time.Minute)
+		d.SetConnMaxLifetime(30 * time.Minute)
 
 		if err := d.Ping(); err != nil {
 			d.Close()
@@ -146,6 +147,7 @@ func OpenWithDriver(driverName, dsnStr string) (*sqlx.DB, error) {
 	d.SetMaxOpenConns(maxOpenConns)
 	d.SetMaxIdleConns(maxIdleConns)
 	d.SetConnMaxIdleTime(5 * time.Minute)
+	d.SetConnMaxLifetime(1 * time.Hour)
 
 	if err := d.Ping(); err != nil {
 		d.Close()

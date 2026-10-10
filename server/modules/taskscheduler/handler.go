@@ -91,6 +91,13 @@ type createScriptReq struct {
 	TimeoutSeconds int    `json:"timeout_seconds"`
 }
 
+var allowedScriptTypes = map[string]bool{
+	"powershell": true,
+	"cmd":        true,
+	"bash":       true,
+	"sh":         true,
+}
+
 func (h *Handler) createScript(w http.ResponseWriter, r *http.Request) {
 	var req createScriptReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -99,6 +106,10 @@ func (h *Handler) createScript(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Name == "" || req.ScriptType == "" || req.ScriptContent == "" {
 		writeErr(w, http.StatusBadRequest, "name, script_type, and script_content are required")
+		return
+	}
+	if !allowedScriptTypes[req.ScriptType] {
+		writeErr(w, http.StatusBadRequest, "invalid script_type: must be powershell, cmd, bash, or sh")
 		return
 	}
 
@@ -176,6 +187,10 @@ func (h *Handler) updateScript(w http.ResponseWriter, r *http.Request) {
 		s.Description = *req.Description
 	}
 	if req.ScriptType != nil {
+		if !allowedScriptTypes[*req.ScriptType] {
+			writeErr(w, http.StatusBadRequest, "invalid script_type: must be powershell, cmd, bash, or sh")
+			return
+		}
 		s.ScriptType = *req.ScriptType
 	}
 	if req.ScriptContent != nil {

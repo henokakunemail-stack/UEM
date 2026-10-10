@@ -2,9 +2,13 @@ package auth
 
 import "golang.org/x/crypto/bcrypt"
 
-// HashPassword bcrypts a plaintext password.
+// PasswordCost is the bcrypt work factor. 12 provides strong protection
+// against offline GPU cracking dictionaries while remaining efficient for interactive logins.
+const PasswordCost = 12
+
+// HashPassword bcrypts a plaintext password with work factor 12.
 func HashPassword(plain string) (string, error) {
-	b, err := bcrypt.GenerateFromPassword([]byte(plain), bcrypt.DefaultCost)
+	b, err := bcrypt.GenerateFromPassword([]byte(plain), PasswordCost)
 	if err != nil {
 		return "", err
 	}

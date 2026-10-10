@@ -199,6 +199,28 @@ func (r *Repository) ListRulesByPolicy(ctx context.Context, policyID string) ([]
 	return rules, nil
 }
 
+func (r *Repository) GetRuleByID(ctx context.Context, id string) (*FilterRule, error) {
+	var rule FilterRule
+	query := `
+		SELECT id, policy_id, rule_type, pattern, action, category, created_at
+		FROM filter_rules
+		WHERE id = ?
+	`
+	if err := r.db.GetContext(ctx, &rule, query, id); err != nil {
+		return nil, fmt.Errorf("get filter rule: %w", err)
+	}
+	return &rule, nil
+}
+
+func (r *Repository) GetGroupDeviceIDs(ctx context.Context, groupID string) ([]string, error) {
+	var deviceIDs []string
+	query := `SELECT device_id FROM device_group_members WHERE group_id = ?`
+	if err := r.db.SelectContext(ctx, &deviceIDs, query, groupID); err != nil {
+		return nil, fmt.Errorf("get group device ids: %w", err)
+	}
+	return deviceIDs, nil
+}
+
 func (r *Repository) DeleteRule(ctx context.Context, id string) error {
 	res, err := r.db.ExecContext(ctx, `DELETE FROM filter_rules WHERE id = ?`, id)
 	if err != nil {

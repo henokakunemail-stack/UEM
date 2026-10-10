@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"runtime"
 	"time"
@@ -85,13 +86,14 @@ func Save(path string, c Credentials) error {
 }
 
 // restrictToSystemAndAdmins applies a restrictive DACL on Windows so that
-// only SYSTEM and Administrators can read the credentials file.
+// only SYSTEM, Administrators, and the executing user can read the credentials file.
 // It is a no-op on non-Windows platforms.
 func restrictToSystemAndAdmins(path string) {
-	// Use icacls to set explicit ACL: SYSTEM:(OI)(CI)F, BUILTIN\Administrators:(OI)(CI)F
-	// /inheritance:r removes inherited ACEs, then we grant full control to the two principals.
-	// This prevents regular users from reading the device secret.
-	_ = exec.Command("icacls", path, "/inheritance:r", "/grant:r", "SYSTEM:(OI)(CI)F", "/grant:r", "BUILTIN\\Administrators:(OI)(CI)F").Run()
+	args := []string{path, "/inheritance:r", "/grant:r", "SYSTEM:F", "/grant:r", "BUILTIN\\Administrators:F"}
+	if u, err := user.Current(); err == nil && u.Username != "" {
+		args = append(args, "/grant:r", u.Username+":F")
+	}
+	_ = exec.Command("icacls", args...).Run()
 }
 
 // ErrNotEnrolled means the agent has not enrolled yet (no local credentials).

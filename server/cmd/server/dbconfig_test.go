@@ -58,7 +58,7 @@ func TestOpenDatabase_IgnoresBareSQLiteDriver(t *testing.T) {
 func TestConfig_ReadsPostgresSettings(t *testing.T) {
 	t.Setenv("DB_DRIVER", "postgres")
 	t.Setenv("DB_URL", "postgres://u:p@localhost:5432/uem?sslmode=disable")
-	t.Setenv("JWT_SECRET", "test-secret-value")
+	t.Setenv("JWT_SECRET", "test-secret-value-that-is-at-least-32-chars!")
 
 	cfg, err := config.Load()
 	if err != nil {

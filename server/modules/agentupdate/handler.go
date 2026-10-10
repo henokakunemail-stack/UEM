@@ -158,7 +158,8 @@ func (h *Handler) Register(r chi.Router) {
 }
 
 func (h *Handler) handleUploadRelease(w http.ResponseWriter, r *http.Request) {
-	err := r.ParseMultipartForm(100 << 20) // 100 MB max
+	r.Body = http.MaxBytesReader(w, r.Body, 100<<20) // 100 MB max
+	err := r.ParseMultipartForm(100 << 20)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "failed to parse multipart form"})
 		return

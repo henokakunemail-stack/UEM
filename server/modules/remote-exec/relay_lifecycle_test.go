@@ -1,11 +1,13 @@
 package remoteexec
 
 import (
+	"context"
 	"go/ast"
 	"go/parser"
 	"go/token"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -150,5 +152,23 @@ func TestConcurrentUnregisterAndWrite(t *testing.T) {
 
 	if err := sess.WriteToBrowser("term.data", "after"); err == nil {
 		t.Error("the session was never marked closed; Unregister no longer reaches it")
+	}
+}
+
+func TestAcceptTerminalRejectsMismatchedDevice(t *testing.T) {
+	r := NewTerminalRelay()
+	_ = r.Register("s-123", "device-correct", "user-1", nil)
+
+	ctx := context.Background()
+	// Mismatched device in AcceptTerminalData must be refused
+	err := r.AcceptTerminalData(ctx, "device-rogue", "s-123", "fake stdout data")
+	if err == nil || !strings.Contains(err.Error(), "does not belong") {
+		t.Fatalf("expected device mismatch error in AcceptTerminalData, got %v", err)
+	}
+
+	// Mismatched device in AcceptTerminalClose must be refused
+	err = r.AcceptTerminalClose(ctx, "device-rogue", "s-123")
+	if err == nil || !strings.Contains(err.Error(), "does not belong") {
+		t.Fatalf("expected device mismatch error in AcceptTerminalClose, got %v", err)
 	}
 }

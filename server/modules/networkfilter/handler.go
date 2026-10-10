@@ -265,6 +265,10 @@ func (h *Handler) createPolicy(w http.ResponseWriter, r *http.Request) {
 		"name": policy.Name, "target": policy.TargetType,
 	})
 
+	if policy.IsEnabled {
+		h.dispatchAffected(context.Background(), policy.TargetType, policy.TargetID)
+	}
+
 	writeJSON(w, http.StatusCreated, policy)
 }
 
@@ -275,6 +279,10 @@ func (h *Handler) updatePolicy(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, "policy not found")
 		return
 	}
+
+	oldTargetType := policy.TargetType
+	oldTargetID := policy.TargetID
+	oldEnabled := policy.IsEnabled
 
 	var req updatePolicyReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -326,11 +334,26 @@ func (h *Handler) updatePolicy(w http.ResponseWriter, r *http.Request) {
 		"name": policy.Name,
 	})
 
+	// Dispatch to current target
+	if policy.IsEnabled {
+		h.dispatchAffected(context.Background(), policy.TargetType, policy.TargetID)
+	}
+	// If retargeted or disabled, also re-dispatch to old target so it drops the rules
+	if (oldTargetType != policy.TargetType || oldTargetID != policy.TargetID) || (oldEnabled && !policy.IsEnabled) {
+		h.dispatchAffected(context.Background(), oldTargetType, oldTargetID)
+	}
+
 	writeJSON(w, http.StatusOK, policy)
 }
 
 func (h *Handler) deletePolicy(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
+	policy, err := h.repo.GetPolicyByID(r.Context(), id)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, "policy not found")
+		return
+	}
+
 	if err := h.repo.DeletePolicy(r.Context(), id); err != nil {
 		writeErr(w, http.StatusNotFound, err.Error())
 		return
@@ -338,6 +361,10 @@ func (h *Handler) deletePolicy(w http.ResponseWriter, r *http.Request) {
 
 	actorID := auth.UserIDFromContext(r.Context())
 	_ = h.audit.Log(r.Context(), "user", actorID, "filter.policy_delete", id, nil)
+
+	if policy.IsEnabled {
+		h.dispatchAffected(context.Background(), policy.TargetType, policy.TargetID)
+	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
@@ -413,11 +440,22 @@ func (h *Handler) addRule(w http.ResponseWriter, r *http.Request) {
 		"policy_id": policyID, "pattern": rule.Pattern,
 	})
 
+	if policy, err := h.repo.GetPolicyByID(r.Context(), policyID); err == nil && policy.IsEnabled {
+		h.dispatchAffected(context.Background(), policy.TargetType, policy.TargetID)
+	}
+
 	writeJSON(w, http.StatusCreated, rule)
 }
 
 func (h *Handler) deleteRule(w http.ResponseWriter, r *http.Request) {
 	ruleID := chi.URLParam(r, "ruleId")
+	rule, err := h.repo.GetRuleByID(r.Context(), ruleID)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, "rule not found")
+		return
+	}
+	policy, _ := h.repo.GetPolicyByID(r.Context(), rule.PolicyID)
+
 	if err := h.repo.DeleteRule(r.Context(), ruleID); err != nil {
 		writeErr(w, http.StatusNotFound, err.Error())
 		return
@@ -426,7 +464,85 @@ func (h *Handler) deleteRule(w http.ResponseWriter, r *http.Request) {
 	actorID := auth.UserIDFromContext(r.Context())
 	_ = h.audit.Log(r.Context(), "user", actorID, "filter.rule_delete", ruleID, nil)
 
+	if policy != nil && policy.IsEnabled {
+		h.dispatchAffected(context.Background(), policy.TargetType, policy.TargetID)
+	}
+
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
+func (h *Handler) dispatchDevice(ctx context.Context, deviceID string) error {
+	if h.hub == nil || !h.hub.Online(deviceID) {
+		return nil
+	}
+	patterns, version, err := h.repo.CompileEffectiveRules(ctx, deviceID)
+	if err != nil {
+		return fmt.Errorf("compile rules: %w", err)
+	}
+	envBytes, err := filterApplyEnvelope(version, patterns)
+	if err != nil {
+		return fmt.Errorf("encode filter policy: %w", err)
+	}
+	if !h.hub.SendTo(deviceID, envBytes) {
+		return fmt.Errorf("send filter policy: device %s", deviceID)
+	}
+
+	priorRules := 0
+	if prior, err := h.repo.GetDeviceFilterState(ctx, deviceID); err == nil {
+		priorRules = prior.RulesApplied
+	}
+	state := &DeviceFilterState{
+		DeviceID:      deviceID,
+		PolicyVersion: version,
+		Status:        statusPending,
+		RulesApplied:  priorRules,
+	}
+	_ = h.repo.RecordDeviceFilterState(ctx, state)
+	return nil
+}
+
+func (h *Handler) dispatchAffected(ctx context.Context, targetType, targetID string) {
+	if h.hub == nil {
+		return
+	}
+	var deviceIDs []string
+	switch targetType {
+	case "all":
+		if h.devices != nil {
+			devs, err := h.devices.List(ctx, devicemgmt.StatusOnline, "")
+			if err != nil {
+				log.Error().Err(err).Msg("dispatch affected: list devices failed")
+				return
+			}
+			for _, d := range devs {
+				deviceIDs = append(deviceIDs, d.ID)
+			}
+		}
+	case "device":
+		if targetID != "" {
+			deviceIDs = append(deviceIDs, targetID)
+		}
+	case "group":
+		if targetID != "" {
+			gDevs, err := h.repo.GetGroupDeviceIDs(ctx, targetID)
+			if err != nil {
+				log.Error().Err(err).Str("group_id", targetID).Msg("dispatch affected: get group devices failed")
+				return
+			}
+			deviceIDs = append(deviceIDs, gDevs...)
+		}
+	}
+
+	seen := make(map[string]bool)
+	for _, devID := range deviceIDs {
+		if seen[devID] {
+			continue
+		}
+		seen[devID] = true
+		if err := h.dispatchDevice(ctx, devID); err != nil {
+			log.Warn().Err(err).Str("device", devID).Msg("auto-dispatch filter policy failed")
+		}
+	}
 }
 
 // filterApplyEnvelope builds the wire message an agent applies. Both the manual

@@ -147,6 +147,9 @@ func Load() (Config, error) {
 	if cfg.JWTSecret == "" {
 		return cfg, fmt.Errorf("JWT_SECRET must be set (generate one, e.g. 32+ random bytes)")
 	}
+	if len(cfg.JWTSecret) < 32 {
+		return cfg, fmt.Errorf("JWT_SECRET must be at least 32 characters long for cryptographic security")
+	}
 	return cfg, nil
 }
 

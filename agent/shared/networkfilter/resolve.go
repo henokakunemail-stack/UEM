@@ -68,14 +68,22 @@ func (r *resolver) resolve(domain string) ([]net.IP, error) {
 	if err != nil {
 		return nil, fmt.Errorf("resolve %s: %w", d, err)
 	}
-	if len(ips) == 0 {
-		return nil, fmt.Errorf("resolve %s: no addresses", d)
+	var validIPs []net.IP
+	for _, ip := range ips {
+		// Drop sinkhole / loopback addresses (0.0.0.0, 127.0.0.1, ::) so the firewall
+		// never installs rules for local addresses if a hosts file was touched.
+		if !ip.IsUnspecified() && !ip.IsLoopback() {
+			validIPs = append(validIPs, ip)
+		}
+	}
+	if len(validIPs) == 0 {
+		return nil, fmt.Errorf("resolve %s: no valid addresses", d)
 	}
 
 	r.mu.Lock()
-	r.cache[d] = resolveEntry{addrs: ips, until: r.now().Add(resolveCacheTTL)}
+	r.cache[d] = resolveEntry{addrs: validIPs, until: r.now().Add(resolveCacheTTL)}
 	r.mu.Unlock()
-	return ips, nil
+	return validIPs, nil
 }
 
 // resolveAll returns the deduplicated union of every domain's addresses. One

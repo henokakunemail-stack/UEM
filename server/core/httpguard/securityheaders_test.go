@@ -1,7 +1,9 @@
 package httpguard
 
 import (
+	"bufio"
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -203,6 +205,9 @@ func TestDefaultSecurityHeadersConfig(t *testing.T) {
 	if cfgTLS.ReferrerPolicy != "no-referrer" {
 		t.Errorf("ReferrerPolicy should be no-referrer, got %s", cfgTLS.ReferrerPolicy)
 	}
+	if !strings.Contains(cfgTLS.CSPPolicy, "default-src 'self'") {
+		t.Errorf("DefaultSecurityHeaders should include default CSP policy, got %q", cfgTLS.CSPPolicy)
+	}
 
 	// Non-TLS config
 	cfgHTTP := DefaultSecurityHeaders(false)
@@ -212,4 +217,46 @@ func TestDefaultSecurityHeadersConfig(t *testing.T) {
 	if cfgHTTP.ContentTypeOptions != true {
 		t.Error("ContentTypeOptions should still be true")
 	}
+	if !strings.Contains(cfgHTTP.CSPPolicy, "default-src 'self'") {
+		t.Errorf("DefaultSecurityHeaders(false) should include default CSP policy, got %q", cfgHTTP.CSPPolicy)
+	}
 }
+
+type fakeHijackerRecorder struct {
+	*httptest.ResponseRecorder
+	hijacked bool
+}
+
+func (f *fakeHijackerRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	f.hijacked = true
+	return nil, nil, nil
+}
+
+func TestSecurityHeaders_PreservesHijacker(t *testing.T) {
+	cfg := DefaultSecurityHeaders(false)
+	middleware := SecurityHeaders(cfg)
+
+	called := false
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hj, ok := w.(http.Hijacker)
+		if !ok {
+			t.Fatal("response writer does not implement http.Hijacker")
+		}
+		_, _, err := hj.Hijack()
+		if err != nil {
+			t.Fatalf("hijack failed: %v", err)
+		}
+		called = true
+	})
+
+	handler := middleware(next)
+	rec := &fakeHijackerRecorder{ResponseRecorder: httptest.NewRecorder()}
+	req := httptest.NewRequest(http.MethodGet, "/ws", nil)
+	req.Header.Set("Upgrade", "websocket")
+	handler.ServeHTTP(rec, req)
+
+	if !called || !rec.hijacked {
+		t.Fatal("expected handler to hijack successfully")
+	}
+}
+
