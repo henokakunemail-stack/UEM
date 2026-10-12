@@ -75,7 +75,7 @@ chmod 0755 $InstallBin
 # 5. Perform Enrollment if token provided
 if ($EnrollToken) {
     Write-Host "[*] Enrolling device with $ServerUrl..." -ForegroundColor Cyan
-    & $InstallBin -server $ServerUrl -enroll $EnrollToken -creds $CredsPath
+    & $InstallBin -server $ServerUrl -enroll $EnrollToken -enroll-only -creds $CredsPath
     if ($LASTEXITCODE -ne 0) {
         Write-Warning "[-] Enrollment returned exit code $LASTEXITCODE. Service will continue installation."
     } else {

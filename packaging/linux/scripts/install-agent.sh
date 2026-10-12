@@ -38,7 +38,7 @@ chmod 0755 "$INSTALL_BIN"
 
 if [ -n "$ENROLL_TOKEN" ]; then
     echo "[*] Enrolling device with $SERVER_URL..."
-    "$INSTALL_BIN" -server "$SERVER_URL" -enroll "$ENROLL_TOKEN" -creds "$CREDS_PATH" || echo "[!] Enrollment warning (will continue)"
+    "$INSTALL_BIN" -server "$SERVER_URL" -enroll "$ENROLL_TOKEN" -enroll-only -creds "$CREDS_PATH" || echo "[!] Enrollment warning (will continue)"
 fi
 
 echo "[*] Registering and starting systemd service 'endpoint-agent'..."

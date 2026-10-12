@@ -43,7 +43,7 @@ Folder ini menyediakan spesifikasi dan skrip untuk membuat **macOS Flat Package 
 
 Setelah paket `.pkg` diinstal di komputer Mac pengguna:
 ```bash
-sudo endpoint-agent -server https://mgmt.perusahaan.com -enroll <TOKEN> -creds /etc/endpoint-agent/creds.json
+sudo endpoint-agent -server https://mgmt.perusahaan.com -enroll <TOKEN> -enroll-only -creds /etc/endpoint-agent/creds.json
 sudo launchctl kickstart -k system/com.endpoint-mgmt.agent
 ```
 Agen akan langsung terhubung ke konsol server via WebSocket TLS.
