@@ -295,6 +295,19 @@ See the complete [GitHub Release & Installation Guide](docs/installation/release
 | **Docker** | Distroless Container Image | `docker run -d -p 8443:8443 -e JWT_SECRET=$(openssl rand -hex 32) -e ADMIN_PASSWORD=... -v uem-data:/data endpoint-mgmt-server` |
 | **Source Build** | Go 1.23+ & Node.js | `cd web-console && npm run build && cd .. && go build -o endpoint-mgmt-server ./server/cmd/server` |
 
+#### 🔄 Server Safe Update One-Liners (In-Place Upgrade with Auto-Rollback)
+Similar to CLI package updaters (`npm i -g <pkg>@latest`), UEM provides automated one-liner update scripts that safely upgrade the server daemon in-place (auto-detects installation, hot backups SQLite DB, rotates binary with `.bak`, strictly preserves existing `.env` / `JWT_SECRET`, and probes `/healthz` before finalizing):
+
+```powershell
+# Windows Server Update (PowerShell)
+irm https://raw.githubusercontent.com/henokakunemail-stack/UEM/main/packaging/windows/scripts/update-server.ps1 | iex
+```
+
+```bash
+# Linux Server Update (Bash)
+curl -fsSL https://raw.githubusercontent.com/henokakunemail-stack/UEM/main/packaging/linux/scripts/update-server.sh | sudo bash
+```
+
 ### 📱 Endpoint Agent Quick-Start
 
 > **Prerequisite**: Generate an Enrollment Token in the Web Console (**Devices** → **Generate Enrollment Token**).

@@ -37,8 +37,11 @@ mkdir -p /usr/local/bin "$DATA_DIR/backups" "$CONF_DIR"
 cp "$BIN_SRC" "$INSTALL_BIN"
 chmod 0755 "$INSTALL_BIN"
 
-echo "[*] Generating $ENV_FILE..."
-cat <<EOF > "$ENV_FILE"
+if [ -f "$ENV_FILE" ]; then
+    echo "[*] Configuration file exists ($ENV_FILE); preserving existing settings and JWT_SECRET."
+else
+    echo "[*] Generating $ENV_FILE..."
+    cat <<EOF > "$ENV_FILE"
 # Runtime configuration for endpoint-mgmt-server
 HTTP_ADDR=$LISTEN_ADDR
 DB_PATH=$DATA_DIR/server.db
@@ -49,10 +52,11 @@ ALLOWED_ORIGIN_DOMAINS=
 JWT_SECRET=
 EOF
 
-if [ -n "$ADMIN_PASSWORD" ]; then
-    echo "ADMIN_PASSWORD=$ADMIN_PASSWORD" >> "$ENV_FILE"
+    if [ -n "$ADMIN_PASSWORD" ]; then
+        echo "ADMIN_PASSWORD=$ADMIN_PASSWORD" >> "$ENV_FILE"
+    fi
+    chmod 0600 "$ENV_FILE"
 fi
-chmod 0600 "$ENV_FILE"
 
 echo "[*] Creating systemd service..."
 cat <<EOF > /etc/systemd/system/endpoint-mgmt-server.service

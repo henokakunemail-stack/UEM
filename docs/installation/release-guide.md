@@ -251,14 +251,18 @@ For users deploying directly from source code or extracting release archives wit
 ### Windows Scripts (`packaging/windows/scripts/`)
 | Script | Target | Purpose |
 |---|---|---|
-| `install-server.ps1` | Windows Server | Configures directories, `.env`, creates Windows Service, configures firewall port `8443`, and starts server. |
+| `install-server.ps1` | Windows Server | Configures directories, `.env`, creates Windows Service, configures firewall port `8443`, and starts server (preserves existing config). |
+| `update-server.ps1` | Windows Server | Safe in-place updater: pulls GitHub release or local binary, creates SQLite snapshot, rotates binary, preserves `server.env`, verifies health, and auto-rolls back on failure. |
 | `uninstall-server.ps1` | Windows Server | Stops service, deletes Windows Service, removes firewall rule, with optional database/data purge switch. |
 | `install-agent.ps1` | Windows Endpoint | Enrolls endpoint against target server, writes credentials to ProgramData, registers and starts SCM service as `LocalSystem`. |
 | `uninstall-agent.ps1` | Windows Endpoint | Stops and uninstalls `endpoint-agent` service with optional credential purge switch. |
 
-### Linux Scripts (`packaging/linux/scripts/`)
+### Linux Scripts (`packaging/linux/scripts/` & `deploy/`)
 | Script | Target | Purpose |
 |---|---|---|
+| `update-server.sh` | Linux Server (Generic) | Safe in-place updater for systemd daemon with automated release fetch, database backup, binary rotation, and health verification. |
+| `deploy/update-server.sh` | Ubuntu Server (Production) | Production updater for `/opt/endpoint-mgmt` deployments with Nginx, preserving user permissions, `.env`, and TLS certificates. |
+| `install-server.sh` | Linux Server (POSIX) | Standalone server installer: sets up systemd service, preserves existing config if present. |
 | `install-agent.sh` | Linux Endpoint (POSIX) | Installs binary to `/usr/local/bin`, enrolls with server URL & token, enables & starts systemd service. |
 | `install-server.ps1` / `install-agent.ps1` | Linux (PowerShell Core) | Cross-platform PowerShell automation for Linux environments. |
 | `deploy/install-ubuntu.sh` | Ubuntu Server | Complete production Nginx + systemd + TLS server provisioning script. |
@@ -266,6 +270,45 @@ For users deploying directly from source code or extracting release archives wit
 ### Standalone NSIS Uninstallers (`packaging/windows/*.nsi`)
 - `EndpointServer-Uninstall.exe` (compiled from `packaging/windows/server-uninstall.nsi`): GUI wizard to stop service, delete registry keys, and safely remove server installation with optional configuration and database purge checkboxes.
 - `EndpointAgent-Uninstall.exe` (compiled from `packaging/windows/agent-uninstall.nsi`): GUI wizard to stop agent, delete service, and optionally purge credentials.
+
+---
+
+## 🔄 5. Server Update & Upgrade Automation (One-Liner Scripts)
+
+Just like package managers provide one-line update commands (`npm i -g <pkg>@latest`), UEM provides automated one-liner scripts for in-place server upgrades with full enterprise safeguards:
+1. **Zero Config Destruction**: Existing `server.env` / `.env`, `JWT_SECRET`, and administrative credentials are never overwritten.
+2. **Automated Hot Backup**: A consistent SQLite database snapshot is created before service downtime.
+3. **Binary Rotation & Auto-Rollback**: The existing binary is saved as `.bak`. If the new binary fails its health probe (`/healthz`), the script automatically rolls back to the previous version and restarts the service.
+4. **Auto-Migration**: Embedded database schema migrations execute automatically upon service startup.
+
+### Windows Server One-Liner Update
+
+```powershell
+# 1. Update to latest release from GitHub (One-Liner)
+irm https://raw.githubusercontent.com/henokakunemail-stack/UEM/main/packaging/windows/scripts/update-server.ps1 | iex
+
+# 2. Update to a specific release version tag
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/henokakunemail-stack/UEM/main/packaging/windows/scripts/update-server.ps1))) -Version v1.1.0
+
+# 3. Update from local binary (offline / air-gapped)
+powershell -File .\packaging\windows\scripts\update-server.ps1 -BinaryPath .\server-windows-amd64.exe
+```
+
+### Linux Server One-Liner Update
+
+```bash
+# 1. Generic Linux Standalone Server (One-Liner)
+curl -fsSL https://raw.githubusercontent.com/henokakunemail-stack/UEM/main/packaging/linux/scripts/update-server.sh | sudo bash
+
+# 2. Ubuntu Production Deployment (/opt/endpoint-mgmt with Nginx)
+curl -fsSL https://raw.githubusercontent.com/henokakunemail-stack/UEM/main/deploy/update-server.sh | sudo bash
+
+# 3. Update to a specific release version tag
+curl -fsSL https://raw.githubusercontent.com/henokakunemail-stack/UEM/main/packaging/linux/scripts/update-server.sh | sudo bash -s -- --version v1.1.0
+
+# 4. Update from local binary (offline / air-gapped)
+sudo ./packaging/linux/scripts/update-server.sh --binary-path ./server-linux-amd64
+```
 
 ---
 

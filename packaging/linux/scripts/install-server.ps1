@@ -78,25 +78,29 @@ Write-Host "[*] Installing server binary to $InstallBin..." -ForegroundColor Yel
 Copy-Item -Path $resolvedBin -Destination $InstallBin -Force
 chmod 0755 $InstallBin
 
-# 5. Generate server.env configuration
-Write-Host "[*] Writing configuration to $EnvFile..." -ForegroundColor Yellow
-$dbFile = Join-Path $DataDir "server.db"
-$logFile = Join-Path $DataDir "server.log"
-$envLines = @(
-    "# Runtime configuration for endpoint-mgmt-server",
-    "HTTP_ADDR=$ListenAddr",
-    "DB_PATH=$dbFile",
-    "BACKUP_DIR=$backupDir",
-    "LOG_FILE=$logFile",
-    "LOG_LEVEL=info",
-    "ALLOWED_ORIGIN_DOMAINS=",
-    "JWT_SECRET="
-)
-if ($AdminPassword) {
-    $envLines += "ADMIN_PASSWORD=$AdminPassword"
+# 5. Generate server.env configuration (preserve if already exists)
+if (Test-Path $EnvFile) {
+    Write-Host "[*] Configuration file exists ($EnvFile); preserving existing settings and JWT_SECRET." -ForegroundColor Green
+} else {
+    Write-Host "[*] Writing configuration to $EnvFile..." -ForegroundColor Yellow
+    $dbFile = Join-Path $DataDir "server.db"
+    $logFile = Join-Path $DataDir "server.log"
+    $envLines = @(
+        "# Runtime configuration for endpoint-mgmt-server",
+        "HTTP_ADDR=$ListenAddr",
+        "DB_PATH=$dbFile",
+        "BACKUP_DIR=$backupDir",
+        "LOG_FILE=$logFile",
+        "LOG_LEVEL=info",
+        "ALLOWED_ORIGIN_DOMAINS=",
+        "JWT_SECRET="
+    )
+    if ($AdminPassword) {
+        $envLines += "ADMIN_PASSWORD=$AdminPassword"
+    }
+    [IO.File]::WriteAllLines($EnvFile, $envLines, [Text.Encoding]::UTF8)
+    chmod 0600 $EnvFile
 }
-[IO.File]::WriteAllLines($EnvFile, $envLines, [Text.Encoding]::UTF8)
-chmod 0600 $EnvFile
 
 # 6. Install systemd unit
 Write-Host "[*] Registering systemd service 'endpoint-mgmt-server'..." -ForegroundColor Yellow
