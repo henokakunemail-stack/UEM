@@ -32,6 +32,7 @@ func (h *Handler) Register(r chi.Router) {
 	r.Route("/api", func(r chi.Router) {
 		r.With(h.jwt.RequireAuth, rbac.RequireRole(rbac.RoleViewer)).Get("/devices", h.listDevices)
 		r.With(h.jwt.RequireAuth, rbac.RequireRole(rbac.RoleViewer)).Get("/devices/{id}", h.getDevice)
+		r.With(h.jwt.RequireAuth, rbac.RequireRole(rbac.RoleTechnician)).Patch("/devices/{id}", h.updateDevice)
 		// Creating enrollment tokens is admin-only.
 		r.With(h.jwt.RequireAuth, rbac.RequireRole(rbac.RoleAdmin)).Post("/devices/enroll-token", h.createEnrollToken)
 		r.With(h.jwt.RequireAuth, rbac.RequireRole(rbac.RoleAdmin)).Post("/devices/{id}/enroll-token", h.enrollExisting)
@@ -208,9 +209,11 @@ func (h *Handler) createEnrollToken(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	if req.Hostname == "" || req.OSName == "" {
-		writeErr(w, http.StatusBadRequest, "hostname and os_name are required")
-		return
+	if req.Hostname == "" {
+		req.Hostname = "Pending Enrollment"
+	}
+	if req.OSName == "" {
+		req.OSName = OSWindows
 	}
 	switch req.OSName {
 	case OSWindows, OSLinux, OSMacOS:
@@ -254,6 +257,42 @@ func (h *Handler) createEnrollToken(w http.ResponseWriter, r *http.Request) {
 		EnrollmentToken: plain,
 		ExpiresAt:       expiresAt,
 	})
+}
+
+type updateDeviceReq struct {
+	Hostname string `json:"hostname"`
+	Site     string `json:"site"`
+}
+
+func (h *Handler) updateDevice(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	var req updateDeviceReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.Hostname == "" && req.Site == "" {
+		writeErr(w, http.StatusBadRequest, "hostname or site is required")
+		return
+	}
+	if err := h.repo.UpdateDevice(r.Context(), id, req.Hostname, req.Site); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			writeErr(w, http.StatusNotFound, "device not found")
+			return
+		}
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	actor := auth.UserIDFromContext(r.Context())
+	_ = audit.Log(r.Context(), h.db, "user", actor, "device.updated", id, map[string]string{
+		"hostname": req.Hostname, "site": req.Site,
+	})
+	d, err := h.repo.GetByID(r.Context(), id)
+	if err != nil {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	writeJSON(w, http.StatusOK, toDTO(d))
 }
 
 func (h *Handler) listAudit(w http.ResponseWriter, r *http.Request) {

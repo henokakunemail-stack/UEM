@@ -60,20 +60,19 @@ export const EnrollTokenModal: React.FC<EnrollTokenModalProps> = ({
 
   const handleGenerate = async () => {
     const trimmed = hostname.trim()
-    if (!trimmed) {
-      setError('A hostname is required — it is what the device will be known by')
-      return
-    }
     setPending(true)
     setError(null)
     try {
       const res = await api.createEnrollmentToken({
-        hostname: trimmed,
+        ...(trimmed ? { hostname: trimmed } : {}),
         os_name: osName,
         ...(site.trim() ? { site: site.trim() } : {}),
       })
       setIssued(res)
-      toast.success(`Pre-registered ${trimmed}`, 'Enrollment Token Created')
+      toast.success(
+        trimmed ? `Pre-registered ${trimmed}` : 'Token created (hostname will auto-detect on connect)',
+        'Enrollment Token Created'
+      )
       onEnrolled?.()
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Could not create the token')
@@ -140,7 +139,7 @@ export const EnrollTokenModal: React.FC<EnrollTokenModalProps> = ({
               type="button"
               className="btn btn-primary"
               onClick={handleGenerate}
-              disabled={pending || !hostname.trim()}
+              disabled={pending}
             >
               <KeyRound size={16} />
               <span>{pending ? 'Generating…' : 'Generate Token'}</span>
@@ -154,7 +153,7 @@ export const EnrollTokenModal: React.FC<EnrollTokenModalProps> = ({
           <div className="form-row">
             <div className="form-field">
               <label className="form-label" htmlFor="enroll-hostname">
-                Hostname <span className="form-label-required">*</span>
+                Hostname <span className="text-muted text-xs font-normal">(Optional — auto-detected on connect)</span>
               </label>
               <input
                 id="enroll-hostname"
@@ -164,7 +163,7 @@ export const EnrollTokenModal: React.FC<EnrollTokenModalProps> = ({
                   setHostname(e.target.value)
                   if (error) setError(null)
                 }}
-                placeholder="e.g. LAPTOP-SARI-01"
+                placeholder="Leave blank to auto-detect from device"
                 autoComplete="off"
                 disabled={pending}
               />

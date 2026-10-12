@@ -151,6 +151,52 @@ func (r *Repository) UpdateOSInfo(ctx context.Context, id, osVersion, agentVersi
 	return nil
 }
 
+// UpdateSystemInfo syncs real machine hostname, OS name, OS version, and agent version
+// reported by the agent in hello message. If hostname or osName are empty or unknown,
+// the existing values are preserved.
+func (r *Repository) UpdateSystemInfo(ctx context.Context, id, hostname, osName, osVersion, agentVersion string) error {
+	_, err := r.db.ExecContext(ctx, `
+		UPDATE devices SET
+			hostname = CASE WHEN ? != '' THEN ? ELSE hostname END,
+			os_name = CASE WHEN ? != '' AND ? != 'unknown' THEN ? ELSE os_name END,
+			os_version = ?,
+			agent_version = ?,
+			updated_at = ?
+		WHERE id = ?`,
+		hostname, hostname,
+		osName, osName, osName,
+		osVersion, agentVersion, time.Now().UTC(), id)
+	if err != nil {
+		return fmt.Errorf("update system info %s: %w", id, err)
+	}
+	return nil
+}
+
+// UpdateDevice allows operators to manually rename device hostname or update site location.
+func (r *Repository) UpdateDevice(ctx context.Context, id, hostname, site string) error {
+	var sitePtr *string
+	if site != "" {
+		sitePtr = &site
+	}
+	res, err := r.db.ExecContext(ctx, `
+		UPDATE devices SET
+			hostname = CASE WHEN ? != '' THEN ? ELSE hostname END,
+			site = CASE WHEN ? != '' THEN ? ELSE site END,
+			updated_at = ?
+		WHERE id = ? AND retired_at IS NULL`,
+		hostname, hostname,
+		site, sitePtr,
+		time.Now().UTC(), id)
+	if err != nil {
+		return fmt.Errorf("update device %s: %w", id, err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // ConsumeEnrollmentToken marks the one-time token as used by storing the persistent
 // device secret hash. Returns ErrNotFound if the token hash is not registered or
 // has expired.

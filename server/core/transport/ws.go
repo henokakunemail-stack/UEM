@@ -413,7 +413,7 @@ func (h *WSHandler) handleHello(ctx context.Context, c *Conn, env Envelope) {
 	if name == "" {
 		name = "unknown"
 	}
-	_ = h.repo.UpdateOSInfo(ctx, c.DeviceID, version, p.AgentVersion)
+	_ = h.repo.UpdateSystemInfo(ctx, c.DeviceID, p.Hostname, name, version, p.AgentVersion)
 	_ = h.repo.UpdateStatus(ctx, c.DeviceID, devicemgmt.StatusOnline, time.Now().UTC())
 	if h.setCapabilities != nil && len(p.Capabilities) > 0 {
 		if capJSON, err := json.Marshal(p.Capabilities); err == nil {
