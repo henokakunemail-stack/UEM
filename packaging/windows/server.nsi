@@ -189,6 +189,15 @@ FunctionEnd
 ; ------------------------------------------------------------------------------
 Section "Install Server" SecInstall
     !insertmacro ResolvePaths
+
+    ; Stop existing service and terminate lingering processes to avoid file-in-use locks
+    DetailPrint "Stopping existing '${SERVER_NAME}' service if running..."
+    nsExec::ExecToLog 'net.exe stop "${SERVER_NAME}"'
+    Pop $0
+    nsExec::Exec 'cmd.exe /c "taskkill.exe /F /IM endpoint-server.exe /T 2>nul"'
+    Pop $0
+    Sleep 1000
+
     SetOutPath "$INSTDIR"
     File "/oname=endpoint-server.exe" "..\..\server-windows-amd64.exe"
 
@@ -276,14 +285,11 @@ Section "Uninstall"
     SetOutPath "$TEMP"
 
     DetailPrint "Stopping service..."
-    ; sc.exe stop returns when the stop request is accepted, not when the process
-    ; is gone, and the server unwinds through a graceful HTTP shutdown first. The
-    ; batch below is what actually waits, by retrying the delete until the locks
-    ; clear, so a short sleep here is only there to avoid deleting the binary out
-    ; from under a process that is still opening it.
-    nsExec::ExecToLog '"$INSTDIR\endpoint-server.exe" -service stop'
+    nsExec::ExecToLog 'net.exe stop "${SERVER_NAME}"'
     Pop $0
-    Sleep 2000
+    nsExec::Exec 'cmd.exe /c "taskkill.exe /F /IM endpoint-server.exe /T 2>nul"'
+    Pop $0
+    Sleep 1000
 
     DetailPrint "Removing service registration..."
     nsExec::ExecToLog '"$INSTDIR\endpoint-server.exe" -service uninstall'

@@ -115,6 +115,15 @@ FunctionEnd
 ; --- Installer Section ---
 Section "Install Agent" SecInstall
     !insertmacro ResolvePaths
+
+    ; Stop existing service and terminate lingering processes to avoid file-in-use locks
+    DetailPrint "Stopping existing '${SERVICE_NAME}' service if running..."
+    nsExec::ExecToLog 'net.exe stop "${SERVICE_NAME}"'
+    Pop $0
+    nsExec::Exec 'cmd.exe /c "taskkill.exe /F /IM endpoint-agent.exe /T 2>nul"'
+    Pop $0
+    Sleep 1000
+
     SetOutPath "$INSTDIR"
 
     ; 1. Copy agent binary
@@ -178,8 +187,11 @@ Section "Uninstall"
     SetOutPath "$TEMP"
 
     DetailPrint "Stopping Windows Service '${SERVICE_NAME}'..."
-    nsExec::ExecToLog '"$INSTDIR\endpoint-agent.exe" -service stop'
+    nsExec::ExecToLog 'net.exe stop "${SERVICE_NAME}"'
     Pop $0
+    nsExec::Exec 'cmd.exe /c "taskkill.exe /F /IM endpoint-agent.exe /T 2>nul"'
+    Pop $0
+    Sleep 1000
 
     DetailPrint "Removing Windows Service '${SERVICE_NAME}'..."
     nsExec::ExecToLog '"$INSTDIR\endpoint-agent.exe" -service uninstall'

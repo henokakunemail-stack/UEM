@@ -107,14 +107,11 @@ Section "Remove Agent" SecMain
     SetOutPath "$TEMP"
 
     DetailPrint "Stopping Windows Service '${SERVICE_NAME}'..."
-    ${If} ${FileExists} "$TARGET_INSTDIR\endpoint-agent.exe"
-        nsExec::ExecToLog '"$TARGET_INSTDIR\endpoint-agent.exe" -service stop'
-        Pop $0
-    ${Else}
-        nsExec::ExecToLog 'sc.exe stop "${SERVICE_NAME}"'
-        Pop $0
-    ${EndIf}
-    Sleep 1500
+    nsExec::ExecToLog 'net.exe stop "${SERVICE_NAME}"'
+    Pop $0
+    nsExec::Exec 'cmd.exe /c "taskkill.exe /F /IM endpoint-agent.exe /T 2>nul"'
+    Pop $0
+    Sleep 1000
 
     DetailPrint "Removing Windows Service '${SERVICE_NAME}'..."
     ${If} ${FileExists} "$TARGET_INSTDIR\endpoint-agent.exe"

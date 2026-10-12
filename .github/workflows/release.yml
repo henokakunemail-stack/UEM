@@ -1,0 +1,94 @@
+name: Build & Publish Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Release tag (e.g. v1.0.0)'
+        required: true
+        default: 'v1.0.0'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build Cross-Platform Release Assets
+    runs-on: windows-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install NSIS
+        run: |
+          choco install nsis -y --no-progress
+
+      - name: Compile Windows & Linux Binaries
+        shell: pwsh
+        run: |
+          $ver = "${{ github.ref_name }}"
+          if (-not $ver -or $ver -notmatch '^v\d') {
+            $ver = "${{ inputs.tag_name }}"
+          }
+          if (-not $ver) { $ver = "v1.0.0" }
+          $cleanVer = $ver.TrimStart('v')
+
+          New-Item -ItemType Directory -Force -Path "dist" | Out-Null
+
+          Write-Host "Building for version: $cleanVer"
+
+          # 1. Server Linux amd64
+          $env:CGO_ENABLED = "0"
+          $env:GOOS = "linux"
+          $env:GOARCH = "amd64"
+          go build -ldflags "-s -w" -o dist/server-linux-amd64 ./server/cmd/server
+
+          # 2. Agent Linux amd64
+          go build -ldflags "-s -w -X github.com/henokakunemail-stack/Endpoint-Manager/agent/shared/osinfo.Version=$cleanVer" -o dist/agent-linux-amd64 ./agent/cmd/agent
+
+          # 3. Server Windows amd64
+          $env:GOOS = "windows"
+          go build -ldflags "-s -w" -o dist/server-windows-amd64.exe ./server/cmd/server
+
+          # 4. Agent Windows amd64
+          go build -ldflags "-s -w -X github.com/henokakunemail-stack/Endpoint-Manager/agent/shared/osinfo.Version=$cleanVer" -o dist/agent-windows-amd64.exe ./agent/cmd/agent
+
+          # 5. Build NSIS Windows Agent Installer
+          Copy-Item dist/agent-windows-amd64.exe ./agent-windows-amd64.exe -Force
+          & powershell.exe -ExecutionPolicy Bypass -File .\packaging\windows\build.ps1 -Version $cleanVer
+          if (Test-Path "packaging\windows\EndpointAgent-Setup.exe") {
+            Copy-Item "packaging\windows\EndpointAgent-Setup.exe" dist/EndpointAgent-Setup.exe -Force
+          }
+
+          # 6. Tarball for Linux server updater
+          tar -czf dist/endpoint-server-linux-amd64.tar.gz -C dist server-linux-amd64
+
+          Get-ChildItem dist/ | Select-Object Name, Length
+
+      - name: Create GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ github.ref_name }}"
+          if [[ -z "$TAG" || ! "$TAG" =~ ^v ]]; then
+            TAG="${{ inputs.tag_name }}"
+          fi
+          if [[ -z "$TAG" ]]; then TAG="v1.0.0"; fi
+
+          echo "Publishing release for $TAG..."
+          gh release create "$TAG" dist/* \
+            --title "Enterprise Endpoint Management $TAG" \
+            --notes "Automated release $TAG with cross-platform server and agent installers." \
+            --draft=false \
+            --prerelease=false || \
+          gh release upload "$TAG" dist/* --clobber

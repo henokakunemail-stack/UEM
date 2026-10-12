@@ -85,6 +85,8 @@ if ($svc) {
     Stop-Service -Name "endpoint-agent" -Force -ErrorAction SilentlyContinue
     Start-Sleep -Seconds 2
 }
+Get-Process -Name "endpoint-agent" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+Start-Sleep -Seconds 1
 
 # 5. Copy binary
 Write-Host "[*] Copying binary to $destExe..." -ForegroundColor Yellow
