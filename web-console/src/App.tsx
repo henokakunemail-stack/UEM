@@ -24,6 +24,7 @@ import { ReportsPage } from './pages/ReportsPage'
 import { RemoteControlPage } from './pages/RemoteControlPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { SoftwarePage } from './pages/SoftwarePage'
+import { SystemPolicyPage } from './pages/SystemPolicyPage'
 import { TasksSchedulerPage } from './pages/TasksSchedulerPage'
 import { UsersPage } from './pages/UsersPage'
 import type { DeviceDTO } from './types/api'
@@ -45,6 +46,7 @@ const PAGE_LABELS: Record<string, string> = {
   maintenance: 'Maintenance',
   remotecontrol: 'Remote control',
   filter: 'Network filter',
+  'system-policy': 'Group policy',
   alerts: 'Alerts',
   reports: 'Reports',
   users: 'User management',
@@ -107,6 +109,7 @@ function ConsoleRoot() {
         <Route path="/maintenance" element={<MaintenancePage />} />
         <Route path="/remotecontrol" element={<RemoteControlPage onOpenSession={setRcDevice} />} />
         <Route path="/filter" element={<NetworkFilterPage />} />
+        <Route path="/system-policy" element={<SystemPolicyPage />} />
         <Route path="/alerts" element={<AlertsPage />} />
         <Route path="/reports" element={<ReportsPage />} />
         <Route path="/users" element={<Restricted role="admin"><UsersPage /></Restricted>} />

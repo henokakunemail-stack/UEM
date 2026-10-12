@@ -44,6 +44,13 @@ type WSHandler struct {
 	// status='pending', and returned. Nothing read that row, so the device stayed
 	// unfiltered until an operator clicked Sync again.
 	filterSync FilterSyncer
+	// systemPolicySync pushes effective system policy (GPO) to a reconnected device.
+	systemPolicySync SystemPolicySyncer
+}
+
+// SystemPolicySyncer re-sends compiled system policies to a device on reconnect.
+type SystemPolicySyncer interface {
+	SyncOnReconnect(ctx context.Context, deviceID string) error
 }
 
 // FilterSyncer re-sends the compiled filter policy to a device that has just
@@ -115,6 +122,12 @@ func (h *WSHandler) WithUpdateQueue(q UpdateQueue) *WSHandler {
 // next manual sync.
 func (h *WSHandler) WithFilterSync(s FilterSyncer) *WSHandler {
 	h.filterSync = s
+	return h
+}
+
+// WithSystemPolicySync attaches the re-sync hook for system policies (GPO).
+func (h *WSHandler) WithSystemPolicySync(s SystemPolicySyncer) *WSHandler {
+	h.systemPolicySync = s
 	return h
 }
 
@@ -246,6 +259,13 @@ func (h *WSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if h.filterSync != nil {
 		if err := h.filterSync.SyncOnReconnect(r.Context(), deviceID); err != nil {
 			log.Warn().Err(err).Str("device", deviceID).Msg("re-sync filter policy on reconnect")
+		}
+	}
+
+	// Same reasoning for system policy (GPO): re-sync if device state is stale.
+	if h.systemPolicySync != nil {
+		if err := h.systemPolicySync.SyncOnReconnect(r.Context(), deviceID); err != nil {
+			log.Warn().Err(err).Str("device", deviceID).Msg("re-sync system policy on reconnect")
 		}
 	}
 

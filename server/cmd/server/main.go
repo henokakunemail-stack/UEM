@@ -45,6 +45,7 @@ import (
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/modules/remotecontrol"
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/modules/reports"
 	softwaredeployment "github.com/henokakunemail-stack/Endpoint-Manager/server/modules/software-deployment"
+	"github.com/henokakunemail-stack/Endpoint-Manager/server/modules/systempolicy"
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/modules/taskscheduler"
 	usermgmt "github.com/henokakunemail-stack/Endpoint-Manager/server/modules/user-management"
 )
@@ -581,6 +582,12 @@ func buildServer(cfg config.Config, database *sqlx.DB) (*http.Server, func()) {
 	// wrote status='pending' and nothing ever re-read the row, so the endpoint
 	// stayed unfiltered until someone pressed Sync a second time.
 	wsH.WithFilterSync(filterH)
+
+	// Endpoint system policies (Active Directory GPO-like management).
+	sysPolicyRepo := systempolicy.NewRepository(database)
+	sysPolicyH := systempolicy.NewHandler(sysPolicyRepo, hub, deviceRepo, &auditAdapter{db: database}, jwtSvc.RequireAuth)
+	sysPolicyH.Register(r)
+	wsH.WithSystemPolicySync(sysPolicyH)
 
 	// Phase 14: asset & license management.
 	assetRepo := assetlicense.NewRepository(database)

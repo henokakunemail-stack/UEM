@@ -582,6 +582,50 @@ export interface DeviceGroupDTO {
   member_count: number
 }
 
+// Endpoint System Policies (Active Directory GPO-like management)
+export type USBStorageMode = 'allow' | 'block' | 'read_only'
+export type WallpaperStyle = 'fill' | 'fit' | 'stretch' | 'center' | 'tile'
+export type WindowsUpdateMode = 'default' | 'auto_install' | 'notify_only'
+
+export interface SystemPolicySettingsDTO {
+  usb_storage_mode: USBStorageMode
+  wallpaper_enabled: boolean
+  wallpaper_url?: string
+  wallpaper_style?: WallpaperStyle
+  inactivity_timeout_minutes: number
+  disable_task_mgr: boolean
+  disable_cmd: boolean
+  disable_registry_tools: boolean
+  disable_control_panel: boolean
+  windows_update_mode: WindowsUpdateMode
+}
+
+export interface SystemPolicyDTO {
+  id: string
+  name: string
+  description: string
+  target_type: 'all' | 'group' | 'device'
+  target_id: string
+  is_enabled: boolean
+  priority: number
+  settings: SystemPolicySettingsDTO
+  created_by: string
+  created_at: string
+  updated_at: string
+}
+
+export interface DeviceSystemPolicyStateDTO {
+  device_id: string
+  policy_version: string
+  status: 'synced' | 'pending' | 'failed'
+  applied_settings: SystemPolicySettingsDTO
+  last_applied_at: string
+  error_message: string
+  hostname?: string
+  os_name?: string
+}
+
+
 // Phase 13: Agent Self-Update & Rollouts
 export interface AgentReleaseDTO {
   id: string

@@ -46,6 +46,9 @@ import type {
   RemoteControlMode,
   RemoteControlSessionDTO,
   AuthSession,
+  SystemPolicyDTO,
+  SystemPolicySettingsDTO,
+  DeviceSystemPolicyStateDTO,
 } from '../types/api'
 
 const TOKEN_KEY = 'em_access_token'
@@ -989,5 +992,78 @@ export const api = {
   // page loads next.
   getReportExportUrl(reportType: 'inventory' | 'patches' | 'deployments' | 'audit', format: 'csv' | 'json'): string {
     return `/api/reports/${reportType}?format=${format}`
+  },
+
+  // System Policy / Group Policy Management
+  async getSystemPolicies(): Promise<SystemPolicyDTO[]> {
+    const res = await request<{ policies: SystemPolicyDTO[]; count: number }>('/api/system-policies')
+    return res.policies || []
+  },
+
+  async getSystemPolicy(id: string): Promise<SystemPolicyDTO> {
+    return request<SystemPolicyDTO>(`/api/system-policies/${id}`)
+  },
+
+  async createSystemPolicy(data: {
+    name: string
+    description?: string
+    target_type: 'all' | 'group' | 'device'
+    target_id?: string
+    is_enabled?: boolean
+    priority?: number
+    settings: SystemPolicySettingsDTO
+  }): Promise<SystemPolicyDTO> {
+    return request<SystemPolicyDTO>('/api/system-policies', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    })
+  },
+
+  async updateSystemPolicy(
+    id: string,
+    data: Partial<{
+      name: string
+      description: string
+      target_type: 'all' | 'group' | 'device'
+      target_id: string
+      is_enabled: boolean
+      priority: number
+      settings: SystemPolicySettingsDTO
+    }>
+  ): Promise<SystemPolicyDTO> {
+    return request<SystemPolicyDTO>(`/api/system-policies/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    })
+  },
+
+  async deleteSystemPolicy(id: string): Promise<void> {
+    await request<{ status: string }>(`/api/system-policies/${id}`, {
+      method: 'DELETE',
+    })
+  },
+
+  async applySystemPolicy(id: string): Promise<{ status: string; message: string }> {
+    return request<{ status: string; message: string }>(`/api/system-policies/${id}/apply`, {
+      method: 'POST',
+    })
+  },
+
+  async getDeviceSystemPolicy(deviceId: string): Promise<{
+    compiled: { device_id: string; version: string; settings: SystemPolicySettingsDTO }
+    state?: DeviceSystemPolicyStateDTO | null
+  }> {
+    return request(`/api/devices/${deviceId}/system-policy`)
+  },
+
+  async syncDeviceSystemPolicy(deviceId: string): Promise<{ status: string; message: string }> {
+    return request<{ status: string; message: string }>(`/api/devices/${deviceId}/system-policy/sync`, {
+      method: 'POST',
+    })
+  },
+
+  async getSystemPolicyStates(): Promise<DeviceSystemPolicyStateDTO[]> {
+    const res = await request<{ states: DeviceSystemPolicyStateDTO[]; count: number }>('/api/system-policies/states')
+    return res.states || []
   },
 }

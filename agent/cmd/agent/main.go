@@ -35,6 +35,7 @@ import (
 	"github.com/henokakunemail-stack/Endpoint-Manager/agent/shared/remoteexec"
 	"github.com/henokakunemail-stack/Endpoint-Manager/agent/shared/service"
 	"github.com/henokakunemail-stack/Endpoint-Manager/agent/shared/software"
+	"github.com/henokakunemail-stack/Endpoint-Manager/agent/shared/systempolicy"
 	"github.com/henokakunemail-stack/Endpoint-Manager/agent/shared/transport"
 	"github.com/henokakunemail-stack/Endpoint-Manager/agent/shared/update"
 )
@@ -754,6 +755,37 @@ func runAgent(serverURL, enrollToken, credsPath string, heartbeatSecs int) {
 		}()
 
 		return map[string]string{"status": "dispatched", "task_id": id}
+	})
+
+	// System Policy (Active Directory GPO-like management)
+	sysPolicyEngine := systempolicy.NewEngine(targetServerURL, creds.DeviceID, creds.DeviceSecret)
+
+	dispatcher.Register("system_policy.apply", func(ctx context.Context, command, id string, payload json.RawMessage) any {
+		var p struct {
+			PolicyVersion string                      `json:"policy_version"`
+			Settings      systempolicy.PolicySettings `json:"settings"`
+		}
+		_ = json.Unmarshal(payload, &p)
+		if p.PolicyVersion == "" {
+			p.PolicyVersion = id
+		}
+
+		go func() {
+			defer guardAgentGoroutine("system_policy.apply")
+			_, degraded, err := sysPolicyEngine.Apply(context.Background(), p.PolicyVersion, p.Settings)
+			status, errMsg := "synced", ""
+			switch {
+			case err != nil:
+				status, errMsg = "failed", err.Error()
+				log.Error().Err(err).Msg("apply system policy failed")
+			case degraded != "":
+				status, errMsg = "failed", degraded
+				log.Warn().Str("reason", degraded).Msg("system policy applied with degraded items")
+			}
+			_ = sysPolicyEngine.Report(context.Background(), p.PolicyVersion, status, p.Settings, errMsg)
+		}()
+
+		return map[string]string{"status": "applying", "version": p.PolicyVersion}
 	})
 
 	client.SetCommandHandler(dispatcher.Handle)

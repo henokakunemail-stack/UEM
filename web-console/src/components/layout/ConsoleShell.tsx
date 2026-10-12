@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Link, NavLink, useLocation } from 'react-router-dom'
-import { Activity, Bell, Boxes, CalendarClock, ChevronDown, ChevronRight, FileChartColumn, Globe, History, KeyRound, LayoutDashboard, LogOut, Menu, Monitor, Package, Rocket, ScreenShare, ScrollText, Settings, ShieldCheck, Users, Wrench, X, type LucideIcon } from 'lucide-react'
+import { Activity, Bell, Boxes, CalendarClock, ChevronDown, ChevronRight, FileChartColumn, Globe, History, KeyRound, LayoutDashboard, LogOut, Menu, Monitor, Package, Rocket, ScreenShare, ScrollText, Settings, ShieldCheck, Sliders, Users, Wrench, X, type LucideIcon } from 'lucide-react'
 import { useAuth } from '../../context/AuthContext'
 import { ThemeToggle } from '../../context/ThemeContext'
 import { usePermission } from '../../hooks/usePermission'
@@ -33,6 +33,7 @@ const groups: { label: string; items: NavItem[] }[] = [
   { label: 'Security & assets', items: [
     { label: 'Patch management', path: '/patches', icon: ShieldCheck },
     { label: 'Network filter', path: '/filter', icon: Globe },
+    { label: 'Group policy', path: '/system-policy', icon: Sliders },
     { label: 'Assets & licenses', path: '/assets', icon: Boxes, children: [
       { label: 'Hardware assets', path: '/assets/hardware', icon: Monitor },
       { label: 'Software licenses', path: '/assets/licenses', icon: KeyRound },
