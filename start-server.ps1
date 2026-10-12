@@ -32,4 +32,8 @@ Write-Host "DB_PATH:   $env:DB_PATH"
 Write-Host "HTTP_ADDR: $env:HTTP_ADDR"
 Write-Host "Listening. Press Ctrl+C to stop." -ForegroundColor Cyan
 
-.\server.exe
+if (Test-Path ".env") {
+    .\server.exe -env-file .env
+} else {
+    .\server.exe
+}
