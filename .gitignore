@@ -3,6 +3,8 @@
 *.exe~
 server.exe
 agent.exe
+server-linux-*
+agent-linux-*
 emagent-*
 emserver
 emserver.exe
