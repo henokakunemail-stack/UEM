@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -96,9 +97,10 @@ type Session struct {
 	mu        sync.Mutex
 	stopChan  chan struct{}
 	stopOnce  sync.Once
-	modeMu    sync.RWMutex
-	mode      string
-	wakeChan  chan struct{}
+	modeMu           sync.RWMutex
+	mode             string
+	wakeChan         chan struct{}
+	refreshRequested atomic.Bool
 }
 
 func NewSession(cfg SessionConfig, serverBaseURL string, creds Credentials, capturer ScreenCapturer) *Session {
@@ -287,6 +289,11 @@ func (s *Session) readInputLoop() {
 			s.setMode(in.Mode)
 			continue
 		}
+		if in.Type == "refresh" {
+			s.refreshRequested.Store(true)
+			s.wakeCapture()
+			continue
+		}
 
 		if s.currentMode() == "view_only" {
 			continue // drop input in view_only mode
@@ -382,6 +389,9 @@ func (s *Session) streamFramesLoop() {
 				continue
 			}
 
+			if s.refreshRequested.Swap(false) {
+				damage.ForceKeyframe()
+			}
 			damage.SetSize(width, height)
 			rects := damage.Diff(pixels)
 			if len(rects) == 0 {

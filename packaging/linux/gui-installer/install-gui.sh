@@ -86,7 +86,7 @@ chmod 0755 "$DEST_BIN"
 
 # Perform Enrollment if token provided
 if [ -n "$ENROLL_TOKEN" ]; then
-    "$DEST_BIN" -server "$SERVER_URL" -enroll "$ENROLL_TOKEN" -creds "$CREDS_PATH" || true
+    "$DEST_BIN" -server "$SERVER_URL" -enroll "$ENROLL_TOKEN" -enroll-only -creds "$CREDS_PATH" || true
 fi
 
 # Register and start systemd service

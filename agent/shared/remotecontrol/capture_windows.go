@@ -43,6 +43,7 @@ const (
 	SM_CXSCREEN = 0
 	SM_CYSCREEN = 1
 	SRCCOPY     = 0x00CC0020
+	CAPTUREBLT  = 0x40000000
 	BI_RGB      = 0
 
 	// SendInput, not the legacy mouse_event/keybd_event. Both are documented as
@@ -78,9 +79,12 @@ const (
 	desktopAll = 0x01FF
 )
 
-type inputHeader struct {
+// win32Input matches tagINPUT on 64-bit Windows:
+// 4 bytes type, 4 bytes padding, 32 bytes union. Total size: 40 bytes.
+type win32Input struct {
 	Type uint32
-	_    uint32
+	_pad uint32
+	Data [32]byte
 }
 
 type mouseInput struct {
@@ -89,6 +93,7 @@ type mouseInput struct {
 	MouseData   uint32
 	DwFlags     uint32
 	Time        uint32
+	_pad        uint32
 	DwExtraInfo uintptr
 }
 
@@ -97,17 +102,9 @@ type keyboardInput struct {
 	Scan        uint16
 	DwFlags     uint32
 	Time        uint32
+	_pad        uint32
 	DwExtraInfo uintptr
-}
-
-type inputUnion struct {
-	Ki keyboardInput
-	Mi mouseInput
-}
-
-type input struct {
-	Header inputHeader
-	Union  inputUnion
+	_trailing   uint64
 }
 
 type bitmapInfoHeader struct {
@@ -259,7 +256,7 @@ func (c *WindowsCapturer) probeCapture() error {
 	old, _, _ := procSelectObject.Call(hdcMem, hBitmap)
 	defer procSelectObject.Call(hdcMem, old)
 
-	if ret, _, callErr := procBitBlt.Call(hdcMem, 0, 0, 1, 1, hdcScreen, 0, 0, uintptr(SRCCOPY)); ret == 0 {
+	if ret, _, callErr := procBitBlt.Call(hdcMem, 0, 0, 1, 1, hdcScreen, 0, 0, uintptr(SRCCOPY|CAPTUREBLT)); ret == 0 {
 		return fmt.Errorf("BitBlt failed: %w", callErr)
 	}
 	return nil
@@ -301,7 +298,7 @@ func (c *WindowsCapturer) CaptureScreen() ([]byte, int, int, error) {
 	hOld, _, _ := procSelectObject.Call(hdcMem, hBitmap)
 	defer procSelectObject.Call(hdcMem, hOld)
 
-	ret, _, callErr := procBitBlt.Call(hdcMem, 0, 0, uintptr(width), uintptr(height), hdcScreen, 0, 0, uintptr(SRCCOPY))
+	ret, _, callErr := procBitBlt.Call(hdcMem, 0, 0, uintptr(width), uintptr(height), hdcScreen, 0, 0, uintptr(SRCCOPY|CAPTUREBLT))
 	if ret == 0 {
 		tid, _, _ := procGetCurrentThreadID.Call()
 		attachedThreads.Delete(tid)
@@ -351,6 +348,8 @@ func (c *WindowsCapturer) CaptureScreen() ([]byte, int, int, error) {
 }
 
 func (c *WindowsCapturer) InjectMouseEvent(e InputEvent) error {
+	_ = attachToInputDesktop()
+
 	// SetCursorPos for the move, SendInput for the button and wheel events.
 	// Both operate in the same virtual-desktop coordinate space the frame was
 	// captured in, because the process is now DPI-aware.
@@ -363,8 +362,7 @@ func (c *WindowsCapturer) InjectMouseEvent(e InputEvent) error {
 	switch e.Action {
 	case "move":
 		// SetCursorPos already moved the cursor to the target coordinate and generated
-		// WM_MOUSEMOVE. Calling SendInput with MOUSEEVENTF_MOVE without MOUSEEVENTF_ABSOLUTE
-		// interprets Dx/Dy as relative mickeys, displacing the cursor a second time.
+		// WM_MOUSEMOVE.
 		return nil
 	case "down":
 		switch e.Button {
@@ -399,11 +397,7 @@ func (c *WindowsCapturer) InjectMouseEvent(e InputEvent) error {
 		DwFlags:   flags,
 	}
 
-	c.sendInput(input{
-		Header: inputHeader{Type: INPUT_MOUSE},
-		Union:  inputUnion{Mi: mi},
-	})
-	return nil
+	return c.sendMouseInput(mi)
 }
 
 // isExtendedVK reports whether a virtual key needs KEYEVENTF_EXTENDEDKEY.
@@ -457,7 +451,7 @@ func (c *WindowsCapturer) InjectKeyboardEvent(e InputEvent) error {
 	// Scan path when the layout produced one, virtual-key path otherwise. Both
 	// carry Vk, so a target application sees a complete key record either way.
 	ki := keyboardInput{Vk: vk, Scan: scan, DwFlags: flags}
-	c.sendInput(input{Header: inputHeader{Type: INPUT_KEYBOARD}, Union: inputUnion{Ki: ki}})
+	err := c.sendKeyboardInput(ki)
 
 	c.mu.Lock()
 	if e.Action == "up" {
@@ -466,7 +460,7 @@ func (c *WindowsCapturer) InjectKeyboardEvent(e InputEvent) error {
 		c.held[vk] = true
 	}
 	c.mu.Unlock()
-	return nil
+	return err
 }
 
 func (c *WindowsCapturer) ReleaseAllKeys() error {
@@ -497,11 +491,31 @@ func (c *WindowsCapturer) ReleaseAllKeys() error {
 			flags |= KEYEVENTF_SCANCODE
 		}
 		ki := keyboardInput{Vk: vk, Scan: scan, DwFlags: flags}
-		c.sendInput(input{Header: inputHeader{Type: INPUT_KEYBOARD}, Union: inputUnion{Ki: ki}})
+		_ = c.sendKeyboardInput(ki)
 	}
 	return nil
 }
 
-func (c *WindowsCapturer) sendInput(in input) {
-	_, _, _ = procSendInput.Call(1, uintptr(unsafe.Pointer(&in)), unsafe.Sizeof(in))
+func (c *WindowsCapturer) sendMouseInput(mi mouseInput) error {
+	_ = attachToInputDesktop()
+	var in win32Input
+	in.Type = INPUT_MOUSE
+	*(*mouseInput)(unsafe.Pointer(&in.Data[0])) = mi
+	ret, _, callErr := procSendInput.Call(1, uintptr(unsafe.Pointer(&in)), unsafe.Sizeof(in))
+	if ret == 0 {
+		return fmt.Errorf("SendInput mouse failed: %w", callErr)
+	}
+	return nil
+}
+
+func (c *WindowsCapturer) sendKeyboardInput(ki keyboardInput) error {
+	_ = attachToInputDesktop()
+	var in win32Input
+	in.Type = INPUT_KEYBOARD
+	*(*keyboardInput)(unsafe.Pointer(&in.Data[0])) = ki
+	ret, _, callErr := procSendInput.Call(1, uintptr(unsafe.Pointer(&in)), unsafe.Sizeof(in))
+	if ret == 0 {
+		return fmt.Errorf("SendInput keyboard failed: %w", callErr)
+	}
+	return nil
 }

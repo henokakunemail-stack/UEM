@@ -47,6 +47,7 @@ func main() {
 	var (
 		serverURL     string
 		enrollToken   string
+		enrollOnly    bool
 		credsPath     string
 		heartbeatSecs int
 		serviceAction string
@@ -55,6 +56,7 @@ func main() {
 	)
 	flag.StringVar(&serverURL, "server", envOr("AGENT_SERVER", "http://localhost:8443"), "central server URL")
 	flag.StringVar(&enrollToken, "enroll", "", "one-time enrollment token (first run only)")
+	flag.BoolVar(&enrollOnly, "enroll-only", false, "enroll device with server, save credentials, and exit immediately")
 	flag.StringVar(&credsPath, "creds", defaultCredsPath(), "path to persisted credentials")
 	flag.IntVar(&heartbeatSecs, "heartbeat", 20, "heartbeat interval in seconds")
 	flag.StringVar(&serviceAction, "service", "", "OS service management action (install|uninstall|start|stop|status)")
@@ -63,6 +65,15 @@ func main() {
 	flag.StringVar(&rcWorkerArg, "rc-worker", "", "internal: base64 remote control session config (session worker mode)")
 	flag.StringVar(&rcWorkerCreds, "rc-creds", "", "internal: credential path for the session worker")
 	flag.Parse()
+
+	if enrollOnly {
+		if err := runEnrollOnly(serverURL, enrollToken, credsPath); err != nil {
+			log.Error().Err(err).Msg("enroll-only failed")
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
 
 	// The worker branch runs before the service check on purpose. A worker spawned
 	// into the user's session is not a service, so RunAsService would be false
@@ -155,6 +166,43 @@ func runRCWorker(cfgArg, credsPath string) {
 	// would end the session the instant it began.
 	session.Wait(ctx)
 	log.Info().Str("session", cfg.SessionID).Msg("rc worker session ended")
+}
+
+// runEnrollOnly contacts the management server with a one-time enrollment token,
+// saves credentials to disk, and exits immediately. Used by installers so that
+// the installer process does not block on the background agent daemon.
+//
+// ponytail: skip daemon init, metrics, inventory, websocket; exit immediately.
+func runEnrollOnly(serverURL, enrollToken, credsPath string) error {
+	if strings.TrimSpace(enrollToken) == "" {
+		return errors.New("-enroll token is required when using -enroll-only")
+	}
+	if strings.TrimSpace(serverURL) == "" {
+		return errors.New("-server URL is required when using -enroll-only")
+	}
+
+	creds, err := enrollment.Load(credsPath)
+	if err != nil && !errors.Is(err, enrollment.ErrNotEnrolled) {
+		return fmt.Errorf("load existing credentials: %w", err)
+	}
+
+	log.Info().Str("server", serverURL).Msg("enrolling with provided token (enroll-only)")
+	newCreds, err := enrollment.Exchange(serverURL, enrollToken)
+	if err != nil {
+		return fmt.Errorf("enrollment exchange failed: %w", err)
+	}
+
+	if creds.DeviceID != "" && newCreds.DeviceID != creds.DeviceID {
+		return fmt.Errorf("refusing to overwrite credentials for different device (stored: %s, returned: %s)", creds.DeviceID, newCreds.DeviceID)
+	}
+
+	if err := enrollment.Save(credsPath, newCreds); err != nil {
+		return fmt.Errorf("save credentials: %w", err)
+	}
+
+	log.Info().Str("device_id", newCreds.DeviceID).Msg("enrolled successfully")
+	fmt.Printf("Device enrolled successfully (device_id: %s)\n", newCreds.DeviceID)
+	return nil
 }
 
 func runAgent(serverURL, enrollToken, credsPath string, heartbeatSecs int) {

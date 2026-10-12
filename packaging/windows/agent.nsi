@@ -126,7 +126,7 @@ Section "Install Agent" SecInstall
     ; 3. Run Enrollment if token provided
     ${If} $EnrollToken != ""
         DetailPrint "Enrolling device with central server..."
-        nsExec::ExecToLog '"$INSTDIR\endpoint-agent.exe" -server "$ServerURL" -enroll "$EnrollToken" -creds "$DATADIR\creds.json"'
+        nsExec::ExecToLog '"$INSTDIR\endpoint-agent.exe" -server "$ServerURL" -enroll "$EnrollToken" -enroll-only -creds "$DATADIR\creds.json"'
         Pop $0
         ${If} $0 != 0
             DetailPrint "Warning: Enrollment returned code $0. Service registration will continue."

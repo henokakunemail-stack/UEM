@@ -4,6 +4,7 @@ package windows
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 	"unsafe"
 
@@ -81,9 +82,92 @@ func (c *winCollector) collectSoftware() []inventory.Software {
 	return out
 }
 
+var kbPrefixRegex = regexp.MustCompile(`(?i)^kb\d+`)
+
+type arpEntry struct {
+	DisplayName          string
+	DisplayVersion       string
+	Publisher            string
+	ProductCode          string
+	InstallDate          string
+	SystemComponent      bool
+	ParentKeyName        string
+	ParentDisplayName    string
+	UninstallString      string
+	QuietUninstallString string
+	WindowsInstaller     bool
+	ReleaseType          string
+}
+
+func regGetString(k registry.Key, name string) string {
+	s, _, err := k.GetStringValue(name)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(s)
+}
+
+func regIsOne(k registry.Key, name string) bool {
+	if val, _, err := k.GetIntegerValue(name); err == nil {
+		return val == 1
+	}
+	if s, _, err := k.GetStringValue(name); err == nil {
+		return strings.TrimSpace(s) == "1"
+	}
+	return false
+}
+
+func isUpdateReleaseType(rt string) bool {
+	rt = strings.TrimSpace(rt)
+	return strings.EqualFold(rt, "Security Update") ||
+		strings.EqualFold(rt, "Update") ||
+		strings.EqualFold(rt, "Hotfix") ||
+		strings.EqualFold(rt, "Service Pack")
+}
+
+func isUpdateDisplayName(name string) bool {
+	if kbPrefixRegex.MatchString(name) {
+		return true
+	}
+	lower := strings.ToLower(name)
+	return strings.HasPrefix(lower, "update for ") ||
+		strings.HasPrefix(lower, "security update for ") ||
+		strings.HasPrefix(lower, "hotfix for ") ||
+		strings.HasPrefix(lower, "service pack for ")
+}
+
+func isARPVisible(e arpEntry) bool {
+	name := strings.TrimSpace(e.DisplayName)
+	if name == "" {
+		return false
+	}
+	// SystemComponent indicates internal Windows/driver subcomponent
+	if e.SystemComponent {
+		return false
+	}
+	// ParentKeyName or ParentDisplayName indicates child component/patch of another suite
+	if strings.TrimSpace(e.ParentKeyName) != "" || strings.TrimSpace(e.ParentDisplayName) != "" {
+		return false
+	}
+	// Must have an uninstaller command or be managed by Windows Installer (MSI)
+	hasUninstaller := strings.TrimSpace(e.UninstallString) != "" ||
+		strings.TrimSpace(e.QuietUninstallString) != "" ||
+		e.WindowsInstaller
+	if !hasUninstaller {
+		return false
+	}
+	// Exclude servicing/hotfix updates
+	if isUpdateReleaseType(e.ReleaseType) {
+		return false
+	}
+	if isUpdateDisplayName(name) {
+		return false
+	}
+	return true
+}
+
 // readUninstallEntry reads one Uninstall subkey. Returns ok=false for entries
-// that are not user-visible programs: entries without a DisplayName are usually
-// language packs or servicing payloads.
+// that are not user-visible programs (system components, driver stubs, updates).
 func (c *winCollector) readUninstallEntry(root registry.Key, path string) (inventory.Software, bool) {
 	k, err := registry.OpenKey(root, path, registry.READ)
 	if err != nil {
@@ -91,21 +175,43 @@ func (c *winCollector) readUninstallEntry(root registry.Key, path string) (inven
 	}
 	defer k.Close()
 
-	name, _, err := k.GetStringValue("DisplayName")
-	if err != nil || strings.TrimSpace(name) == "" {
+	entry := arpEntry{
+		DisplayName:          regGetString(k, "DisplayName"),
+		DisplayVersion:       regGetString(k, "DisplayVersion"),
+		Publisher:            regGetString(k, "Publisher"),
+		ProductCode:          regGetString(k, "ProductCode"),
+		InstallDate:          regGetString(k, "InstallDate"),
+		SystemComponent:      regIsOne(k, "SystemComponent"),
+		ParentKeyName:        regGetString(k, "ParentKeyName"),
+		ParentDisplayName:    regGetString(k, "ParentDisplayName"),
+		UninstallString:      regGetString(k, "UninstallString"),
+		QuietUninstallString: regGetString(k, "QuietUninstallString"),
+		WindowsInstaller:     regIsOne(k, "WindowsInstaller"),
+		ReleaseType:          regGetString(k, "ReleaseType"),
+	}
+
+	if !isARPVisible(entry) {
 		return inventory.Software{}, false
 	}
-	version, _, _ := k.GetStringValue("DisplayVersion")
-	publisher, _, _ := k.GetStringValue("Publisher")
-	productCode, _, _ := k.GetStringValue("ProductCode")
-	installDate, _, _ := k.GetStringValue("InstallDate") // "YYYYMMDD" in ARP entries
+
+	// ProductCode fix: if not explicitly set, check if subkey name is a GUID
+	productCode := entry.ProductCode
+	if productCode == "" {
+		keyName := path
+		if idx := strings.LastIndex(path, `\`); idx >= 0 {
+			keyName = path[idx+1:]
+		}
+		if strings.HasPrefix(keyName, "{") && strings.HasSuffix(keyName, "}") {
+			productCode = keyName
+		}
+	}
 
 	return inventory.Software{
-		Name:        strings.TrimSpace(name),
-		Version:     strings.TrimSpace(version),
-		Publisher:   strings.TrimSpace(publisher),
-		ProductCode: strings.TrimSpace(productCode),
-		InstallDate: installDate,
+		Name:        entry.DisplayName,
+		Version:     entry.DisplayVersion,
+		Publisher:   entry.Publisher,
+		ProductCode: productCode,
+		InstallDate: entry.InstallDate,
 	}, true
 }
 

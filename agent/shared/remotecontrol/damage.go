@@ -30,8 +30,8 @@ const tileSize = 32
 // typical change to a handful of rectangles; this is the guard for the case
 // where nothing merges, such as a full-screen video or a window being dragged
 // across the desktop. Past this the frame collapses to the bounding box of dirty
-// tiles (or the full screen if >60% of the desktop is dirty).
-const maxRects = 128
+// tiles (or the full screen if >50% of the desktop is dirty).
+const maxRects = 24
 
 // Rect is a region of the desktop in endpoint pixel coordinates.
 type Rect struct {
@@ -91,6 +91,13 @@ func (d *Damage) SetSize(width, height int) {
 	d.previous = make([]byte, width*height*4)
 	d.dirty = make([]bool, d.cols*d.rows)
 	d.consumed = make([]bool, d.cols*d.rows)
+	d.firstFrame = true
+}
+
+// ForceKeyframe resets the baseline so the next diff returns the entire screen
+// in one full-desktop rectangle. Used when a client connects, reconnects, or
+// explicitly requests a keyframe refresh.
+func (d *Damage) ForceKeyframe() {
 	d.firstFrame = true
 }
 

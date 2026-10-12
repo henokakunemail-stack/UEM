@@ -93,7 +93,7 @@ Copy-Item -Path $resolvedBin -Destination $destExe -Force
 # 6. Run enrollment if token provided
 if ($EnrollToken) {
     Write-Host "[*] Enrolling device with server $ServerUrl..." -ForegroundColor Cyan
-    & $destExe -server $ServerUrl -enroll $EnrollToken -creds $credsPath
+    & $destExe -server $ServerUrl -enroll $EnrollToken -enroll-only -creds $credsPath
     if ($LASTEXITCODE -ne 0) {
         Write-Warning "[-] Device enrollment returned exit code $LASTEXITCODE. Service will continue installation."
     } else {

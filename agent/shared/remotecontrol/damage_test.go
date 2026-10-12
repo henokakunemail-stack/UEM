@@ -501,3 +501,28 @@ func TestAdaptiveQualityReducesLargeDamagePayload(t *testing.T) {
 		t.Errorf("large rect bytes per pixel (%.3f) should be lower or comparable to small rect (%.3f)", largeBytesPerPx, smallBytesPerPx)
 	}
 }
+
+func TestForceKeyframeProducesFullDesktop(t *testing.T) {
+	const w, h = 640, 480
+	d := NewDamage()
+	d.SetSize(w, h)
+	frame := solidFrame(w, h, 0x10, 0x20, 0x30, 0xFF)
+
+	// First frame is full
+	rects := d.Diff(frame)
+	if len(rects) != 1 || rects[0].W != w || rects[0].H != h {
+		t.Fatalf("first frame not full screen: %+v", rects)
+	}
+
+	// Subsequent identical frame produces zero rectangles
+	if rects := d.Diff(frame); len(rects) != 0 {
+		t.Fatalf("unchanged frame produced rects: %+v", rects)
+	}
+
+	// Calling ForceKeyframe forces full desktop capture again
+	d.ForceKeyframe()
+	rects = d.Diff(frame)
+	if len(rects) != 1 || rects[0].W != w || rects[0].H != h {
+		t.Fatalf("ForceKeyframe did not produce full desktop: %+v", rects)
+	}
+}

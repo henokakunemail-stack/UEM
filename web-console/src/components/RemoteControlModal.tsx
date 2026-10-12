@@ -175,6 +175,9 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
           // first frame arrives. `awaitingFirstFrame` drives the difference
           // between "connecting" and "stalled".
           setAwaitingFirstFrame(true)
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'refresh' }))
+          }
         }
 
         ws.onmessage = (event) => {
@@ -282,14 +285,25 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
               // old Blob -> objectURL -> Image path, which decoded a ~100KB
               // JPEG on the UI thread for every frame and made input feel
               // sluggish under load.
-              const bitmaps = await Promise.all(rects.map((r) => createImageBitmap(r.body)))
+              const bitmaps = await Promise.all(
+                rects.map(async (r) => {
+                  try {
+                    return await createImageBitmap(r.body)
+                  } catch {
+                    return null
+                  }
+                })
+              )
               if (isCancelled) {
-                bitmaps.forEach((b) => b.close())
+                bitmaps.forEach((b) => b?.close())
                 return
               }
               for (let i = 0; i < bitmaps.length; i++) {
-                ctx.drawImage(bitmaps[i], rects[i].x, rects[i].y)
-                bitmaps[i].close()
+                const bmp = bitmaps[i]
+                if (bmp) {
+                  ctx.drawImage(bmp, rects[i].x, rects[i].y)
+                  bmp.close()
+                }
               }
               hasPaintedRef.current = true
             })
@@ -679,28 +693,44 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
           role="application"
           aria-label={`Remote desktop for ${device.hostname}. Keyboard input is forwarded to the endpoint. Click the desktop to focus it, then type.`}
         >
-          {status === 'active' || status === 'stalled' ? (
-            <>
-              <canvas
-                ref={canvasRef}
-                onMouseMove={handleMouseMove}
-                onMouseDown={handleMouseDown}
-                onMouseUp={handleMouseUp}
-                onContextMenu={handleContextMenu}
-                onWheel={handleWheel}
-                className={`remote-canvas ${mode === 'full_control' ? 'remote-canvas-control' : 'remote-canvas-view'}`}
-              />
-              {status === 'stalled' && (
-                <div className="remote-overlay" role="alert">
-                  <AlertCircle size={28} />
-                  <p className="remote-overlay-text">{errorMessage}</p>
-                  <button type="button" className="btn btn-secondary" onClick={onClose}>
-                    Close session
-                  </button>
-                </div>
-              )}
-            </>
-          ) : status === 'error' ? (
+          {status !== 'error' && status !== 'ended' && (
+            <canvas
+              ref={canvasRef}
+              onMouseMove={handleMouseMove}
+              onMouseDown={handleMouseDown}
+              onMouseUp={handleMouseUp}
+              onContextMenu={handleContextMenu}
+              onWheel={handleWheel}
+              className={`remote-canvas ${mode === 'full_control' ? 'remote-canvas-control' : 'remote-canvas-view'}`}
+            />
+          )}
+
+          {(status === 'initiating' || status === 'connecting') && (
+            <div className="remote-overlay">
+              <RefreshCw className="remote-placeholder-icon spinning" />
+              <p className="remote-placeholder-text">
+                {status === 'initiating'
+                  ? 'Requesting desktop tunnel...'
+                  : 'Waiting for the endpoint to attach and send its first frame...'}
+              </p>
+              <p className="remote-hint">
+                <Keyboard size={12} /> Click the desktop to focus it, then type. Keys are forwarded to{' '}
+                {device.hostname}.
+              </p>
+            </div>
+          )}
+
+          {status === 'stalled' && (
+            <div className="remote-overlay" role="alert">
+              <AlertCircle size={28} />
+              <p className="remote-overlay-text">{errorMessage}</p>
+              <button type="button" className="btn btn-secondary" onClick={onClose}>
+                Close session
+              </button>
+            </div>
+          )}
+
+          {status === 'error' && (
             <div className="remote-placeholder">
               <Monitor className="remote-placeholder-icon" />
               <h3 className="remote-placeholder-title">Cannot Stream This Desktop</h3>
@@ -713,7 +743,9 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
                 Close Window
               </button>
             </div>
-          ) : status === 'ended' ? (
+          )}
+
+          {status === 'ended' && (
             <div className="remote-placeholder">
               <Monitor className="remote-placeholder-icon" />
               <h3 className="remote-placeholder-title">Remote Session Ended</h3>
@@ -723,19 +755,6 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
               <button type="button" className="btn btn-primary" onClick={onClose}>
                 Close Window
               </button>
-            </div>
-          ) : (
-            <div className="remote-placeholder">
-              <RefreshCw className="remote-placeholder-icon spinning" />
-              <p className="remote-placeholder-text">
-                {status === 'initiating'
-                  ? 'Requesting desktop tunnel...'
-                  : 'Waiting for the endpoint to attach and send its first frame...'}
-              </p>
-              <p className="remote-hint">
-                <Keyboard size={12} /> Click the desktop to focus it, then type. Keys are forwarded to{' '}
-                {device.hostname}.
-              </p>
             </div>
           )}
         </div>

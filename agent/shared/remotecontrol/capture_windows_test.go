@@ -2,7 +2,10 @@
 
 package remotecontrol
 
-import "testing"
+import (
+	"testing"
+	"unsafe"
+)
 
 // The capability probe and the real capture have to agree. They used to disagree
 // in the only direction that matters: the probe ran on a thread with no desktop
@@ -102,5 +105,68 @@ func TestKeyboardTrackingIsSafeUnderConcurrency(t *testing.T) {
 		}
 	}
 	<-done
+	_ = c.ReleaseAllKeys()
+}
+
+func TestWin32InputStructContract(t *testing.T) {
+	// Win32 tagINPUT on 64-bit Windows must be exactly 40 bytes.
+	// Passing an incorrect cbSize to SendInput causes the syscall to return 0 with ERROR_INVALID_PARAMETER.
+	if sz := unsafe.Sizeof(win32Input{}); sz != 40 {
+		t.Fatalf("win32Input size = %d bytes, want exactly 40 bytes for Win32 tagINPUT", sz)
+	}
+	if sz := unsafe.Sizeof(mouseInput{}); sz != 32 {
+		t.Fatalf("mouseInput size = %d bytes, want exactly 32 bytes for Win32 MOUSEINPUT", sz)
+	}
+	if sz := unsafe.Sizeof(keyboardInput{}); sz != 32 {
+		t.Fatalf("keyboardInput size = %d bytes, want exactly 32 bytes for Win32 KEYBDINPUT union slot", sz)
+	}
+}
+
+func TestInjectMouseEventSucceeds(t *testing.T) {
+	c := NewPlatformCapturer()
+	if caps := c.Capabilities(); !caps.Capture {
+		t.Skipf("this host cannot be captured/injected: %s", caps.Reason)
+	}
+
+	// Move mouse
+	if err := c.InjectMouseEvent(InputEvent{Type: "mouse", Action: "move", X: 100, Y: 100}); err != nil {
+		t.Fatalf("InjectMouseEvent move failed: %v", err)
+	}
+
+	// Left click down and up
+	if err := c.InjectMouseEvent(InputEvent{Type: "mouse", Action: "down", X: 100, Y: 100, Button: "left"}); err != nil {
+		t.Fatalf("InjectMouseEvent left down failed: %v", err)
+	}
+	if err := c.InjectMouseEvent(InputEvent{Type: "mouse", Action: "up", X: 100, Y: 100, Button: "left"}); err != nil {
+		t.Fatalf("InjectMouseEvent left up failed: %v", err)
+	}
+
+	// Right click down and up
+	if err := c.InjectMouseEvent(InputEvent{Type: "mouse", Action: "down", X: 100, Y: 100, Button: "right"}); err != nil {
+		t.Fatalf("InjectMouseEvent right down failed: %v", err)
+	}
+	if err := c.InjectMouseEvent(InputEvent{Type: "mouse", Action: "up", X: 100, Y: 100, Button: "right"}); err != nil {
+		t.Fatalf("InjectMouseEvent right up failed: %v", err)
+	}
+
+	// Wheel scroll
+	if err := c.InjectMouseEvent(InputEvent{Type: "mouse", Action: "wheel", X: 100, Y: 100, Delta: 120}); err != nil {
+		t.Fatalf("InjectMouseEvent wheel failed: %v", err)
+	}
+}
+
+func TestInjectKeyboardEventSucceeds(t *testing.T) {
+	c := NewPlatformCapturer()
+	if caps := c.Capabilities(); !caps.Capture {
+		t.Skipf("this host cannot be captured/injected: %s", caps.Reason)
+	}
+
+	// Virtual-key code 0x11 (VK_CONTROL)
+	if err := c.InjectKeyboardEvent(InputEvent{Type: "keyboard", Action: "down", Code: 0x11}); err != nil {
+		t.Fatalf("InjectKeyboardEvent down failed: %v", err)
+	}
+	if err := c.InjectKeyboardEvent(InputEvent{Type: "keyboard", Action: "up", Code: 0x11}); err != nil {
+		t.Fatalf("InjectKeyboardEvent up failed: %v", err)
+	}
 	_ = c.ReleaseAllKeys()
 }

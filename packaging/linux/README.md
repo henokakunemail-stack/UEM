@@ -37,7 +37,7 @@ Paket standar Debian yang dapat didistribusikan melalui repositori APT privat at
 sudo dpkg -i endpoint-agent_1.0.0_amd64.deb
 
 # Konfigurasi token & mulai service
-sudo endpoint-agent -server https://mgmt.example.com -enroll <TOKEN> -creds /etc/endpoint-agent/creds.json
+sudo endpoint-agent -server https://mgmt.example.com -enroll <TOKEN> -enroll-only -creds /etc/endpoint-agent/creds.json
 sudo systemctl restart endpoint-agent
 
 # Hapus paket (service dihentikan otomatis)
