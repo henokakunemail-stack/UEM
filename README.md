@@ -378,3 +378,13 @@ before-release check rather than a per-commit one:
 - **Cryptographic Hash Verification**: All scripts, binaries, and patch installers are hashed with SHA-256 before remote dispatch.
 - **Audit Logging**: Every administrative action, command execution, and remote desktop connection is recorded with UTC timestamp, user ID, IP address, and change details.
 - **Encrypted Communication**: Mandatory TLS 1.2+ encryption on all agent-to-server WebSocket connections and REST endpoints.
+
+---
+
+## 📚 Documentation & Guides
+
+- [Panduan Pembaruan / Update Guide (Windows & Linux)](docs/installation/update-guide.md)
+- [Panduan Rilis & Instalasi Lengkap (Release Guide)](docs/installation/release-guide.md)
+- [Instalasi Server Linux](docs/installation/server-linux.md)
+- [Instalasi Server Windows](docs/installation/server-windows.md)
+- [Deployment via Docker](docs/installation/docker.md)

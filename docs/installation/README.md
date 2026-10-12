@@ -13,6 +13,7 @@ deployment lewat Docker.
 | Agen di Linux | [agent-linux.md](agent-linux.md) |
 | Server lewat Docker | [docker.md](docker.md) |
 | Kebutuhan perangkat lunak | [prerequisites.md](prerequisites.md) |
+| **Panduan Update Server & Agent** | **[update-guide.md](update-guide.md)** |
 
 Urutan yang benar: **server dulu, lalu agen**. Agen membutuhkan URL server dan
 satu enrollment token yang hanya bisa dibuat setelah server berjalan.
