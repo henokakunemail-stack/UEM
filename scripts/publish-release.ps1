@@ -75,7 +75,8 @@ try {
     $DraftFlag = if ($Draft) { @("--draft") } else { @() }
 
     # Try create release
-    $CreateOut = & gh release create "$Tag" $Assets --title "Enterprise Endpoint Management $Tag" --notes "Release $Tag: Cross-platform server, agent, and setup installers." @DraftFlag 2>&1
+    $Notes = "Release " + $Tag + ": Cross-platform server, agent, and setup installers."
+    $CreateOut = & gh release create "$Tag" $Assets --title "Enterprise Endpoint Management $Tag" --notes $Notes @DraftFlag 2>&1
     if ($LASTEXITCODE -ne 0) {
         Write-Host "Release might already exist, uploading/clobbering assets..." -ForegroundColor Yellow
         & gh release upload "$Tag" $Assets --clobber
