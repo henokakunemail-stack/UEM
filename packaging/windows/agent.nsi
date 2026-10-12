@@ -185,6 +185,10 @@ Section "Uninstall"
     nsExec::ExecToLog '"$INSTDIR\endpoint-agent.exe" -service uninstall'
     Pop $0
 
+    DetailPrint "Cleaning up Network Filter firewall rules..."
+    nsExec::ExecToLog 'netsh advfirewall firewall delete rule group="EndpointManager-Filter"'
+    Pop $0
+
     ; Allow SCM short delay to release process handles
     Sleep 2000
 

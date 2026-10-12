@@ -359,9 +359,13 @@ func (c *WindowsCapturer) InjectMouseEvent(e InputEvent) error {
 	}
 
 	var flags uint32
+	var mouseData uint32
 	switch e.Action {
 	case "move":
-		flags = MOUSEEVENTF_MOVE
+		// SetCursorPos already moved the cursor to the target coordinate and generated
+		// WM_MOUSEMOVE. Calling SendInput with MOUSEEVENTF_MOVE without MOUSEEVENTF_ABSOLUTE
+		// interprets Dx/Dy as relative mickeys, displacing the cursor a second time.
+		return nil
 	case "down":
 		switch e.Button {
 		case "right":
@@ -382,14 +386,16 @@ func (c *WindowsCapturer) InjectMouseEvent(e InputEvent) error {
 		}
 	case "wheel":
 		flags = MOUSEEVENTF_WHEEL
+		mouseData = uint32(int32(e.Delta))
 	default:
 		return nil
 	}
 
+	// Dx=0, Dy=0 because cursor is already positioned exactly at (e.X, e.Y) by SetCursorPos.
 	mi := mouseInput{
-		Dx:        int32(e.X),
-		Dy:        int32(e.Y),
-		MouseData: uint32(int32(e.Delta)),
+		Dx:        0,
+		Dy:        0,
+		MouseData: mouseData,
 		DwFlags:   flags,
 	}
 
@@ -440,8 +446,9 @@ func (c *WindowsCapturer) InjectKeyboardEvent(e InputEvent) error {
 	if e.Action == "up" {
 		flags |= KEYEVENTF_KEYUP
 	}
-	if isExtendedVK(vk) {
+	if isExtendedVK(vk) || (scan&0xFF00) == 0xE000 || (scan&0xFF00) == 0xE100 {
 		flags |= KEYEVENTF_EXTENDEDKEY
+		scan = scan & 0xFF
 	}
 	if scan != 0 {
 		flags |= KEYEVENTF_SCANCODE
@@ -482,11 +489,12 @@ func (c *WindowsCapturer) ReleaseAllKeys() error {
 			scan = uint16(ret)
 		}
 		flags := uint32(KEYEVENTF_KEYUP)
+		if isExtendedVK(vk) || (scan&0xFF00) == 0xE000 || (scan&0xFF00) == 0xE100 {
+			flags |= KEYEVENTF_EXTENDEDKEY
+			scan = scan & 0xFF
+		}
 		if scan != 0 {
 			flags |= KEYEVENTF_SCANCODE
-		}
-		if isExtendedVK(vk) {
-			flags |= KEYEVENTF_EXTENDEDKEY
 		}
 		ki := keyboardInput{Vk: vk, Scan: scan, DwFlags: flags}
 		c.sendInput(input{Header: inputHeader{Type: INPUT_KEYBOARD}, Union: inputUnion{Ki: ki}})

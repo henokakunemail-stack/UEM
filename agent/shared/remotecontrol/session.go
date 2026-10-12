@@ -79,16 +79,13 @@ type ScreenCapturer interface {
 	ReleaseAllKeys() error
 }
 
-// Frame rate the agent captures at.
-//
-// This is the rate at which the endpoint is sampled, not the rate at which the
-// operator sees something change. An unchanged frame produces no rectangles and
-// no network traffic at all, so the visible frame rate on a mostly-static
-// desktop is far below this while the cost stays the same as before. 10 fps is
-// the point where a cursor movement or a scroll still reads as continuous; a
-// higher rate only adds blits on the endpoint, which is CPU the endpoint's owner
-// is paying for and cannot see the benefit of.
-const captureInterval = 100 * time.Millisecond
+// Adaptive capture intervals: 33ms (~30 FPS) while user interacts or desktop is active,
+// throttling smoothly up to 125ms (~8 FPS) when desktop is completely static.
+const (
+	minCaptureInterval = 33 * time.Millisecond
+	maxCaptureInterval = 125 * time.Millisecond
+	captureInterval    = minCaptureInterval
+)
 
 type Session struct {
 	config    SessionConfig
@@ -101,6 +98,7 @@ type Session struct {
 	stopOnce  sync.Once
 	modeMu    sync.RWMutex
 	mode      string
+	wakeChan  chan struct{}
 }
 
 func NewSession(cfg SessionConfig, serverBaseURL string, creds Credentials, capturer ScreenCapturer) *Session {
@@ -114,6 +112,7 @@ func NewSession(cfg SessionConfig, serverBaseURL string, creds Credentials, capt
 		creds:     creds,
 		capturer:  capturer,
 		stopChan:  make(chan struct{}),
+		wakeChan:  make(chan struct{}, 1),
 		mode:      mode,
 	}
 }
@@ -261,6 +260,13 @@ func (s *Session) SendNotice(notice, detail string) {
 	})
 }
 
+func (s *Session) wakeCapture() {
+	select {
+	case s.wakeChan <- struct{}{}:
+	default:
+	}
+}
+
 func (s *Session) readInputLoop() {
 	defer s.Stop()
 
@@ -289,6 +295,7 @@ func (s *Session) readInputLoop() {
 		switch in.Type {
 		case "mouse":
 			_ = s.capturer.InjectMouseEvent(in)
+			s.wakeCapture()
 		case "keyboard":
 			// A 'release' action carries no key: it means "lift everything you
 			// think is held", which is what the console sends on blur.
@@ -297,6 +304,7 @@ func (s *Session) readInputLoop() {
 			} else {
 				_ = s.capturer.InjectKeyboardEvent(in)
 			}
+			s.wakeCapture()
 		}
 	}
 }
@@ -304,8 +312,9 @@ func (s *Session) readInputLoop() {
 func (s *Session) streamFramesLoop() {
 	defer s.Stop()
 
-	ticker := time.NewTicker(captureInterval)
-	defer ticker.Stop()
+	interval := minCaptureInterval
+	timer := time.NewTimer(interval)
+	defer timer.Stop()
 
 	caps := s.capturer.Capabilities()
 	if !caps.Capture {
@@ -326,12 +335,25 @@ func (s *Session) streamFramesLoop() {
 	// idleTicks counts consecutive frames that found nothing to send. It is only
 	// used for the report below.
 	idleTicks := 0
+	// activeFrames keeps capture at minCaptureInterval (30 FPS) during active bursts
+	activeFrames := 0
 
 	for {
 		select {
 		case <-s.stopChan:
 			return
-		case <-ticker.C:
+		case <-s.wakeChan:
+			activeFrames = 30 // hold ~30 FPS for active interaction burst
+			interval = minCaptureInterval
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			timer.Reset(0)
+			continue
+		case <-timer.C:
 			pixels, width, height, err := s.capturer.CaptureScreen()
 			if err != nil {
 				// A single blit can fail on a moment when the desktop is being
@@ -351,23 +373,34 @@ func (s *Session) streamFramesLoop() {
 					s.SendNotice("capture_failed", err.Error())
 				}
 				log.Debug().Err(err).Msg("capture screen error")
+				timer.Reset(interval)
 				continue
 			}
 			captureFailures = 0
 			if len(pixels) == 0 {
+				timer.Reset(interval)
 				continue
 			}
 
 			damage.SetSize(width, height)
 			rects := damage.Diff(pixels)
 			if len(rects) == 0 {
-				// Nothing on the endpoint moved. Sending an empty frame would
-				// cost a websocket message and a console repaint for no visible
-				// change, which on a static desktop is the overwhelming majority
-				// of ticks.
+				// Nothing on the endpoint moved.
 				idleTicks++
+				if activeFrames > 0 {
+					activeFrames--
+				} else {
+					// ponytail: step up linearly. Add PID rate controller if network RTT feedback exists.
+					interval = min(interval+15*time.Millisecond, maxCaptureInterval)
+				}
+				timer.Reset(interval)
 				continue
 			}
+
+			// Screen changed: maintain interactive framerate
+			activeFrames = 15
+			interval = minCaptureInterval
+
 			if idleTicks > 0 {
 				log.Debug().Int("idle_ticks", idleTicks).Msg("remote control desktop was static")
 				idleTicks = 0
@@ -376,6 +409,7 @@ func (s *Session) streamFramesLoop() {
 			payload, err := EncodeFrame(pixels, width, height, rects)
 			if err != nil {
 				log.Error().Err(err).Msg("encode remote control frame")
+				timer.Reset(interval)
 				continue
 			}
 
@@ -391,6 +425,7 @@ func (s *Session) streamFramesLoop() {
 			// the agent, and the console then shows the old image there until
 			// the session ends, with nothing in any log to explain it.
 			damage.Acknowledge(rects)
+			timer.Reset(interval)
 		}
 	}
 }

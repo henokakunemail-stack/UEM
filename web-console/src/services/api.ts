@@ -558,6 +558,7 @@ export const api = {
   async createFilterPolicy(data: {
     name: string
     description: string
+    mode?: 'blacklist' | 'whitelist'
     target_type: string
     target_id: string
   }): Promise<FilterPolicyDTO> {
@@ -575,6 +576,7 @@ export const api = {
     data: {
       name?: string
       description?: string
+      mode?: 'blacklist' | 'whitelist'
       target_type?: string
       target_id?: string
       is_enabled?: boolean
@@ -602,10 +604,7 @@ export const api = {
 
   async createFilterRule(
     policyId: string,
-    // No rule_type and no action: enforcement is domain-name blocking only, and the
-    // server rejects anything else. Sending them implied a choice the caller cannot
-    // actually make.
-    data: { pattern: string; category: string }
+    data: { pattern: string; category: string; action?: 'block' | 'allow' }
   ): Promise<FilterRuleDTO> {
     return request<FilterRuleDTO>(`/api/filter/policies/${policyId}/rules`, {
       method: 'POST',

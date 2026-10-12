@@ -126,6 +126,10 @@ Section "Remove Agent" SecMain
     ${EndIf}
     Sleep 1000
 
+    DetailPrint "Cleaning up Network Filter firewall rules..."
+    nsExec::ExecToLog 'netsh advfirewall firewall delete rule group="EndpointManager-Filter"'
+    Pop $0
+
     ; Delete installation files
     DetailPrint "Removing files from '$TARGET_INSTDIR'..."
     Delete "$TARGET_INSTDIR\endpoint-agent.exe"

@@ -615,16 +615,21 @@ func runAgent(serverURL, enrollToken, credsPath string, heartbeatSecs int) {
 	dispatcher.Register("filter.apply", func(ctx context.Context, command, id string, payload json.RawMessage) any {
 		var p struct {
 			PolicyVersion  string   `json:"policy_version"`
+			Mode           string   `json:"mode"`
 			BlockedDomains []string `json:"blocked_domains"`
+			AllowedDomains []string `json:"allowed_domains"`
 		}
 		_ = json.Unmarshal(payload, &p)
 		if p.PolicyVersion == "" {
 			p.PolicyVersion = id
 		}
+		if p.Mode == "" {
+			p.Mode = "blacklist"
+		}
 
 		go func() {
 			defer guardAgentGoroutine("networkfilter.apply")
-			count, degraded, err := filterEngine.ApplyBlockedDomains(p.BlockedDomains)
+			count, degraded, err := filterEngine.ApplyFilter(p.Mode, p.BlockedDomains, p.AllowedDomains)
 			status, errMsg := "synced", ""
 			switch {
 			case err != nil:
@@ -730,11 +735,12 @@ func runAgent(serverURL, enrollToken, credsPath string, heartbeatSecs int) {
 		"capabilities": append(inventoryCapabilities(), maintenance.Capabilities()...),
 	})
 
-	// On shutdown, close the socket so the server marks the device offline
-	// promptly instead of waiting for a ping/pong deadline.
+	// On shutdown, close the socket and restore any modified network adapter DNS
+	// so endpoints never stay trapped on loopback resolver.
 	go func() {
 		<-ctx.Done()
-		log.Info().Msg("shutdown signal received, closing connection")
+		log.Info().Msg("shutdown signal received, closing connection and restoring DNS")
+		filterEngine.Close()
 		client.Close()
 	}()
 

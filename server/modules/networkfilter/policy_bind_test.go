@@ -89,12 +89,12 @@ func TestPolicyRepository_PostgresIntegerBinding(t *testing.T) {
 		args := mock.lastArgs
 		mock.mu.Unlock()
 
-		if len(args) < 6 {
-			t.Fatalf("expected at least 6 args, got %d", len(args))
+		if len(args) < 7 {
+			t.Fatalf("expected at least 7 args, got %d", len(args))
 		}
 
-		// 6th argument is is_enabled ($6 in INSERT statement)
-		enabledArg := args[5]
+		// 7th argument is is_enabled ($7 in INSERT statement, after mode, target_type, target_id)
+		enabledArg := args[6]
 		switch v := enabledArg.(type) {
 		case int:
 			if v != 1 {
@@ -130,12 +130,12 @@ func TestPolicyRepository_PostgresIntegerBinding(t *testing.T) {
 		args := mock.lastArgs
 		mock.mu.Unlock()
 
-		if len(args) < 5 {
-			t.Fatalf("expected at least 5 args, got %d", len(args))
+		if len(args) < 6 {
+			t.Fatalf("expected at least 6 args, got %d", len(args))
 		}
 
-		// 5th argument is is_enabled ($5 in UPDATE statement)
-		enabledArg := args[4]
+		// 6th argument is is_enabled ($6 in UPDATE statement, after name, description, mode, target_type, target_id)
+		enabledArg := args[5]
 		switch v := enabledArg.(type) {
 		case int:
 			if v != 0 {

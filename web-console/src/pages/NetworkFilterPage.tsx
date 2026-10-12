@@ -189,9 +189,16 @@ export const NetworkFilterPage: React.FC = () => {
   const [deleting, setDeleting] = useState(false)
   const toast = useToast()
 
-  const [newPolicy, setNewPolicy] = useState({
+  const [newPolicy, setNewPolicy] = useState<{
+    name: string
+    description: string
+    mode: 'blacklist' | 'whitelist'
+    target_type: string
+    target_id: string
+  }>({
     name: '',
     description: '',
+    mode: 'blacklist',
     target_type: 'all',
     target_id: '',
   })
@@ -303,7 +310,7 @@ export const NetworkFilterPage: React.FC = () => {
       setMsg({ type: 'success', text })
       toast.success(text, 'Policy Created')
       setIsPolicyModalOpen(false)
-      setNewPolicy({ name: '', description: '', target_type: 'all', target_id: '' })
+      setNewPolicy({ name: '', description: '', mode: 'blacklist', target_type: 'all', target_id: '' })
       await loadPolicies()
       setSelectedId(created.id)
     } catch (err: any) {
@@ -350,15 +357,21 @@ export const NetworkFilterPage: React.FC = () => {
   const handleCreateRule = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!selected) return
+    const action = selected.mode === 'whitelist' ? 'allow' : 'block'
     try {
-      await api.createFilterRule(selected.id, newRule)
-      const text = `Rule for '${newRule.pattern}' added to '${selected.name}'.`
+      await api.createFilterRule(selected.id, {
+        pattern: newRule.pattern,
+        category: newRule.category,
+        action,
+      })
+      const isWl = selected.mode === 'whitelist'
+      const text = `${isWl ? 'Allowed domain' : 'Blocked domain'} '${newRule.pattern}' added to '${selected.name}'.`
       setMsg({ type: 'success', text })
       toast.success(text)
       setIsRuleModalOpen(false)
       setNewRule({
         pattern: '',
-        category: 'Security & Phishing',
+        category: isWl ? 'Business & Productivity' : 'Security & Phishing',
       })
       await loadRules(selected.id)
       await loadPolicies()
@@ -490,12 +503,24 @@ export const NetworkFilterPage: React.FC = () => {
             <button
               type="button"
               className="btn btn-primary"
-              onClick={() => selected && setIsRuleModalOpen(true)}
+              onClick={() => {
+                if (selected) {
+                  setNewRule({
+                    pattern: '',
+                    category: selected.mode === 'whitelist' ? 'Business & Productivity' : 'Security & Phishing',
+                  })
+                  setIsRuleModalOpen(true)
+                }
+              }}
               disabled={!selected}
-              title={selected ? `Add a rule to ${selected.name}` : 'Create a policy first'}
+              title={
+                selected
+                  ? `Add ${selected.mode === 'whitelist' ? 'an allowed' : 'a blocked'} domain to ${selected.name}`
+                  : 'Create a policy first'
+              }
             >
               <Plus size={16} />
-              <span>Add Rule</span>
+              <span>{selected?.mode === 'whitelist' ? 'Add Allowed Domain' : 'Add Rule'}</span>
             </button>
           )}
         </div>
@@ -527,6 +552,7 @@ export const NetworkFilterPage: React.FC = () => {
             <thead>
               <tr>
                 <th>Policy</th>
+                <th>Mode</th>
                 <th>Scope</th>
                 <th>Rules</th>
                 <th>Status</th>
@@ -536,7 +562,7 @@ export const NetworkFilterPage: React.FC = () => {
             <tbody>
               {policies.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="text-center py-8 text-muted">
+                  <td colSpan={6} className="text-center py-8 text-muted">
                     No policies yet. Create one to start blocking domains.
                   </td>
                 </tr>
@@ -551,6 +577,17 @@ export const NetworkFilterPage: React.FC = () => {
                     <td>
                       <div className="font-semibold text-main">{p.name}</div>
                       {p.description && <div className="text-sm text-dim">{p.description}</div>}
+                    </td>
+                    <td>
+                      {p.mode === 'whitelist' ? (
+                        <span className="status-pill warning" title="Default-Deny: Only whitelisted websites can be opened">
+                          Whitelist
+                        </span>
+                      ) : (
+                        <span className="status-pill offline" title="Blocklist: Listed domains are blocked">
+                          Blacklist
+                        </span>
+                      )}
                     </td>
                     <td>
                       <div className="font-semibold text-main">{scopeLabel(p)}</div>
@@ -618,13 +655,15 @@ export const NetworkFilterPage: React.FC = () => {
           <div className="card-title-group">
             <Globe className="text-primary" size={18} />
             <h3 className="card-title">
-              Rules {selected ? `in "${selected.name}"` : ''} ({rules.length})
+              {selected?.mode === 'whitelist' ? 'Allowed Domains' : 'Rules'}{' '}
+              {selected ? `in "${selected.name}"` : ''} ({rules.length})
             </h3>
           </div>
           {selected && (
             <span className="text-sm text-dim">
-              Every rule below is compiled and pushed to agents, along with the firewall rules
-              derived from each domain
+              {selected.mode === 'whitelist'
+                ? 'Default-Deny: Only these whitelisted domains (and management server) are permitted. All others are blocked.'
+                : 'Blacklist: Every rule below is sinkholed to 0.0.0.0 and blocked in host firewall on target devices.'}
             </span>
           )}
         </div>
@@ -633,7 +672,7 @@ export const NetworkFilterPage: React.FC = () => {
           <table className="data-table">
             <thead>
               <tr>
-                <th>Domain / Hostname Pattern</th>
+                <th>{selected?.mode === 'whitelist' ? 'Allowed Domain / Hostname Pattern' : 'Blocked Domain / Hostname Pattern'}</th>
                 <th>Category</th>
                 <th>Actions</th>
               </tr>
@@ -648,7 +687,9 @@ export const NetworkFilterPage: React.FC = () => {
               ) : rules.length === 0 ? (
                 <tr>
                   <td colSpan={3} className="text-center py-8 text-muted">
-                    This policy has no rules yet. Use &quot;Add Rule&quot; to block a domain.
+                    {selected.mode === 'whitelist'
+                      ? 'This whitelist policy has no allowed domains yet. Use "Add Allowed Domain" to permit access.'
+                      : 'This blacklist policy has no rules yet. Use "Add Rule" to block a domain.'}
                   </td>
                 </tr>
               ) : (
@@ -810,6 +851,50 @@ export const NetworkFilterPage: React.FC = () => {
             />
           </div>
           <div className="form-group">
+            <label className="form-label">
+              Policy Enforcement Mode
+            </label>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginTop: '0.25rem' }}>
+              <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.6rem', cursor: 'pointer' }}>
+                <input
+                  type="radio"
+                  name="filter-mode"
+                  value="blacklist"
+                  checked={newPolicy.mode === 'blacklist'}
+                  onChange={() => setNewPolicy({ ...newPolicy, mode: 'blacklist' })}
+                  style={{ marginTop: '0.2rem' }}
+                />
+                <div>
+                  <div className="font-semibold text-main">Blacklist (Blocklist)</div>
+                  <div className="text-xs text-muted">
+                    Allow all websites, block only specified domains via hosts sinkhole &amp; firewall.
+                  </div>
+                </div>
+              </label>
+              <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.6rem', cursor: 'pointer' }}>
+                <input
+                  type="radio"
+                  name="filter-mode"
+                  value="whitelist"
+                  checked={newPolicy.mode === 'whitelist'}
+                  onChange={() => setNewPolicy({ ...newPolicy, mode: 'whitelist' })}
+                  style={{ marginTop: '0.2rem' }}
+                />
+                <div>
+                  <div className="font-semibold text-main">Whitelist (Default-Deny)</div>
+                  <div className="text-xs text-muted">
+                    Block all websites, allow ONLY specified domains via local loopback DNS proxy.
+                  </div>
+                </div>
+              </label>
+            </div>
+            {newPolicy.mode === 'whitelist' && (
+              <p className="form-hint" style={{ marginTop: '0.5rem', color: 'var(--color-warning)' }}>
+                Target devices will only be able to open domains added to this whitelist. Management server connection, local intranet, and DHCP remain fully safe.
+              </p>
+            )}
+          </div>
+          <div className="form-group">
             <label className="form-label" htmlFor="filter-policy-desc">
               Description
             </label>
@@ -871,9 +956,9 @@ export const NetworkFilterPage: React.FC = () => {
       <Modal
         open={isRuleModalOpen && selected !== null}
         onClose={() => setIsRuleModalOpen(false)}
-        title="Add Rule"
+        title={selected?.mode === 'whitelist' ? 'Add Allowed Domain' : 'Add Rule'}
         size="md"
-        description={selected ? `to "${selected.name}"` : undefined}
+        description={selected ? `to "${selected.name}" (${selected.mode === 'whitelist' ? 'Whitelist Mode' : 'Blacklist Mode'})` : undefined}
         footer={
           <>
             <button
@@ -884,7 +969,7 @@ export const NetworkFilterPage: React.FC = () => {
               Cancel
             </button>
             <button type="submit" form="filter-rule-form" className="btn btn-primary">
-              Add Rule
+              {selected?.mode === 'whitelist' ? 'Add Allowed Domain' : 'Add Rule'}
             </button>
           </>
         }
@@ -892,17 +977,22 @@ export const NetworkFilterPage: React.FC = () => {
         <form id="filter-rule-form" onSubmit={handleCreateRule}>
           <div className="form-group">
             <label className="form-label" htmlFor="filter-rule-pattern">
-              Domain or Hostname
+              {selected?.mode === 'whitelist' ? 'Allowed Domain or Hostname' : 'Domain or Hostname to Block'}
             </label>
             <input
               id="filter-rule-pattern"
               type="text"
               className="form-input"
               required
-              placeholder="e.g. gambling-site.com or malware.tracker.net"
+              placeholder={selected?.mode === 'whitelist' ? 'e.g. google.com or mycompany.com' : 'e.g. gambling-site.com or malware.tracker.net'}
               value={newRule.pattern}
               onChange={(e) => setNewRule({ ...newRule, pattern: e.target.value })}
             />
+            {selected?.mode === 'whitelist' && (
+              <p className="form-hint">
+                Tip: Subdomains are included automatically (e.g. &apos;google.com&apos; allows &apos;mail.google.com&apos; and &apos;www.google.com&apos;).
+              </p>
+            )}
           </div>
           <div className="form-group">
             <label className="form-label" htmlFor="filter-rule-category">
@@ -914,11 +1004,22 @@ export const NetworkFilterPage: React.FC = () => {
               value={newRule.category}
               onChange={(e) => setNewRule({ ...newRule, category: e.target.value })}
             >
-              <option value="Security & Phishing">Security &amp; Phishing</option>
-              <option value="Adult & Gambling">Adult &amp; Gambling</option>
-              <option value="Bandwidth Heavy / Streaming">Bandwidth Heavy / Streaming</option>
-              <option value="Social Media">Social Media</option>
-              <option value="Custom Policy">Custom Corporate Policy</option>
+              {selected?.mode === 'whitelist' ? (
+                <>
+                  <option value="Business & Productivity">Business &amp; Productivity</option>
+                  <option value="Corporate Portal & Tools">Corporate Portal &amp; Tools</option>
+                  <option value="Educational & Reference">Educational &amp; Reference</option>
+                  <option value="General Whitelist">General Whitelist</option>
+                </>
+              ) : (
+                <>
+                  <option value="Security & Phishing">Security &amp; Phishing</option>
+                  <option value="Adult & Gambling">Adult &amp; Gambling</option>
+                  <option value="Bandwidth Heavy / Streaming">Bandwidth Heavy / Streaming</option>
+                  <option value="Social Media">Social Media</option>
+                  <option value="Custom Policy">Custom Corporate Policy</option>
+                </>
+              )}
             </select>
           </div>
         </form>

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/rs/zerolog/log"
@@ -144,6 +145,7 @@ func (h *Handler) getPolicy(w http.ResponseWriter, r *http.Request) {
 type createPolicyReq struct {
 	Name        string  `json:"name"`
 	Description *string `json:"description"`
+	Mode        *string `json:"mode"`
 	TargetType  string  `json:"target_type"`
 	TargetID    *string `json:"target_id"`
 	IsEnabled   *bool   `json:"is_enabled"`
@@ -165,6 +167,7 @@ type createPolicyReq struct {
 type updatePolicyReq struct {
 	Name        *string `json:"name"`
 	Description *string `json:"description"`
+	Mode        *string `json:"mode"`
 	TargetType  *string `json:"target_type"`
 	TargetID    *string `json:"target_id"`
 	IsEnabled   *bool   `json:"is_enabled"`
@@ -246,9 +249,19 @@ func (h *Handler) createPolicy(w http.ResponseWriter, r *http.Request) {
 	if req.TargetID != nil {
 		targetID = *req.TargetID
 	}
+	mode := "blacklist"
+	if req.Mode != nil && *req.Mode != "" {
+		m := strings.ToLower(strings.TrimSpace(*req.Mode))
+		if m != "blacklist" && m != "whitelist" {
+			writeErr(w, http.StatusBadRequest, "mode must be either 'blacklist' or 'whitelist'")
+			return
+		}
+		mode = m
+	}
 	policy := &FilterPolicy{
 		Name:        req.Name,
 		Description: description,
+		Mode:        mode,
 		TargetType:  req.TargetType,
 		TargetID:    targetID,
 		IsEnabled:   isEnabled,
@@ -262,7 +275,7 @@ func (h *Handler) createPolicy(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_ = h.audit.Log(r.Context(), "user", actorID, "filter.policy_create", policy.ID, map[string]string{
-		"name": policy.Name, "target": policy.TargetType,
+		"name": policy.Name, "target": policy.TargetType, "mode": policy.Mode,
 	})
 
 	if policy.IsEnabled {
@@ -298,6 +311,14 @@ func (h *Handler) updatePolicy(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Description != nil {
 		policy.Description = *req.Description
+	}
+	if req.Mode != nil {
+		m := strings.ToLower(strings.TrimSpace(*req.Mode))
+		if m != "blacklist" && m != "whitelist" {
+			writeErr(w, http.StatusBadRequest, "mode must be either 'blacklist' or 'whitelist'")
+			return
+		}
+		policy.Mode = m
 	}
 	if req.TargetType != nil {
 		if *req.TargetType == "" {
@@ -391,7 +412,8 @@ type addRuleReq struct {
 
 func (h *Handler) addRule(w http.ResponseWriter, r *http.Request) {
 	policyID := chi.URLParam(r, "id")
-	if _, err := h.repo.GetPolicyByID(r.Context(), policyID); err != nil {
+	policy, err := h.repo.GetPolicyByID(r.Context(), policyID)
+	if err != nil {
 		writeErr(w, http.StatusNotFound, "policy not found")
 		return
 	}
@@ -405,16 +427,21 @@ func (h *Handler) addRule(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "pattern is required")
 		return
 	}
-	// The two rejected combinations are refused with an explanation rather than
-	// stored. Both were accepted and then discarded later: CompileEffectiveRules
-	// filters on action = 'block', so an 'allow' rule was dropped at enforcement
-	// time, and 'ip_port' reached the hosts file where the engine strips everything
-	// after the first "/" -- "198.51.100.0/24:443" was written as a bare hostname.
-	// Neither failure was visible from the console.
-	if req.Action != "" && req.Action != "block" {
-		writeErr(w, http.StatusBadRequest,
-			"action must be \"block\": enforcement unions every block rule and has no allow/exempt path, so an allow rule would never take effect")
-		return
+	action := "block"
+	if policy.Mode == "whitelist" {
+		action = "allow"
+		if req.Action != "" && req.Action != "allow" {
+			writeErr(w, http.StatusBadRequest,
+				"action must be \"allow\" for a whitelist policy: only explicitly allowed domains can be visited")
+			return
+		}
+	} else {
+		action = "block"
+		if req.Action != "" && req.Action != "block" {
+			writeErr(w, http.StatusBadRequest,
+				"action must be \"block\" for a blacklist policy: enforcement unions block rules")
+			return
+		}
 	}
 	if req.RuleType != "" && req.RuleType != "domain" {
 		writeErr(w, http.StatusBadRequest,
@@ -426,7 +453,7 @@ func (h *Handler) addRule(w http.ResponseWriter, r *http.Request) {
 		PolicyID: policyID,
 		RuleType: "domain",
 		Pattern:  req.Pattern,
-		Action:   "block",
+		Action:   action,
 		Category: req.Category,
 	}
 
@@ -475,11 +502,11 @@ func (h *Handler) dispatchDevice(ctx context.Context, deviceID string) error {
 	if h.hub == nil || !h.hub.Online(deviceID) {
 		return nil
 	}
-	patterns, version, err := h.repo.CompileEffectiveRules(ctx, deviceID)
+	compiled, err := h.repo.CompileEffectiveRules(ctx, deviceID)
 	if err != nil {
 		return fmt.Errorf("compile rules: %w", err)
 	}
-	envBytes, err := filterApplyEnvelope(version, patterns)
+	envBytes, err := filterApplyEnvelope(compiled)
 	if err != nil {
 		return fmt.Errorf("encode filter policy: %w", err)
 	}
@@ -493,7 +520,7 @@ func (h *Handler) dispatchDevice(ctx context.Context, deviceID string) error {
 	}
 	state := &DeviceFilterState{
 		DeviceID:      deviceID,
-		PolicyVersion: version,
+		PolicyVersion: compiled.Version,
 		Status:        statusPending,
 		RulesApplied:  priorRules,
 	}
@@ -548,14 +575,29 @@ func (h *Handler) dispatchAffected(ctx context.Context, targetType, targetID str
 // filterApplyEnvelope builds the wire message an agent applies. Both the manual
 // sync and the reconnect re-sync send exactly this, so a device cannot end up
 // holding one shape of policy from one path and another shape from the other.
-func filterApplyEnvelope(version string, patterns []string) ([]byte, error) {
+func filterApplyEnvelope(compiled *CompiledRules) ([]byte, error) {
+	blocked := compiled.BlockedDomains
+	if blocked == nil {
+		blocked = []string{}
+	}
+	allowed := compiled.AllowedDomains
+	if allowed == nil {
+		allowed = []string{}
+	}
+	mode := compiled.Mode
+	if mode == "" {
+		mode = "blacklist"
+	}
+
 	env := transport.Envelope{
 		Type:    transport.TypeCommand,
-		ID:      version,
+		ID:      compiled.Version,
 		Command: "filter.apply",
 		Payload: map[string]any{
-			"policy_version":  version,
-			"blocked_domains": patterns,
+			"policy_version":  compiled.Version,
+			"mode":            mode,
+			"blocked_domains": blocked,
+			"allowed_domains": allowed,
 		},
 	}
 	return json.Marshal(env)
@@ -580,27 +622,28 @@ func (h *Handler) SyncOnReconnect(ctx context.Context, deviceID string) error {
 	if h.hub == nil || !h.hub.Online(deviceID) {
 		return nil
 	}
-	patterns, version, err := h.repo.CompileEffectiveRules(ctx, deviceID)
+	compiled, err := h.repo.CompileEffectiveRules(ctx, deviceID)
 	if err != nil {
 		return fmt.Errorf("compile rules: %w", err)
 	}
 	state, err := h.repo.GetDeviceFilterState(ctx, deviceID)
 	switch {
-	case err == nil && state.PolicyVersion == version && state.Status == statusSynced:
+	case err == nil && state.PolicyVersion == compiled.Version && state.Status == statusSynced:
 		return nil
 	case err != nil && !errors.Is(err, sql.ErrNoRows):
 		return fmt.Errorf("read filter state: %w", err)
 	}
 
-	payload, err := filterApplyEnvelope(version, patterns)
+	payload, err := filterApplyEnvelope(compiled)
 	if err != nil {
 		return fmt.Errorf("encode filter policy: %w", err)
 	}
 	if !h.hub.SendTo(deviceID, payload) {
 		return fmt.Errorf("send filter policy for device %s", deviceID)
 	}
-	log.Info().Str("device", deviceID).Str("version", version).
-		Int("rules", len(patterns)).Msg("re-synced filter policy on reconnect")
+	log.Info().Str("device", deviceID).Str("version", compiled.Version).
+		Str("mode", compiled.Mode).Int("rules", len(compiled.Patterns())).
+		Msg("re-synced filter policy on reconnect")
 	return nil
 }
 
@@ -611,13 +654,13 @@ func (h *Handler) syncDeviceFilter(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	patterns, version, err := h.repo.CompileEffectiveRules(r.Context(), deviceID)
+	compiled, err := h.repo.CompileEffectiveRules(r.Context(), deviceID)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "compile rules: "+err.Error())
 		return
 	}
 
-	envBytes, err := filterApplyEnvelope(version, patterns)
+	envBytes, err := filterApplyEnvelope(compiled)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "encode filter policy: "+err.Error())
 		return
@@ -652,7 +695,7 @@ func (h *Handler) syncDeviceFilter(w http.ResponseWriter, r *http.Request) {
 	// showed a state that no longer described the device.
 	state := &DeviceFilterState{
 		DeviceID:      deviceID,
-		PolicyVersion: version,
+		PolicyVersion: compiled.Version,
 		Status:        statusPending,
 		RulesApplied:  priorRules,
 	}
@@ -665,7 +708,7 @@ func (h *Handler) syncDeviceFilter(w http.ResponseWriter, r *http.Request) {
 	_ = h.audit.Log(r.Context(), "user", actorID, "filter.sync_dispatched", deviceID, map[string]string{
 		// strconv, not string(rune(...)): the rune conversion turns a count of
 		// 12 into a control character rather than the text "12".
-		"version": version, "rule_count": strconv.Itoa(len(patterns)),
+		"version": compiled.Version, "rule_count": strconv.Itoa(len(compiled.Patterns())),
 	})
 
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -678,8 +721,8 @@ func (h *Handler) syncDeviceFilter(w http.ResponseWriter, r *http.Request) {
 		// device_filter_states.status.
 		"dispatched":      dispatched,
 		"status":          state.Status,
-		"policy_version":  version,
-		"effective_rules": len(patterns),
+		"policy_version":  compiled.Version,
+		"effective_rules": len(compiled.Patterns()),
 	})
 }
 

@@ -71,10 +71,11 @@ func newConnectFixture(t *testing.T) *connectFixture {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	_, version, err := repo.CompileEffectiveRules(ctx, "dev-1")
+	compiled, err := repo.CompileEffectiveRules(ctx, "dev-1")
 	if err != nil {
 		t.Fatal(err)
 	}
+	version := compiled.Version
 
 	hub := &fakeHub{online: true}
 	// nopAudit, not nil: syncDeviceFilter audits its dispatch, so a handler built

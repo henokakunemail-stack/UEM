@@ -34,6 +34,9 @@ type Engine struct {
 	mu           sync.Mutex
 	resolver     *resolver
 	firewall     firewallBackend
+	dnsProxy     *DNSProxy
+	dnsRestore   func()
+	currentMode  string
 }
 
 func NewEngine(serverURL, deviceID, deviceSecret string) *Engine {
@@ -70,23 +73,73 @@ func (e *Engine) SetHostsPath(p string) {
 	e.hostsPath = p
 }
 
-// ApplyBlockedDomains enforces the block list on both layers: the hosts file gets
-// one sinkhole line per domain, and the firewall gets every address those domains
-// resolve to.
-//
-// The two layers exist because neither covers the other. A hosts file cannot block
-// a subdomain, so www.detik.com survives a rule naming detik.com. A firewall
-// cannot be applied without elevation, so on a non-elevated agent it is the only
-// thing that would work -- and it cannot be relied on there.
-//
-// The hosts layer runs first and its failure is an error, because it is the layer
-// that must work. A firewall failure is not fatal, but it is returned as `degraded`
-// rather than swallowed: a silent fallback is how a device ends up reporting
-// "synced" while only the weaker layer is enforced, which is the state an operator
-// must be able to see. An empty degraded string means both layers applied.
-func (e *Engine) ApplyBlockedDomains(domains []string) (count int, degraded string, err error) {
+// ApplyFilter enforces either whitelist (default-deny) or blacklist policy.
+func (e *Engine) ApplyFilter(mode string, blockedDomains []string, allowedDomains []string) (count int, degraded string, err error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+
+	if mode == "whitelist" {
+		return e.applyWhitelist(allowedDomains)
+	}
+	return e.applyBlacklist(blockedDomains)
+}
+
+func (e *Engine) applyWhitelist(allowedDomains []string) (count int, degraded string, err error) {
+	// 1. Clean out any previous blacklist entries from hosts file and firewall
+	e.cleanHostsManagedSection()
+	e.flushDNS()
+	if e.firewall.Supported() {
+		_, _ = e.firewall.Apply(nil)
+	}
+
+	// If no allowed domains specified, stop proxy and restore original DNS
+	if len(allowedDomains) == 0 {
+		e.stopWhitelistProxy()
+		e.currentMode = "whitelist"
+		return 0, "", nil
+	}
+
+	upstream := GetPrimaryUpstreamDNS()
+	if e.dnsProxy == nil {
+		proxy, err := StartDNSProxy("127.0.0.1:53", upstream, allowedDomains, e.serverURL)
+		if err != nil {
+			return 0, "", fmt.Errorf("start whitelist DNS proxy: %w", err)
+		}
+		e.dnsProxy = proxy
+	} else {
+		e.dnsProxy.UpdateAllowed(allowedDomains)
+	}
+
+	// Configure system network adapters to point to loopback DNS
+	restore, err := ConfigureLoopbackDNS()
+	if err != nil {
+		degraded = "failed to configure adapter DNS to loopback: " + err.Error()
+		log.Warn().Err(err).Msg("failed to configure loopback DNS on adapter; proxy is listening on 127.0.0.1:53")
+	} else {
+		e.dnsRestore = restore
+	}
+
+	e.currentMode = "whitelist"
+	log.Info().Int("allowed_domains", len(allowedDomains)).Msg("whitelist filter mode enforced")
+	return len(allowedDomains), degraded, nil
+}
+
+func (e *Engine) stopWhitelistProxy() {
+	if e.dnsProxy != nil {
+		e.dnsProxy.Stop()
+		e.dnsProxy = nil
+	}
+	if e.dnsRestore != nil {
+		e.dnsRestore()
+		e.dnsRestore = nil
+	}
+	RestoreOriginalDNS()
+}
+
+func (e *Engine) applyBlacklist(domains []string) (count int, degraded string, err error) {
+	// If previously in whitelist mode, stop proxy and restore adapter DNS
+	e.stopWhitelistProxy()
+	e.currentMode = "blacklist"
 
 	// Verify hosts file path accessibility first. If hosts file layer fails,
 	// return immediately without touching the firewall layer.
@@ -128,6 +181,13 @@ func (e *Engine) ApplyBlockedDomains(domains []string) (count int, degraded stri
 	log.Info().Int("hosts_rules", hostsCount).Int("addresses_blocked", blocked).
 		Str("path", e.hostsPath).Msg("network filter rules applied")
 	return hostsCount, "", nil
+}
+
+// ApplyBlockedDomains enforces the block list on both layers: the hosts file gets
+// one sinkhole line per domain, and the firewall gets every address those domains
+// resolve to.
+func (e *Engine) ApplyBlockedDomains(domains []string) (count int, degraded string, err error) {
+	return e.ApplyFilter("blacklist", domains, nil)
 }
 
 func (e *Engine) verifyHostsWritable() error {
@@ -293,6 +353,13 @@ func (e *Engine) flushDNS() {
 	case "linux":
 		_ = exec.Command("resolvectl", "flush-caches").Run()
 	}
+}
+
+// Close shuts down any active DNS proxy and restores original network adapter settings.
+func (e *Engine) Close() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.stopWhitelistProxy()
 }
 
 // ReportFilterState reports policy enforcement status to server

@@ -43,7 +43,7 @@ Enterprise-grade, central endpoint management and security compliance platform a
 5. **Optional PostgreSQL Backend**:
    - SQLite stays the default and requires nothing: one binary, one file, no services. The single-binary standalone deployment is unchanged.
    - Set `DB_URL` to a `postgres://` connection string (and optionally `DB_DRIVER=postgres`) to run on PostgreSQL instead. `DB_PATH` is ignored in that mode.
-   - The 22 migrations are written once in SQLite dialect and translated on the way out — `DATETIME` → `TIMESTAMPTZ`, `INSERT OR IGNORE` → `INSERT ... ON CONFLICT DO NOTHING`, `?` → `$N` — so the two backends cannot drift apart across releases.
+   - The 23 migrations are written once in SQLite dialect and translated on the way out — `DATETIME` → `TIMESTAMPTZ`, `INSERT OR IGNORE` → `INSERT ... ON CONFLICT DO NOTHING`, `?` → `$N` — so the two backends cannot drift apart across releases.
    - Automatic rebind driver (`postgres-rebind`) transparently maps `?` parameters to `$1..$N` placeholders, providing full operational query compatibility across both backends.
 
 ---
@@ -62,8 +62,8 @@ Enterprise-grade, central endpoint management and security compliance platform a
 | **Phase 8** | **Audit & Reports** | Streaming chunked CSV & JSON exports for compliance audits (ISO 27001 / SOC 2) |
 | **Phase 9** | **Alerting & Incidents** | Automated metric evaluations (Disk space <10%, offline agents, critical missing CVEs, deduplication) |
 | **Phase 10** | **Task Scheduler** | Script repository with cryptographic SHA-256 validation, cron and recurring fleet maintenance jobs |
-| **Phase 11** | **Remote Desktop Control** | Outbound reverse screen capture relay (MJPEG/Canvas), mouse click and keyboard input transmission |
-| **Phase 12** | **Network & Web Filter** | Pure-Go DNS sinkholing (0.0.0.0), atomic hosts file manipulation with automatic local DNS cache flush |
+| **Phase 11** | **Remote Desktop Control** | Outbound reverse screen capture relay (MJPEG/Canvas), dirty rect damage tracking with partial delta encoding, dynamic frame-skip, mouse click and keyboard input transmission |
+| **Phase 12** | **Network & Web Filter** | Pure-Go DNS sinkholing (0.0.0.0), atomic hosts file manipulation with automatic local DNS cache flush, Whitelist/Blacklist policy modes (migration 0023) |
 | **Phase 13** | **Agent Self-Update** | Autonomous in-place binary upgrades, SHA-256 pre-execution validation, phased canary wave rollouts |
 | **Phase 14** | **IT Asset & License Management** | Hardware Asset Management (HAM) with configurable currency valuation, Software Asset Management (SAM) live seat reconciliation |
 | **Phase 15** | **Device Maintenance** | Server-defined maintenance jobs (disk cleanup, temp purge, cache clearing) with per-device step progress and fleet-wide progress reporting |
@@ -150,7 +150,7 @@ actually found.
 │   │   ├── audit/                  # Tamper-evident audit logging service
 │   │   ├── auth/                   # JWT, session store, login, rate limiting, origin policy
 │   │   ├── config/                 # Environment-driven runtime configuration
-│   │   ├── db/                     # SQLite WAL engine & sequential migrations (0001-0022)
+│   │   ├── db/                     # SQLite WAL engine & sequential migrations (0001-0023)
 │   │   ├── httpguard/              # Request body size limits & security headers (CSP, HSTS)
 │   │   ├── logger/                 # zerolog setup and in-memory log tail
 │   │   ├── rbac/                   # Role-Based Access Control context utilities

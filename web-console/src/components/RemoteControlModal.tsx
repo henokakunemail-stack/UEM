@@ -64,6 +64,21 @@ interface FrameRect {
  *  behind it; the last position in a frame is the only one that matters. */
 const MOUSE_SEND_INTERVAL_MS = 16
 
+const PREVENT_DEFAULT_KEYS = new Set([
+  'Tab',
+  'Backspace',
+  'Space',
+  ' ',
+  'ArrowUp',
+  'ArrowDown',
+  'ArrowLeft',
+  'ArrowRight',
+  'PageUp',
+  'PageDown',
+  'Home',
+  'End',
+])
+
 export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
   device,
   initialMode = 'full_control',
@@ -104,6 +119,7 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
   const modeRef = useRef<RemoteControlMode>(mode)
   const pendingMoveRef = useRef<{ x: number; y: number } | null>(null)
   const moveTimerRef = useRef<number | null>(null)
+  const lastMoveSentRef = useRef<number>(0)
   const statusRef = useRef<SessionStatus>(status)
 
   useEffect(() => {
@@ -425,11 +441,20 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
     const pos = pendingMoveRef.current
     if (!pos) return
     pendingMoveRef.current = null
+    lastMoveSentRef.current = performance.now()
     send({ type: 'mouse', action: 'move', x: pos.x, y: pos.y })
   }, [send])
 
   const queueMove = useCallback(
     (x: number, y: number) => {
+      const now = performance.now()
+      // If idle for more than interval, dispatch immediately for instant cursor response
+      if (now - lastMoveSentRef.current >= MOUSE_SEND_INTERVAL_MS && pendingMoveRef.current === null) {
+        lastMoveSentRef.current = now
+        send({ type: 'mouse', action: 'move', x, y })
+        return
+      }
+
       pendingMoveRef.current = { x, y }
       if (moveTimerRef.current === null) {
         moveTimerRef.current = window.setInterval(() => {
@@ -441,7 +466,7 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
         }, MOUSE_SEND_INTERVAL_MS)
       }
     },
-    [flushMove]
+    [flushMove, send]
   )
 
   const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -486,11 +511,12 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
   // `key` is a layout-dependent string ("a", "A", "Dead", "Unidentified") that
   // cannot be mapped back to a key code at all.
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Tab') e.preventDefault()
+    if (PREVENT_DEFAULT_KEYS.has(e.key)) e.preventDefault()
     send({ type: 'keyboard', action: 'down', key: e.key, code: e.keyCode })
   }
 
   const handleKeyUp = (e: React.KeyboardEvent) => {
+    if (PREVENT_DEFAULT_KEYS.has(e.key)) e.preventDefault()
     send({ type: 'keyboard', action: 'up', key: e.key, code: e.keyCode })
   }
 

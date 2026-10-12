@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/jmoiron/sqlx"
@@ -15,6 +16,7 @@ type FilterPolicy struct {
 	ID          string    `json:"id" db:"id"`
 	Name        string    `json:"name" db:"name"`
 	Description string    `json:"description" db:"description"`
+	Mode        string    `json:"mode" db:"mode"` // 'blacklist', 'whitelist'
 	TargetType  string    `json:"target_type" db:"target_type"` // 'all', 'group', 'device'
 	TargetID    string    `json:"target_id" db:"target_id"`
 	IsEnabled   bool      `json:"is_enabled" db:"is_enabled"`
@@ -24,6 +26,20 @@ type FilterPolicy struct {
 	UpdatedAt   time.Time `json:"updated_at" db:"updated_at"`
 
 	RulesCount int `json:"rules_count" db:"rules_count"`
+}
+
+type CompiledRules struct {
+	Mode           string   `json:"mode"`
+	BlockedDomains []string `json:"blocked_domains"`
+	AllowedDomains []string `json:"allowed_domains"`
+	Version        string   `json:"version"`
+}
+
+func (c *CompiledRules) Patterns() []string {
+	if c.Mode == "whitelist" {
+		return c.AllowedDomains
+	}
+	return c.BlockedDomains
 }
 
 type FilterRule struct {
@@ -73,15 +89,18 @@ func (r *Repository) CreatePolicy(ctx context.Context, p *FilterPolicy) error {
 	}
 	p.CreatedAt = now
 	p.UpdatedAt = now
+	if p.Mode == "" {
+		p.Mode = "blacklist"
+	}
 
 	query := `
 		INSERT INTO filter_policies (
-			id, name, description, target_type, target_id,
+			id, name, description, mode, target_type, target_id,
 			is_enabled, priority, created_by, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
 	_, err := r.db.ExecContext(ctx, query,
-		p.ID, p.Name, p.Description, p.TargetType, p.TargetID,
+		p.ID, p.Name, p.Description, p.Mode, p.TargetType, p.TargetID,
 		boolToInt(p.IsEnabled), p.Priority, p.CreatedBy, p.CreatedAt, p.UpdatedAt,
 	)
 	if err != nil {
@@ -94,7 +113,7 @@ func (r *Repository) GetPolicyByID(ctx context.Context, id string) (*FilterPolic
 	var p FilterPolicy
 	query := `
 		SELECT
-			p.id, p.name, p.description, p.target_type, p.target_id,
+			p.id, p.name, p.description, COALESCE(p.mode, 'blacklist') as mode, p.target_type, p.target_id,
 			p.is_enabled, p.priority, p.created_by, p.created_at, p.updated_at,
 			(SELECT COUNT(*) FROM filter_rules r WHERE r.policy_id = p.id) as rules_count
 		FROM filter_policies p
@@ -110,7 +129,7 @@ func (r *Repository) ListPolicies(ctx context.Context) ([]FilterPolicy, error) {
 	policies := []FilterPolicy{}
 	query := `
 		SELECT
-			p.id, p.name, p.description, p.target_type, p.target_id,
+			p.id, p.name, p.description, COALESCE(p.mode, 'blacklist') as mode, p.target_type, p.target_id,
 			p.is_enabled, p.priority, p.created_by, p.created_at, p.updated_at,
 			(SELECT COUNT(*) FROM filter_rules r WHERE r.policy_id = p.id) as rules_count
 		FROM filter_policies p
@@ -124,14 +143,17 @@ func (r *Repository) ListPolicies(ctx context.Context) ([]FilterPolicy, error) {
 
 func (r *Repository) UpdatePolicy(ctx context.Context, p *FilterPolicy) error {
 	p.UpdatedAt = time.Now().UTC()
+	if p.Mode == "" {
+		p.Mode = "blacklist"
+	}
 	query := `
 		UPDATE filter_policies SET
-			name = ?, description = ?, target_type = ?, target_id = ?,
+			name = ?, description = ?, mode = ?, target_type = ?, target_id = ?,
 			is_enabled = ?, priority = ?, updated_at = ?
 		WHERE id = ?
 	`
 	res, err := r.db.ExecContext(ctx, query,
-		p.Name, p.Description, p.TargetType, p.TargetID,
+		p.Name, p.Description, p.Mode, p.TargetType, p.TargetID,
 		boolToInt(p.IsEnabled), p.Priority, p.UpdatedAt, p.ID,
 	)
 	if err != nil {
@@ -241,35 +263,116 @@ func (r *Repository) DeleteRule(ctx context.Context, id string) error {
 // (group_id, device_id), not device_id), and taking an arbitrary single group meant
 // a device in three groups silently ignored two of the policies aimed at it -- with
 // no error anywhere, because the query succeeded and returned a short list.
-func (r *Repository) CompileEffectiveRules(ctx context.Context, deviceID string) ([]string, string, error) {
+func (r *Repository) CompileEffectiveRules(ctx context.Context, deviceID string) (*CompiledRules, error) {
 	var groupIDs []string
 	// Not _ =: a failure here would silently degrade the device to "no groups" and
 	// drop every group policy aimed at it, which reads as a working system rather
 	// than a failed query.
 	if err := r.db.SelectContext(ctx, &groupIDs,
 		`SELECT group_id FROM device_group_members WHERE device_id = ?`, deviceID); err != nil {
-		return nil, "", fmt.Errorf("resolve device groups: %w", err)
+		return nil, fmt.Errorf("resolve device groups: %w", err)
 	}
 
-	// The pattern set has to be a stable, deterministic union, so the caller and the
-	// device independently compute the same version hash from the same ordering.
-	// Priority is the tiebreak an operator already sets in the UI, so it keeps
-	// deciding the order.
+	// 1. Fetch all enabled policies targeting this device to determine effective mode.
+	type policyHead struct {
+		ID         string    `db:"id"`
+		Mode       string    `db:"mode"`
+		TargetType string    `db:"target_type"`
+		Priority   int       `db:"priority"`
+		CreatedAt  time.Time `db:"created_at"`
+	}
+	var policies []policyHead
+	policyQuery := `
+		SELECT id, COALESCE(mode, 'blacklist') as mode, target_type, priority, created_at
+		FROM filter_policies
+		WHERE is_enabled = 1
+		  AND (
+		      target_type = 'all'
+		      OR (target_type = 'device' AND target_id = ?)
+		  )
+	`
+	if err := r.db.SelectContext(ctx, &policies, policyQuery, deviceID); err != nil {
+		return nil, fmt.Errorf("query policies: %w", err)
+	}
+
+	if len(groupIDs) > 0 {
+		groupPolicyQuery, args, err := sqlx.In(`
+			SELECT id, COALESCE(mode, 'blacklist') as mode, target_type, priority, created_at
+			FROM filter_policies
+			WHERE is_enabled = 1
+			  AND target_type = 'group' AND target_id IN (?)
+		`, groupIDs)
+		if err != nil {
+			return nil, fmt.Errorf("build group policy query: %w", err)
+		}
+		var groupPolicies []policyHead
+		if err := r.db.SelectContext(ctx, &groupPolicies, groupPolicyQuery, args...); err != nil {
+			return nil, fmt.Errorf("query group policies: %w", err)
+		}
+		policies = append(policies, groupPolicies...)
+	}
+
+	// If no policies target this device, return default clean state.
+	if len(policies) == 0 {
+		return &CompiledRules{
+			Mode:           "blacklist",
+			BlockedDomains: []string{},
+			AllowedDomains: []string{},
+			Version:        "",
+		}, nil
+	}
+
+	// Sort policies by scope hierarchy (device > group > all), then priority ASC, then created_at ASC.
+	// Scope hierarchy ensures a device-targeted policy overrides group or fleet-wide defaults.
+	scopeRank := func(targetType string) int {
+		switch targetType {
+		case "device":
+			return 1
+		case "group":
+			return 2
+		default:
+			return 3
+		}
+	}
+
+	sort.SliceStable(policies, func(i, j int) bool {
+		ri, rj := scopeRank(policies[i].TargetType), scopeRank(policies[j].TargetType)
+		if ri != rj {
+			return ri < rj
+		}
+		if policies[i].Priority != policies[j].Priority {
+			return policies[i].Priority < policies[j].Priority
+		}
+		return policies[i].CreatedAt.Before(policies[j].CreatedAt)
+	})
+
+	effectiveMode := policies[0].Mode
+	if effectiveMode == "" {
+		effectiveMode = "blacklist"
+	}
+
+	targetAction := "block"
+	if effectiveMode == "whitelist" {
+		targetAction = "allow"
+	}
+
+	// 2. Fetch effective rules matching the effective mode.
 	patterns := []string{}
 	query := `
 		SELECT r.pattern
 		FROM filter_rules r
 		JOIN filter_policies p ON p.id = r.policy_id
 		WHERE p.is_enabled = 1
-		  AND r.action = 'block'
+		  AND COALESCE(p.mode, 'blacklist') = ?
+		  AND r.action = ?
 		  AND (
 		      p.target_type = 'all'
 		      OR (p.target_type = 'device' AND p.target_id = ?)
 		  )
-		ORDER BY p.priority ASC, r.created_at ASC
+		ORDER BY (CASE p.target_type WHEN 'device' THEN 1 WHEN 'group' THEN 2 ELSE 3 END) ASC, p.priority ASC, r.created_at ASC
 	`
-	if err := r.db.SelectContext(ctx, &patterns, query, deviceID); err != nil {
-		return nil, "", fmt.Errorf("compile rules: %w", err)
+	if err := r.db.SelectContext(ctx, &patterns, query, effectiveMode, targetAction, deviceID); err != nil {
+		return nil, fmt.Errorf("compile rules: %w", err)
 	}
 
 	// Group policies are a second query rather than an IN clause because sqlx.In
@@ -281,16 +384,17 @@ func (r *Repository) CompileEffectiveRules(ctx context.Context, deviceID string)
 			FROM filter_rules r
 			JOIN filter_policies p ON p.id = r.policy_id
 			WHERE p.is_enabled = 1
-			  AND r.action = 'block'
+			  AND COALESCE(p.mode, 'blacklist') = ?
+			  AND r.action = ?
 			  AND p.target_type = 'group' AND p.target_id IN (?)
 			ORDER BY p.priority ASC, r.created_at ASC
-		`, groupIDs)
+		`, effectiveMode, targetAction, groupIDs)
 		if err != nil {
-			return nil, "", fmt.Errorf("build group query: %w", err)
+			return nil, fmt.Errorf("build group query: %w", err)
 		}
 		var groupPatterns []string
 		if err := r.db.SelectContext(ctx, &groupPatterns, groupQuery, args...); err != nil {
-			return nil, "", fmt.Errorf("compile group rules: %w", err)
+			return nil, fmt.Errorf("compile group rules: %w", err)
 		}
 		patterns = append(patterns, groupPatterns...)
 	}
@@ -305,15 +409,29 @@ func (r *Repository) CompileEffectiveRules(ctx context.Context, deviceID string)
 		}
 	}
 
-	// Compute a version hash of the effective rules
+	// Compute a version hash of the effective rules including mode
 	h := sha256.New()
+	h.Write([]byte(effectiveMode))
+	h.Write([]byte{'\n'})
 	for _, u := range unique {
 		h.Write([]byte(u))
 		h.Write([]byte{'\n'})
 	}
 	version := hex.EncodeToString(h.Sum(nil))[:16]
 
-	return unique, version, nil
+	res := &CompiledRules{
+		Mode:           effectiveMode,
+		BlockedDomains: []string{},
+		AllowedDomains: []string{},
+		Version:        version,
+	}
+	if effectiveMode == "whitelist" {
+		res.AllowedDomains = unique
+	} else {
+		res.BlockedDomains = unique
+	}
+
+	return res, nil
 }
 
 func (r *Repository) RecordDeviceFilterState(ctx context.Context, s *DeviceFilterState) error {

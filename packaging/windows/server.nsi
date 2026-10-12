@@ -57,10 +57,15 @@ Var TextPassword
 Var BatchH
 Var BatchLineText
 
+Function LaunchWebConsole
+    ExecShell "open" "http://localhost:8443"
+FunctionEnd
+
 ; --- Interface Settings ---
 !define MUI_ABORTWARNING
-!define MUI_FINISHPAGE_RUN "$INSTDIR\endpoint-server.exe"
-!define MUI_FINISHPAGE_RUN_TEXT "Start the management console now"
+!define MUI_FINISHPAGE_RUN
+!define MUI_FINISHPAGE_RUN_TEXT "Open management console in browser (http://localhost:8443)"
+!define MUI_FINISHPAGE_RUN_FUNCTION LaunchWebConsole
 !define MUI_ICON "${NSISDIR}\Contrib\Graphics\Icons\modern-install.ico"
 !define MUI_UNICON "${NSISDIR}\Contrib\Graphics\Icons\modern-uninstall.ico"
 

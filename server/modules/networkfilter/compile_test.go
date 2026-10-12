@@ -82,10 +82,11 @@ func TestCompileCoversEveryGroupTheDeviceBelongsTo(t *testing.T) {
 		}
 	}
 
-	rules, _, err := repo.CompileEffectiveRules(ctx, "dev-multi")
+	compiled, err := repo.CompileEffectiveRules(ctx, "dev-multi")
 	if err != nil {
 		t.Fatalf("compile: %v", err)
 	}
+	rules := compiled.BlockedDomains
 	seen := make(map[string]bool, len(rules))
 	for _, got := range rules {
 		seen[got] = true
@@ -141,18 +142,19 @@ func TestCompileIsDeterministicAcrossGroups(t *testing.T) {
 		}
 	}
 
-	_, first, err := repo.CompileEffectiveRules(ctx, "dev-stable")
+	firstCompiled, err := repo.CompileEffectiveRules(ctx, "dev-stable")
 	if err != nil {
 		t.Fatal(err)
 	}
+	first := firstCompiled.Version
 	for i := 0; i < 5; i++ {
-		_, again, err := repo.CompileEffectiveRules(ctx, "dev-stable")
+		againCompiled, err := repo.CompileEffectiveRules(ctx, "dev-stable")
 		if err != nil {
 			t.Fatal(err)
 		}
-		if again != first {
+		if againCompiled.Version != first {
 			t.Fatalf("compile %d produced version %q, first was %q: an unstable version "+
-				"hash makes every reconnect look like a policy change", i, again, first)
+				"hash makes every reconnect look like a policy change", i, againCompiled.Version, first)
 		}
 	}
 }
@@ -203,12 +205,80 @@ func TestCompileForDeviceWithNoGroups(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	rules, _, err := repo.CompileEffectiveRules(ctx, "dev-solo")
+	compiled, err := repo.CompileEffectiveRules(ctx, "dev-solo")
 	if err != nil {
 		t.Fatalf("compile for a device in no group: %v", err)
 	}
+	rules := compiled.BlockedDomains
 	if len(rules) != 1 || rules[0] != "fleet-wide.com" {
 		t.Fatalf("got %v, want exactly [fleet-wide.com]: a device in no group still needs "+
 			"the fleet-wide policies and must not inherit another group's", rules)
+	}
+}
+
+func TestCompileWhitelistModeTakesPrecedenceAndGathersAllowed(t *testing.T) {
+	database, err := db.Open(filepath.Join(t.TempDir(), "whitelist.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { database.Close() })
+
+	repo := NewRepository(database)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	if _, err := database.Exec(`
+		INSERT INTO devices (id, hostname, os_name, os_version, agent_version, site, status, enrolled_at, last_seen_at, device_secret_hash, created_at, updated_at)
+		VALUES ('dev-wl', 'PC-WL', 'windows', '11.0', '1.0.0', 'Jakarta', 'online', ?, ?, 'h', ?, ?)
+	`, now, now, now, now); err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Fleet-wide blacklist policy (low priority / scope: all)
+	globalBlacklist := &FilterPolicy{
+		Name: "global blacklist", TargetType: "all", CreatedBy: "admin",
+		IsEnabled: true, Priority: 10, Mode: "blacklist",
+	}
+	if err := repo.CreatePolicy(ctx, globalBlacklist); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.AddRule(ctx, &FilterRule{
+		PolicyID: globalBlacklist.ID, RuleType: "domain", Pattern: "bad.com", Action: "block", Category: "security",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// 2. Device-specific whitelist policy (high precedence / scope: device)
+	deviceWhitelist := &FilterPolicy{
+		Name: "device whitelist", TargetType: "device", TargetID: "dev-wl", CreatedBy: "admin",
+		IsEnabled: true, Priority: 100, Mode: "whitelist",
+	}
+	if err := repo.CreatePolicy(ctx, deviceWhitelist); err != nil {
+		t.Fatal(err)
+	}
+	for _, domain := range []string{"allowed1.com", "allowed2.com"} {
+		if err := repo.AddRule(ctx, &FilterRule{
+			PolicyID: deviceWhitelist.ID, RuleType: "domain", Pattern: domain, Action: "allow", Category: "business",
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	compiled, err := repo.CompileEffectiveRules(ctx, "dev-wl")
+	if err != nil {
+		t.Fatalf("compile whitelist rules: %v", err)
+	}
+
+	if compiled.Mode != "whitelist" {
+		t.Fatalf("compiled mode = %q, want whitelist (device whitelist must override global blacklist)", compiled.Mode)
+	}
+	if len(compiled.BlockedDomains) != 0 {
+		t.Fatalf("expected 0 blocked domains in whitelist mode, got %v", compiled.BlockedDomains)
+	}
+	if len(compiled.AllowedDomains) != 2 || compiled.AllowedDomains[0] != "allowed1.com" || compiled.AllowedDomains[1] != "allowed2.com" {
+		t.Fatalf("allowed domains = %v, want [allowed1.com, allowed2.com]", compiled.AllowedDomains)
+	}
+	if compiled.Version == "" {
+		t.Fatal("version hash must not be empty")
 	}
 }

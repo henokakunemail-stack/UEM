@@ -117,27 +117,27 @@ func TestNetworkFilter_PolicyAndRules(t *testing.T) {
 	})
 
 	// 5. Test Compile Effective Rules for dev-nf-1 (should get global + group + device = 5 rules)
-	rules1, version1, err := repo.CompileEffectiveRules(ctx, "dev-nf-1")
+	res1, err := repo.CompileEffectiveRules(ctx, "dev-nf-1")
 	if err != nil {
 		t.Fatalf("compile dev-nf-1 rules: %v", err)
 	}
-	if len(rules1) != 5 {
-		t.Fatalf("expected 5 effective rules for dev-nf-1, got %d: %v", len(rules1), rules1)
+	if len(res1.BlockedDomains) != 5 {
+		t.Fatalf("expected 5 effective rules for dev-nf-1, got %d: %v", len(res1.BlockedDomains), res1.BlockedDomains)
 	}
-	if version1 == "" {
+	if res1.Version == "" {
 		t.Fatal("expected policy version hash")
 	}
-	t.Logf("dev-nf-1 effective rules (%d): %v (Version: %s)", len(rules1), rules1, version1)
+	t.Logf("dev-nf-1 effective rules (%d): %v (Version: %s)", len(res1.BlockedDomains), res1.BlockedDomains, res1.Version)
 
 	// 6. Test Compile Effective Rules for dev-nf-2 (not in finance group, only global = 2 rules)
-	rules2, version2, err := repo.CompileEffectiveRules(ctx, "dev-nf-2")
+	res2, err := repo.CompileEffectiveRules(ctx, "dev-nf-2")
 	if err != nil {
 		t.Fatalf("compile dev-nf-2 rules: %v", err)
 	}
-	if len(rules2) != 2 {
-		t.Fatalf("expected 2 effective rules for dev-nf-2, got %d: %v", len(rules2), rules2)
+	if len(res2.BlockedDomains) != 2 {
+		t.Fatalf("expected 2 effective rules for dev-nf-2, got %d: %v", len(res2.BlockedDomains), res2.BlockedDomains)
 	}
-	t.Logf("dev-nf-2 effective rules (%d): %v (Version: %s)", len(rules2), rules2, version2)
+	t.Logf("dev-nf-2 effective rules (%d): %v (Version: %s)", len(res2.BlockedDomains), res2.BlockedDomains, res2.Version)
 }
 
 func TestNetworkFilter_DeviceStatePersistence(t *testing.T) {
@@ -389,16 +389,16 @@ func TestNetworkFilter_AutoDispatchAndRestoreAccess(t *testing.T) {
 	if err := repo.DeleteRule(context.Background(), addedRule.ID); err != nil {
 		t.Fatal(err)
 	}
-	effective, _, err := repo.CompileEffectiveRules(context.Background(), "dev-detik")
+	effective, err := repo.CompileEffectiveRules(context.Background(), "dev-detik")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(effective) != 0 {
-		t.Fatalf("expected 0 effective rules after delete, got %v", effective)
+	if len(effective.BlockedDomains) != 0 {
+		t.Fatalf("expected 0 effective rules after delete, got %v", effective.BlockedDomains)
 	}
 
 	// 4. Agent applies empty domains (payload from delete auto-dispatch) -> clean hosts file
-	clearCount, _, err := engine.ApplyBlockedDomains(effective)
+	clearCount, _, err := engine.ApplyBlockedDomains(effective.BlockedDomains)
 	if err != nil {
 		t.Fatalf("agent apply empty rules: %v", err)
 	}

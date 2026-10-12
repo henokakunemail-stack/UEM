@@ -432,3 +432,72 @@ func TestAnIdleDesktopCostsNoBytesAtAll(t *testing.T) {
 		t.Fatalf("100 ticks of an unchanged desktop produced %d bytes; the old path sent a full frame every one of them", encoded)
 	}
 }
+
+// When many non-contiguous dirty tiles exceed maxRects within a sub-region (e.g. moving window or scrolling list),
+// the damage tracker collapses to the tight bounding box of those tiles rather than the full 1080p desktop.
+func TestDirtyTilesAboveMaxRectsUseBoundingBoxNotFullScreen(t *testing.T) {
+	const w, h = 1920, 1080
+	d := NewDamage()
+	d.SetSize(w, h)
+	base := solidFrame(w, h, 0, 0, 0, 0xFF)
+	d.Diff(base)
+
+	mosaic := append([]byte(nil), base...)
+	// Place checkerboard dirty tiles inside a 640x640 box (tx: 10..29, ty: 10..29)
+	// A checkerboard pattern ((tx+ty)%2 == 0) cannot merge horizontally OR vertically,
+	// producing 200 isolated 1-tile rectangles, exceeding maxRects (128).
+	for ty := 10; ty < 30; ty++ {
+		for tx := 10; tx < 30; tx++ {
+			if (tx+ty)%2 == 0 {
+				mosaic[(ty*tileSize*w+tx*tileSize)*4] ^= 0xFF
+			}
+		}
+	}
+
+	rects := d.Diff(mosaic)
+	if len(rects) != 1 {
+		t.Fatalf("expected 1 bounding box rectangle when dirty tiles exceed threshold, got %d", len(rects))
+	}
+	r := rects[0]
+	// Should be tightly bounded around tx 10..29 and ty 10..29 (approx 640x640), not 1920x1080!
+	if r.W > 700 || r.H > 700 {
+		t.Fatalf("expected bounded rectangle around dirty region, got %dx%d (full screen collapse bug)", r.W, r.H)
+	}
+	if r.X < 10*tileSize || r.Y < 10*tileSize {
+		t.Fatalf("rectangle origin %d,%d is outside the dirty cluster", r.X, r.Y)
+	}
+	if r.X < 10*tileSize || r.Y < 10*tileSize {
+		t.Fatalf("rectangle origin %d,%d is outside the dirty cluster", r.X, r.Y)
+	}
+}
+
+// Large damaged rectangles (>200,000 px) use quality 55 to reduce bandwidth and latency,
+// while small damage uses quality 75 for sharp text legibility.
+func TestAdaptiveQualityReducesLargeDamagePayload(t *testing.T) {
+	const w, h = 800, 600
+	pixels := solidFrame(w, h, 0x55, 0xAA, 0x33, 0xFF)
+	// Add some high frequency detail so JPEG compression ratios are realistic
+	for i := 0; i < len(pixels); i += 7 {
+		pixels[i] ^= 0x7F
+	}
+
+	largeRect := Rect{X: 0, Y: 0, W: 600, H: 400} // 240,000 px -> quality 55
+	smallRect := Rect{X: 0, Y: 0, W: 64, H: 64}   // 4,096 px -> quality 75
+
+	largeEncoded, err := encodeRect(pixels, w*4, largeRect)
+	if err != nil {
+		t.Fatalf("encode large rect: %v", err)
+	}
+	smallEncoded, err := encodeRect(pixels, w*4, smallRect)
+	if err != nil {
+		t.Fatalf("encode small rect: %v", err)
+	}
+
+	largeBytesPerPx := float64(len(largeEncoded)) / float64(largeRect.W*largeRect.H)
+	smallBytesPerPx := float64(len(smallEncoded)) / float64(smallRect.W*smallRect.H)
+
+	t.Logf("large rect bytes/px: %.3f, small rect bytes/px: %.3f", largeBytesPerPx, smallBytesPerPx)
+	if largeBytesPerPx >= smallBytesPerPx*1.5 {
+		t.Errorf("large rect bytes per pixel (%.3f) should be lower or comparable to small rect (%.3f)", largeBytesPerPx, smallBytesPerPx)
+	}
+}

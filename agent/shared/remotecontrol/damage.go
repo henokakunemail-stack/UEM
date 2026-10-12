@@ -29,10 +29,9 @@ const tileSize = 32
 // maxRects bounds the rectangle count in one frame. Merging already reduces a
 // typical change to a handful of rectangles; this is the guard for the case
 // where nothing merges, such as a full-screen video or a window being dragged
-// across the desktop. Past this the frame collapses to one full-screen
-// rectangle, which is the honest encoding of "the whole screen changed" and is
-// still no worse than the full frame this path replaced.
-const maxRects = 64
+// across the desktop. Past this the frame collapses to the bounding box of dirty
+// tiles (or the full screen if >60% of the desktop is dirty).
+const maxRects = 128
 
 // Rect is a region of the desktop in endpoint pixel coordinates.
 type Rect struct {
@@ -241,9 +240,47 @@ func (d *Damage) merge() []Rect {
 	}
 
 	if collapsed {
+		bbox := d.dirtyBoundingBox()
+		bboxArea := bbox.W * bbox.H
+		screenArea := d.width * d.height
+		if bboxArea < (screenArea*6)/10 && bbox.W > 0 && bbox.H > 0 {
+			return []Rect{bbox}
+		}
 		return []Rect{{W: d.width, H: d.height}}
 	}
 	return rects
+}
+
+// dirtyBoundingBox finds the minimum bounding rectangle encompassing all dirty tiles.
+func (d *Damage) dirtyBoundingBox() Rect {
+	minTx, minTy := d.cols, d.rows
+	maxTx, maxTy := -1, -1
+	for ty := 0; ty < d.rows; ty++ {
+		for tx := 0; tx < d.cols; tx++ {
+			if d.dirty[ty*d.cols+tx] {
+				if tx < minTx {
+					minTx = tx
+				}
+				if ty < minTy {
+					minTy = ty
+				}
+				if tx > maxTx {
+					maxTx = tx
+				}
+				if ty > maxTy {
+					maxTy = ty
+				}
+			}
+		}
+	}
+	if maxTx < 0 {
+		return Rect{}
+	}
+	x := minTx * tileSize
+	y := minTy * tileSize
+	w := min((maxTx-minTx+1)*tileSize, d.width-x)
+	h := min((maxTy-minTy+1)*tileSize, d.height-y)
+	return Rect{X: x, Y: y, W: w, H: h}
 }
 
 // acknowledge moves the sent rectangles into the baseline, so the next diff is
@@ -355,11 +392,14 @@ func encodeRect(pixels []byte, rowBytes int, r Rect) ([]byte, error) {
 	}
 
 	var out bytes.Buffer
-	// Quality 70 rather than the 60 the full-frame path used. Only the changed
-	// pixels are encoded now, so the bitrate is already bounded by the size of
-	// the change, and the higher quality is what keeps text on the endpoint
-	// legible at the scale an operator is reading it.
-	if err := jpeg.Encode(&out, img, &jpeg.Options{Quality: 70}); err != nil {
+	area := r.W * r.H
+	quality := 75 // sharp text for small UI damage
+	if area > 200000 {
+		quality = 55 // ponytail: fixed 3-tier quality. Add client bandwidth estimation if ACK metrics exist.
+	} else if area > 60000 {
+		quality = 65
+	}
+	if err := jpeg.Encode(&out, img, &jpeg.Options{Quality: quality}); err != nil {
 		return nil, fmt.Errorf("encode rect: %w", err)
 	}
 	return out.Bytes(), nil

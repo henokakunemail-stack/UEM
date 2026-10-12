@@ -233,3 +233,25 @@ func TestSendNoticeOnADeadSessionIsSafe(t *testing.T) {
 	)
 	s.SendNotice("connect_failed", "dial failed")
 }
+
+// wakeCapture signals the wake channel so screen frames are captured immediately
+// without waiting for the full idle tick. Repeated signals must not block.
+func TestWakeCaptureSignalsChannel(t *testing.T) {
+	s := NewSession(
+		SessionConfig{SessionID: "s-1", Mode: "full_control"},
+		"http://localhost:18460",
+		Credentials{},
+		&fakeCapturer{capture: true},
+	)
+	s.wakeCapture()
+	select {
+	case <-s.wakeChan:
+		// success
+	default:
+		t.Fatal("wakeCapture did not signal wakeChan")
+	}
+
+	// Repeated calls must not block buffered wakeChan
+	s.wakeCapture()
+	s.wakeCapture()
+}

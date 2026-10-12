@@ -370,6 +370,7 @@ export interface FilterPolicyDTO {
   id: string
   name: string
   description: string
+  mode?: 'blacklist' | 'whitelist'
   target_type: 'all' | 'group' | 'device'
   target_id: string
   is_enabled: boolean
