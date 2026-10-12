@@ -133,8 +133,11 @@ else
 
     # Fallback to direct URL if API rate-limited
     if [ -z "$DOWNLOAD_URL" ]; then
-        TAG_NAME="$VERSION"
-        if [ "$TAG_NAME" = "latest" ]; then TAG_NAME="v1.0.0"; fi
+        TAG_NAME=$(printf '%s\n' "$RELEASE_JSON" | grep -m1 '"tag_name":' | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/' || true)
+        if [ -z "$TAG_NAME" ] || [ "$TAG_NAME" = "latest" ]; then TAG_NAME="v1.0.0"; fi
+        if [ "$VERSION" != "latest" ]; then
+            TAG_NAME="$VERSION"
+        fi
         DOWNLOAD_URL="https://github.com/$REPO/releases/download/$TAG_NAME/endpoint-server-linux-amd64.tar.gz"
     fi
 
@@ -231,7 +234,10 @@ HEALTHY=0
 ELAPSED=0
 
 while [ "$ELAPSED" -lt "$TIMEOUT_SEC" ]; do
-    if curl -sf --connect-timeout 2 "http://127.0.0.1:$PORT/healthz" &>/dev/null; then
+    # Try HTTPS too: a TLS-only deployment answers on the same port, and probing
+    # plain HTTP only would report a healthy new binary as broken and roll it back.
+    if curl -sf --connect-timeout 2 "http://127.0.0.1:$PORT/healthz" &>/dev/null || \
+       curl -sf -k --connect-timeout 2 "https://127.0.0.1:$PORT/healthz" &>/dev/null; then
         HEALTHY=1
         break
     fi

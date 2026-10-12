@@ -138,6 +138,15 @@ else
 
     DOWNLOAD_URL=$(printf '%s\n' "$RELEASE_JSON" | grep -E '"browser_download_url":.*(server-linux-amd64|endpoint-server.*linux.*amd64)' | head -n1 | sed -E 's/.*"browser_download_url": *"([^"]+)".*/\1/' || true)
 
+    # An anonymous GitHub API call is rate limited hard; fall back to the direct
+    # download URL derived from the tag the API did report.
+    if [ -z "$DOWNLOAD_URL" ]; then
+        REPORTED_TAG=$(printf '%s\n' "$RELEASE_JSON" | grep -m1 '"tag_name":' | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/' || true)
+        if [ -n "$REPORTED_TAG" ]; then
+            DOWNLOAD_URL="https://github.com/$REPO/releases/download/$REPORTED_TAG/server-linux-amd64"
+        fi
+    fi
+
     if [ -n "$DOWNLOAD_URL" ]; then
         echo "[+] Found release asset: $DOWNLOAD_URL"
         DL_TARGET="$STAGING_DIR/$(basename "$DOWNLOAD_URL")"
@@ -201,17 +210,50 @@ fi
 echo "[+] Validated new server binary ($(( BIN_SIZE / 1024 / 1024 )) MB)"
 
 # 3. Database Snapshot Backup
-if [ "$SKIP_BACKUP" -eq 0 ] && [ -n "$ENV_FILE" ]; then
-    DB_PATH=$(grep -m1 '^DB_PATH=' "$ENV_FILE" | cut -d= -f2- | tr -d '"' | tr -d "'" || true)
+if [ "$SKIP_BACKUP" -eq 0 ]; then
+    DB_PATH=""
+    if [ -n "$ENV_FILE" ] && [ -f "$ENV_FILE" ]; then
+        DB_PATH=$(grep -m1 '^DB_PATH=' "$ENV_FILE" | cut -d= -f2- | tr -d '"' | tr -d "'" || true)
+    fi
+    # Fallbacks cover the default layout written by the systemd installer.
+    if [ -z "$DB_PATH" ]; then
+        for cand in "/var/lib/endpoint-mgmt-server/server.db" \
+                    "/var/lib/endpoint-mgmt-server/endpoint-manager.db" \
+                    "/opt/endpoint-mgmt/data/server.db" \
+                    "/opt/endpoint-manager/data/endpoint-manager.db"; do
+            if [ -f "$cand" ]; then DB_PATH="$cand"; break; fi
+        done
+    fi
+
     if [ -n "$DB_PATH" ] && [ -f "$DB_PATH" ]; then
         BACKUP_FILE="${DB_PATH}.bak.$(date +%Y%m%d%H%M%S)"
         echo "[*] Creating database snapshot: $BACKUP_FILE..."
-        if command -v sqlite3 >/dev/null 2>&1; then
+        # Prefer the server binary's own VACUUM INTO backup: it checkpoints WAL
+        # and is safe while the service is still running. sqlite3 CLI is the
+        # second choice; a cold copy is last resort and stops the service first.
+        if [ -n "$INSTALL_BIN" ] && \
+           "$INSTALL_BIN" -env-file "$ENV_FILE" -backup "$BACKUP_FILE" 2>/dev/null; then
+            :
+        elif command -v sqlite3 >/dev/null 2>&1; then
             sqlite3 "$DB_PATH" ".backup '$BACKUP_FILE'"
         else
+            if [ -n "$SERVICE_NAME" ]; then systemctl stop "$SERVICE_NAME" || true; fi
             cp "$DB_PATH" "$BACKUP_FILE"
+            [ -f "${DB_PATH}-wal" ] && cp "${DB_PATH}-wal" "${BACKUP_FILE}-wal" || true
+            [ -f "${DB_PATH}-shm" ] && cp "${DB_PATH}-shm" "${BACKUP_FILE}-shm" || true
+            if [ -n "$SERVICE_NAME" ]; then systemctl start "$SERVICE_NAME" || true; fi
+        fi
+        # The service user must own the snapshot, or the service cannot read or
+        # rotate it later.
+        if [ -n "$SERVICE_NAME" ]; then
+            SERVICE_USER=$(systemctl show -pUser --value "$SERVICE_NAME" 2>/dev/null || true)
+            if [ -n "$SERVICE_USER" ] && [ "$SERVICE_USER" != "" ]; then
+                chown "$SERVICE_USER" "$BACKUP_FILE" 2>/dev/null || true
+            fi
         fi
         echo "[+] Database backed up successfully."
+    else
+        echo "[!] No database file located; continuing without snapshot."
     fi
 fi
 
@@ -222,9 +264,15 @@ if [ -n "$SERVICE_NAME" ]; then
 fi
 
 echo "[*] Rotating server binary (creating ${INSTALL_BIN}.bak)..."
-cp "$INSTALL_BIN" "${INSTALL_BIN}.bak"
+# Preserve the original ownership and mode: a binary installed as an
+# unprivileged service user would otherwise be rotated to root:root.
+ORIG_OWNER=$(stat -c '%U:%G' "$INSTALL_BIN" 2>/dev/null || true)
+cp -p "$INSTALL_BIN" "${INSTALL_BIN}.bak"
 cp "$STAGED_BIN" "$INSTALL_BIN"
 chmod 0755 "$INSTALL_BIN"
+if [ -n "$ORIG_OWNER" ] && [ "$ORIG_OWNER" != "" ]; then
+    chown "$ORIG_OWNER" "$INSTALL_BIN" 2>/dev/null || true
+fi
 
 # 5. Restart Service & Health Check
 if [ -n "$SERVICE_NAME" ]; then
@@ -233,7 +281,7 @@ if [ -n "$SERVICE_NAME" ]; then
 fi
 
 # Determine HTTP Port from Env
-PORT=8080
+PORT=8443
 if [ -n "$ENV_FILE" ] && [ -f "$ENV_FILE" ]; then
     HTTP_ADDR=$(grep -m1 '^HTTP_ADDR=' "$ENV_FILE" | cut -d= -f2- | tr -d '"' | tr -d "'" || true)
     if [[ "$HTTP_ADDR" =~ :([0-9]+)$ ]]; then
@@ -245,7 +293,10 @@ echo "[*] Running health check on http://127.0.0.1:$PORT/healthz (timeout: ${TIM
 HEALTH_OK=0
 ELAPSED=0
 while [ "$ELAPSED" -lt "$TIMEOUT_SEC" ]; do
-    if curl -s -f -m 3 "http://127.0.0.1:$PORT/healthz" >/dev/null 2>&1; then
+    # Try both plain HTTP and HTTPS (self-signed) so a TLS-only deployment is
+    # not misjudged as a failed boot and rolled back.
+    if curl -s -f -m 3 "http://127.0.0.1:$PORT/healthz" >/dev/null 2>&1 || \
+       curl -s -f -k -m 3 "https://127.0.0.1:$PORT/healthz" >/dev/null 2>&1; then
         HEALTH_OK=1
         break
     fi
