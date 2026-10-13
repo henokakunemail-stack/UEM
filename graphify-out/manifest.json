@@ -24,8 +24,8 @@
     "semantic_hash": "22bf7b338bb5b22d45ecaa309db6914f"
   },
   "agent/cmd/agent/main.go": {
-    "mtime": 1791866751.6029541,
-    "seen": 1791867187.3722122,
+    "mtime": 1791872947.4151814,
+    "seen": 1791872975.9042013,
     "ast_hash": "81ba19220fbb4c25d70aa3444df7f207",
     "semantic_hash": ""
   },
@@ -72,8 +72,8 @@
     "semantic_hash": "55779a2463528b32a165503775556539"
   },
   "agent/shared/enrollment/enrollment.go": {
-    "mtime": 1791866724.9208224,
-    "seen": 1791867187.3722372,
+    "mtime": 1791872947.422757,
+    "seen": 1791872975.9042273,
     "ast_hash": "1b78ba3259d4b89ee1a94d4a2409c12d",
     "semantic_hash": ""
   },
@@ -222,8 +222,8 @@
     "semantic_hash": "45ee77e9a6e1f14f4336371579756c0c"
   },
   "agent/shared/osinfo/osinfo.go": {
-    "mtime": 1791866562.4495766,
-    "seen": 1791867187.372309,
+    "mtime": 1791872947.429492,
+    "seen": 1791872975.9043062,
     "ast_hash": "d13be2fdf3534d067ac34b8d1bd65eea",
     "semantic_hash": ""
   },
@@ -696,8 +696,8 @@
     "semantic_hash": "0ca54f2981275c1d3b74a6ed5c1a17c9"
   },
   "agent/shared/transport/wsclient.go": {
-    "mtime": 1791866686.4814167,
-    "seen": 1791867187.3725433,
+    "mtime": 1791872947.466848,
+    "seen": 1791872975.9045753,
     "ast_hash": "b36d2121b7a01549f9711e1e07f01d10",
     "semantic_hash": ""
   },
@@ -924,8 +924,8 @@
     "semantic_hash": "d3e5c1bbe9a818f725cb0483fb1d145f"
   },
   "packaging/windows/scripts/install-agent.ps1": {
-    "mtime": 1791866968.1573246,
-    "seen": 1791867187.3726413,
+    "mtime": 1791872948.9180515,
+    "seen": 1791872975.9046814,
     "ast_hash": "73b75b1ce1fc6d53c71b8b518f21cee2",
     "semantic_hash": ""
   },
@@ -1110,14 +1110,14 @@
     "semantic_hash": "288877d6ee703aa767eca246d0ffc537"
   },
   "server/cmd/server/main.go": {
-    "mtime": 1791865254.432864,
-    "seen": 1791866519.5954974,
+    "mtime": 1791872948.9480617,
+    "seen": 1791872975.9047706,
     "ast_hash": "4ac3aecc36e70f53e9cc406ecf0a3a8a",
     "semantic_hash": ""
   },
   "server/cmd/server/route_contract_test.go": {
-    "mtime": 1791865295.3584902,
-    "seen": 1791866519.5955007,
+    "mtime": 1791872948.978127,
+    "seen": 1791872975.9047732,
     "ast_hash": "2cf9bab997c41dd829d95bf65e73712a",
     "semantic_hash": ""
   },
@@ -1254,8 +1254,8 @@
     "semantic_hash": "c9e55c60395f30c5cd264c552b7d30c4"
   },
   "server/core/db/backup.go": {
-    "mtime": 1791864946.7526703,
-    "seen": 1791866519.5955753,
+    "mtime": 1791872949.0106597,
+    "seen": 1791872975.9048374,
     "ast_hash": "67cf369755faef8398c9433325c891f8",
     "semantic_hash": ""
   },
@@ -1584,8 +1584,8 @@
     "semantic_hash": "4535045c45f1fc5e64b02d7bf88a5afa"
   },
   "server/modules/device-management/enrollment.go": {
-    "mtime": 1791866804.4002807,
-    "seen": 1791867187.373003,
+    "mtime": 1791872949.1553547,
+    "seen": 1791872975.9050605,
     "ast_hash": "d4e273082613615bed226987faee15d6",
     "semantic_hash": ""
   },
@@ -2250,8 +2250,8 @@
     "semantic_hash": "141070cf429b17f6d9cdb6dda476a257"
   },
   "web-console/src/App.tsx": {
-    "mtime": 1791865657.3233569,
-    "seen": 1791866519.5961316,
+    "mtime": 1791872949.167045,
+    "seen": 1791872975.905381,
     "ast_hash": "ebad404b736a15733fe5be90d6a4e608",
     "semantic_hash": ""
   },
@@ -2262,8 +2262,8 @@
     "semantic_hash": "ccfa24207f8c489319713c29839cb931"
   },
   "web-console/src/components/DeviceDetailModal.tsx": {
-    "mtime": 1791866513.6220076,
-    "seen": 1791866519.5961368,
+    "mtime": 1791872949.2051728,
+    "seen": 1791872975.905386,
     "ast_hash": "16e401c0bd7b591985751d4047318f6b",
     "semantic_hash": ""
   },
@@ -2316,8 +2316,8 @@
     "semantic_hash": "ed1c2a8a8af9da99072abe35abd11a5d"
   },
   "web-console/src/components/layout/ConsoleShell.tsx": {
-    "mtime": 1791865597.79618,
-    "seen": 1791866519.596159,
+    "mtime": 1791872949.2061696,
+    "seen": 1791872975.9054134,
     "ast_hash": "880ece7d12bc13c7c110b99e3f6b4dee",
     "semantic_hash": ""
   },
@@ -2412,8 +2412,8 @@
     "semantic_hash": "f75f44c4862b223537a641007cc3ea14"
   },
   "web-console/src/pages/DevicesPage.tsx": {
-    "mtime": 1791866483.4412935,
-    "seen": 1791866519.5962095,
+    "mtime": 1791872949.2944875,
+    "seen": 1791872975.9054575,
     "ast_hash": "532031c19062e01af8c23cfd1c5df064",
     "semantic_hash": ""
   },
@@ -2466,8 +2466,8 @@
     "semantic_hash": "0b7b6ddde1b01fa9fbe021254bae7b84"
   },
   "web-console/src/pages/SettingsPage.tsx": {
-    "mtime": 1791866263.2144792,
-    "seen": 1791866519.596234,
+    "mtime": 1791872949.2959943,
+    "seen": 1791872975.9054818,
     "ast_hash": "ed6cb627e68d79b4baefd921b5a3a0e2",
     "semantic_hash": ""
   },
@@ -2496,14 +2496,14 @@
     "semantic_hash": "e866e88869d5de5cac82cfa25ee435d0"
   },
   "web-console/src/services/api.ts": {
-    "mtime": 1791865531.9230874,
-    "seen": 1791866519.5962489,
+    "mtime": 1791872949.3164053,
+    "seen": 1791872975.9054987,
     "ast_hash": "d28605a80b8eba75a53fe5aa1c08202d",
     "semantic_hash": ""
   },
   "web-console/src/types/api.ts": {
-    "mtime": 1791865332.2058947,
-    "seen": 1791866519.5962508,
+    "mtime": 1791872949.350871,
+    "seen": 1791872975.9055011,
     "ast_hash": "8a98575819b0e86fb90bc3e3d637aeef",
     "semantic_hash": ""
   },
@@ -3101,22 +3101,22 @@
     "ast_hash": "b980551603fe97c88dbb6266b91e7c0b",
     "semantic_hash": ""
   },
+  "agent/shared/transport/url_test.go": {
+    "mtime": 1791872947.429492,
+    "seen": 1791872975.9045725,
+    "ast_hash": "588b7ee790131155748ed33023053ee8",
+    "semantic_hash": ""
+  },
   "server/modules/backup/handler.go": {
-    "mtime": 1791865151.9310486,
-    "seen": 1791866519.5957837,
+    "mtime": 1791872949.1086671,
+    "seen": 1791878064.0373092,
     "ast_hash": "c7bb40ad63229470a0eca41fbf0affd2",
     "semantic_hash": ""
   },
   "server/modules/backup/handler_test.go": {
-    "mtime": 1791865114.2090223,
-    "seen": 1791866519.595787,
+    "mtime": 1791872949.1527586,
+    "seen": 1791878064.0373116,
     "ast_hash": "36467ba1a89461b601d4f222d8eb0431",
-    "semantic_hash": ""
-  },
-  "agent/shared/transport/url_test.go": {
-    "mtime": 1791867013.3369591,
-    "seen": 1791867187.3725402,
-    "ast_hash": "588b7ee790131155748ed33023053ee8",
     "semantic_hash": ""
   }
 }
