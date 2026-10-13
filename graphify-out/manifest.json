@@ -24,8 +24,8 @@
     "semantic_hash": "22bf7b338bb5b22d45ecaa309db6914f"
   },
   "agent/cmd/agent/main.go": {
-    "mtime": 1791856000.586586,
-    "seen": 1791858829.9284487,
+    "mtime": 1791859383.8858578,
+    "seen": 1791859395.991534,
     "ast_hash": "f989ae5f46410a97b6c74597c83c6455",
     "semantic_hash": "f989ae5f46410a97b6c74597c83c6455"
   },
@@ -102,16 +102,10 @@
     "semantic_hash": "c686e4f4b3d74377756b10ccc5b2ca85"
   },
   "agent/shared/inventory/scheduler.go": {
-    "mtime": 1791855714.58877,
-    "seen": 1791858829.928474,
+    "mtime": 1791859383.9023962,
+    "seen": 1791859395.9915602,
     "ast_hash": "5d007527a9cb7d7d5913ab95711d0e8d",
     "semantic_hash": "5d007527a9cb7d7d5913ab95711d0e8d"
-  },
-  "agent/shared/inventory/scheduler_test.go": {
-    "mtime": 1791855809.814057,
-    "seen": 1791858829.9284759,
-    "ast_hash": "82eac5eb66257a80b4a936994e5dc364",
-    "semantic_hash": "82eac5eb66257a80b4a936994e5dc364"
   },
   "agent/shared/maintenance/cleanup_locked_windows_test.go": {
     "mtime": 1791272592.275198,
@@ -330,8 +324,8 @@
     "semantic_hash": "5c5d4a1416b1781a3427298b2e7278fe"
   },
   "agent/shared/remotecontrol/capture_windows.go": {
-    "mtime": 1791856024.4433935,
-    "seen": 1791858829.928552,
+    "mtime": 1791859383.9430828,
+    "seen": 1791859395.9916203,
     "ast_hash": "6b9e494c9b6d7f268a6168ca29c0bc75",
     "semantic_hash": "6b9e494c9b6d7f268a6168ca29c0bc75"
   },
@@ -354,8 +348,8 @@
     "semantic_hash": "d9757ea7c64c66c929005bbd3a8463d2"
   },
   "agent/shared/remotecontrol/session.go": {
-    "mtime": 1791855962.0565195,
-    "seen": 1791858829.9285607,
+    "mtime": 1791859384.0023134,
+    "seen": 1791859395.9916265,
     "ast_hash": "9a1d22f3bd20e6d93a57fb24ef8f7f31",
     "semantic_hash": "9a1d22f3bd20e6d93a57fb24ef8f7f31"
   },
@@ -676,30 +670,6 @@
     "seen": 1791858829.9286685,
     "ast_hash": "8954ce546c3f04041f98e7528c27e1b6",
     "semantic_hash": "8954ce546c3f04041f98e7528c27e1b6"
-  },
-  "agent/shared/systempolicy/engine.go": {
-    "mtime": 1791815432.0266135,
-    "seen": 1791858829.9286704,
-    "ast_hash": "44f557a74480451e1df22c6bf47f5f3f",
-    "semantic_hash": "44f557a74480451e1df22c6bf47f5f3f"
-  },
-  "agent/shared/systempolicy/engine_other.go": {
-    "mtime": 1791855733.834921,
-    "seen": 1791858829.9286726,
-    "ast_hash": "687b6ccfddcc295aa244808b51f12744",
-    "semantic_hash": "687b6ccfddcc295aa244808b51f12744"
-  },
-  "agent/shared/systempolicy/engine_test.go": {
-    "mtime": 1791816348.133897,
-    "seen": 1791858829.9286742,
-    "ast_hash": "f264c49557e73f06132ba1071f052354",
-    "semantic_hash": "f264c49557e73f06132ba1071f052354"
-  },
-  "agent/shared/systempolicy/engine_windows.go": {
-    "mtime": 1791815560.427567,
-    "seen": 1791858829.9286764,
-    "ast_hash": "6426ee98db403d8ae48bc423a18801cf",
-    "semantic_hash": "6426ee98db403d8ae48bc423a18801cf"
   },
   "agent/shared/transport/dispatcher.go": {
     "mtime": 1790043864.7578394,
@@ -1085,12 +1055,6 @@
     "ast_hash": "d78dd15706753af766829cfbba439999",
     "semantic_hash": "d78dd15706753af766829cfbba439999"
   },
-  "scripts/e2e-system-policy.ps1": {
-    "mtime": 1791856281.5354037,
-    "seen": 1791858829.928812,
-    "ast_hash": "8a98de67f41d7a721f5b63f9feac244b",
-    "semantic_hash": "8a98de67f41d7a721f5b63f9feac244b"
-  },
   "scripts/e2e-task-scheduler.ps1": {
     "mtime": 1790755195.135461,
     "seen": 1791858829.9288142,
@@ -1146,8 +1110,8 @@
     "semantic_hash": "288877d6ee703aa767eca246d0ffc537"
   },
   "server/cmd/server/main.go": {
-    "mtime": 1791815276.8762486,
-    "seen": 1791858829.928832,
+    "mtime": 1791859385.192575,
+    "seen": 1791859395.991825,
     "ast_hash": "6dd545c9a79922b49b71d2011d53e448",
     "semantic_hash": "6dd545c9a79922b49b71d2011d53e448"
   },
@@ -1440,8 +1404,8 @@
     "semantic_hash": "b1e362b8eb1006718ba105a895294470"
   },
   "server/core/transport/ws.go": {
-    "mtime": 1791815157.4533405,
-    "seen": 1791858829.9289274,
+    "mtime": 1791859385.2138202,
+    "seen": 1791859395.9919386,
     "ast_hash": "a4b7dad75c5d48aee4bcc05f30ae5f24",
     "semantic_hash": "a4b7dad75c5d48aee4bcc05f30ae5f24"
   },
@@ -2045,30 +2009,6 @@
     "ast_hash": "1ee6952251654a3e8e6b4c97f2be55b6",
     "semantic_hash": "1ee6952251654a3e8e6b4c97f2be55b6"
   },
-  "server/modules/systempolicy/compile_test.go": {
-    "mtime": 1791815402.0058918,
-    "seen": 1791858829.9291258,
-    "ast_hash": "e77b2aa3b8e7805abb021c00eaf2f7d6",
-    "semantic_hash": "e77b2aa3b8e7805abb021c00eaf2f7d6"
-  },
-  "server/modules/systempolicy/handler.go": {
-    "mtime": 1791815087.552396,
-    "seen": 1791858829.9291456,
-    "ast_hash": "ce9193f71e396665fdca01396124c908",
-    "semantic_hash": "ce9193f71e396665fdca01396124c908"
-  },
-  "server/modules/systempolicy/models.go": {
-    "mtime": 1791814958.1685157,
-    "seen": 1791858829.9291475,
-    "ast_hash": "6369b0d47320e251a44a85e02a308ea9",
-    "semantic_hash": "6369b0d47320e251a44a85e02a308ea9"
-  },
-  "server/modules/systempolicy/repository.go": {
-    "mtime": 1791814980.766197,
-    "seen": 1791858829.9291494,
-    "ast_hash": "4ef88d46eda2764e588a9c167890ea46",
-    "semantic_hash": "4ef88d46eda2764e588a9c167890ea46"
-  },
   "server/modules/taskscheduler/handler.go": {
     "mtime": 1791555160.1882975,
     "seen": 1791858829.9291515,
@@ -2154,8 +2094,8 @@
     "semantic_hash": "706d27d840781c85e7bf5ed358145ddf"
   },
   "start-server.ps1": {
-    "mtime": 1791856369.4616847,
-    "seen": 1791858829.929179,
+    "mtime": 1791859385.2752988,
+    "seen": 1791859395.9921134,
     "ast_hash": "5f73cf6c9523fc0cedf2a5a323c95990",
     "semantic_hash": "5f73cf6c9523fc0cedf2a5a323c95990"
   },
@@ -2310,8 +2250,8 @@
     "semantic_hash": "141070cf429b17f6d9cdb6dda476a257"
   },
   "web-console/src/App.tsx": {
-    "mtime": 1791856095.251554,
-    "seen": 1791858829.929231,
+    "mtime": 1791859385.285412,
+    "seen": 1791859395.9921532,
     "ast_hash": "14141ff25eec3751f28de652d57a27b0",
     "semantic_hash": "14141ff25eec3751f28de652d57a27b0"
   },
@@ -2358,8 +2298,8 @@
     "semantic_hash": "fc78dfac824d5ea5bf28e6010e6123f0"
   },
   "web-console/src/components/RemoteControlModal.tsx": {
-    "mtime": 1791856079.243217,
-    "seen": 1791858829.9292464,
+    "mtime": 1791859385.304847,
+    "seen": 1791859395.9921649,
     "ast_hash": "c5f2a8a6e066510e99f7832360098a8a",
     "semantic_hash": "c5f2a8a6e066510e99f7832360098a8a"
   },
@@ -2376,8 +2316,8 @@
     "semantic_hash": "ed1c2a8a8af9da99072abe35abd11a5d"
   },
   "web-console/src/components/layout/ConsoleShell.tsx": {
-    "mtime": 1791815884.6432247,
-    "seen": 1791858829.9292521,
+    "mtime": 1791859385.3129947,
+    "seen": 1791859395.992169,
     "ast_hash": "7312153f721dac61bf749870e0e7b566",
     "semantic_hash": "7312153f721dac61bf749870e0e7b566"
   },
@@ -2537,12 +2477,6 @@
     "ast_hash": "0b48d6992c0f3594e8efdf363ebcd1b7",
     "semantic_hash": "0b48d6992c0f3594e8efdf363ebcd1b7"
   },
-  "web-console/src/pages/SystemPolicyPage.tsx": {
-    "mtime": 1791816305.4904275,
-    "seen": 1791858829.9293058,
-    "ast_hash": "74159ff55cdac32b64a7a57b515476c7",
-    "semantic_hash": "74159ff55cdac32b64a7a57b515476c7"
-  },
   "web-console/src/pages/TasksSchedulerPage.tsx": {
     "mtime": 1791515779.0667677,
     "seen": 1791858829.929308,
@@ -2562,16 +2496,16 @@
     "semantic_hash": "e866e88869d5de5cac82cfa25ee435d0"
   },
   "web-console/src/services/api.ts": {
-    "mtime": 1791815709.3446782,
-    "seen": 1791858829.929314,
+    "mtime": 1791859385.4963737,
+    "seen": 1791859395.992216,
     "ast_hash": "afd90a2ae43aba5814b398b6ef09b20d",
     "semantic_hash": "afd90a2ae43aba5814b398b6ef09b20d"
   },
   "web-console/src/types/api.ts": {
-    "mtime": 1791815648.3286054,
-    "seen": 1791858829.9293156,
-    "ast_hash": "1b9a55b92895bcadd306fcd53dff2f91",
-    "semantic_hash": "1b9a55b92895bcadd306fcd53dff2f91"
+    "mtime": 1791859385.545955,
+    "seen": 1791859395.9922175,
+    "ast_hash": "0d483a8d9b6a96e29d6b9de50f2e105b",
+    "semantic_hash": ""
   },
   "web-console/tsconfig.app.json": {
     "mtime": 1790149264.563697,
@@ -2735,12 +2669,6 @@
     "ast_hash": "1d00e843db6d3a1e4acf93e9d506db1d",
     "semantic_hash": "1d00e843db6d3a1e4acf93e9d506db1d"
   },
-  "server/core/db/migrations/0024_system_policies.sql": {
-    "mtime": 1791814847.8009639,
-    "seen": 1791858882.2048,
-    "ast_hash": "22dfdfcbdbfe0f88ba0f76f51931e1af",
-    "semantic_hash": "22dfdfcbdbfe0f88ba0f76f51931e1af"
-  },
   ".github/dependabot.yml": {
     "mtime": 1790748486.4069777,
     "seen": 1791859357.016013,
@@ -2748,8 +2676,8 @@
     "semantic_hash": ""
   },
   ".github/workflows/ci.yml": {
-    "mtime": 1791856308.479495,
-    "seen": 1791859357.0160153,
+    "mtime": 1791859383.7263384,
+    "seen": 1791859395.9922266,
     "ast_hash": "4849ec7174b1e71e205e510b577b48e1",
     "semantic_hash": ""
   },
@@ -2771,21 +2699,15 @@
     "ast_hash": "a51781d60532c4c8c791741a404006f3",
     "semantic_hash": ""
   },
-  "CLAUDE.md": {
-    "mtime": 1791858684.0716953,
-    "seen": 1791859357.016021,
-    "ast_hash": "a278036c579e59f518c1010140482c4b",
-    "semantic_hash": ""
-  },
   "CONTRIBUTING.md": {
-    "mtime": 1791856381.7958536,
-    "seen": 1791859357.0160222,
+    "mtime": 1791859383.748482,
+    "seen": 1791859395.9922328,
     "ast_hash": "32c2280ea61c72fc0729679d7b4ad12f",
     "semantic_hash": ""
   },
   "README.md": {
-    "mtime": 1791856433.90289,
-    "seen": 1791859357.0160236,
+    "mtime": 1791859383.787212,
+    "seen": 1791859395.9922345,
     "ast_hash": "5028a1b835438c88fca2c4fba890ae33",
     "semantic_hash": ""
   },
@@ -2841,12 +2763,6 @@
     "mtime": 1790217488.9437575,
     "seen": 1791859357.0160348,
     "ast_hash": "6ea4771c7d41c2981103d0713ee94355",
-    "semantic_hash": ""
-  },
-  "docs/architecture/phase-15-system-policy-plan.md": {
-    "mtime": 1791856447.044193,
-    "seen": 1791859357.016043,
-    "ast_hash": "8558bc1beaecfea9041e0a459d41b578",
     "semantic_hash": ""
   },
   "docs/architecture/phase-2-device-management-plan.md": {
@@ -2991,12 +2907,6 @@
     "mtime": 1790217987.297495,
     "seen": 1791859357.0160732,
     "ast_hash": "3f2c294f921bc87985d6abcb74f0e9f7",
-    "semantic_hash": ""
-  },
-  "docs/readiness-reports/phase-15-system-policy.md": {
-    "mtime": 1791856453.880044,
-    "seen": 1791859357.0160744,
-    "ast_hash": "b980551603fe97c88dbb6266b91e7c0b",
     "semantic_hash": ""
   },
   "docs/readiness-reports/phase-4-software-deployment.md": {
