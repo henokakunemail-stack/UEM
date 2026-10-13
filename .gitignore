@@ -54,6 +54,9 @@ Thumbs.db
 # Claude Code local state: worktrees are full checkouts, settings are personal
 .claude/
 
+# Graphify temporary cache
+graphify-out/cache/
+
 # Working screenshots from verification runs, not product assets
 pic/
 
