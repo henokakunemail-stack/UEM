@@ -215,6 +215,11 @@ func Restore(sourcePath, destPath string) error {
 	return nil
 }
 
+// QuickCheck reports whether the SQLite database at path is structurally sound.
+func QuickCheck(path string) error {
+	return quickCheck(path)
+}
+
 // quickCheck reports whether the SQLite database at path is structurally sound.
 func quickCheck(path string) error {
 	d, err := sqlx.Open("sqlite", path)

@@ -35,6 +35,7 @@ import (
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/modules/agentupdate"
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/modules/alerting"
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/modules/assetlicense"
+	"github.com/henokakunemail-stack/Endpoint-Manager/server/modules/backup"
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/modules/dashboard"
 	devicemgmt "github.com/henokakunemail-stack/Endpoint-Manager/server/modules/device-management"
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/modules/directory"
@@ -607,6 +608,10 @@ func buildServer(cfg config.Config, database *sqlx.DB) (*http.Server, func()) {
 		jwtSvc.RequireAuth,
 	)
 	dirH.Register(r)
+
+	// Phase 17: backup & restore management.
+	backupH := backup.NewHandler(cfg, database, &auditAdapter{db: database}, jwtSvc.RequireAuth)
+	backupH.Register(r)
 
 	// Command dispatch demo endpoint: send "ping" to a device's live connection.
 	r.With(jwtSvc.RequireAuth, rbac.RequireRole(rbac.RoleTechnician)).

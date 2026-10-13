@@ -155,8 +155,8 @@ func (h *EnrollmentHandler) enroll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.OSVersion != "" || req.AgentVersion != "" {
-		_ = h.repo.UpdateOSInfo(r.Context(), dev.ID, req.OSVersion, req.AgentVersion)
+	if req.Hostname != "" || req.OSVersion != "" || req.AgentVersion != "" {
+		_ = h.repo.UpdateSystemInfo(r.Context(), dev.ID, req.Hostname, req.OSName, req.OSVersion, req.AgentVersion)
 	}
 	_ = audit.Log(r.Context(), h.db, "agent", dev.ID, "device.enroll", dev.ID, map[string]string{
 		"hostname": req.Hostname, "os_name": req.OSName,

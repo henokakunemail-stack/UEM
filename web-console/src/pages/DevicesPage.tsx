@@ -502,6 +502,7 @@ export const DevicesPage: React.FC<{
             ) : (
               filteredItems.map((d: DeviceDTO) => {
                 const isRetired = Boolean(d.retired_at)
+                const isPending = d.hostname === 'Pending Enrollment' || (!d.last_seen_at && !isRetired && d.status === 'offline')
                 return (
                   <tr key={d.id} className="device-row">
                     {canRetire && (
@@ -515,9 +516,9 @@ export const DevicesPage: React.FC<{
                       </td>
                     )}
                     <td data-label="Status">
-                      <span className={`status-pill ${isRetired ? 'retired' : d.status}`}>
+                      <span className={`status-pill ${isRetired ? 'retired' : isPending ? 'pending' : d.status}`}>
                         <span className="dot"></span>
-                        {isRetired ? 'RETIRED' : d.status.toUpperCase()}
+                        {isRetired ? 'RETIRED' : isPending ? 'PENDING' : d.status.toUpperCase()}
                       </span>
                     </td>
                     <td data-label="Hostname & Identity">
@@ -543,7 +544,7 @@ export const DevicesPage: React.FC<{
                       <span className="site-badge">{d.site || 'HQ'}</span>
                     </td>
                     <td data-label="Agent">
-                      <span className="font-mono text-sm">{d.agent_version || '0.1.0'}</span>
+                      <span className="font-mono text-sm">{d.agent_version || '—'}</span>
                     </td>
                     <td data-label="Last Heartbeat">
                       <span className="timestamp-cell">

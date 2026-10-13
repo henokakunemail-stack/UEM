@@ -59,7 +59,7 @@ const PAGE_LABELS: Record<string, string> = {
 
 const pageLabel = (pathname: string) => PAGE_LABELS[pathname.split('/')[1]] ?? 'This page'
 
-function SubtabPage({ section }: { section: 'software' | 'scheduler' | 'assets' | 'updates' }) {
+function SubtabPage({ section }: { section: 'software' | 'scheduler' | 'assets' | 'updates' | 'settings' }) {
   const { tab } = useParams()
   const navigate = useNavigate()
   const onChange = (value: string) => navigate(`/${section}/${value}`)
@@ -76,6 +76,9 @@ function SubtabPage({ section }: { section: 'software' | 'scheduler' | 'assets' 
     case 'updates':
       return tab === 'releases' || tab === 'campaigns'
         ? <AgentUpdatesPage activeTab={tab} onTabChange={onChange} /> : <Navigate to="/updates/releases" replace />
+    case 'settings':
+      return tab === 'directory' || tab === 'backup'
+        ? <SettingsPage activeTab={tab} onTabChange={onChange} /> : <Navigate to="/settings/directory" replace />
   }
 }
 
@@ -118,7 +121,7 @@ function ConsoleRoot() {
           <Route path="/users" element={<Restricted role="admin"><UsersPage /></Restricted>} />
           <Route path="/audit" element={<Restricted role="technician"><AuditPage /></Restricted>} />
           <Route path="/log" element={<Restricted role="admin"><LogPage /></Restricted>} />
-          <Route path="/settings" element={<Restricted role="admin"><SettingsPage /></Restricted>} />
+          <Route path="/settings/:tab?" element={<Restricted role="admin"><SubtabPage section="settings" /></Restricted>} />
           <Route path="*" element={<div className="empty-state"><h1>Page not found</h1><Link to="/dashboard">Return to dashboard</Link></div>} />
         </Routes>
       </Suspense>

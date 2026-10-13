@@ -1476,6 +1476,15 @@ body {
   background-color: var(--text-dim);
 }
 
+.status-pill.pending {
+  background-color: var(--color-warning-subtle);
+  color: var(--color-warning);
+}
+.status-pill.pending .dot {
+  background-color: var(--color-warning);
+  box-shadow: 0 0 4px var(--color-warning);
+}
+
 .status-pill.retired {
   background-color: var(--color-warning-subtle);
   color: var(--color-warning);

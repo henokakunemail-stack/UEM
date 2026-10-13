@@ -44,6 +44,15 @@ Write-Host "   Enterprise Endpoint Management Agent - PowerShell Installer" -For
 Write-Host "==========================================================" -ForegroundColor Cyan
 
 # 2. Locate Agent Binary
+$ServerUrl = $ServerUrl.Trim().TrimEnd('/')
+if (-not ($ServerUrl.StartsWith("http://") -or $ServerUrl.StartsWith("https://"))) {
+    if ($ServerUrl -like "localhost*" -or $ServerUrl -like "127.0.0.1*") {
+        $ServerUrl = "http://$ServerUrl"
+    } else {
+        $ServerUrl = "https://$ServerUrl"
+    }
+}
+
 $resolvedBin = $null
 $candidates = @(
     $BinaryPath,
@@ -96,8 +105,10 @@ Copy-Item -Path $resolvedBin -Destination $destExe -Force
 if ($EnrollToken) {
     Write-Host "[*] Enrolling device with server $ServerUrl..." -ForegroundColor Cyan
     & $destExe -server $ServerUrl -enroll $EnrollToken -enroll-only -creds $credsPath
-    if ($LASTEXITCODE -ne 0) {
-        Write-Warning "[-] Device enrollment returned exit code $LASTEXITCODE. Service will continue installation."
+    if ($LASTEXITCODE -ne 0 -and -not (Test-Path $credsPath)) {
+        throw "[-] Device enrollment failed with exit code $LASTEXITCODE. Pastikan ServerUrl ($ServerUrl) dapat diakses dan token belum kadaluarsa. Instalasi dihentikan untuk mencegah service error."
+    } elseif ($LASTEXITCODE -ne 0) {
+        Write-Warning "[-] Device enrollment returned exit code $LASTEXITCODE, but existing credentials were found."
     } else {
         Write-Host "[+] Device enrolled successfully." -ForegroundColor Green
     }

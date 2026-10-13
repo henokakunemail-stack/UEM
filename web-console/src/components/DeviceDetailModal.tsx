@@ -384,11 +384,13 @@ export const DeviceDetailModal: React.FC<DeviceDetailModalProps> = ({ device, on
       <div className="device-overview-bar">
         <div className="overview-item">
           <span className="overview-label">STATUS</span>
-          <span className={`status-pill ${device.status}`}>{device.status.toUpperCase()}</span>
+          <span className={`status-pill ${device.hostname === 'Pending Enrollment' || (!device.last_seen_at && device.status === 'offline') ? 'pending' : device.status}`}>
+            {device.hostname === 'Pending Enrollment' || (!device.last_seen_at && device.status === 'offline') ? 'PENDING' : device.status.toUpperCase()}
+          </span>
         </div>
         <div className="overview-item">
           <span className="overview-label">AGENT VERSION</span>
-          <span className="overview-val">{device.agent_version || '0.1.0'}</span>
+          <span className="overview-val">{device.agent_version || 'Not Enrolled'}</span>
         </div>
         <div className="overview-item">
           <span className="overview-label">LAST SEEN</span>

@@ -48,17 +48,43 @@ func NewClient(serverURL, deviceID, deviceSecret string) *Client {
 // otherwise mark it offline.
 const DefaultHeartbeat = 20 * time.Second
 
+// NormalizeServerURL cleans up a user-supplied server URL: trims spaces, strips
+// trailing slashes, and defaults to https:// if scheme is missing (unless localhost/127.0.0.1).
+func NormalizeServerURL(raw string) string {
+	s := strings.TrimSpace(raw)
+	s = strings.TrimRight(s, "/")
+	if s == "" {
+		return s
+	}
+	if !strings.HasPrefix(s, "http://") && !strings.HasPrefix(s, "https://") &&
+		!strings.HasPrefix(s, "ws://") && !strings.HasPrefix(s, "wss://") {
+		hostOnly := s
+		if colon := strings.Index(hostOnly, ":"); colon != -1 {
+			hostOnly = hostOnly[:colon]
+		}
+		if hostOnly == "localhost" || hostOnly == "127.0.0.1" || strings.HasPrefix(hostOnly, "192.168.") || strings.HasPrefix(hostOnly, "10.") {
+			s = "http://" + s
+		} else {
+			s = "https://" + s
+		}
+	}
+	return s
+}
+
 // wsURL normalises an http(s):// server base URL to ws(s):// so callers can use
 // the same "-server" value for both the REST enrollment call and the socket.
 func wsURL(serverURL string) string {
-	if s := strings.TrimPrefix(serverURL, "https://"); s != serverURL {
+	normalized := NormalizeServerURL(serverURL)
+	if s := strings.TrimPrefix(normalized, "https://"); s != normalized {
 		return "wss://" + s
 	}
-	if s := strings.TrimPrefix(serverURL, "http://"); s != serverURL {
+	if s := strings.TrimPrefix(normalized, "http://"); s != normalized {
 		return "ws://" + s
 	}
-	// Already ws://, wss://, or a bare host:port — use as-is.
-	return strings.TrimRight(serverURL, "/")
+	if strings.HasPrefix(normalized, "ws://") || strings.HasPrefix(normalized, "wss://") {
+		return normalized
+	}
+	return "wss://" + normalized
 }
 
 // SetCommandHandler installs the callback invoked for each server command.

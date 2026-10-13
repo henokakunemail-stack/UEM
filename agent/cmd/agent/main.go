@@ -196,8 +196,9 @@ func runEnrollOnly(serverURL, enrollToken, credsPath string) error {
 		return fmt.Errorf("load existing credentials: %w", err)
 	}
 
+	info, _ := osProvider.Collect()
 	log.Info().Str("server", serverURL).Msg("enrolling with provided token (enroll-only)")
-	newCreds, err := enrollment.Exchange(serverURL, enrollToken)
+	newCreds, err := enrollment.Exchange(serverURL, enrollToken, info)
 	if err != nil {
 		return fmt.Errorf("enrollment exchange failed: %w", err)
 	}
@@ -231,8 +232,9 @@ func runAgent(serverURL, enrollToken, credsPath string, heartbeatSecs int) {
 		if err != nil && !errors.Is(err, enrollment.ErrNotEnrolled) {
 			log.Fatal().Err(err).Msg("load existing credentials")
 		}
+		info, _ := osProvider.Collect()
 		log.Info().Msg("enrolling with provided token")
-		newCreds, err := enrollment.Exchange(serverURL, enrollToken)
+		newCreds, err := enrollment.Exchange(serverURL, enrollToken, info)
 		if err != nil {
 			log.Fatal().Err(err).Msg("enrollment failed")
 		}

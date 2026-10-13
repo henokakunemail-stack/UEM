@@ -22,10 +22,10 @@ InstallDirRegKey HKLM "${SERVICE_KEY}" "InstallDir"
 
 ; --- Version Information ---
 !ifndef VERSION
-  !define VERSION "1.0.0"
+  !define VERSION "1.4.0"
 !endif
 !ifndef VERSION_NUM
-  !define VERSION_NUM "1.0.0.0"
+  !define VERSION_NUM "1.4.0.0"
 !endif
 VIProductVersion "${VERSION_NUM}"
 VIAddVersionKey "ProductName" "Endpoint Management Agent"
@@ -110,6 +110,14 @@ Function ServerConfigPageLeave
         MessageBox MB_ICONEXCLAMATION|MB_OK "Server URL is required to configure agent communication."
         Abort
     ${EndIf}
+
+    ; Normalize URL: auto-prepend https:// if scheme is missing
+    StrCpy $0 $ServerURL 7
+    StrCpy $1 $ServerURL 8
+    ${If} $0 != "http://"
+    ${AndIf} $1 != "https://"
+        StrCpy $ServerURL "https://$ServerURL"
+    ${EndIf}
 FunctionEnd
 
 ; --- Installer Section ---
@@ -138,7 +146,11 @@ Section "Install Agent" SecInstall
         nsExec::ExecToLog '"$INSTDIR\endpoint-agent.exe" -server "$ServerURL" -enroll "$EnrollToken" -enroll-only -creds "$DATADIR\creds.json"'
         Pop $0
         ${If} $0 != 0
-            DetailPrint "Warning: Enrollment returned code $0. Service registration will continue."
+            ${IfNot} ${FileExists} "$DATADIR\creds.json"
+                DetailPrint "ERROR: Enrollment failed with exit code $0."
+                MessageBox MB_ICONSTOP|MB_OK "Device enrollment failed (exit code $0).$\r$\n$\r$\nPastikan:$\r$\n1. Server URL ($ServerURL) dapat diakses.$\r$\n2. Enrollment Token valid dan belum kadaluarsa.$\r$\n3. Koneksi internet/jaringan aktif.$\r$\n$\r$\nInstalasi dibatalkan untuk mencegah service error."
+                Abort
+            ${EndIf}
         ${Else}
             DetailPrint "Device enrolled successfully."
         ${EndIf}

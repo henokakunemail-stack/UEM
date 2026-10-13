@@ -14,6 +14,7 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/henokakunemail-stack/Endpoint-Manager/agent/shared/osinfo"
 	"github.com/henokakunemail-stack/Endpoint-Manager/agent/shared/transport"
 )
 
@@ -25,10 +26,29 @@ type Credentials struct {
 }
 
 // Exchange posts the enrollment token to the server and stores the returned secret.
-func Exchange(serverURL, token string) (Credentials, error) {
-	body, _ := json.Marshal(map[string]string{"enrollment_token": token})
+// If osinfo.Info is provided, it enriches the enrollment request with device facts.
+func Exchange(serverURL, token string, info ...osinfo.Info) (Credentials, error) {
+	normURL := transport.NormalizeServerURL(serverURL)
+	payload := map[string]string{
+		"enrollment_token": token,
+	}
+	if len(info) > 0 {
+		if info[0].Hostname != "" {
+			payload["hostname"] = info[0].Hostname
+		}
+		if info[0].Name != "" {
+			payload["os_name"] = info[0].Name
+		}
+		if info[0].Version != "" {
+			payload["os_version"] = info[0].Version
+		}
+		if info[0].AgentVersion != "" {
+			payload["agent_version"] = info[0].AgentVersion
+		}
+	}
+	body, _ := json.Marshal(payload)
 	client := transport.NewHTTPClient(15 * time.Second)
-	resp, err := client.Post(serverURL+"/api/agent/enroll", "application/json", bytesReader(body))
+	resp, err := client.Post(normURL+"/api/agent/enroll", "application/json", bytesReader(body))
 	if err != nil {
 		return Credentials{}, fmt.Errorf("enroll request: %w", err)
 	}
@@ -46,7 +66,7 @@ func Exchange(serverURL, token string) (Credentials, error) {
 	if out.DeviceID == "" || out.DeviceSecret == "" {
 		return Credentials{}, errors.New("server returned empty credentials")
 	}
-	return Credentials{DeviceID: out.DeviceID, DeviceSecret: out.DeviceSecret, ServerURL: serverURL}, nil
+	return Credentials{DeviceID: out.DeviceID, DeviceSecret: out.DeviceSecret, ServerURL: normURL}, nil
 }
 
 // Load reads persisted credentials. Returns ErrNotEnrolled if absent.

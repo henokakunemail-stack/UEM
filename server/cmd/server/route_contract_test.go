@@ -314,6 +314,7 @@ var listEndpoints = []string{
 	"/api/users",
 	"/api/maintenance/tasks",
 	"/api/maintenance/jobs",
+	"/api/system/backups",
 }
 
 // listShapes declares, per endpoint, whether the server answers with a bare
@@ -375,6 +376,7 @@ var listShapes = []struct {
 	// `list || []` only because a nil slice is exactly what a Go server sends
 	// for a list that was never built.
 	{path: "/api/directory/contacts"},
+	{path: "/api/system/backups"},
 }
 
 func TestListEndpointResponseShape(t *testing.T) {

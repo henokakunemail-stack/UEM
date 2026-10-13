@@ -49,6 +49,8 @@ import type {
   SystemPolicyDTO,
   SystemPolicySettingsDTO,
   DeviceSystemPolicyStateDTO,
+  BackupFileDTO,
+  RestoreResponseDTO,
 } from '../types/api'
 
 const TOKEN_KEY = 'em_access_token'
@@ -1065,5 +1067,49 @@ export const api = {
   async getSystemPolicyStates(): Promise<DeviceSystemPolicyStateDTO[]> {
     const res = await request<{ states: DeviceSystemPolicyStateDTO[]; count: number }>('/api/system-policies/states')
     return res.states || []
+  },
+
+  // Backup & Restore Management (Phase 17)
+  async getBackups(): Promise<BackupFileDTO[]> {
+    return request<BackupFileDTO[]>('/api/system/backups')
+  },
+
+  async createBackup(): Promise<BackupFileDTO> {
+    return request<BackupFileDTO>('/api/system/backup/create', { method: 'POST' })
+  },
+
+  async deleteBackup(filename: string): Promise<{ status: string; filename: string }> {
+    const file = encodeURIComponent(filename)
+    return request<{ status: string; filename: string }>(`/api/system/backup/${file}`, {
+      method: 'DELETE',
+    })
+  },
+
+  async restoreBackup(filename: string): Promise<RestoreResponseDTO> {
+    const file = encodeURIComponent(filename)
+    return request<RestoreResponseDTO>(`/api/system/backup/restore/${file}`, {
+      method: 'POST',
+    })
+  },
+
+  async uploadAndRestoreBackup(file: File): Promise<RestoreResponseDTO> {
+    const formData = new FormData()
+    formData.append('file', file)
+    return request<RestoreResponseDTO>('/api/system/backup/upload-restore', {
+      method: 'POST',
+      body: formData,
+    })
+  },
+
+  async downloadBackup(filename: string): Promise<Blob> {
+    const res = await fetchRaw(`/api/system/backup/download/${encodeURIComponent(filename)}`)
+    if (!res.ok) throw new Error(`Download failed: HTTP ${res.status}`)
+    return res.blob()
+  },
+
+  async downloadActiveBackup(): Promise<Blob> {
+    const res = await fetchRaw('/api/system/backup/download-active')
+    if (!res.ok) throw new Error(`Download failed: HTTP ${res.status}`)
+    return res.blob()
   },
 }

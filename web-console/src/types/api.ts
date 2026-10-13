@@ -817,3 +817,18 @@ export interface AuthSession {
   expires_at: string
   created_ip: string
 }
+
+// Phase 17: Backup & Restore Management
+export interface BackupFileDTO {
+  filename: string
+  size: number
+  created_at: string
+  is_auto: boolean
+}
+
+export interface RestoreResponseDTO {
+  status: string
+  message: string
+  safety_backup?: string
+}
+
