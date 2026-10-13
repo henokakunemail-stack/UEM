@@ -2740,5 +2740,365 @@
     "seen": 1791858882.2048,
     "ast_hash": "22dfdfcbdbfe0f88ba0f76f51931e1af",
     "semantic_hash": "22dfdfcbdbfe0f88ba0f76f51931e1af"
+  },
+  ".github/dependabot.yml": {
+    "mtime": 1790748486.4069777,
+    "seen": 1791859357.016013,
+    "ast_hash": "b7b307037d4be5c0f87289b80f31577b",
+    "semantic_hash": ""
+  },
+  ".github/workflows/ci.yml": {
+    "mtime": 1791856308.479495,
+    "seen": 1791859357.0160153,
+    "ast_hash": "4849ec7174b1e71e205e510b577b48e1",
+    "semantic_hash": ""
+  },
+  ".github/workflows/release.yml": {
+    "mtime": 1791800456.356568,
+    "seen": 1791859357.016017,
+    "ast_hash": "d0798c487098f24a8fb7bc3ac2272d81",
+    "semantic_hash": ""
+  },
+  ".github/workflows/sign-release.yml": {
+    "mtime": 1791420803.7216449,
+    "seen": 1791859357.0160182,
+    "ast_hash": "3eec800a024fcb95c442fcda63a80831",
+    "semantic_hash": ""
+  },
+  ".golangci.yml": {
+    "mtime": 1791272265.3950844,
+    "seen": 1791859357.0160198,
+    "ast_hash": "a51781d60532c4c8c791741a404006f3",
+    "semantic_hash": ""
+  },
+  "CLAUDE.md": {
+    "mtime": 1791858684.0716953,
+    "seen": 1791859357.016021,
+    "ast_hash": "a278036c579e59f518c1010140482c4b",
+    "semantic_hash": ""
+  },
+  "CONTRIBUTING.md": {
+    "mtime": 1791856381.7958536,
+    "seen": 1791859357.0160222,
+    "ast_hash": "32c2280ea61c72fc0729679d7b4ad12f",
+    "semantic_hash": ""
+  },
+  "README.md": {
+    "mtime": 1791856433.90289,
+    "seen": 1791859357.0160236,
+    "ast_hash": "5028a1b835438c88fca2c4fba890ae33",
+    "semantic_hash": ""
+  },
+  "SECURITY.md": {
+    "mtime": 1791359014.7052634,
+    "seen": 1791859357.0160248,
+    "ast_hash": "47b541ec1597dc47dd0b837a461cef1c",
+    "semantic_hash": ""
+  },
+  "deploy/README-UBUNTU-DEPLOY.md": {
+    "mtime": 1791263966.6607864,
+    "seen": 1791859357.016026,
+    "ast_hash": "5b83c9558dfc9103dc65e9475b6c313e",
+    "semantic_hash": ""
+  },
+  "docs/architecture/phase-0-brainstorming.md": {
+    "mtime": 1790235473.4319656,
+    "seen": 1791859357.0160275,
+    "ast_hash": "b51ab16b6758d7e90bf8ac7466155727",
+    "semantic_hash": ""
+  },
+  "docs/architecture/phase-1-core-plan.md": {
+    "mtime": 1790047276.8003883,
+    "seen": 1791859357.0160286,
+    "ast_hash": "3f918c250a954b8e19f3211ce99be9e2",
+    "semantic_hash": ""
+  },
+  "docs/architecture/phase-10-task-scheduler-plan.md": {
+    "mtime": 1790213961.6593208,
+    "seen": 1791859357.0160303,
+    "ast_hash": "457bb3446c17c52ddc518529a629cb19",
+    "semantic_hash": ""
+  },
+  "docs/architecture/phase-11-remote-control-plan.md": {
+    "mtime": 1790214291.5894563,
+    "seen": 1791859357.0160315,
+    "ast_hash": "f95581b532b9c4728aff6ce3c7251435",
+    "semantic_hash": ""
+  },
+  "docs/architecture/phase-12-network-web-filter-plan.md": {
+    "mtime": 1790215980.7787979,
+    "seen": 1791859357.0160325,
+    "ast_hash": "26dab8fc3e7cc6ce7d03fdb247aa004c",
+    "semantic_hash": ""
+  },
+  "docs/architecture/phase-13-agent-self-update-plan.md": {
+    "mtime": 1790216631.170085,
+    "seen": 1791859357.016034,
+    "ast_hash": "8bdc78044248947fee0ee49af5cd7af7",
+    "semantic_hash": ""
+  },
+  "docs/architecture/phase-14-asset-license-management-plan.md": {
+    "mtime": 1790217488.9437575,
+    "seen": 1791859357.0160348,
+    "ast_hash": "6ea4771c7d41c2981103d0713ee94355",
+    "semantic_hash": ""
+  },
+  "docs/architecture/phase-15-system-policy-plan.md": {
+    "mtime": 1791856447.044193,
+    "seen": 1791859357.016043,
+    "ast_hash": "8558bc1beaecfea9041e0a459d41b578",
+    "semantic_hash": ""
+  },
+  "docs/architecture/phase-2-device-management-plan.md": {
+    "mtime": 1790065980.96067,
+    "seen": 1791859357.0160444,
+    "ast_hash": "483e668ba70affcfffe160b29f39293a",
+    "semantic_hash": ""
+  },
+  "docs/architecture/phase-3-dashboard-plan.md": {
+    "mtime": 1790149013.8762846,
+    "seen": 1791859357.0160456,
+    "ast_hash": "2ee62c5634c0c871609f3c5de8ef1b3b",
+    "semantic_hash": ""
+  },
+  "docs/architecture/phase-4-software-deployment-plan.md": {
+    "mtime": 1790150897.788959,
+    "seen": 1791859357.0160468,
+    "ast_hash": "eab4131fcfee3345e0b63c82d06fbe1b",
+    "semantic_hash": ""
+  },
+  "docs/architecture/phase-5-remote-execution-plan.md": {
+    "mtime": 1790152308.4400432,
+    "seen": 1791859357.0160482,
+    "ast_hash": "d3adf46dbd9844092487ab6bc56f47cf",
+    "semantic_hash": ""
+  },
+  "docs/architecture/phase-6-patch-management-plan.md": {
+    "mtime": 1790157746.1591752,
+    "seen": 1791859357.0160491,
+    "ast_hash": "24c265575ebe04b58bb4dabfe9cb08b0",
+    "semantic_hash": ""
+  },
+  "docs/architecture/phase-7-user-management-plan.md": {
+    "mtime": 1790212783.0541832,
+    "seen": 1791859357.0160503,
+    "ast_hash": "879233576b0d1a66ce70a1408cd8f15e",
+    "semantic_hash": ""
+  },
+  "docs/architecture/phase-8-reports-plan.md": {
+    "mtime": 1790213101.5443938,
+    "seen": 1791859357.0160518,
+    "ast_hash": "b0873c22373e3456cb5b8bf2ca8a7928",
+    "semantic_hash": ""
+  },
+  "docs/architecture/phase-9-alerting-plan.md": {
+    "mtime": 1790213503.4480464,
+    "seen": 1791859357.0160527,
+    "ast_hash": "b4d6aa00a01e32cc5f67ed95f132bcbc",
+    "semantic_hash": ""
+  },
+  "docs/installation/README.md": {
+    "mtime": 1791795288.3353698,
+    "seen": 1791859357.016054,
+    "ast_hash": "538592909936637271a574ce85b9e610",
+    "semantic_hash": ""
+  },
+  "docs/installation/agent-linux.md": {
+    "mtime": 1791263966.6557424,
+    "seen": 1791859357.0160556,
+    "ast_hash": "c9e923ef79ece6d703b19a61df3b0a7a",
+    "semantic_hash": ""
+  },
+  "docs/installation/agent-windows.md": {
+    "mtime": 1791263966.652749,
+    "seen": 1791859357.016057,
+    "ast_hash": "4623e80b81bdeca8b0f0a730151ab65b",
+    "semantic_hash": ""
+  },
+  "docs/installation/docker.md": {
+    "mtime": 1791355455.357383,
+    "seen": 1791859357.0160584,
+    "ast_hash": "7f2d70e75fd7f767f6751a17f5779c13",
+    "semantic_hash": ""
+  },
+  "docs/installation/prerequisites.md": {
+    "mtime": 1791263966.65774,
+    "seen": 1791859357.0160596,
+    "ast_hash": "1d48857090626855733f8e4e8985f824",
+    "semantic_hash": ""
+  },
+  "docs/installation/release-guide.md": {
+    "mtime": 1791770560.344357,
+    "seen": 1791859357.0160608,
+    "ast_hash": "862776547e94a9006a839b4c55ff8bfb",
+    "semantic_hash": ""
+  },
+  "docs/installation/server-linux.md": {
+    "mtime": 1791430064.8582873,
+    "seen": 1791859357.0160623,
+    "ast_hash": "6c0a9f1e55405ad0eba0b49a773d750a",
+    "semantic_hash": ""
+  },
+  "docs/installation/server-specs.md": {
+    "mtime": 1791430112.5717113,
+    "seen": 1791859357.0160635,
+    "ast_hash": "68d9c574e86a1146837141aaeb3a3223",
+    "semantic_hash": ""
+  },
+  "docs/installation/server-windows.md": {
+    "mtime": 1791430060.2936938,
+    "seen": 1791859357.016065,
+    "ast_hash": "1289ba7ba8439b5d52c2b176f7c33326",
+    "semantic_hash": ""
+  },
+  "docs/installation/update-guide.md": {
+    "mtime": 1791795288.3419755,
+    "seen": 1791859357.0160658,
+    "ast_hash": "0511f0997cae233642f6e1eb39c73dbb",
+    "semantic_hash": ""
+  },
+  "docs/readiness-reports/README.md": {
+    "mtime": 1791430023.1661637,
+    "seen": 1791859357.016067,
+    "ast_hash": "6d833a91dc213e230045b97f0694d34a",
+    "semantic_hash": ""
+  },
+  "docs/readiness-reports/phase-10-task-scheduler.md": {
+    "mtime": 1790214262.455387,
+    "seen": 1791859357.0160685,
+    "ast_hash": "aff6b359bf75b91e2a7676830f02aa4e",
+    "semantic_hash": ""
+  },
+  "docs/readiness-reports/phase-11-remote-control.md": {
+    "mtime": 1790215950.700003,
+    "seen": 1791859357.0160694,
+    "ast_hash": "0b074109eb835106821a3b8f02307657",
+    "semantic_hash": ""
+  },
+  "docs/readiness-reports/phase-12-network-web-filter.md": {
+    "mtime": 1790216570.230047,
+    "seen": 1791859357.0160706,
+    "ast_hash": "37ed46b6007b6bc54e8564ef5bbd9823",
+    "semantic_hash": ""
+  },
+  "docs/readiness-reports/phase-13-agent-self-update.md": {
+    "mtime": 1790235474.565391,
+    "seen": 1791859357.016072,
+    "ast_hash": "0c263406b8664c1586e9190ffbab2aaf",
+    "semantic_hash": ""
+  },
+  "docs/readiness-reports/phase-14-asset-license-management.md": {
+    "mtime": 1790217987.297495,
+    "seen": 1791859357.0160732,
+    "ast_hash": "3f2c294f921bc87985d6abcb74f0e9f7",
+    "semantic_hash": ""
+  },
+  "docs/readiness-reports/phase-15-system-policy.md": {
+    "mtime": 1791856453.880044,
+    "seen": 1791859357.0160744,
+    "ast_hash": "b980551603fe97c88dbb6266b91e7c0b",
+    "semantic_hash": ""
+  },
+  "docs/readiness-reports/phase-4-software-deployment.md": {
+    "mtime": 1790152267.4997418,
+    "seen": 1791859357.0160758,
+    "ast_hash": "d1bf3477408187e450665fcdc38b6e9c",
+    "semantic_hash": ""
+  },
+  "docs/readiness-reports/phase-5-remote-execution.md": {
+    "mtime": 1790157705.3940508,
+    "seen": 1791859357.016077,
+    "ast_hash": "cacd70618641638dbdb11a17065041b3",
+    "semantic_hash": ""
+  },
+  "docs/readiness-reports/phase-6-patch-management.md": {
+    "mtime": 1790212720.1426544,
+    "seen": 1791859357.016078,
+    "ast_hash": "83c61e274e61384554cc10c8719fbe08",
+    "semantic_hash": ""
+  },
+  "docs/readiness-reports/phase-7-user-management.md": {
+    "mtime": 1790213078.442209,
+    "seen": 1791859357.0160797,
+    "ast_hash": "174aa65d133ec481acff3b7d9a522e4a",
+    "semantic_hash": ""
+  },
+  "docs/readiness-reports/phase-8-reports.md": {
+    "mtime": 1790213459.7727232,
+    "seen": 1791859357.0160809,
+    "ast_hash": "c86f15a650bef88e7b9bb1bf6f99456b",
+    "semantic_hash": ""
+  },
+  "docs/readiness-reports/phase-9-alerting.md": {
+    "mtime": 1790213933.5916755,
+    "seen": 1791859357.0160823,
+    "ast_hash": "4309ec510f16cba367319d059e70c464",
+    "semantic_hash": ""
+  },
+  "packaging/README.md": {
+    "mtime": 1790238642.793037,
+    "seen": 1791859357.0160835,
+    "ast_hash": "8245df6a57462511cd2ee45f61d1b69f",
+    "semantic_hash": ""
+  },
+  "packaging/darwin/README.md": {
+    "mtime": 1791791974.2142923,
+    "seen": 1791859357.0160847,
+    "ast_hash": "9dced792618a5454f22035a0e74aa1da",
+    "semantic_hash": ""
+  },
+  "packaging/linux/README.md": {
+    "mtime": 1791791974.2154167,
+    "seen": 1791859357.0160863,
+    "ast_hash": "2d85637bb217fe023c7f9cf42451847a",
+    "semantic_hash": ""
+  },
+  "packaging/windows/README.md": {
+    "mtime": 1790752431.9549167,
+    "seen": 1791859357.0160875,
+    "ast_hash": "80c421abd9246124301447717a275406",
+    "semantic_hash": ""
+  },
+  "web-console/README.md": {
+    "mtime": 1790149264.5303054,
+    "seen": 1791859357.0160887,
+    "ast_hash": "10495bfcc6c568eca4dab6dd5df795d3",
+    "semantic_hash": ""
+  },
+  "web-console/index.html": {
+    "mtime": 1790322232.6790576,
+    "seen": 1791859357.0160904,
+    "ast_hash": "e419abf5cd3e3c4e3db81aa7cfd475e8",
+    "semantic_hash": ""
+  },
+  "web-console/public/favicon.svg": {
+    "mtime": 1790149264.5421576,
+    "seen": 1791859357.0160916,
+    "ast_hash": "7e840862161341271697daa99a40d76b",
+    "semantic_hash": ""
+  },
+  "web-console/public/icons.svg": {
+    "mtime": 1790149264.5444906,
+    "seen": 1791859357.016093,
+    "ast_hash": "3b4fcfcf393eca4d264dca4a4663bc37",
+    "semantic_hash": ""
+  },
+  "web-console/src/assets/hero.png": {
+    "mtime": 1790149264.5510144,
+    "seen": 1791859357.0160942,
+    "ast_hash": "aead493361b27e7510691c5d7072dfc1",
+    "semantic_hash": ""
+  },
+  "web-console/src/assets/react.svg": {
+    "mtime": 1790149264.5527527,
+    "seen": 1791859357.0160954,
+    "ast_hash": "f0402b67b6ce880f65666bb49e841696",
+    "semantic_hash": ""
+  },
+  "web-console/src/assets/vite.svg": {
+    "mtime": 1790149264.5575745,
+    "seen": 1791859357.0160966,
+    "ast_hash": "9960a24288958394ac50e57ff638b036",
+    "semantic_hash": ""
   }
 }
