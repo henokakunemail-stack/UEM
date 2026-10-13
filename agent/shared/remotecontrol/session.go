@@ -13,12 +13,17 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/rs/zerolog/log"
+
+	"github.com/henokakunemail-stack/Endpoint-Manager/agent/shared/transport"
 )
 
 type SessionConfig struct {
-	SessionID string `json:"session_id"`
-	Mode      string `json:"mode"`
-	RelayURL  string `json:"relay_url"`
+	SessionID    string `json:"session_id"`
+	Mode         string `json:"mode"`
+	RelayURL     string `json:"relay_url"`
+	DeviceID     string `json:"device_id,omitempty"`
+	DeviceSecret string `json:"device_secret,omitempty"`
+	ServerURL    string `json:"server_url,omitempty"`
 }
 
 // Credentials are the agent's per-device secret, the same pair every other
@@ -109,7 +114,7 @@ func NewSession(cfg SessionConfig, serverBaseURL string, creds Credentials, capt
 		mode = "full_control"
 	}
 	return &Session{
-		config:    SessionConfig{SessionID: cfg.SessionID, Mode: mode, RelayURL: cfg.RelayURL},
+		config:    SessionConfig{SessionID: cfg.SessionID, Mode: mode, RelayURL: cfg.RelayURL, DeviceID: cfg.DeviceID, DeviceSecret: cfg.DeviceSecret, ServerURL: cfg.ServerURL},
 		serverURL: serverBaseURL,
 		creds:     creds,
 		capturer:  capturer,
@@ -131,7 +136,8 @@ func (s *Session) Start(ctx context.Context) error {
 	}
 	wsURL := fmt.Sprintf("%s://%s%s", wsScheme, u.Host, s.config.RelayURL)
 
-	conn, _, err := websocket.DefaultDialer.DialContext(ctx, wsURL, http.Header{
+	dialer := transport.NewWebSocketDialer(15 * time.Second)
+	conn, _, err := dialer.DialContext(ctx, wsURL, http.Header{
 		"User-Agent":      []string{"EndpointMgmt-Agent-RC/1.0"},
 		"X-Device-Id":     []string{s.creds.DeviceID},
 		"X-Device-Secret": []string{s.creds.DeviceSecret},

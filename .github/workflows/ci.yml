@@ -71,7 +71,7 @@ jobs:
     needs: windows-test
     # Each script builds a server and an agent, runs them, and asserts over
     # real HTTP and WebSocket. They are independent: every script binds its own
-    # port in the 18443-18456 range, so the matrix runs fully parallel.
+    # port in the 18443-18457 range, so the matrix runs fully parallel.
     runs-on: windows-latest
     strategy:
       fail-fast: false
@@ -91,6 +91,7 @@ jobs:
           - e2e-asset-license
           - e2e-remote-control
           - e2e-agent-update
+          - e2e-system-policy
     steps:
       - uses: actions/checkout@v4
       - name: Set up Go

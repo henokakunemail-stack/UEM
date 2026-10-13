@@ -15,7 +15,9 @@ var (
 	gdi32    = syscall.NewLazyDLL("gdi32.dll")
 	kernel32 = syscall.NewLazyDLL("kernel32.dll")
 
-	procGetCurrentThreadID = kernel32.NewProc("GetCurrentThreadId")
+	procGetCurrentThreadID   = kernel32.NewProc("GetCurrentThreadId")
+	procGetCurrentProcessId  = kernel32.NewProc("GetCurrentProcessId")
+	procProcessIdToSessionId = kernel32.NewProc("ProcessIdToSessionId")
 
 	procOpenInputDesktop = user32.NewProc("OpenInputDesktop")
 	procSetThreadDesktop = user32.NewProc("SetThreadDesktop")
@@ -257,7 +259,14 @@ func (c *WindowsCapturer) probeCapture() error {
 	defer procSelectObject.Call(hdcMem, old)
 
 	if ret, _, callErr := procBitBlt.Call(hdcMem, 0, 0, 1, 1, hdcScreen, 0, 0, uintptr(SRCCOPY|CAPTUREBLT)); ret == 0 {
-		return fmt.Errorf("BitBlt failed: %w", callErr)
+		var extra string
+		var sessionID uint32
+		pid, _, _ := procGetCurrentProcessId.Call()
+		r, _, _ := procProcessIdToSessionId.Call(pid, uintptr(unsafe.Pointer(&sessionID)))
+		if r != 0 && sessionID == 0 {
+			extra = " (running in Windows Session 0: workstation is locked or has no active logged-on user session)"
+		}
+		return fmt.Errorf("BitBlt failed: %w%s", callErr, extra)
 	}
 	return nil
 }
@@ -310,7 +319,14 @@ func (c *WindowsCapturer) CaptureScreen() ([]byte, int, int, error) {
 		if callErr == nil {
 			callErr = errors.New("unknown win32 error")
 		}
-		return nil, 0, 0, fmt.Errorf("bitblt failed on a %dx%d blit: %w", width, height, callErr)
+		var extra string
+		var sessionID uint32
+		pid, _, _ := procGetCurrentProcessId.Call()
+		r, _, _ := procProcessIdToSessionId.Call(pid, uintptr(unsafe.Pointer(&sessionID)))
+		if r != 0 && sessionID == 0 {
+			extra = " (running in Windows Session 0: workstation is locked or has no active logged-on user session)"
+		}
+		return nil, 0, 0, fmt.Errorf("bitblt failed on a %dx%d blit: %w%s", width, height, callErr, extra)
 	}
 
 	var bi bitmapInfoHeader

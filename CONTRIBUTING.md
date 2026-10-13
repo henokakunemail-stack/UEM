@@ -4,8 +4,8 @@ Thank you for your interest in improving this project!
 
 ## Quick Links
 
-- **Issues**: [GitHub Issues](https://github.com/henokakunemail-stack/Endpoint-Manager/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/henokakunemail-stack/Endpoint-Manager/discussions)
+- **Issues**: [GitHub Issues](https://github.com/henokakunemail-stack/UEM/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/henokakunemail-stack/UEM/discussions)
 - **Documentation**: `docs/` directory
 
 ## How to Contribute

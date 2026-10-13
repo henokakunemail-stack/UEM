@@ -43,12 +43,12 @@ Enterprise-grade, central endpoint management and security compliance platform a
 5. **Optional PostgreSQL Backend**:
    - SQLite stays the default and requires nothing: one binary, one file, no services. The single-binary standalone deployment is unchanged.
    - Set `DB_URL` to a `postgres://` connection string (and optionally `DB_DRIVER=postgres`) to run on PostgreSQL instead. `DB_PATH` is ignored in that mode.
-   - The 23 migrations are written once in SQLite dialect and translated on the way out — `DATETIME` → `TIMESTAMPTZ`, `INSERT OR IGNORE` → `INSERT ... ON CONFLICT DO NOTHING`, `?` → `$N` — so the two backends cannot drift apart across releases.
+   - The 24 migrations are written once in SQLite dialect and translated on the way out — `DATETIME` → `TIMESTAMPTZ`, `INSERT OR IGNORE` → `INSERT ... ON CONFLICT DO NOTHING`, `?` → `$N` — so the two backends cannot drift apart across releases.
    - Automatic rebind driver (`postgres-rebind`) transparently maps `?` parameters to `$1..$N` placeholders, providing full operational query compatibility across both backends.
 
 ---
 
-## 📦 Complete Enterprise Capabilities (Phases 1 - 15)
+## 📦 Complete Enterprise Capabilities (Phases 1 - 16)
 
 | Phase | Module | Core Functionality |
 |---|---|---|
@@ -67,6 +67,7 @@ Enterprise-grade, central endpoint management and security compliance platform a
 | **Phase 13** | **Agent Self-Update** | Autonomous in-place binary upgrades, SHA-256 pre-execution validation, phased canary wave rollouts |
 | **Phase 14** | **IT Asset & License Management** | Hardware Asset Management (HAM) with configurable currency valuation, Software Asset Management (SAM) live seat reconciliation |
 | **Phase 15** | **Device Maintenance** | Server-defined maintenance jobs (disk cleanup, temp purge, cache clearing) with per-device step progress and fleet-wide progress reporting |
+| **Phase 16** | **Active Directory Group Policy** | Multi-tier policy inheritance (`all` < `group` < `device`), USB mass storage lock, corporate wallpaper enforcement, inactivity desktop lock, Windows Update mode (`AUOptions`), administrative tool lockdown |
 
 ### Interactive remote control runs as the signed-in user
 

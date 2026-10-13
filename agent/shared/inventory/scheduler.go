@@ -2,6 +2,7 @@ package inventory
 
 import (
 	"context"
+	"hash/fnv"
 	"time"
 
 	"github.com/rs/zerolog/log"
@@ -38,12 +39,36 @@ func NewScheduler(collector Collector, reporter Reporter, deviceID string,
 	}
 }
 
+func initialOffset(deviceID string, window time.Duration) time.Duration {
+	if window <= 0 || deviceID == "" {
+		return 0
+	}
+	h := fnv.New64a()
+	_, _ = h.Write([]byte(deviceID))
+	// ponytail: deterministic hash offset spreads boot collection evenly; add crypto/rand jitter if device IDs cluster.
+	return time.Duration(h.Sum64() % uint64(window))
+}
+
 // Run collects and reports until ctx is cancelled. The first collection happens
 // immediately so a freshly started agent has inventory on record right away.
 func (s *Scheduler) Run(ctx context.Context) {
 	// Immediate collection on startup: a device that goes offline soon after
 	// booting still has inventory on record.
 	s.collectOnce(ctx)
+	if ctx.Err() != nil {
+		return
+	}
+
+	offset := initialOffset(s.deviceID, s.window)
+	initTimer := time.NewTimer(s.period + offset)
+	defer initTimer.Stop()
+
+	select {
+	case <-initTimer.C:
+		s.collectOnce(ctx)
+	case <-ctx.Done():
+		return
+	}
 
 	ticker := time.NewTicker(s.period)
 	defer ticker.Stop()

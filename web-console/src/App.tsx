@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react'
+import { lazy, Suspense, useState, type ReactNode } from 'react'
 import { BrowserRouter, Link, Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { ConsoleShell } from './components/layout/ConsoleShell'
 import { ErrorBoundary } from './components/ErrorBoundary'
@@ -9,25 +9,27 @@ import { AuthProvider, useAuth } from './context/AuthContext'
 import { ThemeProvider } from './context/ThemeContext'
 import { ToastProvider } from './context/ToastContext'
 import { usePermission } from './hooks/usePermission'
-import { AgentUpdatesPage } from './pages/AgentUpdatesPage'
-import { AlertsPage } from './pages/AlertsPage'
-import { AssetLicensePage } from './pages/AssetLicensePage'
-import { AuditPage } from './pages/AuditPage'
-import { DashboardPage } from './pages/DashboardPage'
-import { DevicesPage } from './pages/DevicesPage'
 import { LoginPage } from './pages/LoginPage'
-import { LogPage } from './pages/LogPage'
-import { MaintenancePage } from './pages/MaintenancePage'
-import { NetworkFilterPage } from './pages/NetworkFilterPage'
-import { PatchesPage } from './pages/PatchesPage'
-import { ReportsPage } from './pages/ReportsPage'
-import { RemoteControlPage } from './pages/RemoteControlPage'
-import { SettingsPage } from './pages/SettingsPage'
-import { SoftwarePage } from './pages/SoftwarePage'
-import { SystemPolicyPage } from './pages/SystemPolicyPage'
-import { TasksSchedulerPage } from './pages/TasksSchedulerPage'
-import { UsersPage } from './pages/UsersPage'
 import type { DeviceDTO } from './types/api'
+
+// Lazy-loaded pages for bundle code-splitting and faster initial paint
+const AgentUpdatesPage = lazy(() => import('./pages/AgentUpdatesPage').then(m => ({ default: m.AgentUpdatesPage })))
+const AlertsPage = lazy(() => import('./pages/AlertsPage').then(m => ({ default: m.AlertsPage })))
+const AssetLicensePage = lazy(() => import('./pages/AssetLicensePage').then(m => ({ default: m.AssetLicensePage })))
+const AuditPage = lazy(() => import('./pages/AuditPage').then(m => ({ default: m.AuditPage })))
+const DashboardPage = lazy(() => import('./pages/DashboardPage').then(m => ({ default: m.DashboardPage })))
+const DevicesPage = lazy(() => import('./pages/DevicesPage').then(m => ({ default: m.DevicesPage })))
+const LogPage = lazy(() => import('./pages/LogPage').then(m => ({ default: m.LogPage })))
+const MaintenancePage = lazy(() => import('./pages/MaintenancePage').then(m => ({ default: m.MaintenancePage })))
+const NetworkFilterPage = lazy(() => import('./pages/NetworkFilterPage').then(m => ({ default: m.NetworkFilterPage })))
+const PatchesPage = lazy(() => import('./pages/PatchesPage').then(m => ({ default: m.PatchesPage })))
+const ReportsPage = lazy(() => import('./pages/ReportsPage').then(m => ({ default: m.ReportsPage })))
+const RemoteControlPage = lazy(() => import('./pages/RemoteControlPage').then(m => ({ default: m.RemoteControlPage })))
+const SettingsPage = lazy(() => import('./pages/SettingsPage').then(m => ({ default: m.SettingsPage })))
+const SoftwarePage = lazy(() => import('./pages/SoftwarePage').then(m => ({ default: m.SoftwarePage })))
+const SystemPolicyPage = lazy(() => import('./pages/SystemPolicyPage'))
+const TasksSchedulerPage = lazy(() => import('./pages/TasksSchedulerPage').then(m => ({ default: m.TasksSchedulerPage })))
+const UsersPage = lazy(() => import('./pages/UsersPage').then(m => ({ default: m.UsersPage })))
 
 function Restricted({ role, children }: { role: 'technician' | 'admin'; children: ReactNode }) {
   const { can } = usePermission()
@@ -97,27 +99,29 @@ function ConsoleRoot() {
     {/* Inside the shell, not around it: a page that throws must not take the
         sidebar and topbar with it. */}
     <ErrorBoundary label={pageLabel(location.pathname)}>
-      <Routes>
-        <Route path="/" element={<Navigate to="/dashboard" replace />} />
-        <Route path="/dashboard" element={<DashboardPage />} />
-        <Route path="/devices" element={<DevicesPage onOpenExec={setExecDevice} onOpenTerminal={(device, shell) => { setTermShell(shell); setTermDevice(device) }} onOpenRemoteControl={setRcDevice} />} />
-        <Route path="/software/:tab?" element={<SubtabPage section="software" />} />
-        <Route path="/scheduler/:tab?" element={<SubtabPage section="scheduler" />} />
-        <Route path="/assets/:tab?" element={<SubtabPage section="assets" />} />
-        <Route path="/updates/:tab?" element={<SubtabPage section="updates" />} />
-        <Route path="/patches" element={<PatchesPage />} />
-        <Route path="/maintenance" element={<MaintenancePage />} />
-        <Route path="/remotecontrol" element={<RemoteControlPage onOpenSession={setRcDevice} />} />
-        <Route path="/filter" element={<NetworkFilterPage />} />
-        <Route path="/system-policy" element={<SystemPolicyPage />} />
-        <Route path="/alerts" element={<AlertsPage />} />
-        <Route path="/reports" element={<ReportsPage />} />
-        <Route path="/users" element={<Restricted role="admin"><UsersPage /></Restricted>} />
-        <Route path="/audit" element={<Restricted role="technician"><AuditPage /></Restricted>} />
-        <Route path="/log" element={<Restricted role="admin"><LogPage /></Restricted>} />
-        <Route path="/settings" element={<Restricted role="admin"><SettingsPage /></Restricted>} />
-        <Route path="*" element={<div className="empty-state"><h1>Page not found</h1><Link to="/dashboard">Return to dashboard</Link></div>} />
-      </Routes>
+      <Suspense fallback={<div className="page-loader" role="status"><div className="app-loading-spinner" /><p className="text-sm text-slate-500 mt-2">Loading...</p></div>}>
+        <Routes>
+          <Route path="/" element={<Navigate to="/dashboard" replace />} />
+          <Route path="/dashboard" element={<DashboardPage />} />
+          <Route path="/devices" element={<DevicesPage onOpenExec={setExecDevice} onOpenTerminal={(device, shell) => { setTermShell(shell); setTermDevice(device) }} onOpenRemoteControl={setRcDevice} />} />
+          <Route path="/software/:tab?" element={<SubtabPage section="software" />} />
+          <Route path="/scheduler/:tab?" element={<SubtabPage section="scheduler" />} />
+          <Route path="/assets/:tab?" element={<SubtabPage section="assets" />} />
+          <Route path="/updates/:tab?" element={<SubtabPage section="updates" />} />
+          <Route path="/patches" element={<PatchesPage />} />
+          <Route path="/maintenance" element={<MaintenancePage />} />
+          <Route path="/remotecontrol" element={<RemoteControlPage onOpenSession={setRcDevice} />} />
+          <Route path="/filter" element={<NetworkFilterPage />} />
+          <Route path="/system-policy" element={<SystemPolicyPage />} />
+          <Route path="/alerts" element={<AlertsPage />} />
+          <Route path="/reports" element={<ReportsPage />} />
+          <Route path="/users" element={<Restricted role="admin"><UsersPage /></Restricted>} />
+          <Route path="/audit" element={<Restricted role="technician"><AuditPage /></Restricted>} />
+          <Route path="/log" element={<Restricted role="admin"><LogPage /></Restricted>} />
+          <Route path="/settings" element={<Restricted role="admin"><SettingsPage /></Restricted>} />
+          <Route path="*" element={<div className="empty-state"><h1>Page not found</h1><Link to="/dashboard">Return to dashboard</Link></div>} />
+        </Routes>
+      </Suspense>
     </ErrorBoundary>
     <RemoteExecModal device={execDevice} onClose={() => setExecDevice(null)} />
     <InteractiveTerminalModal device={termDevice} shell={termShell} onClose={() => setTermDevice(null)} />

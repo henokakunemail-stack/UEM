@@ -409,7 +409,7 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
       if (hasPaintedRef.current || statusRef.current === 'error') return
       setStatus('stalled')
       setErrorMessage(
-        'Connected to the relay, but the endpoint sent no screen frames. The agent may still be starting its capture backend, or remote control is unavailable on that platform.'
+        'Connected to the relay, but the endpoint sent no screen frames. If the endpoint recently reconnected from offline, ensure an interactive user desktop is logged on (Windows lock screen restricts remote screen capture).'
       )
     }, STALL_AFTER_MS)
     return () => window.clearTimeout(timer)

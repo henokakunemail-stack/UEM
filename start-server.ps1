@@ -32,8 +32,24 @@ Write-Host "DB_PATH:   $env:DB_PATH"
 Write-Host "HTTP_ADDR: $env:HTTP_ADDR"
 Write-Host "Listening. Press Ctrl+C to stop." -ForegroundColor Cyan
 
+$serverBin = ".\server.exe"
+if (-not (Test-Path $serverBin)) {
+    if (Test-Path ".\server-windows-amd64.exe") {
+        $serverBin = ".\server-windows-amd64.exe"
+        Write-Host "server.exe not found, using $serverBin" -ForegroundColor Yellow
+    } else {
+        Write-Host "Server binary not found. Compiling server.exe via go build..." -ForegroundColor Yellow
+        $env:CGO_ENABLED = '0'
+        go build -o server.exe ./server/cmd/server
+        if ($LASTEXITCODE -ne 0 -or -not (Test-Path ".\server.exe")) {
+            throw "Failed to compile server.exe"
+        }
+        $serverBin = ".\server.exe"
+    }
+}
+
 if (Test-Path ".env") {
-    .\server.exe -env-file .env
+    & $serverBin -env-file .env
 } else {
-    .\server.exe
+    & $serverBin
 }

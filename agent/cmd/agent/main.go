@@ -132,8 +132,18 @@ func runRCWorker(cfgArg, credsPath string) {
 		return
 	}
 
+	var deviceID, deviceSecret, serverURL string
 	creds, err := enrollment.Load(credsPath)
-	if err != nil {
+	if err == nil {
+		deviceID = creds.DeviceID
+		deviceSecret = creds.DeviceSecret
+		serverURL = creds.ServerURL
+	} else if cfg.DeviceID != "" && cfg.DeviceSecret != "" {
+		log.Warn().Err(err).Msg("rc worker cannot read credentials file from disk; falling back to session config credentials")
+		deviceID = cfg.DeviceID
+		deviceSecret = cfg.DeviceSecret
+		serverURL = cfg.ServerURL
+	} else {
 		// The secret was never passed on the command line, so this is the only
 		// way the worker can authenticate. Without it there is no session, and
 		// saying so here is the only trace: the service already logged that it
@@ -142,7 +152,6 @@ func runRCWorker(cfgArg, credsPath string) {
 		return
 	}
 
-	serverURL := creds.ServerURL
 	if serverURL == "" {
 		log.Error().Msg("rc worker has no server url in its credentials")
 		return
@@ -152,8 +161,8 @@ func runRCWorker(cfgArg, credsPath string) {
 	defer stop()
 
 	session := remotecontrol.NewSession(cfg, serverURL, remotecontrol.Credentials{
-		DeviceID:     creds.DeviceID,
-		DeviceSecret: creds.DeviceSecret,
+		DeviceID:     deviceID,
+		DeviceSecret: deviceSecret,
 	}, remotecontrol.NewPlatformCapturer())
 
 	if err := session.Start(ctx); err != nil {
@@ -567,6 +576,12 @@ func runAgent(serverURL, enrollToken, credsPath string, heartbeatSecs int) {
 			return map[string]string{"status": "rejected", "error": "remote control request carried no relay url"}
 		}
 
+		// Include credentials in the session config so worker spawned across user session
+		// boundary has access to them even when local file DACL restricts access to SYSTEM.
+		cfg.DeviceID = creds.DeviceID
+		cfg.DeviceSecret = creds.DeviceSecret
+		cfg.ServerURL = targetServerURL
+
 		rcMu.Lock()
 		if activeRCSession != nil {
 			activeRCSession.Stop()
@@ -917,14 +932,43 @@ func triggerRestart() {
 	go func() {
 		time.Sleep(1500 * time.Millisecond) // allow HTTP progress report and WebSocket ACK to finish
 		execPath, err := os.Executable()
-		if err == nil && runtime.GOOS == "windows" {
+		if err != nil {
+			log.Error().Err(err).Msg("lookup executable for restart failed; exiting")
+			os.Exit(0)
+		}
+
+		svcName := service.DefaultConfig(nil).Name
+		restarted := false
+
+		switch runtime.GOOS {
+		case "windows":
 			if service.RunAsService() {
-				_ = exec.Command("cmd.exe", "/C", "timeout /t 2 /nobreak > NUL && sc.exe stop endpoint-agent && sc.exe start endpoint-agent").Start()
-			} else {
-				cmd := exec.Command(execPath, os.Args[1:]...)
-				_ = cmd.Start()
+				// ponytail: cmd.exe timeout bridge avoids SCM deadlock; replace with service restarter worker binary if cmd.exe disabled.
+				_ = exec.Command("cmd.exe", "/C", fmt.Sprintf("timeout /t 2 /nobreak > NUL && sc.exe stop %s && sc.exe start %s", svcName, svcName)).Start()
+				restarted = true
+			}
+		case "linux":
+			if os.Getenv("INVOCATION_ID") != "" {
+				cmd := exec.Command("systemctl", "restart", svcName)
+				if err := cmd.Start(); err == nil {
+					restarted = true
+				}
+			}
+		case "darwin":
+			if os.Getenv("XPC_SERVICE_NAME") != "" {
+				cmd := exec.Command("launchctl", "kickstart", "-k", "system/"+svcName)
+				if err := cmd.Start(); err == nil {
+					restarted = true
+				}
 			}
 		}
+
+		if !restarted {
+			// Interactive mode or service manager restart failed: re-spawn process directly
+			cmd := exec.Command(execPath, os.Args[1:]...)
+			_ = cmd.Start()
+		}
+
 		log.Info().Msg("exiting process to allow updated binary to run")
 		os.Exit(0)
 	}()
