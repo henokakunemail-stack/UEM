@@ -501,7 +501,8 @@ export const api = {
 
   // Task Scheduler & Script Repository APIs (Phase 10)
   async getScripts(): Promise<ScriptDTO[]> {
-    return request<ScriptDTO[]>('/api/scripts')
+    const res = await request<ScriptDTO[]>('/api/scripts')
+    return res || []
   },
 
   async createScript(data: {
@@ -523,7 +524,8 @@ export const api = {
   },
 
   async getSchedules(): Promise<ScheduleDTO[]> {
-    return request<ScheduleDTO[]>('/api/schedules')
+    const res = await request<ScheduleDTO[]>('/api/schedules')
+    return res || []
   },
 
   async createSchedule(data: {
@@ -547,11 +549,13 @@ export const api = {
   },
 
   async getTaskRuns(): Promise<TaskRunDTO[]> {
-    return request<TaskRunDTO[]>('/api/schedules/runs')
+    const res = await request<TaskRunDTO[]>('/api/schedules/runs')
+    return res || []
   },
 
   async getRunDeviceRuns(runId: string): Promise<DeviceRunDTO[]> {
-    return request<DeviceRunDTO[]>(`/api/schedules/runs/${runId}/devices`)
+    const res = await request<DeviceRunDTO[]>(`/api/schedules/runs/${runId}/devices`)
+    return res || []
   },
 
   // Network & Web Filter APIs (Phase 12)
@@ -659,7 +663,8 @@ export const api = {
   },
 
   async getAlertRules(): Promise<AlertRuleDTO[]> {
-    return request<AlertRuleDTO[]>('/api/alerts/rules')
+    const res = await request<AlertRuleDTO[]>('/api/alerts/rules')
+    return res || []
   },
 
   async acknowledgeIncident(id: string): Promise<{ status: string }> {
@@ -680,7 +685,8 @@ export const api = {
     if (site) params.append('site', site)
     if (status) params.append('status', status)
     const q = params.toString() ? `?${params.toString()}` : ''
-    return request<HardwareAssetDTO[]>(`/api/assets${q}`)
+    const res = await request<HardwareAssetDTO[]>(`/api/assets${q}`)
+    return res || []
   },
 
   async getAssetSummary(): Promise<AssetSummaryDTO> {
@@ -712,7 +718,8 @@ export const api = {
   // has nothing to save and a viewer reading a name/department is not a
   // privilege escalation.
   async getDirectoryContacts(): Promise<DirectoryContactDTO[]> {
-    return request<DirectoryContactDTO[]>('/api/directory/contacts')
+    const res = await request<DirectoryContactDTO[]>('/api/directory/contacts')
+    return res || []
   },
 
   async getDirectoryConfig(): Promise<DirectoryConfigDTO> {
@@ -747,7 +754,8 @@ export const api = {
   },
 
   async getLicenses(): Promise<SoftwareLicenseDTO[]> {
-    return request<SoftwareLicenseDTO[]>('/api/licenses')
+    const res = await request<SoftwareLicenseDTO[]>('/api/licenses')
+    return res || []
   },
 
   async createLicense(data: Partial<SoftwareLicenseDTO>): Promise<SoftwareLicenseDTO> {
@@ -770,7 +778,8 @@ export const api = {
 
   // Agent Self-Update APIs (Phase 13)
   async getAgentReleases(): Promise<AgentReleaseDTO[]> {
-    return request<AgentReleaseDTO[]>('/api/agent-updates/releases')
+    const res = await request<AgentReleaseDTO[]>('/api/agent-updates/releases')
+    return res || []
   },
 
   async uploadAgentRelease(formData: FormData): Promise<AgentReleaseDTO> {
@@ -781,7 +790,8 @@ export const api = {
   },
 
   async getUpdateCampaigns(): Promise<UpdateCampaignDTO[]> {
-    return request<UpdateCampaignDTO[]>('/api/agent-updates/campaigns')
+    const res = await request<UpdateCampaignDTO[]>('/api/agent-updates/campaigns')
+    return res || []
   },
 
   async createUpdateCampaign(data: {
@@ -814,11 +824,13 @@ export const api = {
   },
 
   async getCampaignTasks(id: string): Promise<CampaignTaskDetail[]> {
-    return request<CampaignTaskDetail[]>(`/api/agent-updates/campaigns/${id}/tasks`)
+    const res = await request<CampaignTaskDetail[]>(`/api/agent-updates/campaigns/${id}/tasks`)
+    return res || []
   },
 
   async getCampaignLogs(id: string): Promise<CampaignLogItem[]> {
-    return request<CampaignLogItem[]>(`/api/agent-updates/campaigns/${id}/logs`)
+    const res = await request<CampaignLogItem[]>(`/api/agent-updates/campaigns/${id}/logs`)
+    return res || []
   },
 
   async dispatchDeviceUpdate(deviceId: string, targetVersion: string): Promise<{ status: string; task_id: string }> {
@@ -847,11 +859,13 @@ export const api = {
   // live in server/modules/maintenance/model.go, and a copy here would drift the
   // moment a task type is added or renamed.
   async getMaintenanceTaskCatalog(): Promise<TaskInfoDTO[]> {
-    return request<TaskInfoDTO[]>('/api/maintenance/tasks')
+    const res = await request<TaskInfoDTO[]>('/api/maintenance/tasks')
+    return res || []
   },
 
   async getMaintenanceJobs(limit = 50, offset = 0): Promise<MaintenanceJobDTO[]> {
-    return request<MaintenanceJobDTO[]>(`/api/maintenance/jobs?limit=${limit}&offset=${offset}`)
+    const res = await request<MaintenanceJobDTO[]>(`/api/maintenance/jobs?limit=${limit}&offset=${offset}`)
+    return res || []
   },
 
   // No getMaintenanceJob(id) here on purpose. The job row the detail modal
@@ -865,7 +879,8 @@ export const api = {
   },
 
   async getMaintenanceJobTasks(jobId: string): Promise<MaintenanceTaskDTO[]> {
-    return request<MaintenanceTaskDTO[]>(`/api/maintenance/jobs/${jobId}/tasks`)
+    const res = await request<MaintenanceTaskDTO[]>(`/api/maintenance/jobs/${jobId}/tasks`)
+    return res || []
   },
 
   // `skipped` is a top-level field, not inside the job: a job targeting the

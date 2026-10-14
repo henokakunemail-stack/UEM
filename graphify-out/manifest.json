@@ -2496,9 +2496,9 @@
     "semantic_hash": "e866e88869d5de5cac82cfa25ee435d0"
   },
   "web-console/src/services/api.ts": {
-    "mtime": 1791885745.219316,
-    "seen": 1791886029.2630262,
-    "ast_hash": "c41d48f5798ec7cae422098101959759",
+    "mtime": 1791948146.4483006,
+    "seen": 1791948246.7541,
+    "ast_hash": "69a0c6cdb9c188f2172cfe21854d5c83",
     "semantic_hash": ""
   },
   "web-console/src/types/api.ts": {
@@ -3123,6 +3123,12 @@
     "mtime": 1791885594.3851998,
     "seen": 1791886029.2627702,
     "ast_hash": "5f0a4e42f026676f6c5b605159d3d4ee",
+    "semantic_hash": ""
+  },
+  "update-server.sh": {
+    "mtime": 1791949062.1760163,
+    "seen": 1791949092.11075,
+    "ast_hash": "183e8cc165609a46d0dccdc05676375b",
     "semantic_hash": ""
   }
 }
