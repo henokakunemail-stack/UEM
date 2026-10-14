@@ -30,6 +30,7 @@ import type { DeviceStatus } from './devicesQuery'
 import { DeviceGroupsPanel } from './DeviceGroupsPanel'
 import { GroupMembersModal } from './GroupMembersModal'
 import { EnrollTokenModal } from '../components/EnrollTokenModal'
+import { UninstallTokenModal } from '../components/UninstallTokenModal'
 
 export const DevicesPage: React.FC<{
   onOpenExec?: (device: DeviceDTO) => void
@@ -53,6 +54,7 @@ export const DevicesPage: React.FC<{
   const [pageSize, setPageSize] = useState<(typeof PAGE_SIZES)[number]>(10)
   const [selectedDevice, setSelectedDevice] = useState<DeviceDTO | null>(null)
   const [retireTarget, setRetireTarget] = useState<DeviceDTO | null>(null)
+  const [uninstallTokenDevice, setUninstallTokenDevice] = useState<DeviceDTO | null>(null)
   const [enrollOpen, setEnrollOpen] = useState(false)
   const [retiring, setRetiring] = useState(false)
   const [actionMsg, setActionMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(
@@ -613,6 +615,17 @@ export const DevicesPage: React.FC<{
                         {canRetire && !isRetired && (
                           <button
                             type="button"
+                            className="btn btn-sm btn-secondary"
+                            onClick={() => setUninstallTokenDevice(d)}
+                            title="Generate Uninstall Verification Token"
+                            aria-label={`Generate uninstall token for ${d.hostname}`}
+                          >
+                            <KeyRound size={12} />
+                          </button>
+                        )}
+                        {canRetire && !isRetired && (
+                          <button
+                            type="button"
                             className="btn btn-sm btn-danger-outline"
                             onClick={() => setRetireTarget(d)}
                             title="Retire Device"
@@ -705,6 +718,12 @@ export const DevicesPage: React.FC<{
           one exists — refresh on the way out rather than making the operator
           guess why a new row has not appeared. */}
       <EnrollTokenModal open={enrollOpen} onClose={() => setEnrollOpen(false)} onEnrolled={fetchDevices} />
+
+      <UninstallTokenModal
+        open={Boolean(uninstallTokenDevice)}
+        device={uninstallTokenDevice}
+        onClose={() => setUninstallTokenDevice(null)}
+      />
     </div>
   )
 }

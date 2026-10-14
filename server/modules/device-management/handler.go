@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -37,8 +38,13 @@ func (h *Handler) Register(r chi.Router) {
 		r.With(h.jwt.RequireAuth, rbac.RequireRole(rbac.RoleAdmin)).Post("/devices/enroll-token", h.createEnrollToken)
 		r.With(h.jwt.RequireAuth, rbac.RequireRole(rbac.RoleAdmin)).Post("/devices/{id}/enroll-token", h.enrollExisting)
 		r.With(h.jwt.RequireAuth, rbac.RequireRole(rbac.RoleAdmin)).Post("/devices/{id}/rotate-secret", h.rotateDeviceSecret)
+		r.With(h.jwt.RequireAuth, rbac.RequireRole(rbac.RoleAdmin)).Post("/devices/{id}/uninstall-token", h.createUninstallToken)
+		r.With(h.jwt.RequireAuth, rbac.RequireRole(rbac.RoleTechnician)).Post("/devices/{id}/verify-uninstall-token", h.verifyUninstallTokenConsole)
 		r.With(h.jwt.RequireAuth, rbac.RequireRole(rbac.RoleTechnician)).Get("/audit-logs", h.listAudit)
 		r.With(h.jwt.RequireAuth, rbac.RequireRole(rbac.RoleTechnician)).Get("/audit-logs/verify", h.verifyAuditChain)
+
+		// Agent endpoint for uninstall verification
+		r.Post("/agent/devices/{id}/verify-uninstall", h.agentVerifyUninstall)
 	})
 }
 
@@ -324,4 +330,98 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 
 func writeErr(w http.ResponseWriter, code int, msg string) {
 	writeJSON(w, code, map[string]string{"error": msg})
+}
+
+type uninstallTokenResp struct {
+	DeviceID       string    `json:"device_id"`
+	UninstallToken string    `json:"uninstall_token"`
+	ExpiresAt      time.Time `json:"expires_at"`
+}
+
+func (h *Handler) createUninstallToken(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	dev, err := h.repo.GetByID(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			writeErr(w, http.StatusNotFound, "device not found")
+			return
+		}
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if dev.RetiredAt != nil {
+		writeErr(w, http.StatusBadRequest, "device is retired")
+		return
+	}
+
+	plain := "UNINST-" + GenerateToken()[:16]
+	hash := HashToken(plain)
+	expiresAt := time.Now().UTC().Add(2 * time.Hour)
+
+	actor := auth.UserIDFromContext(r.Context())
+	if err := h.repo.CreateUninstallToken(r.Context(), id, hash, actor, expiresAt); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	_ = audit.Log(r.Context(), h.db, "user", actor, "device.uninstall_token_created", id, nil)
+	writeJSON(w, http.StatusOK, uninstallTokenResp{
+		DeviceID:       id,
+		UninstallToken: plain,
+		ExpiresAt:      expiresAt,
+	})
+}
+
+type verifyTokenReq struct {
+	Token string `json:"token"`
+}
+
+func (h *Handler) verifyUninstallTokenConsole(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	var req verifyTokenReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Token == "" {
+		writeErr(w, http.StatusBadRequest, "missing token")
+		return
+	}
+
+	valid, err := h.repo.VerifyUninstallToken(r.Context(), id, strings.TrimSpace(req.Token))
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"valid": valid})
+}
+
+func (h *Handler) agentVerifyUninstall(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	authedID, ok := AuthenticateAgent(w, r, h.repo)
+	if !ok {
+		return
+	}
+	if authedID != id {
+		writeErr(w, http.StatusForbidden, "device ID mismatch")
+		return
+	}
+
+	var req verifyTokenReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Token == "" {
+		writeErr(w, http.StatusBadRequest, "missing token in request body")
+		return
+	}
+
+	valid, err := h.repo.VerifyAndConsumeUninstallToken(r.Context(), id, strings.TrimSpace(req.Token))
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if !valid {
+		writeErr(w, http.StatusForbidden, "invalid or expired uninstallation verification token")
+		return
+	}
+
+	_ = audit.Log(r.Context(), h.db, "agent", id, "device.uninstall_verified", id, nil)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"valid":   true,
+		"message": "uninstallation authorized",
+	})
 }

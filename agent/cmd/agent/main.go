@@ -7,12 +7,14 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -46,14 +48,16 @@ var osProvider = newOSInfoProvider()
 
 func main() {
 	var (
-		serverURL     string
-		enrollToken   string
-		enrollOnly    bool
-		credsPath     string
-		heartbeatSecs int
-		serviceAction string
-		rcWorkerArg   string
-		rcWorkerCreds string
+		serverURL            string
+		enrollToken          string
+		enrollOnly           bool
+		credsPath            string
+		heartbeatSecs        int
+		serviceAction        string
+		rcWorkerArg          string
+		rcWorkerCreds        string
+		uninstallToken       string
+		verifyUninstallToken string
 	)
 	flag.StringVar(&serverURL, "server", envOr("AGENT_SERVER", "http://localhost:8443"), "central server URL")
 	flag.StringVar(&enrollToken, "enroll", "", "one-time enrollment token (first run only)")
@@ -61,6 +65,8 @@ func main() {
 	flag.StringVar(&credsPath, "creds", defaultCredsPath(), "path to persisted credentials")
 	flag.IntVar(&heartbeatSecs, "heartbeat", 20, "heartbeat interval in seconds")
 	flag.StringVar(&serviceAction, "service", "", "OS service management action (install|uninstall|start|stop|status)")
+	flag.StringVar(&uninstallToken, "uninstall-token", "", "admin-issued verification token required for uninstallation")
+	flag.StringVar(&verifyUninstallToken, "verify-uninstall", "", "verify uninstall token with server and exit (code 0=valid, 1=invalid)")
 	// Internal: the remote control session worker launched into the logged-on
 	// user's session. Not an operator-facing flag — see runRCWorker.
 	flag.StringVar(&rcWorkerArg, "rc-worker", "", "internal: base64 remote control session config (session worker mode)")
@@ -74,6 +80,12 @@ func main() {
 			os.Exit(1)
 		}
 		return
+	}
+
+	// Standalone uninstall-token verification: called by uninstaller scripts
+	// (NSIS, shell) to gate uninstallation behind admin-issued tokens.
+	if verifyUninstallToken != "" {
+		os.Exit(runVerifyUninstall(serverURL, credsPath, verifyUninstallToken))
 	}
 
 	// The worker branch runs before the service check on purpose. A worker spawned
@@ -904,6 +916,19 @@ func handleServiceAction(action, serverURL, credsPath string) {
 		}
 		fmt.Printf("Service '%s' successfully installed as OS daemon.\n", cfg.Name)
 	case "uninstall", "remove":
+		// Require admin-issued uninstall verification token when device is enrolled
+		creds, loadErr := enrollment.Load(credsPath)
+		if loadErr == nil && creds.DeviceID != "" {
+			token := flag.Lookup("uninstall-token").Value.String()
+			if token == "" {
+				log.Fatal().Msg("agent uninstallation requires an administrator verification token. Use -uninstall-token <token>")
+			}
+			exitCode := runVerifyUninstall(serverURL, credsPath, token)
+			if exitCode != 0 {
+				log.Fatal().Msg("invalid or expired uninstall verification token; uninstallation aborted")
+			}
+			fmt.Println("Uninstall token verified. Proceeding with service removal...")
+		}
 		if err := mgr.Uninstall(); err != nil {
 			log.Fatal().Err(err).Msg("uninstall service failed")
 		}
@@ -928,6 +953,59 @@ func handleServiceAction(action, serverURL, credsPath string) {
 	default:
 		log.Fatal().Str("action", action).Msg("unknown service action (use install, uninstall, start, stop, or status)")
 	}
+}
+
+// runVerifyUninstall contacts the server to verify an admin-issued uninstall
+// token. Returns 0 on success, 1 on failure. Unenrolled devices (no creds)
+// pass automatically — no server knows the machine.
+func runVerifyUninstall(serverURL, credsPath, token string) int {
+	creds, err := enrollment.Load(credsPath)
+	if err != nil || creds.DeviceID == "" {
+		// Not enrolled — no server to check against, allow uninstall
+		fmt.Println("Device not enrolled; uninstall token verification skipped.")
+		return 0
+	}
+
+	target := creds.ServerURL
+	if target == "" {
+		target = serverURL
+	}
+
+	body, _ := json.Marshal(map[string]string{"token": strings.TrimSpace(token)})
+	url := fmt.Sprintf("%s/api/agent/devices/%s/verify-uninstall", strings.TrimRight(target, "/"), creds.DeviceID)
+
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: failed to build verification request: %v\n", err)
+		return 1
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Device-Id", creds.DeviceID)
+	req.Header.Set("X-Device-Secret", creds.DeviceSecret)
+
+	client := &http.Client{Timeout: 15 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: cannot reach server for token verification: %v\n", err)
+		return 1
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusOK {
+		fmt.Println("Uninstall token verified successfully.")
+		return 0
+	}
+
+	var errResp struct {
+		Error string `json:"error"`
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&errResp)
+	msg := errResp.Error
+	if msg == "" {
+		msg = fmt.Sprintf("server returned status %d", resp.StatusCode)
+	}
+	fmt.Fprintf(os.Stderr, "Error: %s\n", msg)
+	return 1
 }
 
 func triggerRestart() {

@@ -333,10 +333,12 @@ func (r *Repository) CompileEffectivePolicy(ctx context.Context, deviceID string
 			effective.WallpaperEnabled = true
 			effective.WallpaperURL = s.WallpaperURL
 			effective.WallpaperStyle = s.WallpaperStyle
+			effective.WallpaperLocked = s.WallpaperLocked
 		} else if p.TargetType == "device" {
 			// Explicit device policy can turn off wallpaper
 			effective.WallpaperEnabled = false
 			effective.WallpaperURL = ""
+			effective.WallpaperLocked = false
 		}
 		// Inactivity Timeout
 		if s.InactivityTimeoutMinutes > 0 || p.TargetType == "device" {
@@ -354,6 +356,24 @@ func (r *Repository) CompileEffectivePolicy(ctx context.Context, deviceID string
 		}
 		if s.DisableControlPanel {
 			effective.DisableControlPanel = true
+		}
+		if s.DisablePowerShell {
+			effective.DisablePowerShell = true
+		}
+		if s.DisableAutoplay {
+			effective.DisableAutoplay = true
+		}
+		if s.FirewallEnabled {
+			effective.FirewallEnabled = true
+		}
+		if s.DefenderProtectionEnabled {
+			effective.DefenderProtectionEnabled = true
+		}
+		if s.ScreenSaverTimeoutMinutes > 0 || p.TargetType == "device" {
+			effective.ScreenSaverTimeoutMinutes = s.ScreenSaverTimeoutMinutes
+		}
+		if s.ScreenSaverPasswordRequired {
+			effective.ScreenSaverPasswordRequired = true
 		}
 
 		// Windows Update

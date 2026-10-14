@@ -298,3 +298,59 @@ func (r *Repository) RotateDeviceSecret(ctx context.Context, id string) (string,
 	}
 	return newPlain, nil
 }
+
+// UninstallToken represents an issued token for agent uninstallation.
+type UninstallToken struct {
+	ID        string     `db:"id"`
+	DeviceID  string     `db:"device_id"`
+	TokenHash string     `db:"token_hash"`
+	CreatedBy string     `db:"created_by"`
+	CreatedAt time.Time  `db:"created_at"`
+	ExpiresAt time.Time  `db:"expires_at"`
+	UsedAt    *time.Time `db:"used_at"`
+}
+
+func (r *Repository) CreateUninstallToken(ctx context.Context, deviceID, tokenHash, createdBy string, expiresAt time.Time) error {
+	now := time.Now().UTC()
+	q := `INSERT INTO device_uninstall_tokens (id, device_id, token_hash, created_by, created_at, expires_at)
+	      VALUES (?, ?, ?, ?, ?, ?)`
+	_, err := r.db.ExecContext(ctx, r.db.Rebind(q), NewID(), deviceID, tokenHash, createdBy, now, expiresAt)
+	if err != nil {
+		return fmt.Errorf("create uninstall token for %s: %w", deviceID, err)
+	}
+	return nil
+}
+
+func (r *Repository) VerifyAndConsumeUninstallToken(ctx context.Context, deviceID, plaintextToken string) (bool, error) {
+	tokenHash := HashToken(plaintextToken)
+	now := time.Now().UTC()
+	var tokenID string
+	q := `SELECT id FROM device_uninstall_tokens
+	      WHERE device_id = ? AND token_hash = ? AND used_at IS NULL AND expires_at > ?
+	      ORDER BY created_at DESC LIMIT 1`
+	err := r.db.GetContext(ctx, &tokenID, r.db.Rebind(q), deviceID, tokenHash, now)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("verify uninstall token: %w", err)
+	}
+
+	// Mark consumed
+	updateQ := `UPDATE device_uninstall_tokens SET used_at = ? WHERE id = ?`
+	_, _ = r.db.ExecContext(ctx, r.db.Rebind(updateQ), now, tokenID)
+	return true, nil
+}
+
+func (r *Repository) VerifyUninstallToken(ctx context.Context, deviceID, plaintextToken string) (bool, error) {
+	tokenHash := HashToken(plaintextToken)
+	now := time.Now().UTC()
+	var count int
+	q := `SELECT COUNT(*) FROM device_uninstall_tokens
+	      WHERE device_id = ? AND token_hash = ? AND used_at IS NULL AND expires_at > ?`
+	err := r.db.GetContext(ctx, &count, r.db.Rebind(q), deviceID, tokenHash, now)
+	if err != nil {
+		return false, fmt.Errorf("verify uninstall token check: %w", err)
+	}
+	return count > 0, nil
+}

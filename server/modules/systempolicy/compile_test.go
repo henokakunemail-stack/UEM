@@ -200,3 +200,66 @@ func TestDevicePolicyState_CRUD(t *testing.T) {
 		t.Errorf("expected synced status, got %s", updated.Status)
 	}
 }
+
+func TestCompileEffectivePolicy_NewSecurityPolicies(t *testing.T) {
+	repo := setupTestDB(t)
+	ctx := context.Background()
+
+	_, err := repo.db.Exec(`INSERT INTO devices (id, hostname, os_name, os_version, agent_version, status, last_seen_at, enrolled_at, device_secret_hash, created_at, updated_at)
+		VALUES ('dev-sec-1', 'PC-SECURE', 'Windows', '11 Pro', '1.4.0', 'online', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 'secret-hash-sec', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`)
+	if err != nil {
+		t.Fatalf("insert device: %v", err)
+	}
+
+	p := &SystemPolicy{
+		Name:       "Enterprise Security Hardening",
+		TargetType: "device",
+		TargetID:   "dev-sec-1",
+		IsEnabled:  true,
+		Priority:   1,
+		CreatedBy:  "sec-admin",
+		Settings: PolicySettings{
+			WallpaperEnabled:            true,
+			WallpaperURL:                "/api/system-policies/wallpapers/wallpaper_abc.png",
+			WallpaperStyle:              WallpaperFill,
+			WallpaperLocked:             true,
+			FirewallEnabled:             true,
+			DefenderProtectionEnabled:   true,
+			DisablePowerShell:           true,
+			DisableAutoplay:             true,
+			ScreenSaverTimeoutMinutes:   10,
+			ScreenSaverPasswordRequired: true,
+		},
+	}
+	if err := repo.Create(ctx, p); err != nil {
+		t.Fatalf("create security policy: %v", err)
+	}
+
+	compiled, err := repo.CompileEffectivePolicy(ctx, "dev-sec-1")
+	if err != nil {
+		t.Fatalf("compile policy: %v", err)
+	}
+
+	s := compiled.Settings
+	if !s.WallpaperEnabled || !s.WallpaperLocked || s.WallpaperURL != "/api/system-policies/wallpapers/wallpaper_abc.png" {
+		t.Errorf("wallpaper settings not compiled: %+v", s)
+	}
+	if !s.FirewallEnabled {
+		t.Errorf("expected FirewallEnabled true")
+	}
+	if !s.DefenderProtectionEnabled {
+		t.Errorf("expected DefenderProtectionEnabled true")
+	}
+	if !s.DisablePowerShell {
+		t.Errorf("expected DisablePowerShell true")
+	}
+	if !s.DisableAutoplay {
+		t.Errorf("expected DisableAutoplay true")
+	}
+	if s.ScreenSaverTimeoutMinutes != 10 {
+		t.Errorf("expected ScreenSaverTimeoutMinutes 10, got %d", s.ScreenSaverTimeoutMinutes)
+	}
+	if !s.ScreenSaverPasswordRequired {
+		t.Errorf("expected ScreenSaverPasswordRequired true")
+	}
+}

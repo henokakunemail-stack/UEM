@@ -37,7 +37,7 @@ func (w *winBackend) Apply(ctx context.Context, client *http.Client, serverURL s
 
 	// 2. Wallpaper Policy
 	if s.WallpaperEnabled && s.WallpaperURL != "" {
-		if err := applyWallpaper(client, serverURL, s.WallpaperURL, s.WallpaperStyle); err != nil {
+		if err := applyWallpaper(client, serverURL, s.WallpaperURL, s.WallpaperStyle, s.WallpaperLocked); err != nil {
 			degraded = append(degraded, "wallpaper: "+err.Error())
 		} else {
 			applied++
@@ -64,6 +64,41 @@ func (w *winBackend) Apply(ctx context.Context, client *http.Client, serverURL s
 	if err := applyWindowsUpdate(s.WindowsUpdateMode); err != nil {
 		degraded = append(degraded, "update: "+err.Error())
 	} else {
+		applied++
+	}
+
+	// 6. Windows Firewall Enforcement
+	if err := applyFirewall(s.FirewallEnabled); err != nil {
+		degraded = append(degraded, "firewall: "+err.Error())
+	} else if s.FirewallEnabled {
+		applied++
+	}
+
+	// 7. Windows Defender Real-time Protection
+	if err := applyDefenderProtection(s.DefenderProtectionEnabled); err != nil {
+		degraded = append(degraded, "defender: "+err.Error())
+	} else if s.DefenderProtectionEnabled {
+		applied++
+	}
+
+	// 8. PowerShell Script Restriction
+	if err := applyPowerShellPolicy(s.DisablePowerShell); err != nil {
+		degraded = append(degraded, "powershell: "+err.Error())
+	} else if s.DisablePowerShell {
+		applied++
+	}
+
+	// 9. Autoplay / Autorun Restriction
+	if err := applyAutoplayPolicy(s.DisableAutoplay); err != nil {
+		degraded = append(degraded, "autoplay: "+err.Error())
+	} else if s.DisableAutoplay {
+		applied++
+	}
+
+	// 10. Screen Saver Security Policy
+	if err := applyScreenSaverPolicy(s.ScreenSaverTimeoutMinutes, s.ScreenSaverPasswordRequired); err != nil {
+		degraded = append(degraded, "screensaver: "+err.Error())
+	} else if s.ScreenSaverTimeoutMinutes > 0 || s.ScreenSaverPasswordRequired {
 		applied++
 	}
 
@@ -191,7 +226,7 @@ func ejectMountedUSBStorage() {
 	}
 }
 
-func applyWallpaper(client *http.Client, serverURL, wallpaperURL string, style WallpaperStyle) error {
+func applyWallpaper(client *http.Client, serverURL, wallpaperURL string, style WallpaperStyle, locked bool) error {
 	dir := `C:\ProgramData\EndpointManager`
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return fmt.Errorf("create wallpaper dir: %w", err)
@@ -265,6 +300,23 @@ func applyWallpaper(client *http.Client, serverURL, wallpaperURL string, style W
 		_ = sysPolKey.SetStringValue("WallpaperStyle", styleCode)
 	}
 
+	// Lock or unlock wallpaper changes via GPO
+	for _, keyPath := range []string{
+		`SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\ActiveDesktop`,
+		`SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System`,
+	} {
+		if k, _, err := registry.CreateKey(registry.LOCAL_MACHINE, keyPath, registry.SET_VALUE); err == nil {
+			if locked {
+				_ = k.SetDWordValue("NoChangingWallPaper", 1)
+				_ = k.SetDWordValue("NoChangingWallpaper", 1)
+			} else {
+				_ = k.DeleteValue("NoChangingWallPaper")
+				_ = k.DeleteValue("NoChangingWallpaper")
+			}
+			k.Close()
+		}
+	}
+
 	// Set Default user desktop for new logins
 	defDesktopKey, _, err := registry.CreateKey(
 		registry.USERS,
@@ -308,6 +360,17 @@ func revertWallpaper() {
 		defer sysPolKey.Close()
 		_ = sysPolKey.DeleteValue("Wallpaper")
 		_ = sysPolKey.DeleteValue("WallpaperStyle")
+	}
+
+	for _, keyPath := range []string{
+		`SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\ActiveDesktop`,
+		`SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System`,
+	} {
+		if k, err := registry.OpenKey(registry.LOCAL_MACHINE, keyPath, registry.SET_VALUE); err == nil {
+			_ = k.DeleteValue("NoChangingWallPaper")
+			_ = k.DeleteValue("NoChangingWallpaper")
+			k.Close()
+		}
 	}
 
 	defKey, err := registry.OpenKey(
@@ -425,5 +488,118 @@ func applyWindowsUpdate(mode WindowsUpdateMode) error {
 		_ = k.DeleteValue("AUOptions")
 	}
 
+	return nil
+}
+
+// applyFirewall enforces Windows Defender Firewall across all network profiles
+func applyFirewall(enabled bool) error {
+	for _, profile := range []string{"StandardProfile", "DomainProfile", "PublicProfile"} {
+		keyPath := fmt.Sprintf(`SOFTWARE\Policies\Microsoft\WindowsFirewall\%s`, profile)
+		if k, _, err := registry.CreateKey(registry.LOCAL_MACHINE, keyPath, registry.SET_VALUE); err == nil {
+			if enabled {
+				_ = k.SetDWordValue("EnableFirewall", 1)
+			} else {
+				_ = k.DeleteValue("EnableFirewall")
+			}
+			k.Close()
+		}
+	}
+	if enabled {
+		_ = exec.Command("netsh", "advfirewall", "set", "allprofiles", "state", "on").Run()
+	}
+	return nil
+}
+
+// applyDefenderProtection prevents disabling Windows Defender real-time antivirus protection
+func applyDefenderProtection(enabled bool) error {
+	kDef, _, err := registry.CreateKey(registry.LOCAL_MACHINE, `SOFTWARE\Policies\Microsoft\Windows Defender`, registry.SET_VALUE)
+	if err == nil {
+		if enabled {
+			_ = kDef.SetDWordValue("DisableAntiSpyware", 0)
+		} else {
+			_ = kDef.DeleteValue("DisableAntiSpyware")
+		}
+		kDef.Close()
+	}
+
+	kReal, _, err := registry.CreateKey(registry.LOCAL_MACHINE, `SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection`, registry.SET_VALUE)
+	if err == nil {
+		if enabled {
+			_ = kReal.SetDWordValue("DisableRealtimeMonitoring", 0)
+			_ = kReal.SetDWordValue("DisableBehaviorMonitoring", 0)
+			_ = kReal.SetDWordValue("DisableOnAccessProtection", 0)
+		} else {
+			_ = kReal.DeleteValue("DisableRealtimeMonitoring")
+			_ = kReal.DeleteValue("DisableBehaviorMonitoring")
+			_ = kReal.DeleteValue("DisableOnAccessProtection")
+		}
+		kReal.Close()
+	}
+	return nil
+}
+
+// applyPowerShellPolicy restricts interactive PowerShell script execution
+func applyPowerShellPolicy(disabled bool) error {
+	k, _, err := registry.CreateKey(registry.LOCAL_MACHINE, `SOFTWARE\Policies\Microsoft\Windows\PowerShell`, registry.SET_VALUE)
+	if err != nil {
+		return err
+	}
+	defer k.Close()
+
+	if disabled {
+		_ = k.SetDWordValue("EnableScripts", 0)
+		_ = k.SetStringValue("ExecutionPolicy", "Restricted")
+	} else {
+		_ = k.DeleteValue("EnableScripts")
+		_ = k.DeleteValue("ExecutionPolicy")
+	}
+	return nil
+}
+
+// applyAutoplayPolicy restricts media and USB autorun/autoplay
+func applyAutoplayPolicy(disabled bool) error {
+	for _, p := range []string{
+		`SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer`,
+		`SOFTWARE\Policies\Microsoft\Windows\Explorer`,
+	} {
+		if k, _, err := registry.CreateKey(registry.LOCAL_MACHINE, p, registry.SET_VALUE); err == nil {
+			if disabled {
+				_ = k.SetDWordValue("NoDriveTypeAutoRun", 0xFF) // 255 = disable for all drives
+				_ = k.SetDWordValue("NoAutoplayfornonVolume", 1)
+			} else {
+				_ = k.DeleteValue("NoDriveTypeAutoRun")
+				_ = k.DeleteValue("NoAutoplayfornonVolume")
+			}
+			k.Close()
+		}
+	}
+	return nil
+}
+
+// applyScreenSaverPolicy configures screen saver security and password protection on resume
+func applyScreenSaverPolicy(timeoutMinutes int, passwordRequired bool) error {
+	k, _, err := registry.CreateKey(registry.LOCAL_MACHINE, `SOFTWARE\Policies\Microsoft\Windows\Control Panel\Desktop`, registry.SET_VALUE)
+	if err != nil {
+		return err
+	}
+	defer k.Close()
+
+	if timeoutMinutes > 0 {
+		_ = k.SetStringValue("ScreenSaveActive", "1")
+		_ = k.SetStringValue("ScreenSaveTimeOut", fmt.Sprintf("%d", timeoutMinutes*60))
+	} else {
+		_ = k.DeleteValue("ScreenSaveTimeOut")
+	}
+
+	if passwordRequired {
+		_ = k.SetStringValue("ScreenSaveActive", "1")
+		_ = k.SetStringValue("ScreenSaverIsSecure", "1")
+	} else {
+		_ = k.DeleteValue("ScreenSaverIsSecure")
+	}
+
+	if timeoutMinutes == 0 && !passwordRequired {
+		_ = k.DeleteValue("ScreenSaveActive")
+	}
 	return nil
 }

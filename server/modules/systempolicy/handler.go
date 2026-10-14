@@ -2,11 +2,16 @@ package systempolicy
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -70,6 +75,11 @@ func (h *Handler) Register(r chi.Router) {
 
 	r.With(h.authMiddleware, rbac.RequireRole(rbac.RoleTechnician)).
 		Post("/api/system-policies/{id}/apply", h.applyPolicyNow)
+
+	r.With(h.authMiddleware, rbac.RequireRole(rbac.RoleAdmin)).
+		Post("/api/system-policies/wallpaper-upload", h.wallpaperUpload)
+
+	r.Get("/api/system-policies/wallpapers/{filename}", h.serveWallpaper)
 
 	// Device-level State & Sync
 	r.With(h.authMiddleware).
@@ -548,4 +558,65 @@ func systemPolicyApplyEnvelope(compiled *CompiledPolicy) ([]byte, error) {
 		},
 	}
 	return json.Marshal(env)
+}
+
+func (h *Handler) wallpaperUpload(w http.ResponseWriter, r *http.Request) {
+	// 10MB limit
+	r.Body = http.MaxBytesReader(w, r.Body, 10<<20)
+	if err := r.ParseMultipartForm(10 << 20); err != nil {
+		writeErr(w, http.StatusBadRequest, "file too large or invalid multipart form")
+		return
+	}
+
+	file, header, err := r.FormFile("wallpaper")
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "missing wallpaper file field")
+		return
+	}
+	defer file.Close()
+
+	ext := strings.ToLower(filepath.Ext(header.Filename))
+	if ext != ".jpg" && ext != ".jpeg" && ext != ".png" && ext != ".bmp" {
+		writeErr(w, http.StatusBadRequest, "only JPG, PNG, and BMP image files allowed")
+		return
+	}
+
+	randBytes := make([]byte, 16)
+	_, _ = rand.Read(randBytes)
+	newFilename := fmt.Sprintf("wallpaper_%s%s", hex.EncodeToString(randBytes), ext)
+
+	uploadDir := filepath.Join("data", "wallpapers")
+	if err := os.MkdirAll(uploadDir, 0755); err != nil {
+		writeErr(w, http.StatusInternalServerError, "failed to create wallpaper directory")
+		return
+	}
+
+	dstPath := filepath.Join(uploadDir, newFilename)
+	dst, err := os.Create(dstPath)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "failed to save wallpaper file")
+		return
+	}
+	defer dst.Close()
+
+	if _, err := io.Copy(dst, file); err != nil {
+		writeErr(w, http.StatusInternalServerError, "failed to write wallpaper file")
+		return
+	}
+
+	wallpaperURL := fmt.Sprintf("/api/system-policies/wallpapers/%s", newFilename)
+	writeJSON(w, http.StatusOK, map[string]string{
+		"wallpaper_url": wallpaperURL,
+		"filename":      newFilename,
+	})
+}
+
+func (h *Handler) serveWallpaper(w http.ResponseWriter, r *http.Request) {
+	filename := filepath.Base(chi.URLParam(r, "filename"))
+	filePath := filepath.Join("data", "wallpapers", filename)
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		http.NotFound(w, r)
+		return
+	}
+	http.ServeFile(w, r, filePath)
 }

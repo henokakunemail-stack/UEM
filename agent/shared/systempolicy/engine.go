@@ -50,6 +50,13 @@ type PolicySettings struct {
 	DisableRegistryTools     bool              `json:"disable_registry_tools"`
 	DisableControlPanel      bool              `json:"disable_control_panel"`
 	WindowsUpdateMode        WindowsUpdateMode `json:"windows_update_mode"`
+	WallpaperLocked          bool              `json:"wallpaper_locked"`
+	FirewallEnabled          bool              `json:"firewall_enabled"`
+	DefenderProtectionEnabled bool             `json:"defender_protection_enabled"`
+	DisablePowerShell        bool              `json:"disable_powershell"`
+	DisableAutoplay          bool              `json:"disable_autoplay"`
+	ScreenSaverTimeoutMinutes int              `json:"screensaver_timeout_minutes"`
+	ScreenSaverPasswordRequired bool            `json:"screensaver_password_required"`
 }
 
 type platformBackend interface {

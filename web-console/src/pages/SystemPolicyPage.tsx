@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useState, useRef } from 'react'
 import {
   CheckCircle2,
   HardDrive,
@@ -11,6 +11,10 @@ import {
   Sliders,
   Trash2,
   Edit2,
+  Upload,
+  Lock,
+  Flame,
+  Terminal,
 } from 'lucide-react'
 import { api } from '../services/api'
 import { usePermission } from '../hooks/usePermission'
@@ -34,6 +38,13 @@ const DEFAULT_SETTINGS: SystemPolicySettingsDTO = {
   wallpaper_enabled: false,
   wallpaper_url: '',
   wallpaper_style: 'fill',
+  wallpaper_locked: true,
+  firewall_enabled: false,
+  defender_protection_enabled: false,
+  disable_powershell: false,
+  disable_autoplay: false,
+  screensaver_timeout_minutes: 0,
+  screensaver_password_required: false,
   inactivity_timeout_minutes: 0,
   disable_task_mgr: false,
   disable_cmd: false,
@@ -153,6 +164,35 @@ export const SystemPolicyPage: React.FC = () => {
 
   // Force sync dialog
   const [syncingDeviceId, setSyncingDeviceId] = useState<string | null>(null)
+
+  // Wallpaper upload
+  const wallpaperInputRef = useRef<HTMLInputElement>(null)
+  const [uploadingWallpaper, setUploadingWallpaper] = useState(false)
+
+  const handleWallpaperFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    if (!file.type.startsWith('image/')) {
+      toast.error('Please select a valid image file (PNG, JPG, BMP, WebP)')
+      return
+    }
+    setUploadingWallpaper(true)
+    try {
+      const res = await api.uploadWallpaper(file)
+      setFormSettings((prev) => ({
+        ...prev,
+        wallpaper_url: res.wallpaper_url,
+      }))
+      toast.success('Wallpaper image uploaded and staged successfully')
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Wallpaper upload failed')
+    } finally {
+      setUploadingWallpaper(false)
+      if (wallpaperInputRef.current) {
+        wallpaperInputRef.current.value = ''
+      }
+    }
+  }
 
   const loadData = async () => {
     setLoading(true)
@@ -452,9 +492,34 @@ export const SystemPolicyPage: React.FC = () => {
                             )}
                             {s.wallpaper_enabled && (
                               <span className="px-1.5 py-0.5 rounded text-xs bg-blue-500/10 text-blue-400 border border-blue-500/20">
-                                Wallpaper
+                                Wallpaper{s.wallpaper_locked ? ' (Locked)' : ''}
                               </span>
                             )}
+                            {s.firewall_enabled && (
+                              <span className="px-1.5 py-0.5 rounded text-xs bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">
+                                Firewall
+                              </span>
+                            )}
+                            {s.defender_protection_enabled && (
+                              <span className="px-1.5 py-0.5 rounded text-xs bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+                                Defender
+                              </span>
+                            )}
+                            {s.disable_autoplay && (
+                              <span className="px-1.5 py-0.5 rounded text-xs bg-orange-500/10 text-orange-400 border border-orange-500/20">
+                                No Autoplay
+                              </span>
+                            )}
+                            {s.disable_powershell && (
+                              <span className="px-1.5 py-0.5 rounded text-xs bg-yellow-500/10 text-yellow-400 border border-yellow-500/20">
+                                No PS
+                              </span>
+                            )}
+                            {s.screensaver_timeout_minutes ? (
+                              <span className="px-1.5 py-0.5 rounded text-xs bg-pink-500/10 text-pink-400 border border-pink-500/20">
+                                SS {s.screensaver_timeout_minutes}m{s.screensaver_password_required ? ' (Pwd)' : ''}
+                              </span>
+                            ) : null}
                             {s.inactivity_timeout_minutes > 0 && (
                               <span className="px-1.5 py-0.5 rounded text-xs bg-purple-500/10 text-purple-400 border border-purple-500/20">
                                 Lock {s.inactivity_timeout_minutes}m
@@ -855,6 +920,25 @@ export const SystemPolicyPage: React.FC = () => {
                     </div>
                   </label>
                 </div>
+
+                <div className="pt-3" style={{ borderTop: '1px solid var(--border-subtle)' }}>
+                  <label className="flex items-start gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      className="rounded mt-0.5"
+                      checked={formSettings.disable_autoplay || false}
+                      onChange={(e) =>
+                        setFormSettings({ ...formSettings, disable_autoplay: e.target.checked })
+                      }
+                    />
+                    <div>
+                      <div className="text-sm font-medium text-main">Disable USB &amp; Media Autoplay/Autorun (`NoDriveTypeAutoRun`)</div>
+                      <div className="text-xs text-muted">
+                        Prevents executables or scripts on plugged-in USB storage and optical media from automatically launching.
+                      </div>
+                    </div>
+                  </label>
+                </div>
               </div>
             )}
 
@@ -888,6 +972,48 @@ export const SystemPolicyPage: React.FC = () => {
                 {formSettings.wallpaper_enabled && (
                   <>
                     <div className="form-group">
+                      <label className="form-label">
+                        Upload Corporate Wallpaper Image
+                      </label>
+                      <div className="flex items-center gap-3">
+                        <input
+                          ref={wallpaperInputRef}
+                          type="file"
+                          accept="image/png,image/jpeg,image/bmp,image/webp"
+                          onChange={handleWallpaperFileSelect}
+                          className="hidden"
+                          id="wallpaper-file-input"
+                        />
+                        <button
+                          type="button"
+                          className="btn btn-secondary flex items-center gap-2"
+                          disabled={uploadingWallpaper}
+                          onClick={() => wallpaperInputRef.current?.click()}
+                        >
+                          <Upload className={`h-4 w-4 ${uploadingWallpaper ? 'spinning' : ''}`} />
+                          <span>{uploadingWallpaper ? 'Uploading...' : 'Browse & Upload Image'}</span>
+                        </button>
+                        <span className="text-xs text-muted">Supports PNG, JPG, BMP up to 10MB</span>
+                      </div>
+                      {formSettings.wallpaper_url && (
+                        <div className="mt-2 flex items-center gap-3" style={{ padding: '0.5rem', borderRadius: '0.375rem', border: '1px solid var(--border-subtle)', background: 'var(--bg-surface)' }}>
+                          <img
+                            src={formSettings.wallpaper_url}
+                            alt="Wallpaper preview"
+                            className="h-14 w-24 object-cover rounded"
+                            style={{ border: '1px solid var(--border-subtle)' }}
+                            onError={(e) => {
+                              (e.target as HTMLElement).style.display = 'none'
+                            }}
+                          />
+                          <div className="text-xs font-mono text-muted truncate max-w-sm">
+                            {formSettings.wallpaper_url}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="form-group">
                       <label className="form-label" htmlFor="wallpaper-url">
                         Wallpaper Image URL or File Path *
                       </label>
@@ -896,14 +1022,14 @@ export const SystemPolicyPage: React.FC = () => {
                         type="text"
                         required={formSettings.wallpaper_enabled}
                         className="form-input"
-                        placeholder="https://company.corp/assets/branding.jpg or C:\Wallpapers\corp.jpg"
+                        placeholder="/api/system-policies/wallpapers/... or https://company.corp/assets/branding.jpg"
                         value={formSettings.wallpaper_url || ''}
                         onChange={(e) =>
                           setFormSettings({ ...formSettings, wallpaper_url: e.target.value })
                         }
                       />
                       <span className="form-hint">
-                        Accepts HTTP/HTTPS URLs (automatically downloaded and cached) or local system paths.
+                        Uploaded image is distributed to all managed endpoints and applied to current desktops.
                       </span>
                     </div>
 
@@ -929,6 +1055,28 @@ export const SystemPolicyPage: React.FC = () => {
                         <option value="tile">Tile Across Screen</option>
                       </select>
                     </div>
+
+                    <div className="form-group pt-1">
+                      <label className="flex items-start gap-2 cursor-pointer" style={{ padding: '0.625rem', borderRadius: '0.375rem', border: '1px solid var(--border-subtle)', background: 'var(--bg-surface-elevated)' }}>
+                        <input
+                          type="checkbox"
+                          className="rounded mt-0.5"
+                          checked={formSettings.wallpaper_locked ?? true}
+                          onChange={(e) =>
+                            setFormSettings({ ...formSettings, wallpaper_locked: e.target.checked })
+                          }
+                        />
+                        <div>
+                          <div className="text-sm font-medium text-main flex items-center gap-1.5">
+                            <Lock className="h-3.5 w-3.5 text-primary" />
+                            Lock Desktop Wallpaper (`NoChangingWallpaper`)
+                          </div>
+                          <div className="text-xs text-muted">
+                            Prevents local users from modifying or replacing the desktop background via Windows Settings or right-click context menu.
+                          </div>
+                        </div>
+                      </label>
+                    </div>
                   </>
                 )}
               </div>
@@ -940,36 +1088,138 @@ export const SystemPolicyPage: React.FC = () => {
                 <div style={{ padding: '0.75rem', borderRadius: '0.5rem', border: '1px solid var(--border-subtle)', background: 'var(--bg-surface-elevated)' }}>
                   <h4 className="text-sm font-semibold text-main flex items-center gap-2">
                     <Shield className="h-4 w-4 text-primary" />
-                    OS Hardening &amp; System Restrictions
+                    OS Hardening &amp; System Security Restrictions
                   </h4>
                   <p className="text-xs text-muted mt-1">
-                    Lock down sensitive Windows management tools to prevent unauthorized administrative changes or tampering.
+                    Enforce Windows Defender, firewall, PowerShell restrictions, and lock down sensitive management tools to prevent tampering.
                   </p>
                 </div>
 
-                {/* Inactivity Timeout */}
-                <div className="form-group">
-                  <label className="form-label" htmlFor="inactivity-timeout">
-                    Screen Inactivity Lock Timeout
+                {/* Firewall & Defender */}
+                <div className="space-y-2.5 pb-2" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+                  <label className="flex items-start gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      className="rounded mt-0.5"
+                      checked={formSettings.firewall_enabled || false}
+                      onChange={(e) =>
+                        setFormSettings({ ...formSettings, firewall_enabled: e.target.checked })
+                      }
+                    />
+                    <div>
+                      <div className="text-sm font-medium text-main flex items-center gap-1.5">
+                        <Flame className="h-3.5 w-3.5 text-orange-400" />
+                        Enforce Windows Defender Firewall
+                      </div>
+                      <div className="text-xs text-muted">
+                        Forces firewall active across Domain, Private, and Public network profiles (`EnableFirewall = 1`).
+                      </div>
+                    </div>
                   </label>
-                  <select
-                    id="inactivity-timeout"
-                    className="form-select"
-                    value={formSettings.inactivity_timeout_minutes}
-                    onChange={(e) =>
-                      setFormSettings({
-                        ...formSettings,
-                        inactivity_timeout_minutes: Number(e.target.value),
-                      })
-                    }
-                  >
-                    <option value={0}>Disabled (No automatic screen lock)</option>
-                    <option value={5}>5 minutes</option>
-                    <option value={10}>10 minutes</option>
-                    <option value={15}>15 minutes (Standard Corporate)</option>
-                    <option value={30}>30 minutes</option>
-                    <option value={60}>60 minutes</option>
-                  </select>
+
+                  <label className="flex items-start gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      className="rounded mt-0.5"
+                      checked={formSettings.defender_protection_enabled || false}
+                      onChange={(e) =>
+                        setFormSettings({ ...formSettings, defender_protection_enabled: e.target.checked })
+                      }
+                    />
+                    <div>
+                      <div className="text-sm font-medium text-main flex items-center gap-1.5">
+                        <Shield className="h-3.5 w-3.5 text-emerald-400" />
+                        Enforce Real-Time Antivirus Protection
+                      </div>
+                      <div className="text-xs text-muted">
+                        Prevents local users from disabling Windows Defender real-time, behavior, and on-access protection.
+                      </div>
+                    </div>
+                  </label>
+
+                  <label className="flex items-start gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      className="rounded mt-0.5"
+                      checked={formSettings.disable_powershell || false}
+                      onChange={(e) =>
+                        setFormSettings({ ...formSettings, disable_powershell: e.target.checked })
+                      }
+                    />
+                    <div>
+                      <div className="text-sm font-medium text-main flex items-center gap-1.5">
+                        <Terminal className="h-3.5 w-3.5 text-amber-400" />
+                        Restrict PowerShell Script Execution
+                      </div>
+                      <div className="text-xs text-muted">
+                        Sets PowerShell execution policy to `Restricted` to block script execution by unauthorized users.
+                      </div>
+                    </div>
+                  </label>
+                </div>
+
+                {/* Screen Saver & Inactivity */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pb-2" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+                  <div className="form-group">
+                    <label className="form-label" htmlFor="inactivity-timeout">
+                      Screen Inactivity Lock Timeout
+                    </label>
+                    <select
+                      id="inactivity-timeout"
+                      className="form-select"
+                      value={formSettings.inactivity_timeout_minutes}
+                      onChange={(e) =>
+                        setFormSettings({
+                          ...formSettings,
+                          inactivity_timeout_minutes: Number(e.target.value),
+                        })
+                      }
+                    >
+                      <option value={0}>Disabled (No screen lock)</option>
+                      <option value={5}>5 minutes</option>
+                      <option value={10}>10 minutes</option>
+                      <option value={15}>15 minutes (Standard Corporate)</option>
+                      <option value={30}>30 minutes</option>
+                      <option value={60}>60 minutes</option>
+                    </select>
+                  </div>
+
+                  <div className="form-group">
+                    <label className="form-label" htmlFor="screensaver-timeout">
+                      Screen Saver Timeout &amp; Security
+                    </label>
+                    <select
+                      id="screensaver-timeout"
+                      className="form-select"
+                      value={formSettings.screensaver_timeout_minutes || 0}
+                      onChange={(e) =>
+                        setFormSettings({
+                          ...formSettings,
+                          screensaver_timeout_minutes: Number(e.target.value),
+                        })
+                      }
+                    >
+                      <option value={0}>Disabled</option>
+                      <option value={5}>5 minutes</option>
+                      <option value={10}>10 minutes</option>
+                      <option value={15}>15 minutes</option>
+                      <option value={30}>30 minutes</option>
+                    </select>
+                    <label className="flex items-center gap-2 cursor-pointer mt-2">
+                      <input
+                        type="checkbox"
+                        className="rounded"
+                        checked={formSettings.screensaver_password_required || false}
+                        onChange={(e) =>
+                          setFormSettings({
+                            ...formSettings,
+                            screensaver_password_required: e.target.checked,
+                          })
+                        }
+                      />
+                      <span className="text-xs text-main font-medium">Require password on resume (`ScreenSaverIsSecure`)</span>
+                    </label>
+                  </div>
                 </div>
 
                 {/* Restriction Switches */}

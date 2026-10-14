@@ -38,6 +38,8 @@ Var CheckboxPurge
 Var CheckboxPurgeState
 Var TARGET_INSTDIR
 Var TARGET_DATADIR
+Var TextToken
+Var UninstallToken
 
 ; --- Interface Settings ---
 !define MUI_ABORTWARNING
@@ -75,7 +77,7 @@ FunctionEnd
 ; Custom Options Page
 ; ------------------------------------------------------------------------------
 Function ConfirmOptionsPage
-    !insertmacro MUI_HEADER_TEXT "Uninstall Options" "Choose cleanup actions for Endpoint Management Agent."
+    !insertmacro MUI_HEADER_TEXT "Uninstall Options" "Enter verification token and choose cleanup actions."
 
     nsDialogs::Create 1018
     Pop $Dialog
@@ -83,21 +85,49 @@ Function ConfirmOptionsPage
         Abort
     ${EndIf}
 
-    ${NSD_CreateLabel} 0 0 100% 24u "This wizard will stop and remove the 'endpoint-agent' Windows Service and remove all agent binaries from:$\n$TARGET_INSTDIR"
+    ${NSD_CreateLabel} 0 0 100% 16u "This wizard will stop and remove the 'endpoint-agent' service from:$\n$TARGET_INSTDIR"
     Pop $0
 
-    ${NSD_CreateCheckbox} 0 32u 100% 14u "Purge device credentials (creds.json) and cache logs from ProgramData"
+    ${NSD_CreateLabel} 0 20u 100% 10u "Administrator Uninstall Verification Token:"
+    Pop $0
+
+    ${NSD_CreateText} 0 32u 100% 14u "$UninstallToken"
+    Pop $TextToken
+
+    ${NSD_CreateLabel} 0 48u 100% 18u "To prevent unauthorized uninstallation, enter a time-limited token issued by an administrator from the Endpoint Management Console."
+    Pop $0
+
+    ${NSD_CreateCheckbox} 0 70u 100% 14u "Purge device credentials (creds.json) and cache logs from ProgramData"
     Pop $CheckboxPurge
     ${NSD_Check} $CheckboxPurge
 
-    ${NSD_CreateLabel} 0 54u 100% 24u "Note: If unchecked, credentials are kept so re-installing will automatically resume fleet connectivity without re-enrollment."
+    ${NSD_CreateLabel} 0 88u 100% 18u "Note: If unchecked, credentials are kept so re-installing will automatically resume fleet connectivity."
     Pop $0
 
     nsDialogs::Show
 FunctionEnd
 
 Function ConfirmOptionsPageLeave
+    ${NSD_GetText} $TextToken $UninstallToken
     ${NSD_GetState} $CheckboxPurge $CheckboxPurgeState
+
+    ; Verify token against agent binary if enrolled
+    ${If} ${FileExists} "$TARGET_DATADIR\creds.json"
+    ${AndIf} ${FileExists} "$TARGET_INSTDIR\endpoint-agent.exe"
+        ${If} $UninstallToken == ""
+            MessageBox MB_ICONEXCLAMATION|MB_OK "An administrator verification token is required to uninstall this managed agent.$\n$\nPlease request an uninstallation token from your IT administrator."
+            Abort
+        ${EndIf}
+
+        nsExec::ExecToStack '"$TARGET_INSTDIR\endpoint-agent.exe" -verify-uninstall "$UninstallToken"'
+        Pop $0 ; Exit code
+        Pop $1 ; Output
+
+        ${If} $0 != 0
+            MessageBox MB_ICONSTOP|MB_OK "Uninstallation Rejected: Invalid or expired verification token.$\n$\n$1$\n$\nPlease contact your administrator."
+            Abort
+        ${EndIf}
+    ${EndIf}
 FunctionEnd
 
 ; ------------------------------------------------------------------------------
@@ -115,7 +145,7 @@ Section "Remove Agent" SecMain
 
     DetailPrint "Removing Windows Service '${SERVICE_NAME}'..."
     ${If} ${FileExists} "$TARGET_INSTDIR\endpoint-agent.exe"
-        nsExec::ExecToLog '"$TARGET_INSTDIR\endpoint-agent.exe" -service uninstall'
+        nsExec::ExecToLog '"$TARGET_INSTDIR\endpoint-agent.exe" -service uninstall -uninstall-token "$UninstallToken"'
         Pop $0
     ${Else}
         nsExec::ExecToLog 'sc.exe delete "${SERVICE_NAME}"'

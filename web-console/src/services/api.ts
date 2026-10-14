@@ -51,6 +51,8 @@ import type {
   SystemPolicyDTO,
   SystemPolicySettingsDTO,
   DeviceSystemPolicyStateDTO,
+  UninstallTokenResp,
+  VerifyUninstallTokenResp,
   BackupFileDTO,
   RestoreResponseDTO,
 } from '../types/api'
@@ -1098,6 +1100,28 @@ export const api = {
   async getSystemPolicyStates(): Promise<DeviceSystemPolicyStateDTO[]> {
     const res = await request<{ states: DeviceSystemPolicyStateDTO[]; count: number }>('/api/system-policies/states')
     return res.states || []
+  },
+
+  async uploadWallpaper(file: File): Promise<{ wallpaper_url: string; filename: string }> {
+    const formData = new FormData()
+    formData.append('wallpaper', file)
+    return request<{ wallpaper_url: string; filename: string }>('/api/system-policies/wallpaper-upload', {
+      method: 'POST',
+      body: formData,
+    })
+  },
+
+  async createUninstallToken(deviceId: string): Promise<UninstallTokenResp> {
+    return request<UninstallTokenResp>(`/api/devices/${deviceId}/uninstall-token`, {
+      method: 'POST',
+    })
+  },
+
+  async verifyUninstallToken(deviceId: string, token: string): Promise<VerifyUninstallTokenResp> {
+    return request<VerifyUninstallTokenResp>(`/api/devices/${deviceId}/verify-uninstall-token`, {
+      method: 'POST',
+      body: JSON.stringify({ token }),
+    })
   },
 
   // Backup & Restore Management (Phase 17)

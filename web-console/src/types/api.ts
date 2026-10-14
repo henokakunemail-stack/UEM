@@ -592,12 +592,29 @@ export interface SystemPolicySettingsDTO {
   wallpaper_enabled: boolean
   wallpaper_url?: string
   wallpaper_style?: WallpaperStyle
+  wallpaper_locked?: boolean
+  firewall_enabled?: boolean
+  defender_protection_enabled?: boolean
+  disable_powershell?: boolean
+  disable_autoplay?: boolean
+  screensaver_timeout_minutes?: number
+  screensaver_password_required?: boolean
   inactivity_timeout_minutes: number
   disable_task_mgr: boolean
   disable_cmd: boolean
   disable_registry_tools: boolean
   disable_control_panel: boolean
   windows_update_mode: WindowsUpdateMode
+}
+
+export interface UninstallTokenResp {
+  device_id: string
+  uninstall_token: string
+  expires_at: string
+}
+
+export interface VerifyUninstallTokenResp {
+  valid: boolean
 }
 
 export interface SystemPolicyDTO {

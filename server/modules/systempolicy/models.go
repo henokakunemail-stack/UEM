@@ -40,9 +40,26 @@ type PolicySettings struct {
 	USBStorageMode USBStorageMode `json:"usb_storage_mode"` // "allow", "block", "read_only"
 
 	// Desktop Personalization
-	WallpaperEnabled bool           `json:"wallpaper_enabled"`
-	WallpaperURL     string         `json:"wallpaper_url,omitempty"`
-	WallpaperStyle   WallpaperStyle `json:"wallpaper_style,omitempty"` // "fill", "fit", "stretch", "center", "tile"
+	WallpaperEnabled         bool              `json:"wallpaper_enabled"`
+	WallpaperURL             string            `json:"wallpaper_url,omitempty"`
+	WallpaperStyle           WallpaperStyle    `json:"wallpaper_style,omitempty"` // "fill", "fit", "stretch", "center", "tile"
+	WallpaperLocked          bool              `json:"wallpaper_locked"`          // Lock wallpaper to prevent user changes
+
+	// Firewall & Network Security
+	FirewallEnabled bool `json:"firewall_enabled"` // Enforce Windows Defender Firewall on all profiles
+
+	// Windows Defender Real-time Protection
+	DefenderProtectionEnabled bool `json:"defender_protection_enabled"` // Prevent disabling Windows Defender real-time protection
+
+	// Disable PowerShell / Script Execution
+	DisablePowerShell bool `json:"disable_powershell"` // Block PowerShell execution
+
+	// Disable USB Autoplay / Autorun
+	DisableAutoplay bool `json:"disable_autoplay"` // Disable Windows Autoplay for all drive types
+
+	// Screen Saver
+	ScreenSaverTimeoutMinutes int `json:"screensaver_timeout_minutes"` // 0 = disabled, non-zero enables timeout
+	ScreenSaverPasswordRequired bool `json:"screensaver_password_required"` // Require password on screen saver resume
 
 	// Security & Access Restrictions
 	InactivityTimeoutMinutes int               `json:"inactivity_timeout_minutes"` // 0 = disabled, 5, 10, 15, 30, 60
