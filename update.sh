@@ -94,6 +94,16 @@ if [ -z "$INSTALL_BIN" ]; then
     done
 fi
 
+# Detect any running systemd unit whose ExecStart references INSTALL_BIN
+if [ -z "$SERVICE_NAME" ] && [ -n "$INSTALL_BIN" ]; then
+    for unit in $(systemctl list-unit-files --type=service --no-legend 2>/dev/null | awk '{print $1}'); do
+        if systemctl cat "$unit" 2>/dev/null | grep -Fq "$INSTALL_BIN"; then
+            SERVICE_NAME="${unit%.service}"
+            break
+        fi
+    done
+fi
+
 if [ -z "$ENV_FILE" ]; then
     for cand in "/etc/endpoint-mgmt-server/server.env" "/opt/endpoint-mgmt/.env" "/opt/endpoint-manager/.env" "/etc/endpoint-manager/server.env"; do
         if [ -f "$cand" ]; then
@@ -130,21 +140,18 @@ if [ -n "$BINARY_PATH" ]; then
     fi
     STAGED_BIN="$BINARY_PATH"
     echo "[+] Using provided binary: $STAGED_BIN"
+elif [ "$BRANCH" != "main" ]; then
+    # Custom branch requested: bypass release assets and compile from git source
+    echo "[*] Branch '$BRANCH' specified, building directly from branch source..."
 else
-    # Check GitHub Releases first
+    # Check GitHub Releases for main branch (Linux ELF only)
     echo "[*] Checking for latest release from GitHub ($REPO)..."
     API_URL="https://api.github.com/repos/$REPO/releases/latest"
     RELEASE_JSON=$(curl -sSL -H "User-Agent: UEM-Updater" "$API_URL" || true)
 
-    DOWNLOAD_URL=$(printf '%s\n' "$RELEASE_JSON" | grep -E '"browser_download_url":.*(server-linux-amd64|endpoint-server.*linux.*amd64)' | head -n1 | sed -E 's/.*"browser_download_url": *"([^"]+)".*/\1/' || true)
-
-    # An anonymous GitHub API call is rate limited hard; fall back to the direct
-    # download URL derived from the tag the API did report.
+    DOWNLOAD_URL=$(printf '%s\n' "$RELEASE_JSON" | grep -o 'https://[^"]*/server-linux-amd64' | head -n1 || true)
     if [ -z "$DOWNLOAD_URL" ]; then
-        REPORTED_TAG=$(printf '%s\n' "$RELEASE_JSON" | grep -m1 '"tag_name":' | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/' || true)
-        if [ -n "$REPORTED_TAG" ]; then
-            DOWNLOAD_URL="https://github.com/$REPO/releases/download/$REPORTED_TAG/server-linux-amd64"
-        fi
+        DOWNLOAD_URL=$(printf '%s\n' "$RELEASE_JSON" | grep -o 'https://[^"]*/endpoint-server-linux-amd64.tar.gz' | head -n1 || true)
     fi
 
     if [ -n "$DOWNLOAD_URL" ]; then
@@ -159,46 +166,45 @@ else
             fi
         fi
     fi
+fi
 
-    # Fallback: Git Source Auto-Build
-    if [ -z "$STAGED_BIN" ] || [ ! -f "$STAGED_BIN" ]; then
-        echo "[*] No release binary asset available on GitHub releases."
-        echo "[*] Falling back to repository source build from branch: $BRANCH..."
+# Fallback: Git Source Auto-Build
+if [ -z "$STAGED_BIN" ] || [ ! -f "$STAGED_BIN" ]; then
+    echo "[*] Compiling from git repository branch: $BRANCH..."
 
-        REPO_DIR=""
-        BIN_DIR=$(dirname "$INSTALL_BIN")
-        if [ -d "$BIN_DIR/.git" ]; then
-            REPO_DIR="$BIN_DIR"
-        elif [ -d "/opt/endpoint-mgmt/.git" ]; then
-            REPO_DIR="/opt/endpoint-mgmt"
-        elif [ -d "$PWD/.git" ]; then
-            REPO_DIR="$PWD"
-        fi
-
-        if [ -n "$REPO_DIR" ]; then
-            echo "[+] Detected existing git repository at: $REPO_DIR"
-            cd "$REPO_DIR"
-            git fetch origin "$BRANCH"
-            git checkout "$BRANCH"
-            git pull origin "$BRANCH"
-            SRC_DIR="$REPO_DIR"
-        else
-            echo "[*] Cloning latest source code into staging..."
-            git clone --depth 1 --branch "$BRANCH" "https://github.com/$REPO.git" "$STAGING_DIR/repo"
-            SRC_DIR="$STAGING_DIR/repo"
-        fi
-
-        if ! command -v go >/dev/null 2>&1; then
-            echo "[-] Go compiler not found on this system to compile from source." >&2
-            echo "    Install Go via 'apt install golang-go' or publish release assets on GitHub." >&2
-            exit 1
-        fi
-
-        echo "[*] Compiling server binary (embedded web console is pre-built in repository)..."
-        cd "$SRC_DIR"
-        CGO_ENABLED=0 go build -ldflags="-s -w" -o "$STAGING_DIR/endpoint-server" ./server/cmd/server
-        STAGED_BIN="$STAGING_DIR/endpoint-server"
+    REPO_DIR=""
+    BIN_DIR=$(dirname "$INSTALL_BIN")
+    if [ -d "$BIN_DIR/.git" ]; then
+        REPO_DIR="$BIN_DIR"
+    elif [ -d "/opt/endpoint-mgmt/.git" ]; then
+        REPO_DIR="/opt/endpoint-mgmt"
+    elif [ -d "$PWD/.git" ]; then
+        REPO_DIR="$PWD"
     fi
+
+    if [ -n "$REPO_DIR" ]; then
+        echo "[+] Detected existing git repository at: $REPO_DIR"
+        cd "$REPO_DIR"
+        git fetch origin "$BRANCH"
+        git checkout "$BRANCH"
+        git pull origin "$BRANCH"
+        SRC_DIR="$REPO_DIR"
+    else
+        echo "[*] Cloning latest source code into staging..."
+        git clone --depth 1 --branch "$BRANCH" "https://github.com/$REPO.git" "$STAGING_DIR/repo"
+        SRC_DIR="$STAGING_DIR/repo"
+    fi
+
+    if ! command -v go >/dev/null 2>&1; then
+        echo "[-] Go compiler not found on this system to compile from source." >&2
+        echo "    Install Go via 'apt install golang-go' or publish release assets on GitHub." >&2
+        exit 1
+    fi
+
+    echo "[*] Compiling server binary (embedded web console is pre-built in repository)..."
+    cd "$SRC_DIR"
+    CGO_ENABLED=0 go build -ldflags="-s -w" -o "$STAGING_DIR/endpoint-server" ./server/cmd/server
+    STAGED_BIN="$STAGING_DIR/endpoint-server"
 fi
 
 chmod +x "$STAGED_BIN"
@@ -260,24 +266,38 @@ fi
 # 4. Stop Service & Swap Binary
 if [ -n "$SERVICE_NAME" ]; then
     echo "[*] Stopping service $SERVICE_NAME..."
-    systemctl stop "$SERVICE_NAME"
+    systemctl stop "$SERVICE_NAME" || true
+else
+    RUNNING_PIDS=$(pgrep -f "$INSTALL_BIN" 2>/dev/null || true)
+    if [ -n "$RUNNING_PIDS" ]; then
+        echo "[*] Stopping standalone server process ($RUNNING_PIDS)..."
+        kill $RUNNING_PIDS 2>/dev/null || true
+        sleep 1
+    fi
 fi
 
 echo "[*] Rotating server binary (creating ${INSTALL_BIN}.bak)..."
-# Preserve the original ownership and mode: a binary installed as an
-# unprivileged service user would otherwise be rotated to root:root.
 ORIG_OWNER=$(stat -c '%U:%G' "$INSTALL_BIN" 2>/dev/null || true)
 cp -p "$INSTALL_BIN" "${INSTALL_BIN}.bak"
-cp "$STAGED_BIN" "$INSTALL_BIN"
-chmod 0755 "$INSTALL_BIN"
+cp "$STAGED_BIN" "${INSTALL_BIN}.new"
+chmod 0755 "${INSTALL_BIN}.new"
 if [ -n "$ORIG_OWNER" ] && [ "$ORIG_OWNER" != "" ]; then
-    chown "$ORIG_OWNER" "$INSTALL_BIN" 2>/dev/null || true
+    chown "$ORIG_OWNER" "${INSTALL_BIN}.new" 2>/dev/null || true
 fi
+# Rename (atomic inode replace) prevents 'Text file busy' errors
+mv -f "${INSTALL_BIN}.new" "$INSTALL_BIN"
 
 # 5. Restart Service & Health Check
 if [ -n "$SERVICE_NAME" ]; then
     echo "[*] Starting service $SERVICE_NAME..."
     systemctl start "$SERVICE_NAME"
+else
+    echo "[*] Restarting standalone server..."
+    if [ -n "$ORIG_OWNER" ] && [ "$ORIG_OWNER" != "" ] && [ "$ORIG_OWNER" != "root:root" ]; then
+        su - "${ORIG_OWNER%%:*}" -c "nohup $INSTALL_BIN -env-file $ENV_FILE >/tmp/uem-server.log 2>&1 &" || nohup "$INSTALL_BIN" -env-file "$ENV_FILE" >/tmp/uem-server.log 2>&1 &
+    else
+        nohup "$INSTALL_BIN" -env-file "$ENV_FILE" >/tmp/uem-server.log 2>&1 &
+    fi
 fi
 
 # Determine HTTP Port from Env
@@ -317,7 +337,7 @@ else
     if [ -n "$SERVICE_NAME" ]; then
         systemctl stop "$SERVICE_NAME" || true
     fi
-    cp "${INSTALL_BIN}.bak" "$INSTALL_BIN"
+    mv -f "${INSTALL_BIN}.bak" "$INSTALL_BIN"
     if [ -n "$SERVICE_NAME" ]; then
         systemctl start "$SERVICE_NAME" || true
     fi
