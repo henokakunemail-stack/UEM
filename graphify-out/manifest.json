@@ -708,10 +708,10 @@
     "semantic_hash": "0779d47a36e0e1ebef395ce9df66f393"
   },
   "agent/shared/update/engine.go": {
-    "mtime": 1791420884.3473432,
-    "seen": 1791858829.9286904,
-    "ast_hash": "565f4d37e606b126b27b666744197716",
-    "semantic_hash": "565f4d37e606b126b27b666744197716"
+    "mtime": 1791884291.5521712,
+    "seen": 1791886029.2625642,
+    "ast_hash": "57eb9f2f1fe70ddc1840e1d3f161e83a",
+    "semantic_hash": ""
   },
   "agent/shared/update/keys.go": {
     "mtime": 1791422240.9267142,
@@ -1110,9 +1110,9 @@
     "semantic_hash": "288877d6ee703aa767eca246d0ffc537"
   },
   "server/cmd/server/main.go": {
-    "mtime": 1791872948.9480617,
-    "seen": 1791872975.9047706,
-    "ast_hash": "4ac3aecc36e70f53e9cc406ecf0a3a8a",
+    "mtime": 1791885436.5260804,
+    "seen": 1791886029.2626612,
+    "ast_hash": "14b99b2e6bf9ebbc660c9f9a85b821d2",
     "semantic_hash": ""
   },
   "server/cmd/server/route_contract_test.go": {
@@ -1404,10 +1404,10 @@
     "semantic_hash": "b1e362b8eb1006718ba105a895294470"
   },
   "server/core/transport/ws.go": {
-    "mtime": 1791859385.2138202,
-    "seen": 1791859395.9919386,
-    "ast_hash": "a4b7dad75c5d48aee4bcc05f30ae5f24",
-    "semantic_hash": "a4b7dad75c5d48aee4bcc05f30ae5f24"
+    "mtime": 1791885362.039982,
+    "seen": 1791886029.262766,
+    "ast_hash": "45e75e7d53238172aef70e04553b0913",
+    "semantic_hash": ""
   },
   "server/core/wsticket/ticket.go": {
     "mtime": 1790586585.789796,
@@ -1434,10 +1434,10 @@
     "semantic_hash": "6951d915572a84df5b44b6c209eeb17b"
   },
   "server/modules/agentupdate/handler.go": {
-    "mtime": 1791555362.3425145,
-    "seen": 1791858829.9289374,
-    "ast_hash": "48353c9cf1eae083bb07c6106b45a9f7",
-    "semantic_hash": "48353c9cf1eae083bb07c6106b45a9f7"
+    "mtime": 1791885328.7434213,
+    "seen": 1791886029.2627747,
+    "ast_hash": "33d3675c15ea47e41789c6cb9fa8badd",
+    "semantic_hash": ""
   },
   "server/modules/agentupdate/release_path_test.go": {
     "mtime": 1791420884.4157453,
@@ -1452,10 +1452,10 @@
     "semantic_hash": "d4e7c0806d37ac4071eb55e8fb3aa442"
   },
   "server/modules/agentupdate/repository.go": {
-    "mtime": 1791534588.738959,
-    "seen": 1791858829.9289434,
-    "ast_hash": "c63d1079a3479703233cb481735d30da",
-    "semantic_hash": "c63d1079a3479703233cb481735d30da"
+    "mtime": 1791885207.35264,
+    "seen": 1791886029.2627785,
+    "ast_hash": "315b3e0a48cc3375fad7dbf5adfd368c",
+    "semantic_hash": ""
   },
   "server/modules/agentupdate/signing.go": {
     "mtime": 1791368552.9500492,
@@ -2376,10 +2376,10 @@
     "semantic_hash": "787e5a07efeb2bf6209d5937195f2f68"
   },
   "web-console/src/pages/AgentUpdatesPage.tsx": {
-    "mtime": 1790324297.0666704,
-    "seen": 1791858829.9292727,
-    "ast_hash": "cfb605bc1920fc69d19d23943fb1c0a8",
-    "semantic_hash": "cfb605bc1920fc69d19d23943fb1c0a8"
+    "mtime": 1791885958.515903,
+    "seen": 1791886029.2629979,
+    "ast_hash": "bfd4f4b629c9ba9ff6a6b500d1838a7a",
+    "semantic_hash": ""
   },
   "web-console/src/pages/AlertsPage.tsx": {
     "mtime": 1790329892.2159963,
@@ -2496,15 +2496,15 @@
     "semantic_hash": "e866e88869d5de5cac82cfa25ee435d0"
   },
   "web-console/src/services/api.ts": {
-    "mtime": 1791872949.3164053,
-    "seen": 1791872975.9054987,
-    "ast_hash": "d28605a80b8eba75a53fe5aa1c08202d",
+    "mtime": 1791885745.219316,
+    "seen": 1791886029.2630262,
+    "ast_hash": "c41d48f5798ec7cae422098101959759",
     "semantic_hash": ""
   },
   "web-console/src/types/api.ts": {
-    "mtime": 1791872949.350871,
-    "seen": 1791872975.9055011,
-    "ast_hash": "8a98575819b0e86fb90bc3e3d637aeef",
+    "mtime": 1791885730.5142448,
+    "seen": 1791886029.2630274,
+    "ast_hash": "9aa8a33604e2759db9b1b4990d7e0605",
     "semantic_hash": ""
   },
   "web-console/tsconfig.app.json": {
@@ -3117,6 +3117,12 @@
     "mtime": 1791872949.1527586,
     "seen": 1791878064.0373116,
     "ast_hash": "36467ba1a89461b601d4f222d8eb0431",
+    "semantic_hash": ""
+  },
+  "server/modules/agentupdate/campaign_operations_test.go": {
+    "mtime": 1791885594.3851998,
+    "seen": 1791886029.2627702,
+    "ast_hash": "5f0a4e42f026676f6c5b605159d3d4ee",
     "semantic_hash": ""
   }
 }

@@ -148,8 +148,11 @@ func (h *Handler) Register(r chi.Router) {
 		// Campaigns
 		cr.With(rbac.RequireRole(rbac.RoleViewer)).Get("/api/agent-updates/campaigns", h.handleListCampaigns)
 		cr.With(rbac.RequireRole(rbac.RoleViewer)).Get("/api/agent-updates/campaigns/{id}", h.handleGetCampaign)
+		cr.With(rbac.RequireRole(rbac.RoleViewer)).Get("/api/agent-updates/campaigns/{id}/tasks", h.handleGetCampaignTasks)
+		cr.With(rbac.RequireRole(rbac.RoleViewer)).Get("/api/agent-updates/campaigns/{id}/logs", h.handleGetCampaignLogs)
 		cr.With(rbac.RequireRole(rbac.RoleAdmin)).Post("/api/agent-updates/campaigns", h.handleCreateCampaign)
 		cr.With(rbac.RequireRole(rbac.RoleAdmin)).Post("/api/agent-updates/campaigns/{id}/start", h.handleStartCampaign)
+		cr.With(rbac.RequireRole(rbac.RoleAdmin)).Post("/api/agent-updates/campaigns/{id}/cancel", h.handleCancelCampaign)
 
 		// Device Update Controls
 		cr.With(rbac.RequireRole(rbac.RoleTechnician)).Post("/api/devices/{id}/update/dispatch", h.handleDispatchDeviceUpdate)
@@ -472,6 +475,52 @@ func (h *Handler) handleGetCampaign(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, c)
 }
 
+func (h *Handler) handleGetCampaignTasks(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	tasks, err := h.repo.ListCampaignTasks(r.Context(), id)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, tasks)
+}
+
+func (h *Handler) handleGetCampaignLogs(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	logs, err := h.repo.ListCampaignLogs(r.Context(), id)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, logs)
+}
+
+func (h *Handler) handleCancelCampaign(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	c, err := h.repo.GetCampaign(r.Context(), id)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "campaign not found"})
+		return
+	}
+	if c.Status == "completed" || c.Status == "cancelled" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("cannot cancel campaign with status %s", c.Status)})
+		return
+	}
+
+	actorID := auth.UserIDFromContext(r.Context())
+	if err := h.repo.CancelCampaign(r.Context(), id); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	_ = h.auditor.Log(r.Context(), "user", actorID, "agent_update.campaign_cancel", id, map[string]string{
+		"campaign_id": id,
+		"action":      "cancelled",
+	})
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "cancelled"})
+}
+
 func (h *Handler) handleStartCampaign(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	campaign, err := h.repo.GetCampaign(r.Context(), id)
@@ -486,8 +535,37 @@ func (h *Handler) handleStartCampaign(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_ = h.repo.UpdateCampaignStatus(r.Context(), id, "in_progress")
 	actorID := auth.UserIDFromContext(r.Context())
+
+	// Pre-flight check: count devices needing update vs already up to date
+	devicesNeedingUpdate := 0
+	for _, devID := range deviceIDs {
+		dev, err := h.deviceRepo.GetByID(r.Context(), devID)
+		if err != nil {
+			continue
+		}
+		if dev.AgentVersionString() != campaign.TargetVersion {
+			devicesNeedingUpdate++
+		}
+	}
+
+	if len(deviceIDs) > 0 && devicesNeedingUpdate == 0 {
+		_ = h.repo.UpdateCampaignStatus(r.Context(), id, "completed")
+		_ = h.auditor.Log(r.Context(), "user", actorID, "agent_update.campaign_start", id, map[string]string{
+			"campaign_id": id,
+			"status":      "completed",
+			"reason":      fmt.Sprintf("all %d target devices are already running %s", len(deviceIDs), campaign.TargetVersion),
+		})
+		writeJSON(w, http.StatusOK, map[string]any{
+			"status":          "completed",
+			"total_targets":   len(deviceIDs),
+			"dispatched_live": 0,
+			"message":         fmt.Sprintf("All %d target devices are already running agent v%s", len(deviceIDs), campaign.TargetVersion),
+		})
+		return
+	}
+
+	_ = h.repo.UpdateCampaignStatus(r.Context(), id, "in_progress")
 
 	batchSize := campaign.BatchSize
 	if batchSize <= 0 {
@@ -522,10 +600,8 @@ func (h *Handler) handleStartCampaign(w http.ResponseWriter, r *http.Request) {
 			DeviceID:      devID,
 			FromVersion:   fromVersion,
 			TargetVersion: campaign.TargetVersion,
-			// Pending, not dispatched: SendTask stamps it, and the reconnect
-			// path reads the pending set. See SendTask.
-			Status:       TaskStatusPending,
-			DispatchedAt: &now,
+			Status:        TaskStatusPending,
+			DispatchedAt:  &now,
 		}
 		if err := h.repo.CreateUpdateTask(ctx, task); err != nil {
 			return false
@@ -533,8 +609,23 @@ func (h *Handler) handleStartCampaign(w http.ResponseWriter, r *http.Request) {
 
 		if h.hub.Online(devID) {
 			if err := h.SendTask(ctx, task, rel); err == nil {
+				_ = h.auditor.Log(ctx, "system", devID, "agent_update.task_dispatched", devID, map[string]string{
+					"campaign_id":    campaign.ID,
+					"task_id":        task.ID,
+					"target_version": campaign.TargetVersion,
+					"from_version":   fromVersion,
+					"status":         "dispatched",
+				})
 				return true
 			}
+		} else {
+			_ = h.auditor.Log(ctx, "system", devID, "agent_update.task_queued", devID, map[string]string{
+				"campaign_id":    campaign.ID,
+				"task_id":        task.ID,
+				"target_version": campaign.TargetVersion,
+				"from_version":   fromVersion,
+				"status":         "pending_offline",
+			})
 		}
 		return false
 	}
@@ -550,6 +641,8 @@ func (h *Handler) handleStartCampaign(w http.ResponseWriter, r *http.Request) {
 			dispatchedCount++
 		}
 	}
+
+	_ = h.repo.SyncCampaignStatusByID(r.Context(), campaign.ID)
 
 	// If there are subsequent batches, process in background with stagger interval
 	if len(deviceIDs) > firstBatchEnd {
@@ -573,6 +666,7 @@ func (h *Handler) handleStartCampaign(w http.ResponseWriter, r *http.Request) {
 				for _, devID := range remainingIDs[i:end] {
 					dispatchDevice(context.Background(), devID)
 				}
+				_ = h.repo.SyncCampaignStatusByID(context.Background(), campaignID)
 			}
 		}()
 	}
@@ -840,22 +934,23 @@ func (h *Handler) handleAgentReport(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Log status transparently to audit trail so operators can track rollout stages
+	if req.Status == "failed" || req.Status == "rollback" {
+		_ = h.auditor.Log(r.Context(), "device", deviceID, "agent_update.task_failed", deviceID, map[string]string{
+			"task_id":        req.TaskID,
+			"status":         req.Status,
+			"target_version": req.TargetVersion,
+			"error":          req.ErrorMessage,
+		})
+	} else if req.Status == "downloading" || req.Status == "verifying" || req.Status == "swapping" {
+		_ = h.auditor.Log(r.Context(), "device", deviceID, "agent_update.task_progress", deviceID, map[string]string{
+			"task_id":        req.TaskID,
+			"status":         req.Status,
+			"target_version": req.TargetVersion,
+		})
+	}
+
 	if req.Status == "success" && req.TargetVersion != "" {
-		// The device's own row and the task's status are the same event, and the
-		// version write used to be discarded. A failure there left the fleet
-		// inventory claiming the old version with nothing anywhere saying why,
-		// and the agent had already reported success, so nothing would ever
-		// look at it again.
-		//
-		// 500 is the retryable answer, and re-reporting does fix it:
-		// RecordTaskProgress permits a terminal-to-terminal write, so a second
-		// 'success' re-runs this block. The agent itself does not retry today
-		// (ApplyUpdate discards ReportProgress's error), so this mainly serves a
-		// supervisor or an operator re-sending the report.
-		//
-		// ponytail: the audit line is written after the version succeeds, so a
-		// 500 here means the completion was not logged. That is deliberate --
-		// a completion that did not happen should not appear in the audit trail.
 		if err := h.repo.UpdateDeviceAgentVersion(r.Context(), deviceID, req.TargetVersion); err != nil {
 			log.Error().Err(err).Str("device", deviceID).Str("version", req.TargetVersion).
 				Msg("update reported success but the device version could not be recorded")
@@ -864,8 +959,10 @@ func (h *Handler) handleAgentReport(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
-		_ = h.auditor.Log(r.Context(), "device", deviceID, "agent_update.completed", deviceID, map[string]string{
+		_ = h.auditor.Log(r.Context(), "device", deviceID, "agent_update.task_success", deviceID, map[string]string{
+			"task_id": req.TaskID,
 			"version": req.TargetVersion,
+			"status":  "success",
 		})
 	}
 
@@ -879,6 +976,32 @@ func (h *Handler) handleAgentReport(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "recorded"})
+}
+
+// ReconcileDeviceVersion reconciles in-flight update tasks if an agent reconnects
+// and reports the target version during its hello handshake.
+func (h *Handler) ReconcileDeviceVersion(ctx context.Context, deviceID, version string) error {
+	if deviceID == "" || version == "" {
+		return nil
+	}
+	tasks, err := h.repo.ActiveTasksForDevice(ctx, deviceID)
+	if err != nil {
+		return err
+	}
+	for _, task := range tasks {
+		if task.TargetVersion == version {
+			_ = h.repo.RecordTaskProgress(ctx, task.ID, "success", "")
+			_ = h.repo.UpdateDeviceAgentVersion(ctx, deviceID, version)
+			_ = h.auditor.Log(ctx, "device", deviceID, "agent_update.hello_reconciled", deviceID, map[string]string{
+				"task_id":        task.ID,
+				"version":        version,
+				"status":         "success",
+				"reason":         "Agent reconnected with target version via WebSocket",
+			})
+			_ = h.repo.SyncCampaignStatus(ctx, task.ID)
+		}
+	}
+	return nil
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {

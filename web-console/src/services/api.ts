@@ -35,6 +35,8 @@ import type {
   LicenseComplianceSummaryDTO,
   AgentReleaseDTO,
   UpdateCampaignDTO,
+  CampaignTaskDetail,
+  CampaignLogItem,
   UserDTO,
   ServerLogResponse,
   DeviceGroupDTO,
@@ -798,11 +800,25 @@ export const api = {
 
   async startUpdateCampaign(
     id: string,
-  ): Promise<{ status: string; total_targets: number; dispatched_live: number }> {
-    return request<{ status: string; total_targets: number; dispatched_live: number }>(
+  ): Promise<{ status: string; total_targets: number; dispatched_live: number; message?: string }> {
+    return request<{ status: string; total_targets: number; dispatched_live: number; message?: string }>(
       `/api/agent-updates/campaigns/${id}/start`,
       { method: 'POST' },
     )
+  },
+
+  async cancelUpdateCampaign(id: string): Promise<{ status: string }> {
+    return request<{ status: string }>(`/api/agent-updates/campaigns/${id}/cancel`, {
+      method: 'POST',
+    })
+  },
+
+  async getCampaignTasks(id: string): Promise<CampaignTaskDetail[]> {
+    return request<CampaignTaskDetail[]>(`/api/agent-updates/campaigns/${id}/tasks`)
+  },
+
+  async getCampaignLogs(id: string): Promise<CampaignLogItem[]> {
+    return request<CampaignLogItem[]>(`/api/agent-updates/campaigns/${id}/logs`)
   },
 
   async dispatchDeviceUpdate(deviceId: string, targetVersion: string): Promise<{ status: string; task_id: string }> {

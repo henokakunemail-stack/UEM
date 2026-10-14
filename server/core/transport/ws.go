@@ -67,6 +67,7 @@ type FilterSyncer interface {
 // database claiming to be 'dispatched' forever.
 type UpdateQueue interface {
 	FlushPendingUpdates(ctx context.Context, deviceID string) error
+	ReconcileDeviceVersion(ctx context.Context, deviceID string, version string) error
 }
 
 // TerminalReceiver relays interactive terminal data and closure events from an agent to the server.
@@ -439,6 +440,9 @@ func (h *WSHandler) handleHello(ctx context.Context, c *Conn, env Envelope) {
 		if capJSON, err := json.Marshal(p.Capabilities); err == nil {
 			_ = h.setCapabilities(ctx, c.DeviceID, string(capJSON))
 		}
+	}
+	if h.updateQueue != nil && p.AgentVersion != "" {
+		_ = h.updateQueue.ReconcileDeviceVersion(ctx, c.DeviceID, p.AgentVersion)
 	}
 	log.Info().Str("device", c.DeviceID).Str("agent", p.AgentVersion).
 		Str("os", name+" "+version).Str("hostname", p.Hostname).

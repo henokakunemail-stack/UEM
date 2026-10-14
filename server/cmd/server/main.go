@@ -683,6 +683,10 @@ func buildServer(cfg config.Config, database *sqlx.DB) (*http.Server, func()) {
 	// and the console polls it forever.
 	go maintRepo.StartSweep(bgCtx, maintenance.SweepInterval, maintenance.AbandonGrace)
 
+	// Agent update tasks stranded on offline devices or dead agents. Without
+	// this, offline endpoints leave update campaigns stuck in 'in_progress' forever.
+	go updateRepo.StartSweep(bgCtx, 30*time.Second, 10*time.Minute)
+
 	// Periodic online database backups. VACUUM INTO takes a consistent
 	// snapshot without stopping the server, so a failed backup is logged but
 	// never fatal.

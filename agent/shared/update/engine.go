@@ -14,10 +14,12 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/henokakunemail-stack/Endpoint-Manager/agent/shared/transport"
+	"github.com/rs/zerolog/log"
 )
 
 type UpdateParams struct {
@@ -54,8 +56,9 @@ type Engine struct {
 }
 
 func NewEngine(serverURL, deviceID, deviceSecret string) *Engine {
+	cleanURL := strings.TrimRight(strings.TrimSpace(serverURL), "/")
 	return &Engine{
-		serverURL:    serverURL,
+		serverURL:    cleanURL,
 		deviceID:     deviceID,
 		deviceSecret: deviceSecret,
 		client:       transport.NewHTTPClient(60 * time.Second),
@@ -319,23 +322,39 @@ func (e *Engine) ReportProgress(ctx context.Context, taskID, status, targetVersi
 		return err
 	}
 
-	url := fmt.Sprintf("%s/api/agent/devices/%s/update/report", e.serverURL, e.deviceID)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(data))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Device-Id", e.deviceID)
-	req.Header.Set("X-Device-Secret", e.deviceSecret)
+	url := fmt.Sprintf("%s/api/agent/devices/%s/update/report", strings.TrimRight(e.serverURL, "/"), e.deviceID)
 
-	resp, err := e.client.Do(req)
-	if err != nil {
-		return err
+	maxAttempts := 1
+	if status == "success" || status == "failed" || status == "rollback" {
+		maxAttempts = 3
 	}
-	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("report progress failed with status %d", resp.StatusCode)
+	var lastErr error
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(data))
+		if err != nil {
+			return err
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-Device-Id", e.deviceID)
+		req.Header.Set("X-Device-Secret", e.deviceSecret)
+
+		resp, err := e.client.Do(req)
+		if err == nil {
+			_ = resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				return nil
+			}
+			lastErr = fmt.Errorf("report progress failed with status %d", resp.StatusCode)
+		} else {
+			lastErr = err
+		}
+
+		if attempt < maxAttempts {
+			time.Sleep(time.Duration(attempt) * 500 * time.Millisecond)
+		}
 	}
-	return nil
+
+	log.Warn().Err(lastErr).Str("task_id", taskID).Str("status", status).Msg("failed to report update progress to server")
+	return lastErr
 }

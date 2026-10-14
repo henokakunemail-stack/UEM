@@ -654,6 +654,37 @@ export interface UpdateCampaignDTO {
   created_by: string
   created_at: string
   updated_at: string
+  total_tasks?: number
+  succeeded_tasks?: number
+  failed_tasks?: number
+  pending_tasks?: number
+}
+
+export interface CampaignTaskDetail {
+  id: string
+  campaign_id?: string
+  device_id: string
+  hostname?: string
+  os_name?: string
+  device_online_status?: string
+  from_version: string
+  target_version: string
+  status: string
+  error_message: string
+  dispatched_at?: string | null
+  completed_at?: string | null
+  created_at: string
+}
+
+export interface CampaignLogItem {
+  id: string
+  actor_type: string
+  actor_id: string
+  action: string
+  target_type: string
+  target_id: string
+  details: string
+  created_at: string
 }
 
 // Phase 15: Device Maintenance
