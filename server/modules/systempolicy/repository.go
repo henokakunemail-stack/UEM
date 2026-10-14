@@ -342,7 +342,7 @@ func (r *Repository) CompileEffectivePolicy(ctx context.Context, deviceID string
 		if s.InactivityTimeoutMinutes > 0 || p.TargetType == "device" {
 			effective.InactivityTimeoutMinutes = s.InactivityTimeoutMinutes
 		}
-		// Restrictions
+		// Restrictions (cumulative across policies)
 		if s.DisableTaskMgr {
 			effective.DisableTaskMgr = true
 		}
@@ -355,6 +355,7 @@ func (r *Repository) CompileEffectivePolicy(ctx context.Context, deviceID string
 		if s.DisableControlPanel {
 			effective.DisableControlPanel = true
 		}
+
 		// Windows Update
 		if s.WindowsUpdateMode != "" && s.WindowsUpdateMode != WindowsUpdateDefault {
 			effective.WindowsUpdateMode = s.WindowsUpdateMode

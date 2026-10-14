@@ -78,14 +78,22 @@ func (w *winBackend) Apply(ctx context.Context, client *http.Client, serverURL s
 // applyUSBStoragePolicy configures USB mass storage driver and Removable Storage Group Policy.
 // Mouse and keyboard use hidusb.sys, kbdclass.sys, mouclass.sys and remain 100% active.
 func applyUSBStoragePolicy(mode USBStorageMode) error {
+	var errs []string
+
 	// A. Service driver Start: 3=Demand/Enabled, 4=Disabled
 	usbstorKey, err := registry.OpenKey(registry.LOCAL_MACHINE, `SYSTEM\CurrentControlSet\Services\USBSTOR`, registry.SET_VALUE)
-	if err == nil {
+	if err != nil {
+		errs = append(errs, "open USBSTOR key: "+err.Error())
+	} else {
 		defer usbstorKey.Close()
 		if mode == USBStorageBlock {
-			_ = usbstorKey.SetDWordValue("Start", 4) // Disabled
+			if err := usbstorKey.SetDWordValue("Start", 4); err != nil {
+				errs = append(errs, "set USBSTOR Start=4: "+err.Error())
+			}
 		} else {
-			_ = usbstorKey.SetDWordValue("Start", 3) // Enabled
+			if err := usbstorKey.SetDWordValue("Start", 3); err != nil {
+				errs = append(errs, "set USBSTOR Start=3: "+err.Error())
+			}
 		}
 	}
 
@@ -95,7 +103,9 @@ func applyUSBStoragePolicy(mode USBStorageMode) error {
 		`SOFTWARE\Policies\Microsoft\Windows\RemovableStorageDevices\{53f5630d-b6bf-11d0-94f2-00a0c91efb8b}`,
 		registry.SET_VALUE,
 	)
-	if err == nil {
+	if err != nil {
+		errs = append(errs, "create RemovableStorageDevices key: "+err.Error())
+	} else {
 		defer removableKey.Close()
 		switch mode {
 		case USBStorageBlock:
@@ -128,7 +138,57 @@ func applyUSBStoragePolicy(mode USBStorageMode) error {
 		}
 	}
 
+	// D. Force Group Policy refresh so RemovableStorageDevices takes effect immediately
+	// (without this, policy only applies on next GP cycle ~90 min or reboot)
+	_ = exec.Command("gpupdate", "/force", "/wait:0").Run()
+
+	// E. Eject currently mounted USB storage drives so block is enforced instantly
+	if mode == USBStorageBlock {
+		ejectMountedUSBStorage()
+	}
+
+	if len(errs) > 0 {
+		return fmt.Errorf("usb policy partial failure: %s", strings.Join(errs, "; "))
+	}
 	return nil
+}
+
+// ejectMountedUSBStorage dismounts all removable USB storage volumes.
+// Uses mountvol to enumerate volumes, then unmounts those on removable drives.
+func ejectMountedUSBStorage() {
+	kernel32 := windows.NewLazySystemDLL("kernel32.dll")
+	getDriveType := kernel32.NewProc("GetDriveTypeW")
+
+	for _, letter := range "DEFGHIJKLMNOPQRSTUVWXYZ" {
+		root := string(letter) + `:\`
+		rootUTF16, err := windows.UTF16PtrFromString(root)
+		if err != nil {
+			continue
+		}
+		driveType, _, _ := getDriveType.Call(uintptr(unsafe.Pointer(rootUTF16)))
+		// DRIVE_REMOVABLE = 2
+		if driveType != 2 {
+			continue
+		}
+		// Dismount the volume and lock it
+		volPath := `\\.\` + string(letter) + ":"
+		pathUTF16, err := windows.UTF16PtrFromString(volPath)
+		if err != nil {
+			continue
+		}
+		h, err := windows.CreateFile(pathUTF16,
+			windows.GENERIC_READ|windows.GENERIC_WRITE,
+			windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE,
+			nil, windows.OPEN_EXISTING, 0, 0)
+		if err != nil {
+			continue
+		}
+		// FSCTL_LOCK_VOLUME = 0x00090018, FSCTL_DISMOUNT_VOLUME = 0x00090020
+		var bytesReturned uint32
+		_ = windows.DeviceIoControl(h, 0x00090018, nil, 0, nil, 0, &bytesReturned, nil)
+		_ = windows.DeviceIoControl(h, 0x00090020, nil, 0, nil, 0, &bytesReturned, nil)
+		windows.CloseHandle(h)
+	}
 }
 
 func applyWallpaper(client *http.Client, serverURL, wallpaperURL string, style WallpaperStyle) error {
@@ -249,6 +309,21 @@ func revertWallpaper() {
 		_ = sysPolKey.DeleteValue("Wallpaper")
 		_ = sysPolKey.DeleteValue("WallpaperStyle")
 	}
+
+	defKey, err := registry.OpenKey(
+		registry.USERS,
+		`.DEFAULT\Control Panel\Desktop`,
+		registry.SET_VALUE,
+	)
+	if err == nil {
+		defer defKey.Close()
+		_ = defKey.DeleteValue("Wallpaper")
+		_ = defKey.DeleteValue("WallpaperStyle")
+		_ = defKey.DeleteValue("TileWallpaper")
+	}
+
+	// Broadcast refresh to reset desktop
+	_ = exec.Command("rundll32.exe", "user32.dll,UpdatePerUserSystemParameters", "1,", "True").Run()
 }
 
 func applyInactivityLock(minutes int) error {
@@ -272,46 +347,56 @@ func applyInactivityLock(minutes int) error {
 }
 
 func applyRestrictions(s PolicySettings) error {
+	var errs []string
+
 	// 1. Task Manager & Registry Editor
 	kSys, _, err := registry.CreateKey(
 		registry.LOCAL_MACHINE,
 		`SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System`,
 		registry.SET_VALUE,
 	)
-	if err == nil {
+	if err != nil {
+		errs = append(errs, "policies/system: "+err.Error())
+	} else {
 		defer kSys.Close()
-		setOrDeleteDWord(kSys, "DisableTaskMgr", s.DisableTaskMgr)
-		setOrDeleteDWord(kSys, "DisableRegistryTools", s.DisableRegistryTools)
+		setOrDeleteDWord(kSys, "DisableTaskMgr", s.DisableTaskMgr, 1)
+		setOrDeleteDWord(kSys, "DisableRegistryTools", s.DisableRegistryTools, 1)
 	}
 
-	// 2. Command Prompt & PowerShell
+	// 2. Command Prompt (value 2 = disable interactive CMD, allow batch files so agent scripts continue)
 	kCmd, _, err := registry.CreateKey(
 		registry.LOCAL_MACHINE,
 		`SOFTWARE\Policies\Microsoft\Windows\System`,
 		registry.SET_VALUE,
 	)
-	if err == nil {
+	if err != nil {
+		errs = append(errs, "policies/system cmd: "+err.Error())
+	} else {
 		defer kCmd.Close()
-		setOrDeleteDWord(kCmd, "DisableCMD", s.DisableCMD)
+		setOrDeleteDWord(kCmd, "DisableCMD", s.DisableCMD, 2)
 	}
 
-	// 3. Control Panel & PC Settings
-	kExp, _, err := registry.CreateKey(
-		registry.LOCAL_MACHINE,
+	// 3. Control Panel & PC Settings (set both keys for classic and modern Windows 10/11 coverage)
+	for _, p := range []string{
 		`SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer`,
-		registry.SET_VALUE,
-	)
-	if err == nil {
-		defer kExp.Close()
-		setOrDeleteDWord(kExp, "NoControlPanel", s.DisableControlPanel)
+		`SOFTWARE\Policies\Microsoft\Windows\Explorer`,
+	} {
+		kExp, _, err := registry.CreateKey(registry.LOCAL_MACHINE, p, registry.SET_VALUE)
+		if err == nil {
+			defer kExp.Close()
+			setOrDeleteDWord(kExp, "NoControlPanel", s.DisableControlPanel, 1)
+		}
 	}
 
+	if len(errs) > 0 {
+		return fmt.Errorf("restrictions: %s", strings.Join(errs, "; "))
+	}
 	return nil
 }
 
-func setOrDeleteDWord(k registry.Key, name string, enable bool) {
+func setOrDeleteDWord(k registry.Key, name string, enable bool, val uint32) {
 	if enable {
-		_ = k.SetDWordValue(name, 1)
+		_ = k.SetDWordValue(name, val)
 	} else {
 		_ = k.DeleteValue(name)
 	}
