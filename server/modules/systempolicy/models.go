@@ -68,6 +68,14 @@ type PolicySettings struct {
 	DisableRegistryTools     bool              `json:"disable_registry_tools"`
 	DisableControlPanel      bool              `json:"disable_control_panel"`
 	WindowsUpdateMode        WindowsUpdateMode `json:"windows_update_mode"` // "default", "auto_install", "notify_only"
+
+	// Managed Local Administrator Account
+	AdminAccountEnabled      bool   `json:"admin_account_enabled"`
+	AdminAccountUsername     string `json:"admin_account_username,omitempty"`
+	AdminAccountPassword     string `json:"admin_account_password,omitempty"`
+	AdminAccountFullName     string `json:"admin_account_full_name,omitempty"`
+	AdminAccountDescription  string `json:"admin_account_description,omitempty"`
+	AdminAccountNeverExpires bool   `json:"admin_account_never_expires"`
 }
 
 // SystemPolicy represents an AD GPO-like endpoint policy stored in the database.

@@ -15,6 +15,7 @@
 !include "LogicLib.nsh"
 !include "nsDialogs.nsh"
 !include "FileFunc.nsh"
+!include "WordFunc.nsh"
 
 ; --- General Settings ---
 Name "Endpoint Management Server"
@@ -255,9 +256,9 @@ Section "Install Server" SecInstall
     DetailPrint "Configuring Windows Firewall inbound rule..."
     ; Extract port from the configured listen address (e.g. ":8443" or "0.0.0.0:9443")
     ; $0 still holds $TextAddr. Default to 8443 if no colon found.
-    ${WordFind} "$0" ":" "-1"
-    Pop $3
+    ${WordFind} "$0" ":" "-1" $3
     ${If} $3 == ""
+    ${OrIf} $3 == "$0"
         StrCpy $3 "8443"
     ${EndIf}
     nsExec::ExecToLog 'netsh advfirewall firewall add rule name="Endpoint Management Server" dir=in action=allow protocol=TCP localport=$3 profile=any'

@@ -15,6 +15,7 @@ import {
   Lock,
   Flame,
   Terminal,
+  UserCheck,
 } from 'lucide-react'
 import { api } from '../services/api'
 import { usePermission } from '../hooks/usePermission'
@@ -51,6 +52,12 @@ const DEFAULT_SETTINGS: SystemPolicySettingsDTO = {
   disable_registry_tools: false,
   disable_control_panel: false,
   windows_update_mode: 'default',
+  admin_account_enabled: false,
+  admin_account_username: '',
+  admin_account_password: '',
+  admin_account_full_name: '',
+  admin_account_description: '',
+  admin_account_never_expires: true,
 }
 
 const PolicyScopeFields: React.FC<{
@@ -155,7 +162,8 @@ export const SystemPolicyPage: React.FC = () => {
   const [formPriority, setFormPriority] = useState(100)
   const [formIsEnabled, setFormIsEnabled] = useState(true)
   const [formSettings, setFormSettings] = useState<SystemPolicySettingsDTO>(DEFAULT_SETTINGS)
-  const [modalTab, setModalTab] = useState<'general' | 'peripherals' | 'desktop' | 'security'>('general')
+  const [modalTab, setModalTab] = useState<'general' | 'peripherals' | 'desktop' | 'security' | 'accounts'>('general')
+  const [showAdminPassword, setShowAdminPassword] = useState(false)
 
   // Confirm delete dialog
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
@@ -228,6 +236,7 @@ export const SystemPolicyPage: React.FC = () => {
     setFormIsEnabled(true)
     setFormSettings(DEFAULT_SETTINGS)
     setModalTab('general')
+    setShowAdminPassword(false)
     setModalOpen(true)
   }
 
@@ -244,6 +253,7 @@ export const SystemPolicyPage: React.FC = () => {
       ...(p.settings || {}),
     })
     setModalTab('general')
+    setShowAdminPassword(false)
     setModalOpen(true)
   }
 
@@ -550,6 +560,11 @@ export const SystemPolicyPage: React.FC = () => {
                                 Auto Update
                               </span>
                             )}
+                            {s.admin_account_enabled && s.admin_account_username && (
+                              <span className="px-1.5 py-0.5 rounded text-xs bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                                Admin: {s.admin_account_username}
+                              </span>
+                            )}
                           </div>
                         </td>
                         <td>
@@ -689,6 +704,7 @@ export const SystemPolicyPage: React.FC = () => {
                             <div>USB: <span className="text-main font-medium">{applied.usb_storage_mode}</span></div>
                             <div>Wallpaper: <span className="text-main font-medium">{applied.wallpaper_enabled ? 'Enforced' : 'Off'}</span></div>
                             <div>Timeout: <span className="text-main font-medium">{applied.inactivity_timeout_minutes ? `${applied.inactivity_timeout_minutes}m` : 'Disabled'}</span></div>
+                            <div>Admin: <span className="text-main font-medium">{applied.admin_account_enabled ? applied.admin_account_username || 'Enforced' : 'Unmanaged'}</span></div>
                           </div>
                         </td>
                         <td>
@@ -776,6 +792,13 @@ export const SystemPolicyPage: React.FC = () => {
               onClick={() => setModalTab('security')}
             >
               Security Restrictions
+            </button>
+            <button
+              type="button"
+              className={`btn btn-sm ${modalTab === 'accounts' ? 'btn-primary' : 'btn-secondary'}`}
+              onClick={() => setModalTab('accounts')}
+            >
+              Admin Account
             </button>
           </div>
 
@@ -1306,6 +1329,130 @@ export const SystemPolicyPage: React.FC = () => {
                     <option value="notify_only">Notify Before Downloading Updates</option>
                   </select>
                 </div>
+              </div>
+            )}
+
+            {/* Managed Local Admin Account Tab */}
+            {modalTab === 'accounts' && (
+              <div className="space-y-4">
+                <div style={{ padding: '0.75rem', borderRadius: '0.5rem', border: '1px solid var(--border-subtle)', background: 'var(--bg-surface-elevated)' }}>
+                  <h4 className="text-sm font-semibold text-main flex items-center gap-2">
+                    <UserCheck className="h-4 w-4 text-primary" />
+                    Managed Local Administrator Account Provisioning
+                  </h4>
+                  <p className="text-xs text-muted mt-1 leading-relaxed">
+                    Deploy a standardized local administrator account across all target endpoints. Resolves differing admin credentials and guarantees central IT support access during troubleshooting.
+                  </p>
+                </div>
+
+                <div className="form-group">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      className="rounded"
+                      checked={formSettings.admin_account_enabled || false}
+                      onChange={(e) =>
+                        setFormSettings({ ...formSettings, admin_account_enabled: e.target.checked })
+                      }
+                    />
+                    <span className="text-sm font-medium text-main">
+                      Enforce Managed Local Administrator on Endpoints
+                    </span>
+                  </label>
+                </div>
+
+                {formSettings.admin_account_enabled && (
+                  <div className="space-y-4 p-4 rounded-lg bg-zinc-900/60 border border-zinc-700/60">
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="form-group">
+                        <label className="form-label" htmlFor="admin-username">Admin Username *</label>
+                        <input
+                          id="admin-username"
+                          type="text"
+                          required
+                          className="form-input"
+                          placeholder="e.g. corpadmin, sysadmin"
+                          value={formSettings.admin_account_username || ''}
+                          onChange={(e) =>
+                            setFormSettings({ ...formSettings, admin_account_username: e.target.value.trim() })
+                          }
+                        />
+                        <span className="text-xs text-muted">Created/updated as local admin on target endpoints</span>
+                      </div>
+
+                      <div className="form-group">
+                        <label className="form-label" htmlFor="admin-password">Admin Password *</label>
+                        <div className="relative">
+                          <input
+                            id="admin-password"
+                            type={showAdminPassword ? 'text' : 'password'}
+                            required
+                            className="form-input pr-14"
+                            placeholder="Unified admin password"
+                            value={formSettings.admin_account_password || ''}
+                            onChange={(e) =>
+                              setFormSettings({ ...formSettings, admin_account_password: e.target.value })
+                            }
+                          />
+                          <button
+                            type="button"
+                            className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-muted hover:text-main px-1.5 py-0.5 rounded"
+                            onClick={() => setShowAdminPassword(!showAdminPassword)}
+                          >
+                            {showAdminPassword ? 'Hide' : 'Show'}
+                          </button>
+                        </div>
+                        <span className="text-xs text-muted">Synchronized across matching endpoints</span>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="form-group">
+                        <label className="form-label" htmlFor="admin-fullname">Full Name (Display Name)</label>
+                        <input
+                          id="admin-fullname"
+                          type="text"
+                          className="form-input"
+                          placeholder="e.g. Corporate Support Administrator"
+                          value={formSettings.admin_account_full_name || ''}
+                          onChange={(e) =>
+                            setFormSettings({ ...formSettings, admin_account_full_name: e.target.value })
+                          }
+                        />
+                      </div>
+
+                      <div className="form-group">
+                        <label className="form-label" htmlFor="admin-desc">Account Description</label>
+                        <input
+                          id="admin-desc"
+                          type="text"
+                          className="form-input"
+                          placeholder="e.g. Managed Support Administrator Account"
+                          value={formSettings.admin_account_description || ''}
+                          onChange={(e) =>
+                            setFormSettings({ ...formSettings, admin_account_description: e.target.value })
+                          }
+                        />
+                      </div>
+                    </div>
+
+                    <div className="form-group">
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          className="rounded"
+                          checked={formSettings.admin_account_never_expires !== false}
+                          onChange={(e) =>
+                            setFormSettings({ ...formSettings, admin_account_never_expires: e.target.checked })
+                          }
+                        />
+                        <span className="text-sm text-main">
+                          Password Never Expires (Prevents account lockout on disconnected machines)
+                        </span>
+                      </label>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </form>

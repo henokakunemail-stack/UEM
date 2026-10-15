@@ -263,3 +263,53 @@ func TestCompileEffectivePolicy_NewSecurityPolicies(t *testing.T) {
 		t.Errorf("expected ScreenSaverPasswordRequired true")
 	}
 }
+
+func TestCompileEffectivePolicy_AdminAccount(t *testing.T) {
+	repo := setupTestDB(t)
+	ctx := context.Background()
+
+	_, err := repo.db.Exec(`INSERT INTO devices (id, hostname, os_name, os_version, agent_version, status, last_seen_at, enrolled_at, device_secret_hash, created_at, updated_at)
+		VALUES ('dev-admin-1', 'SRV-HOST', 'Windows', '11 Pro', '1.4.0', 'online', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 'secret-hash-admin', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`)
+	if err != nil {
+		t.Fatalf("insert device: %v", err)
+	}
+
+	p := &SystemPolicy{
+		Name:       "Managed Support Admin Account",
+		TargetType: "device",
+		TargetID:   "dev-admin-1",
+		IsEnabled:  true,
+		Priority:   1,
+		CreatedBy:  "admin",
+		Settings: PolicySettings{
+			AdminAccountEnabled:      true,
+			AdminAccountUsername:     "supportadmin",
+			AdminAccountPassword:     "P@ssw0rdEnterprise2026!",
+			AdminAccountFullName:     "Corporate Support Admin",
+			AdminAccountDescription:  "Automated Support Administrator",
+			AdminAccountNeverExpires: true,
+		},
+	}
+	if err := repo.Create(ctx, p); err != nil {
+		t.Fatalf("create admin account policy: %v", err)
+	}
+
+	compiled, err := repo.CompileEffectivePolicy(ctx, "dev-admin-1")
+	if err != nil {
+		t.Fatalf("compile policy: %v", err)
+	}
+
+	s := compiled.Settings
+	if !s.AdminAccountEnabled {
+		t.Errorf("expected AdminAccountEnabled true")
+	}
+	if s.AdminAccountUsername != "supportadmin" {
+		t.Errorf("expected AdminAccountUsername 'supportadmin', got %s", s.AdminAccountUsername)
+	}
+	if s.AdminAccountPassword != "P@ssw0rdEnterprise2026!" {
+		t.Errorf("expected AdminAccountPassword 'P@ssw0rdEnterprise2026!', got %s", s.AdminAccountPassword)
+	}
+	if !s.AdminAccountNeverExpires {
+		t.Errorf("expected AdminAccountNeverExpires true")
+	}
+}

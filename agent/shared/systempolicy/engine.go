@@ -57,6 +57,12 @@ type PolicySettings struct {
 	DisableAutoplay          bool              `json:"disable_autoplay"`
 	ScreenSaverTimeoutMinutes int              `json:"screensaver_timeout_minutes"`
 	ScreenSaverPasswordRequired bool            `json:"screensaver_password_required"`
+	AdminAccountEnabled       bool             `json:"admin_account_enabled"`
+	AdminAccountUsername      string           `json:"admin_account_username,omitempty"`
+	AdminAccountPassword      string           `json:"admin_account_password,omitempty"`
+	AdminAccountFullName      string           `json:"admin_account_full_name,omitempty"`
+	AdminAccountDescription   string           `json:"admin_account_description,omitempty"`
+	AdminAccountNeverExpires  bool             `json:"admin_account_never_expires"`
 }
 
 type platformBackend interface {

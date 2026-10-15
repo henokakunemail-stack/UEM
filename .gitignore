@@ -6,6 +6,8 @@ server.exe
 agent.exe
 server-linux-*
 agent-linux-*
+server-darwin-*
+agent-darwin-*
 emagent-*
 emserver
 emserver.exe

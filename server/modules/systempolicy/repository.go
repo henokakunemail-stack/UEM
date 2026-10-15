@@ -380,6 +380,24 @@ func (r *Repository) CompileEffectivePolicy(ctx context.Context, deviceID string
 		if s.WindowsUpdateMode != "" && s.WindowsUpdateMode != WindowsUpdateDefault {
 			effective.WindowsUpdateMode = s.WindowsUpdateMode
 		}
+
+		// Managed Local Admin Account
+		if s.AdminAccountEnabled && s.AdminAccountUsername != "" && s.AdminAccountPassword != "" {
+			effective.AdminAccountEnabled = true
+			effective.AdminAccountUsername = s.AdminAccountUsername
+			effective.AdminAccountPassword = s.AdminAccountPassword
+			effective.AdminAccountFullName = s.AdminAccountFullName
+			effective.AdminAccountDescription = s.AdminAccountDescription
+			effective.AdminAccountNeverExpires = s.AdminAccountNeverExpires
+		} else if p.TargetType == "device" && !s.AdminAccountEnabled {
+			// Explicit device policy can turn off managed admin account
+			effective.AdminAccountEnabled = false
+			effective.AdminAccountUsername = ""
+			effective.AdminAccountPassword = ""
+			effective.AdminAccountFullName = ""
+			effective.AdminAccountDescription = ""
+			effective.AdminAccountNeverExpires = false
+		}
 	}
 
 	version := ComputePolicyVersion(effective)

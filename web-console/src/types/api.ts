@@ -608,6 +608,12 @@ export interface SystemPolicySettingsDTO {
   disable_registry_tools: boolean
   disable_control_panel: boolean
   windows_update_mode: WindowsUpdateMode
+  admin_account_enabled?: boolean
+  admin_account_username?: string
+  admin_account_password?: string
+  admin_account_full_name?: string
+  admin_account_description?: string
+  admin_account_never_expires?: boolean
 }
 
 export interface UninstallTokenResp {
