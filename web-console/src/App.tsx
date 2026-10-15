@@ -25,6 +25,7 @@ const NetworkFilterPage = lazy(() => import('./pages/NetworkFilterPage').then(m 
 const PatchesPage = lazy(() => import('./pages/PatchesPage').then(m => ({ default: m.PatchesPage })))
 const ReportsPage = lazy(() => import('./pages/ReportsPage').then(m => ({ default: m.ReportsPage })))
 const RemoteControlPage = lazy(() => import('./pages/RemoteControlPage').then(m => ({ default: m.RemoteControlPage })))
+const SecurityPosturePage = lazy(() => import('./pages/SecurityPosturePage').then(m => ({ default: m.SecurityPosturePage })))
 const SettingsPage = lazy(() => import('./pages/SettingsPage').then(m => ({ default: m.SettingsPage })))
 const SoftwarePage = lazy(() => import('./pages/SoftwarePage').then(m => ({ default: m.SoftwarePage })))
 const SystemPolicyPage = lazy(() => import('./pages/SystemPolicyPage'))
@@ -49,6 +50,7 @@ const PAGE_LABELS: Record<string, string> = {
   remotecontrol: 'Remote control',
   filter: 'Network filter',
   'system-policy': 'Group policy',
+  'security-posture': 'Security posture',
   alerts: 'Alerts',
   reports: 'Reports',
   users: 'User management',
@@ -114,6 +116,7 @@ function ConsoleRoot() {
           <Route path="/patches" element={<PatchesPage />} />
           <Route path="/maintenance" element={<MaintenancePage />} />
           <Route path="/remotecontrol" element={<RemoteControlPage onOpenSession={setRcDevice} onOpenTerminal={(device, shell) => { setTermShell(shell); setTermDevice(device) }} />} />
+          <Route path="/security-posture" element={<Restricted role="admin"><SecurityPosturePage /></Restricted>} />
           <Route path="/filter" element={<NetworkFilterPage />} />
           <Route path="/system-policy" element={<SystemPolicyPage />} />
           <Route path="/alerts" element={<AlertsPage />} />

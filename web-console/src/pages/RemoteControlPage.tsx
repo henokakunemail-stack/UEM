@@ -50,6 +50,16 @@ export const RemoteControlPage: React.FC<{
   const [sessions, setSessions] = useState<RemoteControlSessionDTO[]>([])
   const [sessionsLoading, setSessionsLoading] = useState(false)
 
+  // Disambiguate duplicate hostnames across online fleet
+  const hostnameCounts = React.useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const d of devices) {
+      const h = (d.hostname || '').toLowerCase()
+      counts.set(h, (counts.get(h) || 0) + 1)
+    }
+    return counts
+  }, [devices])
+
   const loadDevices = useCallback(async () => {
     setDevicesLoading(true)
     setDeviceError(null)
@@ -214,7 +224,25 @@ export const RemoteControlPage: React.FC<{
                     onClick={() => setSelected(d)}
                   >
                     <td data-label="Endpoint">
-                      <strong className="device-name">{d.hostname}</strong>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem', flexWrap: 'wrap' }}>
+                        <strong className="device-name">{d.hostname}</strong>
+                        {(hostnameCounts.get((d.hostname || '').toLowerCase()) || 0) > 1 && (
+                          <span
+                            className="badge-severity warning"
+                            style={{
+                              fontSize: '0.625rem',
+                              padding: '0.125rem 0.375rem',
+                              textTransform: 'none',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '0.25rem',
+                            }}
+                            title="Multiple devices share this hostname. Identified uniquely by Device ID."
+                          >
+                            Duplicate Hostname ({d.id.slice(0, 8)})
+                          </span>
+                        )}
+                      </div>
                       <span className="device-id font-mono">{d.id.substring(0, 16)}...</span>
                     </td>
                     <td data-label="OS">

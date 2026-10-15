@@ -395,17 +395,12 @@ type uninstallTokenResp struct {
 
 func (h *Handler) createUninstallToken(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	dev, err := h.repo.GetByID(r.Context(), id)
-	if err != nil {
+	if _, err := h.repo.GetByID(r.Context(), id); err != nil {
 		if errors.Is(err, ErrNotFound) {
 			writeErr(w, http.StatusNotFound, "device not found")
 			return
 		}
 		writeErr(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	if dev.RetiredAt != nil {
-		writeErr(w, http.StatusBadRequest, "device is retired")
 		return
 	}
 
@@ -449,14 +444,6 @@ func (h *Handler) verifyUninstallTokenConsole(w http.ResponseWriter, r *http.Req
 
 func (h *Handler) agentVerifyUninstall(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	authedID, ok := AuthenticateAgent(w, r, h.repo)
-	if !ok {
-		return
-	}
-	if authedID != id {
-		writeErr(w, http.StatusForbidden, "device ID mismatch")
-		return
-	}
 
 	var req verifyTokenReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Token == "" {

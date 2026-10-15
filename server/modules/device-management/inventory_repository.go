@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jmoiron/sqlx"
@@ -115,6 +116,60 @@ func (r *inventoryRepository) restore(ctx context.Context, id string) error {
 		return ErrNotFound
 	}
 	return nil
+}
+
+// deleteDevice permanently removes a device and all dependent child rows across tables.
+// Enforces that the device must be retired first, preventing accidental deletion of active fleet assets.
+func (r *inventoryRepository) deleteDevice(ctx context.Context, id string) error {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin delete tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	// Verify device exists and is retired
+	var count int
+	err = tx.GetContext(ctx, &count, `SELECT COUNT(*) FROM devices WHERE id = ? AND retired_at IS NOT NULL`, id)
+	if err != nil {
+		return fmt.Errorf("check retired device %s: %w", id, err)
+	}
+	if count == 0 {
+		return ErrNotFound
+	}
+
+	// Cascading child cleanup
+	childQueries := []string{
+		`DELETE FROM device_inventory WHERE device_id = ?`,
+		`DELETE FROM device_uninstall_tokens WHERE device_id = ?`,
+		`DELETE FROM device_group_members WHERE device_id = ?`,
+		`DELETE FROM agent_commands WHERE device_id = ?`,
+		`DELETE FROM remote_executions WHERE device_id = ?`,
+		`DELETE FROM terminal_sessions WHERE device_id = ?`,
+		`DELETE FROM deployment_tasks WHERE device_id = ?`,
+		`DELETE FROM scheduled_task_device_runs WHERE device_id = ?`,
+		`DELETE FROM device_patches WHERE device_id = ?`,
+		`DELETE FROM patch_install_jobs WHERE device_id = ?`,
+		`DELETE FROM alert_incidents WHERE device_id = ?`,
+		`DELETE FROM remote_control_sessions WHERE device_id = ?`,
+		`DELETE FROM device_update_tasks WHERE device_id = ?`,
+		`DELETE FROM maintenance_tasks WHERE device_id = ?`,
+		`DELETE FROM network_filter_device_profiles WHERE device_id = ?`,
+		`DELETE FROM license_allocations WHERE device_id = ?`,
+		`DELETE FROM device_policy_states WHERE device_id = ?`,
+		`UPDATE hardware_assets SET device_id = NULL WHERE device_id = ?`,
+		`DELETE FROM devices WHERE id = ? AND retired_at IS NOT NULL`,
+	}
+
+	for _, q := range childQueries {
+		if _, err := tx.ExecContext(ctx, q, id); err != nil {
+			// Some optional tables may not be created in minimal test databases
+			if !strings.Contains(err.Error(), "no such table") {
+				return fmt.Errorf("exec %s: %w", q, err)
+			}
+		}
+	}
+
+	return tx.Commit()
 }
 
 // setCapabilities records which command types the agent supports, so the server

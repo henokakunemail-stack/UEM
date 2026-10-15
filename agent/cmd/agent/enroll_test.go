@@ -90,7 +90,7 @@ func TestRunEnrollOnly_InvalidToken(t *testing.T) {
 	}
 }
 
-func TestRunEnrollOnly_DeviceIDMismatch(t *testing.T) {
+func TestRunEnrollOnly_DeviceIDMismatch_OverwritesWithBackup(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]string{
@@ -114,7 +114,25 @@ func TestRunEnrollOnly_DeviceIDMismatch(t *testing.T) {
 	}
 
 	err := runEnrollOnly(server.URL, "valid-token", credsPath)
-	if err == nil {
-		t.Fatal("expected error for device ID mismatch, got nil")
+	if err != nil {
+		t.Fatalf("expected successful re-enrollment with backup, got error: %v", err)
+	}
+
+	// Verify new credentials were saved
+	newCreds, err := enrollment.Load(credsPath)
+	if err != nil {
+		t.Fatalf("failed to load new creds: %v", err)
+	}
+	if newCreds.DeviceID != "dev-new-id" {
+		t.Fatalf("expected device_id 'dev-new-id', got '%s'", newCreds.DeviceID)
+	}
+
+	// Verify backup was created
+	bakCreds, err := enrollment.Load(credsPath + ".bak")
+	if err != nil {
+		t.Fatalf("failed to load backup creds: %v", err)
+	}
+	if bakCreds.DeviceID != "dev-old-id" {
+		t.Fatalf("expected backup device_id 'dev-old-id', got '%s'", bakCreds.DeviceID)
 	}
 }

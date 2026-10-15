@@ -331,7 +331,14 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
       } catch (err: unknown) {
         if (isCancelled) return
         setStatus('error')
-        setErrorMessage(err instanceof Error ? err.message : 'Unknown initialization error')
+        const rawMsg = err instanceof Error ? err.message : 'Unknown initialization error'
+        let displayMsg = rawMsg
+        if (rawMsg.includes('409') || rawMsg.toLowerCase().includes('offline')) {
+          displayMsg = 'Endpoint is offline or disconnected from central hub. Remote control requires an active agent connection.'
+        } else if (rawMsg.toLowerCase().includes('session 0') || rawMsg.toLowerCase().includes('no active console')) {
+          displayMsg = 'No interactive user session logged into Windows desktop (Session 0 lock). Remote desktop capture requires an active logged-on user session.'
+        }
+        setErrorMessage(displayMsg)
       }
     }
 
@@ -352,20 +359,14 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
         setCapabilities(msg.capabilities ?? null)
         if (msg.mode) setMode(msg.mode)
       } else if (msg.type === 'unsupported' || msg.type === 'connect_failed' || msg.type === 'capture_failed') {
-        // The agent has already said, in as many words, why the desktop is not
-        // coming. Recording the reason and stopping here means the console
-        // shows that sentence instead of the generic stall message, which is
-        // the only thing the operator could act on. The three types are the
-        // three moments it can happen: capture is impossible on this platform,
-        // the relay socket never came up, or the stream started and then
-        // stopped being able to blit.
         setAwaitingFirstFrame(false)
         setCapabilities({ capture: false, mouse: false, keyboard: false, reason: msg.reason ?? '' })
         setStatus('error')
-        setErrorMessage(
-          msg.reason ||
-            'This endpoint cannot stream a desktop. Remote control needs a platform capture backend.'
-        )
+        let reason = msg.reason || 'This endpoint cannot stream a desktop. Remote control needs a platform capture backend.'
+        if (reason.toLowerCase().includes('session') || reason.toLowerCase().includes('desktop') || reason.toLowerCase().includes('capture') || reason.toLowerCase().includes('wts')) {
+          reason = `${reason} (Note: Windows services run in Session 0; ensure an interactive user is logged into the physical desktop and the screen is unlocked).`
+        }
+        setErrorMessage(reason)
       }
     }
 

@@ -213,6 +213,8 @@ func (h *inventoryHandler) routes(r chi.Router) {
 			Post("/api/devices/{id}/retire", h.retireDevice)
 		r.With(h.authMW, rbac.RequireRole(rbac.RoleAdmin)).
 			Post("/api/devices/{id}/restore", h.restoreDevice)
+			r.With(h.authMW, rbac.RequireRole(rbac.RoleAdmin)).
+				Delete("/api/devices/{id}", h.deleteDevice)
 
 		r.With(h.authMW, rbac.RequireRole(rbac.RoleViewer)).Get("/api/groups", h.listGroups)
 		r.With(h.authMW, rbac.RequireRole(rbac.RoleAdmin)).Post("/api/groups", h.createGroup)
@@ -327,6 +329,22 @@ func (h *inventoryHandler) restoreDevice(w http.ResponseWriter, r *http.Request)
 		"device.restore", deviceID, nil)
 	writeJSON(w, http.StatusOK, map[string]string{
 		"status": "offline", "detail": "re-enroll the device to restore connectivity"})
+}
+
+func (h *inventoryHandler) deleteDevice(w http.ResponseWriter, r *http.Request) {
+	deviceID := chi.URLParam(r, "id")
+	if err := h.repo.deleteDevice(r.Context(), deviceID); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			writeErr(w, http.StatusNotFound, "device not found or not retired")
+			return
+		}
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	h.hub.Disconnect(deviceID)
+	_ = h.auditDB.Log(r.Context(), "user", auth.UserIDFromContext(r.Context()),
+		"device.deleted", deviceID, nil)
+	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
 func (h *inventoryHandler) listGroups(w http.ResponseWriter, r *http.Request) {

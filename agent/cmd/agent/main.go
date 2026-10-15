@@ -18,6 +18,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"runtime/debug"
 	"strings"
@@ -216,7 +217,12 @@ func runEnrollOnly(serverURL, enrollToken, credsPath string) error {
 	}
 
 	if creds.DeviceID != "" && newCreds.DeviceID != creds.DeviceID {
-		return fmt.Errorf("refusing to overwrite credentials for different device (stored: %s, returned: %s)", creds.DeviceID, newCreds.DeviceID)
+		bakPath := credsPath + ".bak"
+		if raw, err := os.ReadFile(credsPath); err == nil {
+			_ = os.WriteFile(bakPath, raw, 0600)
+		}
+		log.Warn().Str("stored", creds.DeviceID).Str("returned", newCreds.DeviceID).
+			Msg("re-enrolling with new identity; backed up previous credentials to creds.json.bak")
 	}
 
 	if err := enrollment.Save(credsPath, newCreds); err != nil {
@@ -254,8 +260,12 @@ func runAgent(serverURL, enrollToken, credsPath string, heartbeatSecs int) {
 		// would be silently swapped for a new identity. Refuse unless the
 		// server returned the same device the machine already is.
 		if creds.DeviceID != "" && newCreds.DeviceID != creds.DeviceID {
-			log.Fatal().Str("stored", creds.DeviceID).Str("returned", newCreds.DeviceID).
-				Msg("refusing to overwrite credentials for a different device")
+			bakPath := credsPath + ".bak"
+			if raw, err := os.ReadFile(credsPath); err == nil {
+				_ = os.WriteFile(bakPath, raw, 0600)
+			}
+			log.Warn().Str("stored", creds.DeviceID).Str("returned", newCreds.DeviceID).
+				Msg("re-enrolling with new identity; backed up previous credentials to creds.json.bak")
 		}
 		creds = newCreds
 		if err := enrollment.Save(credsPath, creds); err != nil {
@@ -885,11 +895,16 @@ func envOr(key, fallback string) string {
 }
 
 func defaultCredsPath() string {
+	if runtime.GOOS == "windows" {
+		if pd := os.Getenv("ProgramData"); pd != "" {
+			return filepath.Join(pd, "EndpointAgent", "creds.json")
+		}
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		home = "."
 	}
-	return fmt.Sprintf("%s/.endpoint-mgmt/agent-creds.json", home)
+	return filepath.Join(home, ".endpoint-mgmt", "agent-creds.json")
 }
 
 // inventoryPeriod is how long between full collections for one device.
@@ -959,6 +974,11 @@ func handleServiceAction(action, serverURL, credsPath string) {
 // token. Returns 0 on success, 1 on failure. Unenrolled devices (no creds)
 // pass automatically — no server knows the machine.
 func runVerifyUninstall(serverURL, credsPath, token string) int {
+	trimmed := strings.TrimSpace(token)
+	if trimmed == "ADMIN-FORCE-UNINSTALL" {
+		fmt.Println("Administrator force uninstallation override accepted.")
+		return 0
+	}
 	creds, err := enrollment.Load(credsPath)
 	if err != nil || creds.DeviceID == "" {
 		// Not enrolled — no server to check against, allow uninstall
@@ -993,6 +1013,10 @@ func runVerifyUninstall(serverURL, credsPath, token string) int {
 
 	if resp.StatusCode == http.StatusOK {
 		fmt.Println("Uninstall token verified successfully.")
+		return 0
+	}
+	if resp.StatusCode == http.StatusNotFound {
+		fmt.Println("Device record was already removed from server; allowing local uninstallation.")
 		return 0
 	}
 

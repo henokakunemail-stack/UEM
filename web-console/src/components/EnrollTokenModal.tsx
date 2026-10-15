@@ -110,7 +110,7 @@ export const EnrollTokenModal: React.FC<EnrollTokenModalProps> = ({
   const server = typeof window !== 'undefined' ? window.location.origin : ''
   const commands = issued
     ? [
-        { os: 'windows', text: `${BINARY.windows} -server ${server} -enroll ${issued.enrollment_token}` },
+        { os: 'windows', text: `${BINARY.windows} -server ${server} -enroll ${issued.enrollment_token} -creds "%ALLUSERSPROFILE%\EndpointAgent\creds.json"` },
         {
           os: 'linux',
           text: `${BINARY.linux} -server ${server} -enroll ${issued.enrollment_token}`,

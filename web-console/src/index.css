@@ -1586,6 +1586,16 @@ body {
   background-color: var(--color-danger-subtle);
 }
 
+.btn-danger {
+  background-color: var(--color-danger);
+  border-color: var(--color-danger);
+  color: #ffffff;
+}
+.btn-danger:hover:not(:disabled) {
+  background-color: #dc2626;
+  border-color: #dc2626;
+}
+
 /* A header cell whose only content is a screen-reader label. The Installed
    Software table has one so its action column is announced, but printing an
    empty column header looks like a layout bug. */

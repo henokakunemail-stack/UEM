@@ -49,6 +49,7 @@ import (
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/modules/systempolicy"
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/modules/taskscheduler"
 	usermgmt "github.com/henokakunemail-stack/Endpoint-Manager/server/modules/user-management"
+	"github.com/henokakunemail-stack/Endpoint-Manager/server/modules/securityaudit"
 )
 
 // serviceName is the OS service registration the server installer writes and
@@ -612,6 +613,10 @@ func buildServer(cfg config.Config, database *sqlx.DB) (*http.Server, func()) {
 	// Phase 17: backup & restore management.
 	backupH := backup.NewHandler(cfg, database, &auditAdapter{db: database}, jwtSvc.RequireAuth)
 	backupH.Register(r)
+
+	// Automated 40-point pre-launch security posture auditor.
+	secAuditH := securityaudit.NewHandler(&cfg, database, &auditAdapter{db: database}, jwtSvc.RequireAuth)
+	secAuditH.Register(r)
 
 	// Command dispatch demo endpoint: send "ping" to a device's live connection.
 	r.With(jwtSvc.RequireAuth, rbac.RequireRole(rbac.RoleTechnician)).

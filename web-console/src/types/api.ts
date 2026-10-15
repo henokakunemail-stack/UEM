@@ -527,6 +527,32 @@ export interface DirectoryConfigDTO {
   updated_at?: string
 }
 
+// 40 Pre-Launch Security Checks
+export interface SecurityAuditItem {
+  id: number
+  part: number
+  number: number
+  title: string
+  category: 'core_app' | 'data_security' | 'network' | 'pipeline' | 'hardening'
+  status: 'pass' | 'warn' | 'fail'
+  description: string
+  evidence: string
+  remediation: string
+  owasp_tag: string
+}
+
+export interface SecurityAuditReport {
+  generated_at: string
+  grade: string
+  score: number
+  total_checks: number
+  passed: number
+  warned: number
+  failed: number
+  checks: SecurityAuditItem[]
+}
+
+
 // The add/update/deactivate split a preview produces. Re-derived from the
 // directory on every call rather than stored, so an Apply can never act on a
 // plan that was computed against an older view of the database.

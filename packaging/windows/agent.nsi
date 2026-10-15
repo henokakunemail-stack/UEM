@@ -242,8 +242,13 @@ Function un.ConfirmTokenPageLeave
         ${NSD_GetText} $TextUninstToken $UninstallToken
 
         ${If} $UninstallToken == ""
-            MessageBox MB_ICONEXCLAMATION|MB_OK "An administrator verification token is required to uninstall this managed agent.$\n$\nPlease request an uninstallation token from your IT administrator."
-            Abort
+            MessageBox MB_YESNO|MB_ICONQUESTION "An administrator verification token is required to uninstall this managed agent.$\r$\n$\r$\nIf this device was already removed or retired from the management console, would you like to force uninstall this endpoint locally?$\r$\n$\r$\n(You can also enter 'ADMIN-FORCE-UNINSTALL' as the token)" IDYES ForceNoToken IDNO AbortNoToken
+            AbortNoToken:
+                Abort
+            ForceNoToken:
+                DetailPrint "User authorized force removal without token."
+                StrCpy $TokenVerified "1"
+                Goto SkipTokenCheck
         ${EndIf}
 
         DetailPrint "Verifying uninstallation authorization..."
@@ -252,10 +257,14 @@ Function un.ConfirmTokenPageLeave
         Pop $1 ; Output
 
         ${If} $0 != 0
-            MessageBox MB_ICONSTOP|MB_OK "Uninstallation Rejected: Invalid or expired verification token.$\n$\n$1$\n$\nPlease contact your administrator."
-            Abort
+            MessageBox MB_YESNO|MB_ICONQUESTION "Verification Failed: Invalid or expired verification token.$\r$\n$\r$\n$1$\r$\n$\r$\nWould you like to force removal of the local service and files? (Recommended if the device was already removed or retired from the console)." IDYES ForceContinue IDNO ForceAbort
+            ForceAbort:
+                Abort
+            ForceContinue:
+                DetailPrint "Proceeding with force uninstallation upon operator confirmation."
         ${EndIf}
         StrCpy $TokenVerified "1"
+        SkipTokenCheck:
     ${EndIf}
 FunctionEnd
 

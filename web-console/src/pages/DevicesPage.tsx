@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import {
   Activity,
   AlertCircle,
+  AlertTriangle,
   Archive,
   CheckCircle2,
   ChevronLeft,
@@ -13,9 +14,11 @@ import {
   Layers,
   Monitor,
   RefreshCw,
+  RotateCcw,
   Search,
   Terminal,
   TerminalSquare,
+  Trash2,
   Users,
 } from 'lucide-react'
 import { DeviceDetailModal } from '../components/DeviceDetailModal'
@@ -54,9 +57,13 @@ export const DevicesPage: React.FC<{
   const [pageSize, setPageSize] = useState<(typeof PAGE_SIZES)[number]>(10)
   const [selectedDevice, setSelectedDevice] = useState<DeviceDTO | null>(null)
   const [retireTarget, setRetireTarget] = useState<DeviceDTO | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<DeviceDTO | null>(null)
   const [uninstallTokenDevice, setUninstallTokenDevice] = useState<DeviceDTO | null>(null)
   const [enrollOpen, setEnrollOpen] = useState(false)
   const [retiring, setRetiring] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const [bulkDeleting, setBulkDeleting] = useState(false)
+  const [bulkDeleteConfirmOpen, setBulkDeleteConfirmOpen] = useState(false)
   const [actionMsg, setActionMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(
     null
   )
@@ -224,6 +231,81 @@ export const DevicesPage: React.FC<{
       setRetiring(false)
     }
   }
+
+  const handleDelete = async () => {
+    if (!deleteTarget) return
+    setDeleting(true)
+    try {
+      await api.deleteDevice(deleteTarget.id)
+      const successText = `Device "${deleteTarget.hostname}" (${deleteTarget.id.slice(0, 8)}) was permanently deleted.`
+      setActionMsg({ type: 'success', text: successText })
+      toast.success(successText, 'Device Deleted')
+      setDeleteTarget(null)
+      fetchDevices()
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Delete failed'
+      setActionMsg({ type: 'error', text: msg })
+      toast.error(msg, 'Delete Failed')
+    } finally {
+      setDeleting(false)
+    }
+  }
+
+  const handleBulkDelete = async () => {
+    if (selected.size === 0) return
+    setBulkDeleting(true)
+    try {
+      let deleted = 0
+      for (const id of selected) {
+        try {
+          await api.deleteDevice(id)
+          deleted++
+        } catch {
+          // ignore failures for non-retired or already deleted items
+        }
+      }
+      const successText = `Permanently deleted ${deleted} retired device(s).`
+      setActionMsg({ type: 'success', text: successText })
+      toast.success(successText, 'Bulk Delete Finished')
+      setSelected(new Set())
+      setBulkDeleteConfirmOpen(false)
+      fetchDevices()
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Bulk delete failed'
+      setActionMsg({ type: 'error', text: msg })
+      toast.error(msg, 'Bulk Delete Error')
+    } finally {
+      setBulkDeleting(false)
+    }
+  }
+
+  const handleRestore = async (device: DeviceDTO) => {
+    try {
+      await api.restoreDevice(device.id)
+      const successText = `Restored "${device.hostname}". Re-enroll with a new token to resume telemetry.`
+      setActionMsg({ type: 'success', text: successText })
+      toast.success(successText, 'Device Restored')
+      fetchDevices()
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Restore failed'
+      setActionMsg({ type: 'error', text: msg })
+      toast.error(msg, 'Restore Failed')
+    }
+  }
+
+  const hostnameCounts = React.useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const d of data.devices || []) {
+      if (d.hostname && d.hostname !== 'Pending Enrollment') {
+        counts.set(d.hostname, (counts.get(d.hostname) || 0) + 1)
+      }
+    }
+    return counts
+  }, [data.devices])
+
+  const selectedRetiredCount = React.useMemo(() => {
+    return (data.devices || []).filter((d) => selected.has(d.id) && Boolean(d.retired_at)).length
+  }, [data.devices, selected])
 
   const handlePing = async (device: DeviceDTO) => {
     try {
@@ -433,6 +515,22 @@ export const DevicesPage: React.FC<{
               )}
               <span>{assigning ? 'Adding...' : 'Add to group'}</span>
             </button>
+            {canRetire && selectedRetiredCount > 0 && (
+              <button
+                type="button"
+                className="btn btn-danger"
+                onClick={() => setBulkDeleteConfirmOpen(true)}
+                disabled={bulkDeleting}
+                title="Permanently delete selected retired devices from database"
+              >
+                {bulkDeleting ? (
+                  <RefreshCw size={16} className="spinning" />
+                ) : (
+                  <Trash2 size={16} />
+                )}
+                <span>Delete Retired ({selectedRetiredCount})</span>
+              </button>
+            )}
             <button
               type="button"
               className="btn btn-secondary"
@@ -532,7 +630,19 @@ export const DevicesPage: React.FC<{
                         onClick={() => setSelectedDevice(d)}
                         title="View hardware specs & software"
                       >
-                        <strong className="device-name">{d.hostname}</strong>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                          <strong className="device-name">{d.hostname}</strong>
+                          {(hostnameCounts.get(d.hostname) ?? 0) > 1 && (
+                            <span
+                              className="badge-severity warning"
+                              style={{ display: 'inline-flex', alignItems: 'center', gap: 3, padding: '1px 6px', fontSize: 10, borderRadius: 4, textTransform: 'none' }}
+                              title={`Duplicate hostname detected (${d.hostname}). Isolated by unique Device ID: ${d.id}`}
+                            >
+                              <AlertTriangle size={10} />
+                              Duplicate ({d.id.slice(0, 8)})
+                            </span>
+                          )}
+                        </div>
                         <span className="device-id font-mono">{d.id.substring(0, 16)}...</span>
                       </button>
                     </td>
@@ -612,7 +722,7 @@ export const DevicesPage: React.FC<{
                             <Activity size={12} />
                           </button>
                         )}
-                        {canRetire && !isRetired && (
+                        {canRetire && (
                           <button
                             type="button"
                             className="btn btn-sm btn-secondary"
@@ -633,6 +743,28 @@ export const DevicesPage: React.FC<{
                           >
                             <Archive size={12} />
                           </button>
+                        )}
+                        {canRetire && isRetired && (
+                          <>
+                            <button
+                              type="button"
+                              className="btn btn-sm btn-secondary"
+                              onClick={() => handleRestore(d)}
+                              title="Restore Device to Active Fleet"
+                              aria-label={`Restore ${d.hostname}`}
+                            >
+                              <RotateCcw size={12} />
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-sm btn-danger"
+                              onClick={() => setDeleteTarget(d)}
+                              title="Permanently Delete Retired Device"
+                              aria-label={`Delete ${d.hostname}`}
+                            >
+                              <Trash2 size={12} />
+                            </button>
+                          </>
                         )}
                       </div>
                     </td>
@@ -689,6 +821,30 @@ export const DevicesPage: React.FC<{
         pending={retiring}
         onConfirm={handleRetire}
         onCancel={() => setRetireTarget(null)}
+      />
+
+      <ConfirmDialog
+        open={Boolean(deleteTarget)}
+        title="Permanently Delete Retired Endpoint"
+        message={
+          deleteTarget
+            ? `Permanently delete "${deleteTarget.hostname}" (${deleteTarget.id.slice(0, 8)}) from the database? All associated inventory, logs, and deployment histories will be permanently deleted. This action CANNOT be undone.`
+            : ''
+        }
+        confirmLabel="Delete permanently"
+        pending={deleting}
+        onConfirm={handleDelete}
+        onCancel={() => setDeleteTarget(null)}
+      />
+
+      <ConfirmDialog
+        open={bulkDeleteConfirmOpen}
+        title="Bulk Delete Retired Endpoints"
+        message={`Permanently delete ${selectedRetiredCount} retired endpoint(s) from the database? This action CANNOT be undone.`}
+        confirmLabel={`Delete ${selectedRetiredCount} endpoint(s)`}
+        pending={bulkDeleting}
+        onConfirm={handleBulkDelete}
+        onCancel={() => setBulkDeleteConfirmOpen(false)}
       />
 
       {/* Detail Modal */}
