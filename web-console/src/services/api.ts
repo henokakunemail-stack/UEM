@@ -313,7 +313,15 @@ export const api = {
   // Pre-registers a device and returns a one-time token the agent exchanges for
   // its persistent secret. Admin only, and the plaintext comes back exactly
   // once — close the dialog without copying it and it is gone.
-  async createEnrollmentToken(body: { hostname?: string; os_name?: string; site?: string }): Promise<EnrollmentTokenDTO> {
+  async createEnrollmentToken(body: {
+    hostname?: string
+    os_name?: string
+    site?: string
+    name?: string
+    expires_in_hours?: number
+    max_uses?: number
+    is_multi_use?: boolean
+  }): Promise<EnrollmentTokenDTO> {
     return request<EnrollmentTokenDTO>('/api/devices/enroll-token', {
       method: 'POST',
       body: JSON.stringify(body),

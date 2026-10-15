@@ -125,7 +125,65 @@ func (h *EnrollmentHandler) enroll(w http.ResponseWriter, r *http.Request) {
 	}
 
 	tokenHash := HashToken(req.EnrollmentToken)
-	// Confirm the token is registered before minting a secret.
+
+	// 1. Check if token matches a reusable / multi-device shared token
+	sharedToken, err := h.repo.FindValidSharedEnrollmentToken(r.Context(), tokenHash)
+	if err == nil && sharedToken != nil {
+		plain := GenerateToken()
+		devID := NewID()
+		now := time.Now().UTC()
+
+		hostname := req.Hostname
+		if hostname == "" {
+			hostname = "Device-" + devID[:8]
+		}
+		osName := req.OSName
+		if osName == "" {
+			osName = OSWindows
+		}
+		var osVer, agentVer *string
+		if req.OSVersion != "" {
+			osVer = &req.OSVersion
+		}
+		if req.AgentVersion != "" {
+			agentVer = &req.AgentVersion
+		}
+
+		newDev := Device{
+			ID:               devID,
+			Hostname:         hostname,
+			OSName:           osName,
+			OSVersion:        osVer,
+			AgentVersion:     agentVer,
+			Status:           StatusOffline,
+			EnrolledAt:       now,
+			DeviceSecretHash: HashToken(plain),
+			Site:             sharedToken.Site,
+			CreatedAt:        now,
+			UpdatedAt:        now,
+		}
+
+		if err := h.repo.ConsumeSharedEnrollmentTokenAndCreateDevice(r.Context(), tokenHash, newDev); err != nil {
+			if errors.Is(err, ErrNotFound) {
+				h.limiter.RecordFailure(clientIP)
+				writeErr(w, http.StatusUnauthorized, "invalid, expired, or fully utilized enrollment token")
+				return
+			}
+			log.Error().Err(err).Msg("consume shared enrollment token")
+			writeErr(w, http.StatusInternalServerError, "internal error")
+			return
+		}
+
+		_ = audit.Log(r.Context(), h.db, "agent", devID, "device.enroll_shared", devID, map[string]string{
+			"token_id": sharedToken.ID, "token_name": sharedToken.Name,
+			"hostname": req.Hostname, "os_name": req.OSName,
+		})
+
+		writeJSON(w, http.StatusOK, enrollResponse{DeviceID: devID, DeviceSecret: plain})
+		return
+	}
+
+	// 2. Fallback to single-device pre-registration (devices.enrollment_token_hash)
 	dev, err := h.repo.findByEnrollmentTokenHash(r.Context(), tokenHash)
 	if errors.Is(err, ErrNotFound) {
 		h.limiter.RecordFailure(clientIP)

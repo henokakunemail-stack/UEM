@@ -9,7 +9,7 @@ case "$1" in
 
         # Register and configure systemd service if binary exists
         if [ -x /usr/bin/endpoint-agent ]; then
-            /usr/bin/endpoint-agent -service install || true
+            /usr/bin/endpoint-agent -creds /etc/endpoint-agent/creds.json -service install || true
         fi
 
         # If systemd is running, reload daemon and enable service
@@ -20,11 +20,8 @@ case "$1" in
             # Only (re)start when the agent has already enrolled. Enrollment
             # writes the credentials file, and until it exists there is nothing
             # for the service to authenticate with -- starting it would just
-            # crash-loop until the operator enrolls the machine. The file the
-            # agent actually writes is $HOME/.endpoint-mgmt/agent-creds.json
-            # (see defaultCredsPath in agent/cmd/agent/main.go); under systemd
-            # HOME=/root, so that is where a freshly-enrolled host keeps it.
-            if [ -f /root/.endpoint-mgmt/agent-creds.json ]; then
+            # crash-loop until the operator enrolls the machine.
+            if [ -f /etc/endpoint-agent/creds.json ] || [ -f /root/.endpoint-mgmt/agent-creds.json ]; then
                 systemctl restart endpoint-agent.service || true
             fi
         fi
@@ -35,7 +32,7 @@ case "$1" in
         echo
         echo "endpoint-agent installed and enabled for boot."
         echo "It is NOT running until this endpoint enrolls:"
-        echo "  endpoint-agent -enroll -token <enrollment-token> -server https://<server>:8443"
+        echo "  endpoint-agent -server https://<server>:8443 -creds /etc/endpoint-agent/creds.json -enroll <enrollment-token>"
         echo "  systemctl start endpoint-agent"
     ;;
     abort-upgrade|abort-remove|abort-deconfigure)

@@ -2,6 +2,8 @@ package inventory
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/json"
 	"hash/fnv"
 	"time"
 
@@ -24,6 +26,8 @@ type Scheduler struct {
 	// device so the load stays even hour after hour.
 	window   time.Duration
 	deviceID string
+	lastHash [32]byte
+	lastSend time.Time
 }
 
 // NewScheduler returns a periodic collector. period is the interval between
@@ -96,15 +100,32 @@ func (s *Scheduler) collectOnce(ctx context.Context) {
 	// timestamp means "when the agent read the hardware", which is the moment
 	// this function returns, and setting it once keeps every OS in sync.
 	rep.CollectedAt = time.Now().UTC()
+
+	// Compute content hash (excluding timestamp) to avoid sending unchanged inventory
+	h := hashReport(rep)
+	if s.lastHash != [32]byte{} && h == s.lastHash && time.Since(s.lastSend) < 24*time.Hour {
+		log.Debug().Msg("inventory unchanged, skipping periodic transmission")
+		return
+	}
+
 	if err := s.reporter.ReportInventory(ctx, rep); err != nil {
 		log.Warn().Err(err).Msg("inventory report failed")
 		return
 	}
+	s.lastHash = h
+	s.lastSend = time.Now()
 	log.Info().
 		Dur("took", time.Since(start)).
 		Int("software", len(rep.Software)).
 		Int64("ram_bytes", rep.Hardware.RAMTotalBytes).
 		Msg("inventory reported")
+}
+
+func hashReport(rep Report) [32]byte {
+	clone := rep
+	clone.CollectedAt = time.Time{}
+	b, _ := json.Marshal(clone)
+	return sha256.Sum256(b)
 }
 
 // CollectOnce performs a single collection on demand. Used by the

@@ -392,12 +392,22 @@ func (h *Handler) handleAgentWS(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// A retired or rotated device must not keep streaming on a socket that
-	// authenticated before the credential changed. Check again after attach to
-	// cover the handshake race, and before forwarding every subsequent frame.
+	// authenticated before the credential changed. Check on attach and periodic
+	// window (every 10s) rather than every single 30fps video frame to avoid
+	// overloading SQLite with 30-60 queries/sec per connected session.
 	secretHash := devicemgmt.HashToken(r.Header.Get("X-Device-Secret"))
+	var lastCredCheck time.Time
 	credentialLive := func() bool {
+		now := time.Now()
+		if !lastCredCheck.IsZero() && now.Sub(lastCredCheck) < 10*time.Second {
+			return true
+		}
 		dev, err := h.devices.FindBySecretHash(r.Context(), secretHash)
-		return err == nil && dev.ID == authenticatedDeviceID
+		ok := err == nil && dev.ID == authenticatedDeviceID
+		if ok {
+			lastCredCheck = now
+		}
+		return ok
 	}
 	if !credentialLive() {
 		h.relay.CloseRelay(sessionID)

@@ -102,10 +102,10 @@
     "semantic_hash": "c686e4f4b3d74377756b10ccc5b2ca85"
   },
   "agent/shared/inventory/scheduler.go": {
-    "mtime": 1791859383.9023962,
-    "seen": 1791859395.9915602,
-    "ast_hash": "5d007527a9cb7d7d5913ab95711d0e8d",
-    "semantic_hash": "5d007527a9cb7d7d5913ab95711d0e8d"
+    "mtime": 1792031918.522758,
+    "seen": 1792032336.7522867,
+    "ast_hash": "da72c6b34ed48a4180879f9edc42d527",
+    "semantic_hash": ""
   },
   "agent/shared/maintenance/cleanup_locked_windows_test.go": {
     "mtime": 1791272592.275198,
@@ -804,10 +804,10 @@
     "semantic_hash": "28a85bf2b675f0d5be3bcbde5c9ef9bf"
   },
   "packaging/darwin/pkg/scripts/postinstall": {
-    "mtime": 1790238579.403292,
-    "seen": 1791858829.9287236,
-    "ast_hash": "21a31b94d0c71b2584511ae9f5c17333",
-    "semantic_hash": "21a31b94d0c71b2584511ae9f5c17333"
+    "mtime": 1792031278.3353493,
+    "seen": 1792032336.7530143,
+    "ast_hash": "1645a2686c4b8ad5464369b2a7d66013",
+    "semantic_hash": ""
   },
   "packaging/darwin/pkg/scripts/preinstall": {
     "mtime": 1790238579.1515198,
@@ -822,10 +822,10 @@
     "semantic_hash": "a16e4c4d1282581d74cf1739c002a3a8"
   },
   "packaging/linux/deb/DEBIAN/postinst": {
-    "mtime": 1791273587.0316536,
-    "seen": 1791858829.9287295,
-    "ast_hash": "3788f54c1ffe385dcc12b1834c89080f",
-    "semantic_hash": "3788f54c1ffe385dcc12b1834c89080f"
+    "mtime": 1792031445.650433,
+    "seen": 1792032336.7530296,
+    "ast_hash": "a1b82f590bfdf52b28f3d18b5fc99ab3",
+    "semantic_hash": ""
   },
   "packaging/linux/deb/DEBIAN/postrm": {
     "mtime": 1790238492.2876542,
@@ -846,10 +846,10 @@
     "semantic_hash": "805e6c66d4bec34511e267e395168ec7"
   },
   "packaging/linux/gui-installer/uninstall-gui.sh": {
-    "mtime": 1791338184.4690192,
-    "seen": 1791858829.9287379,
-    "ast_hash": "bb91e275ac34b9a517b3ff9bfff1064f",
-    "semantic_hash": "bb91e275ac34b9a517b3ff9bfff1064f"
+    "mtime": 1792031566.531575,
+    "seen": 1792032336.75305,
+    "ast_hash": "594951157132b4a9fa708aab9b9f1d27",
+    "semantic_hash": ""
   },
   "packaging/linux/scripts/install-agent.ps1": {
     "mtime": 1791791974.217274,
@@ -876,10 +876,10 @@
     "semantic_hash": "5fb2cd21edd88dea9e3afaadbd35a252"
   },
   "packaging/linux/scripts/uninstall-agent.ps1": {
-    "mtime": 1791602534.4624043,
-    "seen": 1791858829.928748,
-    "ast_hash": "e9756663132f3466142c191d88c32e69",
-    "semantic_hash": "e9756663132f3466142c191d88c32e69"
+    "mtime": 1792034281.7187736,
+    "seen": 1792034588.1391594,
+    "ast_hash": "8458e462b48954833e6854f70e913e40",
+    "semantic_hash": ""
   },
   "packaging/linux/scripts/uninstall-agent.sh": {
     "mtime": 1791970731.9780252,
@@ -936,10 +936,10 @@
     "semantic_hash": "b333dea04c11cb7271606bdb3689a0db"
   },
   "packaging/windows/scripts/uninstall-agent.ps1": {
-    "mtime": 1791602482.9916227,
-    "seen": 1791858829.928769,
-    "ast_hash": "fff6097e6629b8d254f9df58c56eef0e",
-    "semantic_hash": "fff6097e6629b8d254f9df58c56eef0e"
+    "mtime": 1792034272.175011,
+    "seen": 1792034588.1391773,
+    "ast_hash": "c130ca9b0e6ea3457d492c9f6ab71c5b",
+    "semantic_hash": ""
   },
   "packaging/windows/scripts/uninstall-server.ps1": {
     "mtime": 1791602507.0701277,
@@ -1404,9 +1404,9 @@
     "semantic_hash": "b1e362b8eb1006718ba105a895294470"
   },
   "server/core/transport/ws.go": {
-    "mtime": 1791885362.039982,
-    "seen": 1791886029.262766,
-    "ast_hash": "45e75e7d53238172aef70e04553b0913",
+    "mtime": 1792030099.0924745,
+    "seen": 1792032336.753727,
+    "ast_hash": "5c90cacbd815fc9ec02efee531beddcd",
     "semantic_hash": ""
   },
   "server/core/wsticket/ticket.go": {
@@ -1584,9 +1584,9 @@
     "semantic_hash": "4535045c45f1fc5e64b02d7bf88a5afa"
   },
   "server/modules/device-management/enrollment.go": {
-    "mtime": 1791872949.1553547,
-    "seen": 1791872975.9050605,
-    "ast_hash": "d4e273082613615bed226987faee15d6",
+    "mtime": 1792027078.1267104,
+    "seen": 1792032336.7539496,
+    "ast_hash": "b06ab9d21a8aeba54dc9330bfd701951",
     "semantic_hash": ""
   },
   "server/modules/device-management/enrollment_bodylimit_test.go": {
@@ -1608,9 +1608,9 @@
     "semantic_hash": "56feaae18c22b74589921b0e4af54199"
   },
   "server/modules/device-management/handler.go": {
-    "mtime": 1791968365.5937116,
-    "seen": 1791986780.812319,
-    "ast_hash": "5ccab1d9ace88d5a44505ee1e9f7ffa7",
+    "mtime": 1792027028.7664645,
+    "seen": 1792032336.7539792,
+    "ast_hash": "7639b3afb8bbe4b7507d593b3dd997ee",
     "semantic_hash": ""
   },
   "server/modules/device-management/helpers.go": {
@@ -1668,9 +1668,9 @@
     "semantic_hash": "544c16f5f8c5ccc7f91728559c30eae8"
   },
   "server/modules/device-management/repository.go": {
-    "mtime": 1791967886.9514847,
-    "seen": 1791986780.8123553,
-    "ast_hash": "9408244fac6d5240580a7bc8a1bb5cd2",
+    "mtime": 1792026896.477244,
+    "seen": 1792032336.7540383,
+    "ast_hash": "2209084cf94943e11093682244a50d35",
     "semantic_hash": ""
   },
   "server/modules/directory/diff.go": {
@@ -1890,10 +1890,10 @@
     "semantic_hash": "c144be326d5866019d783df597570fb8"
   },
   "server/modules/remotecontrol/handler.go": {
-    "mtime": 1791421123.8595128,
-    "seen": 1791858829.9290867,
-    "ast_hash": "be0e6a14d0b491bcd107cc3c2abb4447",
-    "semantic_hash": "be0e6a14d0b491bcd107cc3c2abb4447"
+    "mtime": 1792029751.713307,
+    "seen": 1792032336.7542605,
+    "ast_hash": "43f7a9462a40c3144f094d903f36dbd6",
+    "semantic_hash": ""
   },
   "server/modules/remotecontrol/handler_test.go": {
     "mtime": 1791422241.65075,
@@ -1902,10 +1902,10 @@
     "semantic_hash": "d427a1154637862dbf3ac55e6e0d50c2"
   },
   "server/modules/remotecontrol/relay.go": {
-    "mtime": 1791288667.9413297,
-    "seen": 1791858829.9290905,
-    "ast_hash": "d36ac4ca0f9ebe4974c8ba425216bb1a",
-    "semantic_hash": "d36ac4ca0f9ebe4974c8ba425216bb1a"
+    "mtime": 1792029919.8524363,
+    "seen": 1792032336.7542708,
+    "ast_hash": "9c70151ce6d3ec63cf63bedab30bfe4a",
+    "semantic_hash": ""
   },
   "server/modules/remotecontrol/remotecontrol_lifecycle_test.go": {
     "mtime": 1791288774.782361,
@@ -2250,9 +2250,9 @@
     "semantic_hash": "141070cf429b17f6d9cdb6dda476a257"
   },
   "web-console/src/App.tsx": {
-    "mtime": 1791872949.167045,
-    "seen": 1791872975.905381,
-    "ast_hash": "ebad404b736a15733fe5be90d6a4e608",
+    "mtime": 1792031719.3113492,
+    "seen": 1792032336.7545862,
+    "ast_hash": "c0f0aba98083e81c3f4872adb4a91efc",
     "semantic_hash": ""
   },
   "web-console/src/components/AlertsList.tsx": {
@@ -2268,10 +2268,10 @@
     "semantic_hash": ""
   },
   "web-console/src/components/EnrollTokenModal.tsx": {
-    "mtime": 1791788954.0267978,
-    "seen": 1791858829.9292367,
-    "ast_hash": "c2b4dc5302ac608066539b4916a85482",
-    "semantic_hash": "c2b4dc5302ac608066539b4916a85482"
+    "mtime": 1792028795.5582814,
+    "seen": 1792032336.7545955,
+    "ast_hash": "d0aad3309eea52142cd707072f29b7b1",
+    "semantic_hash": ""
   },
   "web-console/src/components/ErrorBoundary.tsx": {
     "mtime": 1790328598.7666175,
@@ -2454,10 +2454,10 @@
     "semantic_hash": "64ce46b055c3d069e994138bba408ebd"
   },
   "web-console/src/pages/RemoteControlPage.tsx": {
-    "mtime": 1790334131.574268,
-    "seen": 1791858829.929298,
-    "ast_hash": "50a6b696fa2b156760f6ce702663cafe",
-    "semantic_hash": "50a6b696fa2b156760f6ce702663cafe"
+    "mtime": 1792031710.4579518,
+    "seen": 1792032336.754699,
+    "ast_hash": "c2183937ba5a19a57b9951d0878b62e8",
+    "semantic_hash": ""
   },
   "web-console/src/pages/ReportsPage.tsx": {
     "mtime": 1790323973.396464,
@@ -2496,15 +2496,15 @@
     "semantic_hash": "e866e88869d5de5cac82cfa25ee435d0"
   },
   "web-console/src/services/api.ts": {
-    "mtime": 1791972668.7621768,
-    "seen": 1791986780.8129046,
-    "ast_hash": "233627f7e6872e250a3faca962363fc9",
+    "mtime": 1792028030.7012882,
+    "seen": 1792032336.7547238,
+    "ast_hash": "a1847dcdc44574ce4fa3e6128e2e243c",
     "semantic_hash": ""
   },
   "web-console/src/types/api.ts": {
-    "mtime": 1791972062.2474937,
-    "seen": 1791986780.812908,
-    "ast_hash": "2d08adf12dbd8ec715d9f30e95950ef5",
+    "mtime": 1792027646.3211136,
+    "seen": 1792032336.754727,
+    "ast_hash": "e1c00790438f5ec062867eeeaf6f52e9",
     "semantic_hash": ""
   },
   "web-console/tsconfig.app.json": {
@@ -3012,9 +3012,9 @@
     "semantic_hash": ""
   },
   "agent/shared/inventory/scheduler_test.go": {
-    "mtime": 1791859383.91121,
-    "seen": 1791859498.8861756,
-    "ast_hash": "82eac5eb66257a80b4a936994e5dc364",
+    "mtime": 1792031962.0872724,
+    "seen": 1792032336.7522943,
+    "ast_hash": "0ddc8c64628ea4ecc945ec2752a3e26b",
     "semantic_hash": ""
   },
   "agent/shared/systempolicy/engine.go": {
@@ -3153,6 +3153,18 @@
     "mtime": 1791980965.060066,
     "seen": 1791986780.812783,
     "ast_hash": "074fbc60bc03bb6135f2e6e55cec42ba",
+    "semantic_hash": ""
+  },
+  "server/core/db/migrations/0026_reusable_enrollment_tokens.sql": {
+    "mtime": 1792026868.626544,
+    "seen": 1792032336.7536108,
+    "ast_hash": "36776d9367b7223309653831ea722e42",
+    "semantic_hash": ""
+  },
+  "server/modules/device-management/enrollment_multidevice_test.go": {
+    "mtime": 1792027248.9063048,
+    "seen": 1792032336.7539675,
+    "ast_hash": "f2ed3bca78f45d8658cb8c78d7978568",
     "semantic_hash": ""
   }
 }

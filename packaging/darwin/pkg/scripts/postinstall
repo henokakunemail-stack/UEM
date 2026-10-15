@@ -33,7 +33,13 @@ cat <<'EOF' > "$PLIST"
 	<key>RunAtLoad</key>
 	<true/>
 	<key>KeepAlive</key>
-	<true/>
+	<dict>
+		<key>PathState</key>
+		<dict>
+			<key>/etc/endpoint-agent/creds.json</key>
+			<true/>
+		</dict>
+	</dict>
 	<key>StandardOutPath</key>
 	<string>/var/log/endpoint-agent.log</string>
 	<key>StandardErrorPath</key>

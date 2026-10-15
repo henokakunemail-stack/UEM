@@ -9,6 +9,7 @@ import {
   Search,
   History,
   HardDrive,
+  Terminal,
 } from 'lucide-react'
 import { DataTable } from '../components/ui/DataTable'
 import { usePermission } from '../hooks/usePermission'
@@ -30,10 +31,17 @@ import type { DeviceDTO, DeviceListResponse, RemoteControlSessionDTO } from '../
  */
 export const RemoteControlPage: React.FC<{
   onOpenSession?: (device: DeviceDTO) => void
-}> = ({ onOpenSession }) => {
+  onOpenTerminal?: (device: DeviceDTO, shell: string) => void
+}> = ({ onOpenSession, onOpenTerminal }) => {
   const { can } = usePermission()
   const canOperate = can('technician')
   const toast = useToast()
+
+  const isWindows = (osName?: string) => {
+    if (!osName) return false
+    const s = osName.toLowerCase()
+    return s.includes('windows') || s.includes('win')
+  }
 
   const [devices, setDevices] = useState<DeviceDTO[]>([])
   const [devicesLoading, setDevicesLoading] = useState(true)
@@ -210,7 +218,40 @@ export const RemoteControlPage: React.FC<{
                       <span className="device-id font-mono">{d.id.substring(0, 16)}...</span>
                     </td>
                     <td data-label="OS">
-                      <span className="os-name">{d.os_name}</span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem', flexWrap: 'wrap' }}>
+                        <span className="os-name">{d.os_name}</span>
+                        {isWindows(d.os_name) ? (
+                          <span
+                            style={{
+                              fontSize: '0.625rem',
+                              padding: '0.125rem 0.375rem',
+                              borderRadius: '9999px',
+                              background: 'rgba(59, 130, 246, 0.15)',
+                              color: 'var(--primary, #3b82f6)',
+                              border: '1px solid rgba(59, 130, 246, 0.3)',
+                              fontWeight: 500,
+                            }}
+                            title="Desktop GUI screen capture supported"
+                          >
+                            Desktop
+                          </span>
+                        ) : (
+                          <span
+                            style={{
+                              fontSize: '0.625rem',
+                              padding: '0.125rem 0.375rem',
+                              borderRadius: '9999px',
+                              background: 'rgba(245, 158, 11, 0.15)',
+                              color: '#f59e0b',
+                              border: '1px solid rgba(245, 158, 11, 0.3)',
+                              fontWeight: 500,
+                            }}
+                            title="Desktop GUI capture Windows-only. Remote Terminal supported."
+                          >
+                            Terminal Only
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td data-label="Site">
                       <span className="site-badge">{d.site || 'HQ'}</span>
@@ -221,24 +262,46 @@ export const RemoteControlPage: React.FC<{
                       </span>
                     </td>
                     <td className="text-right" data-label="Session">
-                      <button
-                        type="button"
-                        className="btn btn-sm btn-primary"
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          handleStart(d)
-                        }}
-                        disabled={!canOperate}
-                        title={
-                          canOperate
-                            ? 'Open a live remote desktop session'
-                            : 'Starting a session requires the technician role'
-                        }
-                        aria-label={`Start remote desktop session on ${d.hostname}`}
-                      >
-                        <Play size={12} />
-                        <span>Start</span>
-                      </button>
+                      {isWindows(d.os_name) ? (
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-primary"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            handleStart(d)
+                          }}
+                          disabled={!canOperate}
+                          title={
+                            canOperate
+                              ? 'Open a live remote desktop session'
+                              : 'Starting a session requires the technician role'
+                          }
+                          aria-label={`Start remote desktop session on ${d.hostname}`}
+                        >
+                          <Play size={12} />
+                          <span>Start</span>
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-secondary"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            if (onOpenTerminal) {
+                              const isMac = (d.os_name || '').toLowerCase().includes('darwin') || (d.os_name || '').toLowerCase().includes('mac')
+                              onOpenTerminal(d, isMac ? 'zsh' : 'bash')
+                            } else {
+                              toast.info('Desktop GUI capture is Windows-only. Use Interactive Terminal from Devices page.', 'Terminal Available')
+                            }
+                          }}
+                          disabled={!canOperate}
+                          title="Desktop GUI is Windows-only. Click to open Remote Terminal."
+                          aria-label={`Open interactive terminal on ${d.hostname}`}
+                        >
+                          <Terminal size={12} />
+                          <span>Terminal</span>
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))

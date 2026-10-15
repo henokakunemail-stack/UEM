@@ -39,9 +39,13 @@ export const EnrollTokenModal: React.FC<EnrollTokenModalProps> = ({
   onEnrolled,
 }) => {
   const toast = useToast()
+  const [isMultiUse, setIsMultiUse] = useState(true)
+  const [tokenName, setTokenName] = useState('')
   const [hostname, setHostname] = useState('')
   const [osName, setOsName] = useState('windows')
   const [site, setSite] = useState('')
+  const [expiryHours, setExpiryHours] = useState(24)
+  const [maxUses, setMaxUses] = useState(0) // 0 = unlimited
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
   // Held only until this dialog closes. Never persisted, never refetched.
@@ -50,8 +54,12 @@ export const EnrollTokenModal: React.FC<EnrollTokenModalProps> = ({
 
   // Reset on open so a previous token is never still on screen behind a new one.
   const handleClose = () => {
+    setIsMultiUse(true)
+    setTokenName('')
     setHostname('')
     setSite('')
+    setExpiryHours(24)
+    setMaxUses(0)
     setError(null)
     setIssued(null)
     setCopied(null)
@@ -59,18 +67,33 @@ export const EnrollTokenModal: React.FC<EnrollTokenModalProps> = ({
   }
 
   const handleGenerate = async () => {
-    const trimmed = hostname.trim()
+    const trimmedHost = hostname.trim()
+    const trimmedName = tokenName.trim()
     setPending(true)
     setError(null)
     try {
       const res = await api.createEnrollmentToken({
-        ...(trimmed ? { hostname: trimmed } : {}),
-        os_name: osName,
+        is_multi_use: isMultiUse,
+        ...(isMultiUse
+          ? {
+              name: trimmedName || 'Batch Deployment Token',
+              max_uses: maxUses,
+            }
+          : {
+              ...(trimmedHost ? { hostname: trimmedHost } : {}),
+              os_name: osName,
+              max_uses: 1,
+            }),
+        expires_in_hours: expiryHours,
         ...(site.trim() ? { site: site.trim() } : {}),
       })
       setIssued(res)
       toast.success(
-        trimmed ? `Pre-registered ${trimmed}` : 'Token created (hostname will auto-detect on connect)',
+        isMultiUse
+          ? `Reusable token created (${maxUses === 0 ? 'Unlimited devices' : `Max ${maxUses} devices`})`
+          : trimmedHost
+          ? `Pre-registered ${trimmedHost}`
+          : 'Single-use token created',
         'Enrollment Token Created'
       )
       onEnrolled?.()
@@ -150,55 +173,157 @@ export const EnrollTokenModal: React.FC<EnrollTokenModalProps> = ({
     >
       {!issued ? (
         <>
+          {/* Mode Selector */}
+          <div className="form-field" style={{ marginBottom: '1rem' }}>
+            <label className="form-label">Enrollment Type</label>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+              <button
+                type="button"
+                onClick={() => setIsMultiUse(true)}
+                style={{
+                  padding: '0.75rem',
+                  borderRadius: 'var(--radius-md, 0.5rem)',
+                  border: isMultiUse ? '2px solid var(--primary, #3b82f6)' : '1px solid var(--border-subtle, #333)',
+                  background: isMultiUse ? 'rgba(59, 130, 246, 0.1)' : 'var(--bg-surface, #18181b)',
+                  textAlign: 'left',
+                  cursor: 'pointer',
+                  color: 'inherit',
+                }}
+              >
+                <div style={{ fontWeight: 600, fontSize: '0.875rem' }}>Multi-Device / Batch</div>
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted, #a1a1aa)', marginTop: '0.25rem' }}>
+                  1 token registers multiple devices. Recommended for GPO, mass deployment, or scripts.
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setIsMultiUse(false)}
+                style={{
+                  padding: '0.75rem',
+                  borderRadius: 'var(--radius-md, 0.5rem)',
+                  border: !isMultiUse ? '2px solid var(--primary, #3b82f6)' : '1px solid var(--border-subtle, #333)',
+                  background: !isMultiUse ? 'rgba(59, 130, 246, 0.1)' : 'var(--bg-surface, #18181b)',
+                  textAlign: 'left',
+                  cursor: 'pointer',
+                  color: 'inherit',
+                }}
+              >
+                <div style={{ fontWeight: 600, fontSize: '0.875rem' }}>Single Device</div>
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted, #a1a1aa)', marginTop: '0.25rem' }}>
+                  One-time token bound to a single endpoint. Token is spent immediately upon enrollment.
+                </div>
+              </button>
+            </div>
+          </div>
+
+          {isMultiUse ? (
+            <div className="form-row">
+              <div className="form-field">
+                <label className="form-label" htmlFor="enroll-token-name">
+                  Token Name / Label
+                </label>
+                <input
+                  id="enroll-token-name"
+                  className="form-input"
+                  value={tokenName}
+                  onChange={(e) => setTokenName(e.target.value)}
+                  placeholder="e.g. Active Directory GPO Batch"
+                  autoComplete="off"
+                  disabled={pending}
+                />
+              </div>
+              <div className="form-field">
+                <label className="form-label" htmlFor="enroll-max-uses">
+                  Device Limit
+                </label>
+                <select
+                  id="enroll-max-uses"
+                  className="form-select"
+                  value={maxUses}
+                  onChange={(e) => setMaxUses(Number(e.target.value))}
+                  disabled={pending}
+                >
+                  <option value={0}>Unlimited Devices (0)</option>
+                  <option value={10}>Max 10 Devices</option>
+                  <option value={25}>Max 25 Devices</option>
+                  <option value={50}>Max 50 Devices</option>
+                  <option value={100}>Max 100 Devices</option>
+                  <option value={250}>Max 250 Devices</option>
+                </select>
+              </div>
+            </div>
+          ) : (
+            <div className="form-row">
+              <div className="form-field">
+                <label className="form-label" htmlFor="enroll-hostname">
+                  Hostname <span className="text-muted text-xs font-normal">(Optional — auto-detected on connect)</span>
+                </label>
+                <input
+                  id="enroll-hostname"
+                  className="form-input"
+                  value={hostname}
+                  onChange={(e) => {
+                    setHostname(e.target.value)
+                    if (error) setError(null)
+                  }}
+                  placeholder="Leave blank to auto-detect from device"
+                  autoComplete="off"
+                  disabled={pending}
+                />
+              </div>
+              <div className="form-field">
+                <label className="form-label" htmlFor="enroll-os">
+                  Operating System
+                </label>
+                <select
+                  id="enroll-os"
+                  className="form-select"
+                  value={osName}
+                  onChange={(e) => setOsName(e.target.value)}
+                  disabled={pending}
+                >
+                  <option value="windows">Windows</option>
+                  <option value="linux">Linux</option>
+                  <option value="macos">macOS</option>
+                </select>
+              </div>
+            </div>
+          )}
+
           <div className="form-row">
             <div className="form-field">
-              <label className="form-label" htmlFor="enroll-hostname">
-                Hostname <span className="text-muted text-xs font-normal">(Optional — auto-detected on connect)</span>
+              <label className="form-label" htmlFor="enroll-expiry">
+                Expiration Duration
+              </label>
+              <select
+                id="enroll-expiry"
+                className="form-select"
+                value={expiryHours}
+                onChange={(e) => setExpiryHours(Number(e.target.value))}
+                disabled={pending}
+              >
+                <option value={1}>1 Hour (Quick testing)</option>
+                <option value={24}>24 Hours (1 Day — Standard)</option>
+                <option value={168}>7 Days (1 Week deployment window)</option>
+                <option value={720}>30 Days (1 Month rollout)</option>
+                <option value={2160}>90 Days (Quarterly window)</option>
+              </select>
+            </div>
+            <div className="form-field">
+              <label className="form-label" htmlFor="enroll-site">
+                Target Site (Optional)
               </label>
               <input
-                id="enroll-hostname"
+                id="enroll-site"
                 className="form-input"
-                value={hostname}
-                onChange={(e) => {
-                  setHostname(e.target.value)
-                  if (error) setError(null)
-                }}
-                placeholder="Leave blank to auto-detect from device"
+                value={site}
+                onChange={(e) => setSite(e.target.value)}
+                placeholder="e.g. Jakarta-HQ"
                 autoComplete="off"
                 disabled={pending}
               />
             </div>
-            <div className="form-field">
-              <label className="form-label" htmlFor="enroll-os">
-                Operating System
-              </label>
-              <select
-                id="enroll-os"
-                className="form-select"
-                value={osName}
-                onChange={(e) => setOsName(e.target.value)}
-                disabled={pending}
-              >
-                <option value="windows">Windows</option>
-                <option value="linux">Linux</option>
-                <option value="macos">macOS</option>
-              </select>
-            </div>
-          </div>
-
-          <div className="form-field">
-            <label className="form-label" htmlFor="enroll-site">
-              Site
-            </label>
-            <input
-              id="enroll-site"
-              className="form-input"
-              value={site}
-              onChange={(e) => setSite(e.target.value)}
-              placeholder="e.g. Surabaya-Branch (optional)"
-              autoComplete="off"
-              disabled={pending}
-            />
           </div>
 
           {error && (
@@ -208,9 +333,9 @@ export const EnrollTokenModal: React.FC<EnrollTokenModalProps> = ({
           )}
 
           <p className="form-hint" style={{ marginTop: '1rem' }}>
-            The token is valid until the expiry the server sets, then it stops working on its
-            own. Run the agent with it once — the agent exchanges it for a persistent secret
-            and the token is spent.
+            {isMultiUse
+              ? 'This reusable token can enroll multiple endpoints. Each connecting device automatically creates its own independent identity and unique cryptographic secret.'
+              : 'This single-use token will be consumed immediately upon the first device enrollment.'}
           </p>
         </>
       ) : (
@@ -225,7 +350,24 @@ export const EnrollTokenModal: React.FC<EnrollTokenModalProps> = ({
           </div>
 
           <div className="form-field" style={{ marginTop: '1rem' }}>
-            <span className="form-label">Enrollment Token</span>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.25rem' }}>
+              <span className="form-label" style={{ margin: 0 }}>Enrollment Token</span>
+              <span
+                style={{
+                  fontSize: '0.6875rem',
+                  fontWeight: 600,
+                  padding: '0.125rem 0.5rem',
+                  borderRadius: '9999px',
+                  background: issued.is_multi_use ? 'rgba(59, 130, 246, 0.15)' : 'rgba(16, 185, 129, 0.15)',
+                  color: issued.is_multi_use ? 'var(--primary, #3b82f6)' : '#10b981',
+                  border: issued.is_multi_use ? '1px solid rgba(59, 130, 246, 0.3)' : '1px solid rgba(16, 185, 129, 0.3)',
+                }}
+              >
+                {issued.is_multi_use
+                  ? `Multi-Device (${issued.max_uses === 0 ? 'Unlimited' : `Max ${issued.max_uses}`})`
+                  : 'Single Device'}
+              </span>
+            </div>
             <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'stretch' }}>
               <code
                 style={{

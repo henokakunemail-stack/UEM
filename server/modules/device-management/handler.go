@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -149,15 +150,23 @@ func (h *Handler) getDevice(w http.ResponseWriter, r *http.Request) {
 }
 
 type createEnrollTokenReq struct {
-	Hostname string `json:"hostname"`
-	OSName   string `json:"os_name"`
-	Site     string `json:"site"`
+	Hostname        string `json:"hostname"`
+	OSName          string `json:"os_name"`
+	Site            string `json:"site"`
+	ExpiresInHours  *int   `json:"expires_in_hours,omitempty"`
+	DurationSeconds *int64 `json:"duration_seconds,omitempty"`
+	MaxUses         *int   `json:"max_uses,omitempty"`
+	IsMultiUse      bool   `json:"is_multi_use,omitempty"`
+	Name            string `json:"name,omitempty"`
 }
 
 type createEnrollTokenResp struct {
-	DeviceID        string    `json:"device_id"`
+	DeviceID        string    `json:"device_id,omitempty"`
+	TokenID         string    `json:"token_id,omitempty"`
 	EnrollmentToken string    `json:"enrollment_token"`
 	ExpiresAt       time.Time `json:"expires_at"`
+	MaxUses         int       `json:"max_uses"`
+	IsMultiUse      bool      `json:"is_multi_use"`
 }
 
 func (h *Handler) issueEnrollmentToken() (plaintext, hash string, expiresAt time.Time) {
@@ -207,14 +216,67 @@ func (h *Handler) rotateDeviceSecret(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// createEnrollToken pre-registers a device and returns a one-time enrollment token
-// the agent exchanges for a persistent secret. Only the token hash is stored.
+// createEnrollToken pre-registers a device or issues a shared multi-use token.
+// The agent exchanges the token for a persistent secret. Only the token hash is stored.
 func (h *Handler) createEnrollToken(w http.ResponseWriter, r *http.Request) {
 	var req createEnrollTokenReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
+
+	plain := GenerateToken()
+	now := time.Now().UTC()
+	tokenHash := HashToken(plain)
+
+	// Configurable expiration duration
+	ttl := h.ttl
+	if req.ExpiresInHours != nil && *req.ExpiresInHours > 0 {
+		ttl = time.Duration(*req.ExpiresInHours) * time.Hour
+	} else if req.DurationSeconds != nil && *req.DurationSeconds > 0 {
+		ttl = time.Duration(*req.DurationSeconds) * time.Second
+	}
+	expiresAt := now.Add(ttl)
+
+	var site *string
+	if req.Site != "" {
+		site = &req.Site
+	}
+
+	actor := auth.UserIDFromContext(r.Context())
+
+	// Multi-Device / Reusable Shared Token
+	maxUses := 1
+	if req.MaxUses != nil {
+		maxUses = *req.MaxUses
+	}
+	if req.IsMultiUse || (req.MaxUses != nil && *req.MaxUses != 1) {
+		tokenID := NewID()
+		tokenName := req.Name
+		if tokenName == "" {
+			tokenName = req.Hostname
+			if tokenName == "" {
+				tokenName = "Batch Enrollment"
+			}
+		}
+		if err := h.repo.CreateSharedEnrollmentToken(r.Context(), tokenID, tokenHash, tokenName, site, expiresAt, maxUses, actor); err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		_ = audit.Log(r.Context(), h.db, "user", actor, "device.enroll_token_created_shared", tokenID, map[string]string{
+			"name": tokenName, "max_uses": strconv.Itoa(maxUses), "expires_at": expiresAt.Format(time.RFC3339),
+		})
+		writeJSON(w, http.StatusCreated, createEnrollTokenResp{
+			TokenID:         tokenID,
+			EnrollmentToken: plain,
+			ExpiresAt:       expiresAt,
+			MaxUses:         maxUses,
+			IsMultiUse:      true,
+		})
+		return
+	}
+
+	// Single Device Pre-Registration (Legacy / 1-to-1)
 	if req.Hostname == "" {
 		req.Hostname = "Pending Enrollment"
 	}
@@ -228,14 +290,6 @@ func (h *Handler) createEnrollToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	plain := GenerateToken()
-	now := time.Now().UTC()
-	tokenHash := HashToken(plain) // consumed to NULL once the agent enrolls
-	expiresAt := now.Add(h.ttl)
-	var site *string
-	if req.Site != "" {
-		site = &req.Site
-	}
 	dev := Device{
 		ID:                       NewID(),
 		Hostname:                 req.Hostname,
@@ -253,7 +307,6 @@ func (h *Handler) createEnrollToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	actor := auth.UserIDFromContext(r.Context())
 	_ = audit.Log(r.Context(), h.db, "user", actor, "device.enroll_token_created", dev.ID, map[string]string{
 		"hostname": req.Hostname, "os_name": req.OSName, "site": req.Site,
 	})
@@ -262,6 +315,8 @@ func (h *Handler) createEnrollToken(w http.ResponseWriter, r *http.Request) {
 		DeviceID:        dev.ID,
 		EnrollmentToken: plain,
 		ExpiresAt:       expiresAt,
+		MaxUses:         1,
+		IsMultiUse:      false,
 	})
 }
 

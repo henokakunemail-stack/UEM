@@ -44,6 +44,9 @@ Var LabelToken
 Var TextToken
 Var EnrollToken
 Var DATADIR
+Var UninstallToken
+Var UninstDialog
+Var TextUninstToken
 
 ; --- Interface Settings ---
 !define MUI_ABORTWARNING
@@ -59,6 +62,7 @@ Page custom ServerConfigPage ServerConfigPageLeave
 
 ; --- Uninstaller Pages ---
 !insertmacro MUI_UNPAGE_CONFIRM
+UninstPage custom un.ConfirmTokenPage un.ConfirmTokenPageLeave
 !insertmacro MUI_UNPAGE_INSTFILES
 !insertmacro MUI_UNPAGE_FINISH
 
@@ -191,9 +195,86 @@ Section "Install Agent" SecInstall
     DetailPrint "Endpoint Agent installed and configured successfully."
 SectionEnd
 
+; --- Uninstaller Custom Functions ---
+Function un.onInit
+    !insertmacro ResolvePaths
+    ${GetParameters} $R0
+    ${GetOptions} "$R0" "/TOKEN=" $UninstallToken
+FunctionEnd
+
+Function un.ConfirmTokenPage
+    !insertmacro ResolvePaths
+
+    ; Unenrolled agents do not require an authorization token
+    ${IfNot} ${FileExists} "$DATADIR\creds.json"
+        Abort
+    ${EndIf}
+
+    !insertmacro MUI_HEADER_TEXT "Uninstall Verification" "Administrator authorization token required for uninstallation."
+
+    nsDialogs::Create 1018
+    Pop $UninstDialog
+    ${If} $UninstDialog == error
+        Abort
+    ${EndIf}
+
+    ${NSD_CreateLabel} 0 0 100% 20u "This endpoint is managed by central policy. An Administrator Uninstall Verification Token is required to authorize removal:"
+    Pop $0
+
+    ${NSD_CreateLabel} 0 24u 100% 12u "Verification Token (issued from Management Console -> Devices):"
+    Pop $0
+
+    ${NSD_CreateText} 0 38u 100% 14u "$UninstallToken"
+    Pop $TextUninstToken
+
+    ${NSD_CreateLabel} 0 58u 100% 28u "Note: Request a token from your IT administrator before continuing. Uninstallation will be rejected if the token is missing, expired, or invalid."
+    Pop $0
+
+    nsDialogs::Show
+FunctionEnd
+
+Function un.ConfirmTokenPageLeave
+    !insertmacro ResolvePaths
+
+    ${If} ${FileExists} "$DATADIR\creds.json"
+        ${NSD_GetText} $TextUninstToken $UninstallToken
+
+        ${If} $UninstallToken == ""
+            MessageBox MB_ICONEXCLAMATION|MB_OK "An administrator verification token is required to uninstall this managed agent.$\n$\nPlease request an uninstallation token from your IT administrator."
+            Abort
+        ${EndIf}
+
+        DetailPrint "Verifying uninstallation authorization..."
+        nsExec::ExecToStack '"$INSTDIR\endpoint-agent.exe" -creds "$DATADIR\creds.json" -verify-uninstall "$UninstallToken"'
+        Pop $0 ; Exit code
+        Pop $1 ; Output
+
+        ${If} $0 != 0
+            MessageBox MB_ICONSTOP|MB_OK "Uninstallation Rejected: Invalid or expired verification token.$\n$\n$1$\n$\nPlease contact your administrator."
+            Abort
+        ${EndIf}
+    ${EndIf}
+FunctionEnd
+
 ; --- Uninstaller Section ---
 Section "Uninstall"
     !insertmacro ResolvePaths
+
+    ; In silent mode or direct invocation, enforce token verification if enrolled
+    ${If} ${FileExists} "$DATADIR\creds.json"
+    ${AndIf} ${FileExists} "$INSTDIR\endpoint-agent.exe"
+        ${If} $UninstallToken == ""
+            DetailPrint "ERROR: Managed device requires an administrator uninstall token (/TOKEN=<token>)."
+            Abort
+        ${EndIf}
+        nsExec::ExecToStack '"$INSTDIR\endpoint-agent.exe" -creds "$DATADIR\creds.json" -verify-uninstall "$UninstallToken"'
+        Pop $0
+        Pop $1
+        ${If} $0 != 0
+            DetailPrint "ERROR: Invalid or expired verification token: $1"
+            Abort
+        ${EndIf}
+    ${EndIf}
 
     ; Move working directory out of install tree
     SetOutPath "$TEMP"
@@ -206,8 +287,18 @@ Section "Uninstall"
     Sleep 1000
 
     DetailPrint "Removing Windows Service '${SERVICE_NAME}'..."
-    nsExec::ExecToLog '"$INSTDIR\endpoint-agent.exe" -service uninstall'
+    ${If} $UninstallToken != ""
+        nsExec::ExecToLog '"$INSTDIR\endpoint-agent.exe" -creds "$DATADIR\creds.json" -service uninstall -uninstall-token "$UninstallToken"'
+    ${Else}
+        nsExec::ExecToLog '"$INSTDIR\endpoint-agent.exe" -service uninstall'
+    ${EndIf}
     Pop $0
+    ${If} $0 != 0
+        ${If} ${FileExists} "$DATADIR\creds.json"
+            MessageBox MB_ICONSTOP|MB_OK "Service uninstallation was rejected (exit code $0). Aborting uninstallation."
+            Abort
+        ${EndIf}
+    ${EndIf}
 
     DetailPrint "Cleaning up Network Filter firewall rules..."
     nsExec::ExecToLog 'netsh advfirewall firewall delete rule group="EndpointManager-Filter"'

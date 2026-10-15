@@ -359,6 +359,7 @@ func (r *activeRelay) ForwardAgentFrame(msgType int, data []byte) error {
 
 	r.operatorWriteMu.Lock()
 	defer r.operatorWriteMu.Unlock()
+	_ = ws.SetWriteDeadline(time.Now().Add(2500 * time.Millisecond))
 	return ws.WriteMessage(msgType, data)
 }
 

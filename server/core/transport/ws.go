@@ -321,13 +321,18 @@ func (h *WSHandler) readLoop(ctx context.Context, c *Conn, ws *websocket.Conn, s
 		_ = ws.SetReadDeadline(time.Now().Add(h.readDeadline()))
 		return nil
 	})
+	var lastCredCheck time.Time
 	for {
 		_, data, err := ws.ReadMessage()
 		if err != nil {
 			return // client closed or error
 		}
-		if !h.credentialIsLive(ctx, c.DeviceID, secretHash) {
-			return // revoked after upgrade; process no more frames
+		now := time.Now()
+		if lastCredCheck.IsZero() || now.Sub(lastCredCheck) >= 15*time.Second {
+			if !h.credentialIsLive(ctx, c.DeviceID, secretHash) {
+				return // revoked after upgrade; process no more frames
+			}
+			lastCredCheck = now
 		}
 		var env Envelope
 		if err := json.Unmarshal(data, &env); err != nil {

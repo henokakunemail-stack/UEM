@@ -14,6 +14,7 @@
 [CmdletBinding()]
 param(
     [switch]$PurgeData = $false,
+    [string]$UninstallToken = "",
     [string]$InstallBin = "/usr/local/bin/endpoint-agent",
     [string]$CredsPath = "/etc/endpoint-agent/creds.json"
 )
@@ -31,11 +32,36 @@ Write-Host "==========================================================" -Foregro
 Write-Host "   Enterprise Endpoint Management Agent - Linux Uninstaller (PowerShell)" -ForegroundColor Cyan
 Write-Host "==========================================================" -ForegroundColor Cyan
 
+# 1b. Dual-verification check: prevent unauthorized removal of enrolled endpoints
+if ((Test-Path $CredsPath) -and (Test-Path $InstallBin)) {
+    if ([string]::IsNullOrWhiteSpace($UninstallToken)) {
+        if ([Environment]::UserInteractive) {
+            $UninstallToken = Read-Host "Enter Administrator Uninstall Verification Token"
+        }
+    }
+    if ([string]::IsNullOrWhiteSpace($UninstallToken)) {
+        Write-Error "[-] ERROR: Managed device requires an admin-issued uninstall token."
+        exit 1
+    }
+
+    Write-Host "[*] Verifying uninstallation authorization with central server..." -ForegroundColor Yellow
+    & $InstallBin -creds $CredsPath -verify-uninstall $UninstallToken
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "[-] ERROR: Verification failed. Invalid or expired uninstallation token."
+        exit 1
+    }
+    Write-Host "[+] Uninstallation authorized." -ForegroundColor Green
+}
+
 # 2. Stop and disable systemd service
 Write-Host "[*] Stopping and disabling systemd service 'endpoint-agent'..." -ForegroundColor Yellow
 if (Test-Path $InstallBin) {
     & $InstallBin -service stop 2>$null
-    & $InstallBin -service uninstall 2>$null
+    if (-not [string]::IsNullOrWhiteSpace($UninstallToken)) {
+        & $InstallBin -creds $CredsPath -service uninstall -uninstall-token $UninstallToken 2>$null
+    } else {
+        & $InstallBin -service uninstall 2>$null
+    }
 }
 systemctl stop endpoint-agent 2>$null
 systemctl disable endpoint-agent 2>$null

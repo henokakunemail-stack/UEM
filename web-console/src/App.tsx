@@ -113,7 +113,7 @@ function ConsoleRoot() {
           <Route path="/updates/:tab?" element={<SubtabPage section="updates" />} />
           <Route path="/patches" element={<PatchesPage />} />
           <Route path="/maintenance" element={<MaintenancePage />} />
-          <Route path="/remotecontrol" element={<RemoteControlPage onOpenSession={setRcDevice} />} />
+          <Route path="/remotecontrol" element={<RemoteControlPage onOpenSession={setRcDevice} onOpenTerminal={(device, shell) => { setTermShell(shell); setTermDevice(device) }} />} />
           <Route path="/filter" element={<NetworkFilterPage />} />
           <Route path="/system-policy" element={<SystemPolicyPage />} />
           <Route path="/alerts" element={<AlertsPage />} />

@@ -253,7 +253,14 @@ Section "Install Server" SecInstall
     ${EndIf}
 
     DetailPrint "Configuring Windows Firewall inbound rule..."
-    nsExec::ExecToLog 'netsh advfirewall firewall add rule name="Endpoint Management Server" dir=in action=allow protocol=TCP localport=8443 profile=any'
+    ; Extract port from the configured listen address (e.g. ":8443" or "0.0.0.0:9443")
+    ; $0 still holds $TextAddr. Default to 8443 if no colon found.
+    ${WordFind} "$0" ":" "-1"
+    Pop $3
+    ${If} $3 == ""
+        StrCpy $3 "8443"
+    ${EndIf}
+    nsExec::ExecToLog 'netsh advfirewall firewall add rule name="Endpoint Management Server" dir=in action=allow protocol=TCP localport=$3 profile=any'
 
     WriteRegStr HKLM "${SERVICE_KEY}" "InstallDir" "$INSTDIR"
     WriteRegStr HKLM "${SERVICE_KEY}" "EnvFile" "$ENVFILE"
@@ -313,11 +320,23 @@ Section "Uninstall"
     DeleteRegKey HKLM "${UNINSTALL_KEY}"
     DeleteRegKey HKLM "${SERVICE_KEY}"
 
+    ; Ask operator whether to purge or preserve the database and backups
+    MessageBox MB_ICONQUESTION|MB_YESNO|MB_DEFBUTTON2 \
+        "Do you want to permanently delete the server database and all backups ($0\data)?$\n$\nChoose 'No' to preserve your data for reinstall or upgrade." \
+        IDYES PurgeData
+    StrCpy $2 "0" ; Keep database
+    Goto AfterPurgeDecision
+PurgeData:
+    StrCpy $2 "1" ; Purge database
+AfterPurgeDecision:
+
     ; These are unlocked by now, so taking them here keeps the batch's work to
     ; whatever the graceful shutdown was still holding. uninstall.exe is absent
     ; on purpose: it is this process.
     Delete "$0\endpoint-server.exe"
-    RMDir /r "$0\data"
+    ${If} $2 == "1"
+        RMDir /r "$0\data"
+    ${EndIf}
 
     ; The install tree cannot be removed from here. Everything under it is still
     ; held open at this point: the server process is mid-way through a graceful
@@ -344,20 +363,39 @@ Section "Uninstall"
     Call un.BatLine
     StrCpy $BatchLineText "set /a n=0"
     Call un.BatLine
-    StrCpy $BatchLineText ":try"
-    Call un.BatLine
-    StrCpy $BatchLineText 'rd /s /q "$0" >nul 2>nul'
-    Call un.BatLine
-    StrCpy $BatchLineText 'if not exist "$0" goto data'
-    Call un.BatLine
-    StrCpy $BatchLineText "set /a n+=1"
-    Call un.BatLine
-    StrCpy $BatchLineText "if !n! geq 60 goto giveup"
-    Call un.BatLine
-    StrCpy $BatchLineText "ping -n 2 127.0.0.1 >nul"
-    Call un.BatLine
-    StrCpy $BatchLineText "goto try"
-    Call un.BatLine
+    ${If} $2 == "1"
+        StrCpy $BatchLineText ":try"
+        Call un.BatLine
+        StrCpy $BatchLineText 'rd /s /q "$0" >nul 2>nul'
+        Call un.BatLine
+        StrCpy $BatchLineText 'if not exist "$0" goto data'
+        Call un.BatLine
+        StrCpy $BatchLineText "set /a n+=1"
+        Call un.BatLine
+        StrCpy $BatchLineText "if !n! geq 60 goto giveup"
+        Call un.BatLine
+        StrCpy $BatchLineText "ping -n 2 127.0.0.1 >nul"
+        Call un.BatLine
+        StrCpy $BatchLineText "goto try"
+        Call un.BatLine
+    ${Else}
+        StrCpy $BatchLineText ":tryuninst"
+        Call un.BatLine
+        StrCpy $BatchLineText 'del /f /q "$0\uninstall.exe" >nul 2>nul'
+        Call un.BatLine
+        StrCpy $BatchLineText 'del /f /q "$0\endpoint-server.exe" >nul 2>nul'
+        Call un.BatLine
+        StrCpy $BatchLineText 'if not exist "$0\uninstall.exe" goto data'
+        Call un.BatLine
+        StrCpy $BatchLineText "set /a n+=1"
+        Call un.BatLine
+        StrCpy $BatchLineText "if !n! geq 60 goto giveup"
+        Call un.BatLine
+        StrCpy $BatchLineText "ping -n 2 127.0.0.1 >nul"
+        Call un.BatLine
+        StrCpy $BatchLineText "goto tryuninst"
+        Call un.BatLine
+    ${EndIf}
     StrCpy $BatchLineText ":giveup"
     Call un.BatLine
     StrCpy $BatchLineText ":data"

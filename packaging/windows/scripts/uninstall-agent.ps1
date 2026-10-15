@@ -2,9 +2,11 @@
 .SYNOPSIS
     Uninstalls Endpoint Management Agent Windows Service, binaries, and cleanup.
 .DESCRIPTION
-    Automated script for headless removal of Endpoint Agent via PowerShell.
+    Automated script for removal of Endpoint Agent via PowerShell with 2-step verification.
 .PARAMETER PurgeData
     Switch to permanently delete credentials (creds.json) and logs from ProgramData.
+.PARAMETER UninstallToken
+    Administrator verification token required to uninstall managed endpoints.
 .PARAMETER InstallDir
     Target directory for agent binary. Default is C:\Program Files\EndpointAgent.
 .PARAMETER DataDir
@@ -13,6 +15,7 @@
 [CmdletBinding()]
 param(
     [switch]$PurgeData = $false,
+    [string]$UninstallToken = "",
     [string]$InstallDir = "$env:ProgramFiles\EndpointAgent",
     [string]$DataDir = "$env:ProgramData\EndpointAgent"
 )
@@ -25,6 +28,7 @@ if (-not $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Adm
     Write-Warning "This script requires Administrator privileges. Attempting elevation..."
     $argList = "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`""
     if ($PurgeData) { $argList += " -PurgeData" }
+    if (-not [string]::IsNullOrWhiteSpace($UninstallToken)) { $argList += " -UninstallToken `"$UninstallToken`"" }
     Start-Process powershell.exe -ArgumentList $argList -Verb RunAs
     exit 0
 }
@@ -33,14 +37,41 @@ Write-Host "==========================================================" -Foregro
 Write-Host "   Enterprise Endpoint Management Agent - PowerShell Uninstaller" -ForegroundColor Cyan
 Write-Host "==========================================================" -ForegroundColor Cyan
 
+$destExe = Join-Path $InstallDir "endpoint-agent.exe"
+$credsFile = Join-Path $DataDir "creds.json"
+
+# 1b. Dual-verification check: prevent unauthorized removal of enrolled endpoints
+if ((Test-Path $credsFile) -and (Test-Path $destExe)) {
+    if ([string]::IsNullOrWhiteSpace($UninstallToken)) {
+        if ([Environment]::UserInteractive) {
+            $UninstallToken = Read-Host "Enter Administrator Uninstall Verification Token"
+        }
+    }
+    if ([string]::IsNullOrWhiteSpace($UninstallToken)) {
+        Write-Error "[-] ERROR: This managed endpoint requires an Administrator Uninstall Verification Token. Obtain a token from the Management Console."
+        exit 1
+    }
+
+    Write-Host "[*] Verifying uninstallation authorization with central server..." -ForegroundColor Yellow
+    & $destExe -creds $credsFile -verify-uninstall $UninstallToken
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "[-] ERROR: Verification failed. Invalid or expired uninstallation token."
+        exit 1
+    }
+    Write-Host "[+] Uninstallation authorized." -ForegroundColor Green
+}
+
 # 2. Stop and remove Windows Service
 Write-Host "[*] Stopping Windows Service 'endpoint-agent'..." -ForegroundColor Yellow
-$destExe = Join-Path $InstallDir "endpoint-agent.exe"
 if (Test-Path $destExe) {
     & $destExe -service stop | Out-Null
     Start-Sleep -Seconds 1
     Write-Host "[*] Removing Windows Service 'endpoint-agent'..." -ForegroundColor Yellow
-    & $destExe -service uninstall | Out-Null
+    if (-not [string]::IsNullOrWhiteSpace($UninstallToken)) {
+        & $destExe -creds $credsFile -service uninstall -uninstall-token $UninstallToken | Out-Null
+    } else {
+        & $destExe -service uninstall | Out-Null
+    }
 } else {
     & sc.exe stop endpoint-agent | Out-Null
     Start-Sleep -Seconds 1

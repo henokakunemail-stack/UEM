@@ -354,3 +354,84 @@ func (r *Repository) VerifyUninstallToken(ctx context.Context, deviceID, plainte
 	}
 	return count > 0, nil
 }
+
+// EnrollmentTokenRecord represents a shared/reusable enrollment token.
+type EnrollmentTokenRecord struct {
+	ID        string     `db:"id"`
+	TokenHash string     `db:"token_hash"`
+	Name      string     `db:"name"`
+	Site      *string    `db:"site"`
+	CreatedAt time.Time  `db:"created_at"`
+	ExpiresAt time.Time  `db:"expires_at"`
+	MaxUses   int        `db:"max_uses"` // 0 = unlimited
+	UseCount  int        `db:"use_count"`
+	CreatedBy string     `db:"created_by"`
+	RevokedAt *time.Time `db:"revoked_at"`
+}
+
+func (r *Repository) CreateSharedEnrollmentToken(ctx context.Context, id, tokenHash, name string, site *string, expiresAt time.Time, maxUses int, createdBy string) error {
+	now := time.Now().UTC()
+	q := `INSERT INTO enrollment_tokens (id, token_hash, name, site, created_at, expires_at, max_uses, use_count, created_by)
+	      VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)`
+	_, err := r.db.ExecContext(ctx, r.db.Rebind(q), id, tokenHash, name, site, now, expiresAt, maxUses, createdBy)
+	if err != nil {
+		return fmt.Errorf("create shared enrollment token: %w", err)
+	}
+	return nil
+}
+
+func (r *Repository) FindValidSharedEnrollmentToken(ctx context.Context, tokenHash string) (*EnrollmentTokenRecord, error) {
+	var t EnrollmentTokenRecord
+	now := time.Now().UTC()
+	q := `SELECT id, token_hash, name, site, created_at, expires_at, max_uses, use_count, created_by, revoked_at
+	      FROM enrollment_tokens
+	      WHERE token_hash = ? AND revoked_at IS NULL AND expires_at > ?
+	        AND (max_uses = 0 OR use_count < max_uses)`
+	err := r.db.GetContext(ctx, &t, r.db.Rebind(q), tokenHash, now)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("find shared enrollment token: %w", err)
+	}
+	return &t, nil
+}
+
+func (r *Repository) ConsumeSharedEnrollmentTokenAndCreateDevice(ctx context.Context, tokenHash string, dev Device) error {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	now := time.Now().UTC()
+	// Atomically increment use_count if within bounds
+	updateQ := `UPDATE enrollment_tokens
+	            SET use_count = use_count + 1
+	            WHERE token_hash = ? AND revoked_at IS NULL AND expires_at > ?
+	              AND (max_uses = 0 OR use_count < max_uses)`
+	res, err := tx.ExecContext(ctx, tx.Rebind(updateQ), tokenHash, now)
+	if err != nil {
+		return fmt.Errorf("update token use count: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrNotFound
+	}
+
+	// Insert new device
+	insertQ := `INSERT INTO devices (id, hostname, os_name, os_version, agent_version, status,
+	                                 last_seen_at, enrolled_at, enrollment_token_hash,
+	                                 enrollment_token_expires_at,
+	                                 device_secret_hash, site, created_at, updated_at)
+	            VALUES (:id, :hostname, :os_name, :os_version, :agent_version, :status,
+	                    :last_seen_at, :enrolled_at, :enrollment_token_hash,
+	                    :enrollment_token_expires_at,
+	                    :device_secret_hash, :site, :created_at, :updated_at)`
+	if _, err := tx.NamedExecContext(ctx, insertQ, dev); err != nil {
+		return fmt.Errorf("insert enrolled device: %w", err)
+	}
+
+	return tx.Commit()
+}
+

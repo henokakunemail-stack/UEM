@@ -67,3 +67,38 @@ func TestScheduler_ImmediateAndCancel(t *testing.T) {
 		t.Fatalf("expected exactly 1 immediate collection, got %d", rep.count.Load())
 	}
 }
+
+type dynamicCollector struct {
+	rep Report
+}
+
+func (d *dynamicCollector) Collect() (Report, error) {
+	return d.rep, nil
+}
+
+func TestScheduler_HashDiffing(t *testing.T) {
+	col := &dynamicCollector{rep: Report{Hardware: Hardware{RAMTotalBytes: 2048}}}
+	rep := &mockReporter{}
+	s := NewScheduler(col, rep, "dev-diff-test", 1*time.Hour, 10*time.Minute)
+
+	ctx := context.Background()
+
+	// 1. Initial collection must transmit
+	s.collectOnce(ctx)
+	if rep.count.Load() != 1 {
+		t.Fatalf("expected 1st report sent, got %d", rep.count.Load())
+	}
+
+	// 2. Unchanged data must be suppressed
+	s.collectOnce(ctx)
+	if rep.count.Load() != 1 {
+		t.Fatalf("expected 2nd identical report suppressed, got %d", rep.count.Load())
+	}
+
+	// 3. Changed data must transmit
+	col.rep.Hardware.RAMTotalBytes = 4096
+	s.collectOnce(ctx)
+	if rep.count.Load() != 2 {
+		t.Fatalf("expected 3rd modified report sent, got %d", rep.count.Load())
+	}
+}

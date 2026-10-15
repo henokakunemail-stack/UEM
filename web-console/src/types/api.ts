@@ -32,9 +32,12 @@ export interface DeviceDTO {
 // after the agent exchanges it the row's hash is nulled. Re-closing this modal
 // therefore loses it for good, and a lost token means minting another one.
 export interface EnrollmentTokenDTO {
-  device_id: string
+  device_id?: string
+  token_id?: string
   enrollment_token: string
   expires_at: string
+  max_uses?: number
+  is_multi_use?: boolean
 }
 
 export interface DeviceListResponse {  devices: DeviceDTO[]

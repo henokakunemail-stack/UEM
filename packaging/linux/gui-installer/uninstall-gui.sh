@@ -12,22 +12,25 @@ TITLE="Endpoint Management Agent Uninstaller"
 
 ASSUME_YES=false
 QUIET=false
+UNINSTALL_TOKEN="${UNINSTALL_TOKEN:-}"
 show_help() {
     cat <<EOF
 Usage: $(basename "$0") [OPTIONS]
 
 Options:
-  -y, --yes     Skip the confirmation prompt and uninstall immediately.
-                Required for scripted/remote use, where there is no one to
-                answer a dialog.
-  -q, --quiet   Also skip the final "uninstalled" dialog. Implies --yes, since
-                the confirmation is a dialog too.
-  -h, --help    Show this help and exit.
+  -y, --yes          Skip the confirmation prompt and uninstall immediately.
+                     Required for scripted/remote use, where there is no one to
+                     answer a dialog.
+  -t, --token TOKEN  Administrator Uninstall Verification Token required for enrolled endpoints.
+  -q, --quiet        Also skip the final "uninstalled" dialog. Implies --yes, since
+                     the confirmation is a dialog too.
+  -h, --help         Show this help and exit.
 EOF
 }
 while [ "$#" -gt 0 ]; do
     case "$1" in
         -y|--yes)   ASSUME_YES=true ;;
+        -t|--token) UNINSTALL_TOKEN="$2"; shift ;;
         -q|--quiet) QUIET=true; ASSUME_YES=true ;;
         -h|--help)  show_help; exit 0 ;;
         *) echo "Unknown option: $1" >&2; echo >&2; show_help >&2; exit 2 ;;
@@ -77,6 +80,47 @@ else
     if [[ ! "$ANS" =~ ^[Yy]$ ]]; then
         echo "Uninstallation canceled."
         exit 0
+    fi
+fi
+
+# 2b. Dual-verification check: prevent unauthorized removal of enrolled endpoints
+CREDS_FILE="/etc/endpoint-agent/creds.json"
+INSTALL_BIN="/usr/local/bin/endpoint-agent"
+if [ -f "$CREDS_FILE" ] && [ -x "$INSTALL_BIN" ]; then
+    if [ -z "$UNINSTALL_TOKEN" ]; then
+        if [ "$USE_TOOL" = "zenity" ]; then
+            UNINSTALL_TOKEN=$(zenity --entry --title="$TITLE" --width=450 --text="This managed endpoint requires an Administrator Uninstall Token.\n\nPlease enter the verification token generated from your Management Console:" || true)
+        elif [ "$USE_TOOL" = "kdialog" ]; then
+            UNINSTALL_TOKEN=$(kdialog --title "$TITLE" --inputbox "Enter Administrator Uninstall Verification Token:" || true)
+        else
+            if [ -t 0 ]; then
+                read -r -p "Enter Administrator Uninstall Verification Token: " UNINSTALL_TOKEN || true
+            fi
+        fi
+    fi
+
+    if [ -z "$UNINSTALL_TOKEN" ]; then
+        FAIL_MSG="Uninstallation aborted: Administrator Uninstall Token is required."
+        if [ "$USE_TOOL" = "zenity" ]; then
+            zenity --error --title="$TITLE" --text="$FAIL_MSG" || true
+        elif [ "$USE_TOOL" = "kdialog" ]; then
+            kdialog --title "$TITLE" --error "$FAIL_MSG" || true
+        else
+            echo "[-] ERROR: $FAIL_MSG" >&2
+        fi
+        exit 1
+    fi
+
+    if ! "$INSTALL_BIN" -creds "$CREDS_FILE" -verify-uninstall "$UNINSTALL_TOKEN"; then
+        FAIL_MSG="Verification failed: Invalid or expired uninstallation token.\n\nPlease contact your administrator to generate a token from the Management Console."
+        if [ "$USE_TOOL" = "zenity" ]; then
+            zenity --error --title="$TITLE" --width=450 --text="$FAIL_MSG" || true
+        elif [ "$USE_TOOL" = "kdialog" ]; then
+            kdialog --title "$TITLE" --error "$FAIL_MSG" || true
+        else
+            echo "[-] ERROR: Invalid or expired uninstallation token." >&2
+        fi
+        exit 1
     fi
 fi
 
