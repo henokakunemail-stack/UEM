@@ -40,7 +40,7 @@ func TestUninstallToken_Lifecycle(t *testing.T) {
 		t.Errorf("expected wrong token to be invalid")
 	}
 
-	// 4. Verify and consume (agent uninstaller check)
+	// 4. Verify and consume (agent uninstaller check - step 1: GUI page)
 	consumed, err := repo.VerifyAndConsumeUninstallToken(ctx, "dev-uninst-1", plain)
 	if err != nil {
 		t.Fatalf("verify and consume: %v", err)
@@ -49,22 +49,56 @@ func TestUninstallToken_Lifecycle(t *testing.T) {
 		t.Errorf("expected token to be successfully consumed")
 	}
 
-	// 5. Replay attack: once consumed, token cannot be reused
-	replayed, err := repo.VerifyAndConsumeUninstallToken(ctx, "dev-uninst-1", plain)
+	// 5. Subsequent verify calls within grace period succeed (step 2: Section Uninstall & step 3: service uninstall)
+	consumedStep2, err := repo.VerifyAndConsumeUninstallToken(ctx, "dev-uninst-1", plain)
 	if err != nil {
-		t.Fatalf("replayed token check: %v", err)
+		t.Fatalf("replayed token check in grace period: %v", err)
 	}
-	if replayed {
-		t.Errorf("expected consumed token to be rejected on replay")
+	if !consumedStep2 {
+		t.Errorf("expected token to remain valid within uninstallation grace period")
+	}
+
+	// Read-only check within grace period returns valid
+	validInGrace, err := repo.VerifyUninstallToken(ctx, "dev-uninst-1", plain)
+	if err != nil {
+		t.Fatalf("check in grace period: %v", err)
+	}
+	if !validInGrace {
+		t.Errorf("expected token in grace period to show as valid")
+	}
+
+	// 6. Simulate grace window expiration (used_at older than 15 minutes)
+	_, err = d.Exec(`UPDATE device_uninstall_tokens SET used_at = ? WHERE device_id = ?`,
+		time.Now().UTC().Add(-16*time.Minute), "dev-uninst-1")
+	if err != nil {
+		t.Fatalf("simulate grace expiry: %v", err)
+	}
+
+	// 7. Token must be rejected after grace window has elapsed (replay protection)
+	expiredGrace, err := repo.VerifyAndConsumeUninstallToken(ctx, "dev-uninst-1", plain)
+	if err != nil {
+		t.Fatalf("check after grace period: %v", err)
+	}
+	if expiredGrace {
+		t.Errorf("expected token after grace period to be rejected")
 	}
 
 	// Console check also shows invalid now
-	validAfterUse, err := repo.VerifyUninstallToken(ctx, "dev-uninst-1", plain)
+	validAfterGrace, err := repo.VerifyUninstallToken(ctx, "dev-uninst-1", plain)
 	if err != nil {
-		t.Fatalf("check after use: %v", err)
+		t.Fatalf("check after grace: %v", err)
 	}
-	if validAfterUse {
-		t.Errorf("expected used token to show as invalid")
+	if validAfterGrace {
+		t.Errorf("expected used token after grace period to show as invalid")
+	}
+
+	// 8. Reject check for a different device ID
+	validDiffDev, err := repo.VerifyAndConsumeUninstallToken(ctx, "dev-uninst-diff", plain)
+	if err != nil {
+		t.Fatalf("check different device: %v", err)
+	}
+	if validDiffDev {
+		t.Errorf("expected token to be rejected for different device ID")
 	}
 }
 

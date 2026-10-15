@@ -870,10 +870,10 @@
     "semantic_hash": "0d12172bbca034d73cee2d5465cd6cbd"
   },
   "packaging/linux/scripts/install-server.sh": {
-    "mtime": 1791770359.8027747,
-    "seen": 1791858829.9287457,
-    "ast_hash": "5fb2cd21edd88dea9e3afaadbd35a252",
-    "semantic_hash": "5fb2cd21edd88dea9e3afaadbd35a252"
+    "mtime": 1792043667.1575346,
+    "seen": 1792043670.4450662,
+    "ast_hash": "1881ea045ae6f5cf0eab4794b8268ecb",
+    "semantic_hash": ""
   },
   "packaging/linux/scripts/uninstall-agent.ps1": {
     "mtime": 1792036197.6336217,
@@ -900,10 +900,10 @@
     "semantic_hash": "06d0d3e9a79f49c02d18bed1829257aa"
   },
   "packaging/linux/scripts/update-server.sh": {
-    "mtime": 1791800929.3903463,
-    "seen": 1791858829.928756,
-    "ast_hash": "5b4d2238eac0cdc492bdab9b97e65139",
-    "semantic_hash": "5b4d2238eac0cdc492bdab9b97e65139"
+    "mtime": 1792043667.1585402,
+    "seen": 1792043670.445074,
+    "ast_hash": "871601aadda75c4a10cb94a8503ed7ae",
+    "semantic_hash": ""
   },
   "packaging/windows/build-all.ps1": {
     "mtime": 1791602659.2478907,
@@ -1668,9 +1668,9 @@
     "semantic_hash": "544c16f5f8c5ccc7f91728559c30eae8"
   },
   "server/modules/device-management/repository.go": {
-    "mtime": 1792036199.569566,
-    "seen": 1792040777.1271873,
-    "ast_hash": "2209084cf94943e11093682244a50d35",
+    "mtime": 1792048786.7483184,
+    "seen": 1792049274.8080063,
+    "ast_hash": "888afbc01b166e7dda4e9f0aedb7a1da",
     "semantic_hash": ""
   },
   "server/modules/directory/diff.go": {
@@ -3144,9 +3144,9 @@
     "semantic_hash": ""
   },
   "server/modules/device-management/uninstall_token_test.go": {
-    "mtime": 1792036199.7129357,
-    "seen": 1792040777.1271894,
-    "ast_hash": "ad81246d36df0d3db575e572edfdbd17",
+    "mtime": 1792048834.8588543,
+    "seen": 1792049274.8080091,
+    "ast_hash": "9b15fe74240144b5c2bab1e94f6218f2",
     "semantic_hash": ""
   },
   "web-console/src/components/UninstallTokenModal.tsx": {

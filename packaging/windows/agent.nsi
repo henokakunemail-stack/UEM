@@ -47,6 +47,7 @@ Var DATADIR
 Var UninstallToken
 Var UninstDialog
 Var TextUninstToken
+Var TokenVerified
 
 ; --- Interface Settings ---
 !define MUI_ABORTWARNING
@@ -198,6 +199,7 @@ SectionEnd
 ; --- Uninstaller Custom Functions ---
 Function un.onInit
     !insertmacro ResolvePaths
+    StrCpy $TokenVerified "0"
     ${GetParameters} $R0
     ${GetOptions} "$R0" "/TOKEN=" $UninstallToken
 FunctionEnd
@@ -253,6 +255,7 @@ Function un.ConfirmTokenPageLeave
             MessageBox MB_ICONSTOP|MB_OK "Uninstallation Rejected: Invalid or expired verification token.$\n$\n$1$\n$\nPlease contact your administrator."
             Abort
         ${EndIf}
+        StrCpy $TokenVerified "1"
     ${EndIf}
 FunctionEnd
 
@@ -260,19 +263,22 @@ FunctionEnd
 Section "Uninstall"
     !insertmacro ResolvePaths
 
-    ; In silent mode or direct invocation, enforce token verification if enrolled
+    ; In silent mode or direct invocation, enforce token verification if enrolled and not yet verified
     ${If} ${FileExists} "$DATADIR\creds.json"
     ${AndIf} ${FileExists} "$INSTDIR\endpoint-agent.exe"
-        ${If} $UninstallToken == ""
-            DetailPrint "ERROR: Managed device requires an administrator uninstall token (/TOKEN=<token>)."
-            Abort
-        ${EndIf}
-        nsExec::ExecToStack '"$INSTDIR\endpoint-agent.exe" -creds "$DATADIR\creds.json" -verify-uninstall "$UninstallToken"'
-        Pop $0
-        Pop $1
-        ${If} $0 != 0
-            DetailPrint "ERROR: Invalid or expired verification token: $1"
-            Abort
+        ${If} $TokenVerified != "1"
+            ${If} $UninstallToken == ""
+                DetailPrint "ERROR: Managed device requires an administrator uninstall token (/TOKEN=<token>)."
+                Abort
+            ${EndIf}
+            nsExec::ExecToStack '"$INSTDIR\endpoint-agent.exe" -creds "$DATADIR\creds.json" -verify-uninstall "$UninstallToken"'
+            Pop $0
+            Pop $1
+            ${If} $0 != 0
+                DetailPrint "ERROR: Invalid or expired verification token: $1"
+                Abort
+            ${EndIf}
+            StrCpy $TokenVerified "1"
         ${EndIf}
     ${EndIf}
 
@@ -294,10 +300,11 @@ Section "Uninstall"
     ${EndIf}
     Pop $0
     ${If} $0 != 0
-        ${If} ${FileExists} "$DATADIR\creds.json"
-            MessageBox MB_ICONSTOP|MB_OK "Service uninstallation was rejected (exit code $0). Aborting uninstallation."
-            Abort
-        ${EndIf}
+        DetailPrint "Service uninstall command exited with code $0. Forcing cleanup via sc.exe..."
+        nsExec::ExecToLog 'sc.exe stop "${SERVICE_NAME}"'
+        Pop $1
+        nsExec::ExecToLog 'sc.exe delete "${SERVICE_NAME}"'
+        Pop $1
     ${EndIf}
 
     DetailPrint "Cleaning up Network Filter firewall rules..."

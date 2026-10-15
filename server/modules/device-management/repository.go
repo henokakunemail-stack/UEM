@@ -321,14 +321,25 @@ func (r *Repository) CreateUninstallToken(ctx context.Context, deviceID, tokenHa
 	return nil
 }
 
+// UninstallTokenGracePeriod defines the window after initial token verification
+// during which subsequent uninstaller verification requests (e.g. GUI check,
+// section check, and service removal) from the same device remain authorized.
+const UninstallTokenGracePeriod = 15 * time.Minute
+
 func (r *Repository) VerifyAndConsumeUninstallToken(ctx context.Context, deviceID, plaintextToken string) (bool, error) {
 	tokenHash := HashToken(plaintextToken)
 	now := time.Now().UTC()
-	var tokenID string
-	q := `SELECT id FROM device_uninstall_tokens
-	      WHERE device_id = ? AND token_hash = ? AND used_at IS NULL AND expires_at > ?
+	graceCutoff := now.Add(-UninstallTokenGracePeriod)
+
+	var token struct {
+		ID     string     `db:"id"`
+		UsedAt *time.Time `db:"used_at"`
+	}
+	q := `SELECT id, used_at FROM device_uninstall_tokens
+	      WHERE device_id = ? AND token_hash = ? AND expires_at > ?
+	        AND (used_at IS NULL OR used_at >= ?)
 	      ORDER BY created_at DESC LIMIT 1`
-	err := r.db.GetContext(ctx, &tokenID, r.db.Rebind(q), deviceID, tokenHash, now)
+	err := r.db.GetContext(ctx, &token, r.db.Rebind(q), deviceID, tokenHash, now, graceCutoff)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
@@ -336,19 +347,25 @@ func (r *Repository) VerifyAndConsumeUninstallToken(ctx context.Context, deviceI
 		return false, fmt.Errorf("verify uninstall token: %w", err)
 	}
 
-	// Mark consumed
-	updateQ := `UPDATE device_uninstall_tokens SET used_at = ? WHERE id = ?`
-	_, _ = r.db.ExecContext(ctx, r.db.Rebind(updateQ), now, tokenID)
+	// Mark consumed on initial verification; do not advance timestamp on subsequent checks within grace window
+	if token.UsedAt == nil {
+		updateQ := `UPDATE device_uninstall_tokens SET used_at = ? WHERE id = ? AND used_at IS NULL`
+		if _, err := r.db.ExecContext(ctx, r.db.Rebind(updateQ), now, token.ID); err != nil {
+			return false, fmt.Errorf("mark uninstall token used: %w", err)
+		}
+	}
 	return true, nil
 }
 
 func (r *Repository) VerifyUninstallToken(ctx context.Context, deviceID, plaintextToken string) (bool, error) {
 	tokenHash := HashToken(plaintextToken)
 	now := time.Now().UTC()
+	graceCutoff := now.Add(-UninstallTokenGracePeriod)
 	var count int
 	q := `SELECT COUNT(*) FROM device_uninstall_tokens
-	      WHERE device_id = ? AND token_hash = ? AND used_at IS NULL AND expires_at > ?`
-	err := r.db.GetContext(ctx, &count, r.db.Rebind(q), deviceID, tokenHash, now)
+	      WHERE device_id = ? AND token_hash = ? AND expires_at > ?
+	        AND (used_at IS NULL OR used_at >= ?)`
+	err := r.db.GetContext(ctx, &count, r.db.Rebind(q), deviceID, tokenHash, now, graceCutoff)
 	if err != nil {
 		return false, fmt.Errorf("verify uninstall token check: %w", err)
 	}

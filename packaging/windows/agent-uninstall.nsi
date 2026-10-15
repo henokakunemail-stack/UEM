@@ -19,10 +19,10 @@ RequestExecutionLevel admin
 
 ; --- Version Information ---
 !ifndef VERSION
-  !define VERSION "1.0.0"
+  !define VERSION "1.5.0"
 !endif
 !ifndef VERSION_NUM
-  !define VERSION_NUM "1.0.0.0"
+  !define VERSION_NUM "1.5.0.0"
 !endif
 VIProductVersion "${VERSION_NUM}"
 VIAddVersionKey "ProductName" "Endpoint Management Agent Uninstaller"
@@ -119,7 +119,7 @@ Function ConfirmOptionsPageLeave
             Abort
         ${EndIf}
 
-        nsExec::ExecToStack '"$TARGET_INSTDIR\endpoint-agent.exe" -verify-uninstall "$UninstallToken"'
+        nsExec::ExecToStack '"$TARGET_INSTDIR\endpoint-agent.exe" -creds "$TARGET_DATADIR\creds.json" -verify-uninstall "$UninstallToken"'
         Pop $0 ; Exit code
         Pop $1 ; Output
 
@@ -145,8 +145,19 @@ Section "Remove Agent" SecMain
 
     DetailPrint "Removing Windows Service '${SERVICE_NAME}'..."
     ${If} ${FileExists} "$TARGET_INSTDIR\endpoint-agent.exe"
-        nsExec::ExecToLog '"$TARGET_INSTDIR\endpoint-agent.exe" -service uninstall -uninstall-token "$UninstallToken"'
+        ${If} $UninstallToken != ""
+            nsExec::ExecToLog '"$TARGET_INSTDIR\endpoint-agent.exe" -creds "$TARGET_DATADIR\creds.json" -service uninstall -uninstall-token "$UninstallToken"'
+        ${Else}
+            nsExec::ExecToLog '"$TARGET_INSTDIR\endpoint-agent.exe" -service uninstall'
+        ${EndIf}
         Pop $0
+        ${If} $0 != 0
+            DetailPrint "Service uninstall command exited with code $0. Forcing removal via sc.exe..."
+            nsExec::ExecToLog 'sc.exe stop "${SERVICE_NAME}"'
+            Pop $1
+            nsExec::ExecToLog 'sc.exe delete "${SERVICE_NAME}"'
+            Pop $1
+        ${EndIf}
     ${Else}
         nsExec::ExecToLog 'sc.exe delete "${SERVICE_NAME}"'
         Pop $0
