@@ -79,16 +79,39 @@ jobs:
           # 4. Agent Windows amd64
           go build -ldflags "-s -w -X github.com/henokakunemail-stack/Endpoint-Manager/agent/shared/osinfo.Version=$cleanVer" -o dist/agent-windows-amd64.exe ./agent/cmd/agent
 
-          # 5. Build NSIS Windows Installers
+          # 5. Build NSIS Windows Installers & Uninstallers
           Copy-Item dist/agent-windows-amd64.exe ./agent-windows-amd64.exe -Force
           Copy-Item dist/server-windows-amd64.exe ./server-windows-amd64.exe -Force
           & powershell.exe -ExecutionPolicy Bypass -File .\packaging\windows\build.ps1 -Version $cleanVer
           & powershell.exe -ExecutionPolicy Bypass -File .\packaging\windows\build-server.ps1 -Version $cleanVer
+
+          $parts = $cleanVer -split '\.'
+          $numeric = [int[]]@()
+          foreach ($p in $parts) {
+            if ($p -match '^\d+$') { $numeric += [int]$p }
+          }
+          while ($numeric.Count -lt 4) { $numeric += 0 }
+          $versionNum = ($numeric[0..3] -join '.')
+
+          Push-Location packaging\windows
+          try {
+            & makensis.exe /DVERSION=$cleanVer /DVERSION_NUM=$versionNum agent-uninstall.nsi
+            & makensis.exe /DVERSION=$cleanVer /DVERSION_NUM=$versionNum server-uninstall.nsi
+          } finally {
+            Pop-Location
+          }
+
           if (Test-Path "packaging\windows\EndpointAgent-Setup.exe") {
             Copy-Item "packaging\windows\EndpointAgent-Setup.exe" dist/EndpointAgent-Setup.exe -Force
           }
+          if (Test-Path "packaging\windows\EndpointAgent-Uninstall.exe") {
+            Copy-Item "packaging\windows\EndpointAgent-Uninstall.exe" dist/EndpointAgent-Uninstall.exe -Force
+          }
           if (Test-Path "packaging\windows\EndpointServer-Setup.exe") {
             Copy-Item "packaging\windows\EndpointServer-Setup.exe" dist/EndpointServer-Setup.exe -Force
+          }
+          if (Test-Path "packaging\windows\EndpointServer-Uninstall.exe") {
+            Copy-Item "packaging\windows\EndpointServer-Uninstall.exe" dist/EndpointServer-Uninstall.exe -Force
           }
 
           # 6. Tarball for Linux server updater

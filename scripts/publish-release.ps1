@@ -69,19 +69,59 @@ try {
     go build -ldflags "-s -w" -o "$DistDir/server-windows-amd64.exe" ./server/cmd/server
     go build -ldflags "-s -w -X github.com/henokakunemail-stack/Endpoint-Manager/agent/shared/osinfo.Version=$CleanVer" -o "$DistDir/agent-windows-amd64.exe" ./agent/cmd/agent
 
-    # 5. Build NSIS Windows Agent Installer
-    Write-Host "[3/5] Building Windows NSIS Setup Installer..." -ForegroundColor Cyan
+    # 5. Build NSIS Windows Installers & Uninstallers
+    Write-Host "[3/5] Building Windows NSIS Setup Installers and Uninstallers..." -ForegroundColor Cyan
     Copy-Item "$DistDir/agent-windows-amd64.exe" "$RepoRoot/agent-windows-amd64.exe" -Force
     Copy-Item "$DistDir/server-windows-amd64.exe" "$RepoRoot/server-windows-amd64.exe" -Force
     & powershell.exe -ExecutionPolicy Bypass -File (Join-Path $RepoRoot "packaging\windows\build.ps1") -Version $CleanVer
     & powershell.exe -ExecutionPolicy Bypass -File (Join-Path $RepoRoot "packaging\windows\build-server.ps1") -Version $CleanVer
+
+    $Cmd = Get-Command makensis.exe -ErrorAction SilentlyContinue
+    $NsisPath = if ($Cmd) { $Cmd.Source } else { $null }
+    if (-not $NsisPath) {
+        $Candidates = @(
+            "$env:ProgramFiles\NSIS\makensis.exe",
+            "${env:ProgramFiles(x86)}\NSIS\makensis.exe"
+        )
+        foreach ($c in $Candidates) {
+            if (Test-Path $c) { $NsisPath = $c; break }
+        }
+    }
+    if ($NsisPath) {
+        $parts = $CleanVer -split '\.'
+        $numeric = [int[]]@()
+        foreach ($p in $parts) {
+            if ($p -match '^\d+$') { $numeric += [int]$p }
+        }
+        while ($numeric.Count -lt 4) { $numeric += 0 }
+        $VersionNum = ($numeric[0..3] -join '.')
+
+        Push-Location (Join-Path $RepoRoot "packaging\windows")
+        try {
+            Write-Host "      Building EndpointAgent-Uninstall.exe..." -ForegroundColor DarkGray
+            & $NsisPath /DVERSION=$CleanVer /DVERSION_NUM=$VersionNum agent-uninstall.nsi
+            Write-Host "      Building EndpointServer-Uninstall.exe..." -ForegroundColor DarkGray
+            & $NsisPath /DVERSION=$CleanVer /DVERSION_NUM=$VersionNum server-uninstall.nsi
+        } finally {
+            Pop-Location
+        }
+    }
+
     $SetupExe = Join-Path $RepoRoot "packaging\windows\EndpointAgent-Setup.exe"
     if (Test-Path $SetupExe) {
         Copy-Item $SetupExe "$DistDir/EndpointAgent-Setup.exe" -Force
     }
+    $AgentUninstExe = Join-Path $RepoRoot "packaging\windows\EndpointAgent-Uninstall.exe"
+    if (Test-Path $AgentUninstExe) {
+        Copy-Item $AgentUninstExe "$DistDir/EndpointAgent-Uninstall.exe" -Force
+    }
     $ServerSetupExe = Join-Path $RepoRoot "packaging\windows\EndpointServer-Setup.exe"
     if (Test-Path $ServerSetupExe) {
         Copy-Item $ServerSetupExe "$DistDir/EndpointServer-Setup.exe" -Force
+    }
+    $ServerUninstExe = Join-Path $RepoRoot "packaging\windows\EndpointServer-Uninstall.exe"
+    if (Test-Path $ServerUninstExe) {
+        Copy-Item $ServerUninstExe "$DistDir/EndpointServer-Uninstall.exe" -Force
     }
 
     # 5b. Publish SHA256 checksums alongside the binaries so an operator can

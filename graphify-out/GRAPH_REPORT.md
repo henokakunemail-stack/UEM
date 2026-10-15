@@ -1,7 +1,7 @@
 # Graph Report - Desktop Manage  (2026-10-15)
 
 ## Corpus Check
-- 517 files · ~493,254 words
+- 517 files · ~493,478 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 18 file(s) not represented in the graph (top: (none) 7, .nsi 4, .css 2)
 
@@ -11,7 +11,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `6a250c61`
+- Built from commit: `458bfe9a`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -35,11 +35,11 @@
 - chain_test.go
 - react
 - user-management/handler_test.go
-- maintenance/repository_test.go
+- policy_update_test.go
 - buildServer
 - Handler
 - WSHandler
-- policy_update_test.go
+- maintenance/repository_test.go
 - package.json
 - scanner_windows_test.go
 - time.Time
@@ -67,7 +67,7 @@
 - linux/osinfo_linux.go
 - newRunFixture
 - AuthenticateAgent
-- TestE2EEnrollConnectCommand
+- net/http.Client
 - newStore
 - Handler
 - linux/inventory_linux.go
@@ -87,7 +87,7 @@
 - inventory.go
 - Repository
 - networkfilter/engine_test.go
-- net/http.Client
+- TestE2EEnrollConnectCommand
 - Handler
 - scanner_linux.go
 - capture_windows.go
@@ -105,7 +105,7 @@
 - Manager
 - Engine
 - process_test.go
-- cspResponseWriter
+- TerminalManager
 - time.Duration
 - net/http.HandlerFunc
 - 4. Audit & Readiness Report
@@ -113,7 +113,7 @@
 - net/http.Request
 - uninstall_windows.go
 - IPRateLimiter
-- Report
+- sync.RWMutex
 - 0001_init.sql
 - software-deployment/sweep_test.go
 - Exchange
@@ -126,7 +126,7 @@
 - service.go
 - Metode B: Instalasi Manual Langkah-demi-Langkah
 - NewEngine
-- TerminalManager
+- cspResponseWriter
 - MaintenancePage.tsx
 - macos/inventory_darwin.go
 - firewallBackend
@@ -147,6 +147,7 @@
 - 0005_remote_execution.sql
 - 0009_task_scheduler.sql
 - Engine
+- Report
 - CLAUDE.md
 - installedProgram
 - linuxManager
@@ -154,13 +155,12 @@
 - newUploadRouter
 - 0002_device_mgmt.sql
 - 0008_alerting.sql
-- sync.RWMutex
+- Hub
 - Unified Endpoint Manager (UEM) - Release & Installation Guide
 - 0013_asset_license_management.sql
 - 0014_maintenance.sql
 - stubHub
 - darwinManager
-- Hub
 - go_pkg_syscall
 - Read-AgentCommand
 - 0011_network_filter.sql
@@ -355,9 +355,9 @@ Nodes (27): lucide-react, react, DeviceDetailModalProps, formatAge(), BINARY, En
 Cohesion: 0.16
 Nodes (31): ComparePassword(), newEnv(), strictEnv(), TestADeactivatedUserKeepsTheirAuditTrail(), TestADeactivatedUserLosesApiAccess(), TestADemotedUsersSessionsAreRevoked(), TestADuplicateUsernameIsRefused(), TestAMissingRoleDefaultsToViewer() (+23 more)
 
-### Community 19 - "maintenance/repository_test.go"
-Cohesion: 0.29
-Nodes (20): TestHeartbeatKeepsTheStepAliveAndChangesNothingElse(), TestTheSweepBelievesAHeartbeat(), NewRepository(), exitCode(), newTestDB(), seedDevice(), TestAgentCannotPostSkipped(), TestBulkInsertChunks() (+12 more)
+### Community 19 - "policy_update_test.go"
+Cohesion: 0.17
+Nodes (21): addRuleReq, policyRow(), putPolicy(), scopedPolicyFixture(), TestAnEmptyPolicyUpdateChangesNothing(), TestAPartialPolicyUpdateKeepsTheScopeItDoesNotMention(), TestAPolicyUpdateRefusesAValueItCannotStore(), TestAScopedPolicyCanBeWidenedBackToTheWholeFleet() (+13 more)
 
 ### Community 20 - "buildServer"
 Cohesion: 0.06
@@ -371,9 +371,9 @@ Nodes (7): AuditLogger, Handler, HubDispatcher, NewHandler(), strPtr(), writeErr
 Cohesion: 0.08
 Nodes (11): Envelope, recordingAudit, NewWSHandler(), cappedWriter, Conn, FilterSyncer, InventoryReceiver, SystemPolicySyncer (+3 more)
 
-### Community 23 - "policy_update_test.go"
-Cohesion: 0.17
-Nodes (21): addRuleReq, policyRow(), putPolicy(), scopedPolicyFixture(), TestAnEmptyPolicyUpdateChangesNothing(), TestAPartialPolicyUpdateKeepsTheScopeItDoesNotMention(), TestAPolicyUpdateRefusesAValueItCannotStore(), TestAScopedPolicyCanBeWidenedBackToTheWholeFleet() (+13 more)
+### Community 23 - "maintenance/repository_test.go"
+Cohesion: 0.29
+Nodes (20): TestHeartbeatKeepsTheStepAliveAndChangesNothingElse(), TestTheSweepBelievesAHeartbeat(), NewRepository(), exitCode(), newTestDB(), seedDevice(), TestAgentCannotPostSkipped(), TestBulkInsertChunks() (+12 more)
 
 ### Community 24 - "package.json"
 Cohesion: 0.06
@@ -483,9 +483,9 @@ Nodes (19): runFixture, newRunFixture(), newRunFixtureWithHub(), TestADeviceCanS
 Cohesion: 0.15
 Nodes (13): SecretLookup, AuditLogger, Handler, Hub, AuthenticateAgent(), TestAuthenticateAgent_AcceptsMatchingPair(), TestAuthenticateAgent_RejectsMissingCredentials(), TestAuthenticateAgent_RejectsSecretBoundToAnotherDevice() (+5 more)
 
-### Community 51 - "TestE2EEnrollConnectCommand"
-Cohesion: 0.19
-Nodes (15): TestWsURL(), env, contains(), dialAgent(), enroll(), expectDialFail(), mustJSON(), newEnv() (+7 more)
+### Community 51 - "net/http.Client"
+Cohesion: 0.14
+Nodes (12): PolicySettings, USBStorageMode, WallpaperStyle, WindowsUpdateMode, NewEngine(), applyAdminAccountNonWindows(), newPlatformBackend(), TestEngine_Report() (+4 more)
 
 ### Community 52 - "newStore"
 Cohesion: 0.16
@@ -563,9 +563,9 @@ Nodes (6): AssetSummary, HardwareAsset, LicenseComplianceSummary, Repository, So
 Cohesion: 0.23
 Nodes (12): setResolver(), setResolverFor(), TestApplyClearsPreviousFirewallRules(), TestApplyNarrowsRatherThanAccumulates(), TestApplySurvivesAnUnavailableFirewallButReportsIt(), TestCleanApplyIsNotMarkedDegraded(), testEngine(), TestHostsWriteFailureIsFatal() (+4 more)
 
-### Community 71 - "net/http.Client"
-Cohesion: 0.14
-Nodes (12): PolicySettings, USBStorageMode, WallpaperStyle, WindowsUpdateMode, NewEngine(), applyAdminAccountNonWindows(), newPlatformBackend(), TestEngine_Report() (+4 more)
+### Community 71 - "TestE2EEnrollConnectCommand"
+Cohesion: 0.19
+Nodes (15): TestWsURL(), env, contains(), dialAgent(), enroll(), expectDialFail(), mustJSON(), newEnv() (+7 more)
 
 ### Community 72 - "Handler"
 Cohesion: 0.30
@@ -635,6 +635,10 @@ Nodes (3): removeManagedSection(), writeAtomic(), Engine
 Cohesion: 0.18
 Nodes (17): runProcess(), helperArgs(), helperMode(), helperSelf(), processAlive(), TestCappedWriterKeepsHead(), TestCappedWriterUnderCap(), TestHelperNoop() (+9 more)
 
+### Community 89 - "TerminalManager"
+Cohesion: 0.25
+Nodes (3): NewTerminalManager(), ProcessSession, TerminalManager
+
 ### Community 90 - "time.Duration"
 Cohesion: 0.04
 Nodes (43): guardAgentGoroutine(), inventoryPeriod(), inventoryStaggerWindow(), runAgent(), Capabilities(), NewEngine(), reportBackoff(), TestRunAllowsOnlyOneTaskAtATime() (+35 more)
@@ -659,9 +663,9 @@ Nodes (19): compact(), nameMatches(), normalizeProgramName(), exactMatches(), is
 Cohesion: 0.19
 Nodes (3): ipRecord, EnrollmentHandler, IPRateLimiter
 
-### Community 97 - "Report"
-Cohesion: 0.29
-Nodes (4): Report, dynamicCollector, mockCollector, mockReporter
+### Community 97 - "sync.RWMutex"
+Cohesion: 0.28
+Nodes (6): NewDispatcher(), sessionCache, sessionCacheEntry, getSessionCache(), CommandHandler, Dispatcher
 
 ### Community 98 - "0001_init.sql"
 Cohesion: 0.20
@@ -710,10 +714,6 @@ Nodes (21): 1. Persyaratan Sistem, 2. Pilihan Instalasi, 3. Verifikasi Status La
 ### Community 109 - "NewEngine"
 Cohesion: 0.23
 Nodes (10): TestApplyUpdate_EmptyDownloadURLDoesNotPanic(), NewEngine(), runApply(), TestAChecksumMismatchStillRollsBack(), TestAnUnbootableReleaseIsNotReportedAsASuccessfulUpdate(), TestTheOriginalBinaryIsRestoredAfterAFailedHealthCheck(), TestAgentEngineManifestVerification(), fakeExecutable() (+2 more)
-
-### Community 110 - "TerminalManager"
-Cohesion: 0.25
-Nodes (3): NewTerminalManager(), ProcessSession, TerminalManager
 
 ### Community 111 - "MaintenancePage.tsx"
 Cohesion: 0.12
@@ -787,6 +787,10 @@ Nodes (8): idx_sched_device_runs_dev, idx_sched_device_runs_run, idx_scheduled_r
 Cohesion: 0.17
 Nodes (11): Engine, releaseArch(), releaseOSName(), TestTheFormatCheckItself(), TestAZeroLengthFileIsRejectedDirectly(), TestVerifySwappedBinaryTruncated(), verifySwappedBinary(), belowMinimum() (+3 more)
 
+### Community 132 - "Report"
+Cohesion: 0.29
+Nodes (4): Report, dynamicCollector, mockCollector, mockReporter
+
 ### Community 134 - "installedProgram"
 Cohesion: 0.18
 Nodes (13): isRebootRequiredExit(), resolveSilentArgs(), TestUninstallReportsAnAbsentPackageWithItsReason(), findDpkgInstalled(), findInstalled(), findRpmInstalled(), firstLine(), runPlatformUninstall() (+5 more)
@@ -806,10 +810,6 @@ Nodes (7): device_group_members, device_groups, device_inventory, idx_group_memb
 ### Community 139 - "0008_alerting.sql"
 Cohesion: 0.46
 Nodes (7): alert_incidents, alert_rules, idx_alert_dedup, idx_alert_incidents_device, idx_alert_incidents_rule, idx_alert_incidents_status, idx_alert_rules_enabled
-
-### Community 140 - "sync.RWMutex"
-Cohesion: 0.28
-Nodes (6): NewDispatcher(), sessionCache, sessionCacheEntry, getSessionCache(), CommandHandler, Dispatcher
 
 ### Community 142 - "Unified Endpoint Manager (UEM) - Release & Installation Guide"
 Cohesion: 0.12

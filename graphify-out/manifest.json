@@ -1068,10 +1068,10 @@
     "semantic_hash": "610b0a48111447dd271dd13bdc4d9feb"
   },
   "scripts/publish-release.ps1": {
-    "mtime": 1791799495.8829844,
-    "seen": 1791858829.9288185,
-    "ast_hash": "b49df49a4879dfc271838b5f3083cc28",
-    "semantic_hash": "b49df49a4879dfc271838b5f3083cc28"
+    "mtime": 1792051641.4541152,
+    "seen": 1792051689.7511053,
+    "ast_hash": "ae37c036590fb7fb1f31661e643a088a",
+    "semantic_hash": ""
   },
   "scripts/querysqlite/main.go": {
     "mtime": 1790046324.663591,
@@ -2682,9 +2682,9 @@
     "semantic_hash": ""
   },
   ".github/workflows/release.yml": {
-    "mtime": 1791800456.356568,
-    "seen": 1791859357.016017,
-    "ast_hash": "d0798c487098f24a8fb7bc3ac2272d81",
+    "mtime": 1792051648.6658895,
+    "seen": 1792051689.7517014,
+    "ast_hash": "089f805b344a805e70ea8ddb0216dd16",
     "semantic_hash": ""
   },
   ".github/workflows/sign-release.yml": {
