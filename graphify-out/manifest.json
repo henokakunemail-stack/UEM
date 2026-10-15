@@ -1068,9 +1068,9 @@
     "semantic_hash": "610b0a48111447dd271dd13bdc4d9feb"
   },
   "scripts/publish-release.ps1": {
-    "mtime": 1792051641.4541152,
-    "seen": 1792051689.7511053,
-    "ast_hash": "ae37c036590fb7fb1f31661e643a088a",
+    "mtime": 1792062243.1855197,
+    "seen": 1792062346.7477398,
+    "ast_hash": "68dc00947880a27a3e64aab96de81154",
     "semantic_hash": ""
   },
   "scripts/querysqlite/main.go": {
