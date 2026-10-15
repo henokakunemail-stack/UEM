@@ -106,7 +106,7 @@ try {
 $env:CGO_ENABLED = "0"
 $env:GOOS = "windows"
 $env:GOARCH = "amd64"
-$Ldflags = "-s -w -X github.com/henokakunemail-stack/Endpoint-Manager/agent/shared/osinfo.Version=1.4.0"
+$Ldflags = "-s -w -X github.com/henokakunemail-stack/Endpoint-Manager/agent/shared/osinfo.Version=1.5.0"
 
 go build -ldflags="$Ldflags" -o "server.exe" ./server/cmd/server
 go build -ldflags="$Ldflags" -o "server-windows-amd64.exe" ./server/cmd/server
@@ -163,7 +163,7 @@ Respon harus berupa: `{"status":"ok"}`.
 ### 2. Cek Koneksi Agent di Server Log
 Buka `server.log` dan pastikan agent terhubung kembali dengan versi terbaru:
 ```text
-INF server\core\transport\ws.go:425 > agent hello agent=1.4.0 capabilities=10 device=...
+INF server\core\transport\ws.go:425 > agent hello agent=1.5.0 capabilities=10 device=...
 ```
 
 ### 3. Uji Fitur Remote Control di Web Browser

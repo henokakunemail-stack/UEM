@@ -222,9 +222,9 @@
     "semantic_hash": "45ee77e9a6e1f14f4336371579756c0c"
   },
   "agent/shared/osinfo/osinfo.go": {
-    "mtime": 1791872947.429492,
-    "seen": 1791872975.9043062,
-    "ast_hash": "d13be2fdf3534d067ac34b8d1bd65eea",
+    "mtime": 1792041921.6161323,
+    "seen": 1792042119.9729798,
+    "ast_hash": "1ebe52ea0d462106a2c56dfc4427e670",
     "semantic_hash": ""
   },
   "agent/shared/patch/classify_windows_test.go": {
@@ -2868,9 +2868,9 @@
     "semantic_hash": ""
   },
   "docs/installation/update-guide.md": {
-    "mtime": 1791795288.3419755,
-    "seen": 1791859357.0160658,
-    "ast_hash": "0511f0997cae233642f6e1eb39c73dbb",
+    "mtime": 1792041950.792969,
+    "seen": 1792042119.9750729,
+    "ast_hash": "45581d896cb405a88284ca22b06eebda",
     "semantic_hash": ""
   },
   "docs/readiness-reports/README.md": {

@@ -22,10 +22,10 @@ InstallDirRegKey HKLM "${SERVICE_KEY}" "InstallDir"
 
 ; --- Version Information ---
 !ifndef VERSION
-  !define VERSION "1.4.0"
+  !define VERSION "1.5.0"
 !endif
 !ifndef VERSION_NUM
-  !define VERSION_NUM "1.4.0.0"
+  !define VERSION_NUM "1.5.0.0"
 !endif
 VIProductVersion "${VERSION_NUM}"
 VIAddVersionKey "ProductName" "Endpoint Management Agent"
