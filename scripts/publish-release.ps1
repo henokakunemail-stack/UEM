@@ -144,11 +144,19 @@ try {
 
     $DraftFlag = if ($Draft) { @("--draft") } else { @() }
 
-    # Try create release
+    # Check if release exists
+    $ReleaseExists = $false
+    try {
+        & gh release view "$Tag" >$null 2>$null
+        if ($LASTEXITCODE -eq 0) { $ReleaseExists = $true }
+    } catch {}
+
     $Notes = "Release " + $Tag + ": Cross-platform server, agent, and setup installers."
-    $CreateOut = & gh release create "$Tag" $Assets --title "Enterprise Endpoint Management $Tag" --notes $Notes @DraftFlag 2>&1
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "Release might already exist, uploading/clobbering assets..." -ForegroundColor Yellow
+    if (-not $ReleaseExists) {
+        Write-Host "Creating new GitHub release for $Tag..." -ForegroundColor Cyan
+        & gh release create "$Tag" $Assets --title "Enterprise Endpoint Management $Tag" --notes $Notes @DraftFlag
+    } else {
+        Write-Host "Release $Tag already exists, uploading/clobbering assets..." -ForegroundColor Yellow
         & gh release upload "$Tag" $Assets --clobber
     }
 
