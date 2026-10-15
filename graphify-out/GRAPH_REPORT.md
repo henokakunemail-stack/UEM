@@ -3,7 +3,7 @@
 ## Corpus Check
 - 517 files · ~492,923 words
 - Verdict: corpus is large enough that graph structure adds value.
-- Unclassified: 22 file(s) not represented in the graph (top: (none) 11, .nsi 4, .css 2)
+- Unclassified: 18 file(s) not represented in the graph (top: (none) 7, .nsi 4, .css 2)
 
 ## Summary
 - 4678 nodes · 16557 edges · 270 communities (194 shown, 76 thin omitted)
@@ -11,7 +11,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `66544120`
+- Built from commit: `138b41be`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -39,7 +39,7 @@
 - buildServer
 - Handler
 - WSHandler
-- net/http.Client
+- policy_update_test.go
 - package.json
 - scanner_windows_test.go
 - time.Time
@@ -73,7 +73,7 @@
 - linux/inventory_linux.go
 - Handler
 - securityheaders_test.go
-- policy_update_test.go
+- newHandlerTest
 - github.com/gorilla/websocket.Conn
 - Repository
 - Handler
@@ -87,7 +87,7 @@
 - inventory.go
 - Repository
 - networkfilter/engine_test.go
-- newHandlerTest
+- net/http.Client
 - Handler
 - scanner_linux.go
 - capture_windows.go
@@ -371,9 +371,9 @@ Nodes (7): AuditLogger, Handler, HubDispatcher, NewHandler(), strPtr(), writeErr
 Cohesion: 0.08
 Nodes (11): Envelope, recordingAudit, NewWSHandler(), cappedWriter, Conn, FilterSyncer, InventoryReceiver, SystemPolicySyncer (+3 more)
 
-### Community 23 - "net/http.Client"
-Cohesion: 0.14
-Nodes (12): PolicySettings, USBStorageMode, WallpaperStyle, WindowsUpdateMode, NewEngine(), applyAdminAccountNonWindows(), newPlatformBackend(), TestEngine_Report() (+4 more)
+### Community 23 - "policy_update_test.go"
+Cohesion: 0.17
+Nodes (21): addRuleReq, policyRow(), putPolicy(), scopedPolicyFixture(), TestAnEmptyPolicyUpdateChangesNothing(), TestAPartialPolicyUpdateKeepsTheScopeItDoesNotMention(), TestAPolicyUpdateRefusesAValueItCannotStore(), TestAScopedPolicyCanBeWidenedBackToTheWholeFleet() (+13 more)
 
 ### Community 24 - "package.json"
 Cohesion: 0.06
@@ -507,9 +507,9 @@ Nodes (6): Auditor, Handler, QuickCheck(), Snapshot(), writeErr(), writeJSON()
 Cohesion: 0.31
 Nodes (11): SecurityHeadersConfig, DefaultSecurityHeaders(), isTLS(), itoa(), SecurityHeaders(), TestDefaultSecurityHeadersConfig(), TestSecurityHeaders_PreservesHijacker(), TestSecurityHeadersHSTSOnlyWhenTLS() (+3 more)
 
-### Community 57 - "policy_update_test.go"
-Cohesion: 0.17
-Nodes (21): addRuleReq, policyRow(), putPolicy(), scopedPolicyFixture(), TestAnEmptyPolicyUpdateChangesNothing(), TestAPartialPolicyUpdateKeepsTheScopeItDoesNotMention(), TestAPolicyUpdateRefusesAValueItCannotStore(), TestAScopedPolicyCanBeWidenedBackToTheWholeFleet() (+13 more)
+### Community 57 - "newHandlerTest"
+Cohesion: 0.20
+Nodes (16): stubHub, call(), newHandlerTest(), newStubHub(), seedOnlineDevice(), seedTaskForReport(), TestAgentResultRejectsBodyTaskIDMismatch(), TestAgentResultRejectsCrossDeviceReport() (+8 more)
 
 ### Community 58 - "github.com/gorilla/websocket.Conn"
 Cohesion: 0.14
@@ -563,9 +563,9 @@ Nodes (6): AssetSummary, HardwareAsset, LicenseComplianceSummary, Repository, So
 Cohesion: 0.23
 Nodes (12): setResolver(), setResolverFor(), TestApplyClearsPreviousFirewallRules(), TestApplyNarrowsRatherThanAccumulates(), TestApplySurvivesAnUnavailableFirewallButReportsIt(), TestCleanApplyIsNotMarkedDegraded(), testEngine(), TestHostsWriteFailureIsFatal() (+4 more)
 
-### Community 71 - "newHandlerTest"
-Cohesion: 0.20
-Nodes (16): stubHub, call(), newHandlerTest(), newStubHub(), seedOnlineDevice(), seedTaskForReport(), TestAgentResultRejectsBodyTaskIDMismatch(), TestAgentResultRejectsCrossDeviceReport() (+8 more)
+### Community 71 - "net/http.Client"
+Cohesion: 0.14
+Nodes (12): PolicySettings, USBStorageMode, WallpaperStyle, WindowsUpdateMode, NewEngine(), applyAdminAccountNonWindows(), newPlatformBackend(), TestEngine_Report() (+4 more)
 
 ### Community 72 - "Handler"
 Cohesion: 0.30
