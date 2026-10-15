@@ -222,8 +222,8 @@
     "semantic_hash": "45ee77e9a6e1f14f4336371579756c0c"
   },
   "agent/shared/osinfo/osinfo.go": {
-    "mtime": 1792041921.6161323,
-    "seen": 1792042119.9729798,
+    "mtime": 1792042232.6838653,
+    "seen": 1792042246.6195602,
     "ast_hash": "1ebe52ea0d462106a2c56dfc4427e670",
     "semantic_hash": ""
   },
@@ -2868,8 +2868,8 @@
     "semantic_hash": ""
   },
   "docs/installation/update-guide.md": {
-    "mtime": 1792041950.792969,
-    "seen": 1792042119.9750729,
+    "mtime": 1792042232.6848893,
+    "seen": 1792042246.6205137,
     "ast_hash": "45581d896cb405a88284ca22b06eebda",
     "semantic_hash": ""
   },

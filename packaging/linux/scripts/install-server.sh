@@ -22,7 +22,7 @@ echo "=========================================================="
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BIN_SRC=""
-for cand in "$SCRIPT_DIR/endpoint-server" "$SCRIPT_DIR/server-linux-amd64" "$SCRIPT_DIR/../../server-linux-amd64" /tmp/server-linux-amd64; do
+for cand in "$SCRIPT_DIR/endpoint-server" "$SCRIPT_DIR/server-linux-amd64" "$SCRIPT_DIR/../../../server-linux-amd64" "$SCRIPT_DIR/../../server-linux-amd64" "$(pwd)/server-linux-amd64" "$(pwd)/endpoint-server" /tmp/server-linux-amd64; do
     if [ -f "$cand" ]; then BIN_SRC="$cand"; break; fi
 done
 

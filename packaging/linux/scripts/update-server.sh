@@ -84,6 +84,24 @@ if systemctl cat "$SERVICE_NAME" &>/dev/null; then
 fi
 
 if [ ! -f "$INSTALL_BIN" ]; then
+    for cand in /opt/endpoint-mgmt/endpoint-mgmt-server /opt/endpoint-mgmt/server /usr/local/bin/endpoint-mgmt-server /usr/local/bin/server; do
+        if [ -f "$cand" ]; then
+            INSTALL_BIN="$cand"
+            break
+        fi
+    done
+fi
+
+if [ ! -f "$ENV_FILE" ]; then
+    for cand_env in /opt/endpoint-mgmt/.env /opt/endpoint-mgmt/server.env /etc/endpoint-mgmt-server/server.env; do
+        if [ -f "$cand_env" ]; then
+            ENV_FILE="$cand_env"
+            break
+        fi
+    done
+fi
+
+if [ ! -f "$INSTALL_BIN" ]; then
     echo "[-] Installed server binary not found at $INSTALL_BIN." >&2
     echo "    Run the installer first or verify installation directory." >&2
     exit 1
