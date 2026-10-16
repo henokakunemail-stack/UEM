@@ -18,6 +18,7 @@ BRANCH="main"
 BINARY_PATH=""
 TIMEOUT_SEC=30
 SKIP_BACKUP=0
+FROM_SOURCE=0
 
 usage() {
     cat <<EOF
@@ -27,6 +28,7 @@ Usage: sudo $0 [options]
 
 Options:
   --branch <name>       Git branch to update from (default: main)
+  --from-source, --build Force compile directly from git source (bypass release assets)
   --binary-path <path>  Use local or pre-downloaded binary
   --timeout <sec>       Health probe timeout in seconds (default: 30)
   --skip-backup         Skip pre-update database backup
@@ -40,7 +42,8 @@ EOF
 
 while [ $# -gt 0 ]; do
     case "$1" in
-        --branch)       BRANCH="${2:-main}"; shift 2 ;;
+        --branch)        BRANCH="${2:-main}"; shift 2 ;;
+        --from-source|--build) FROM_SOURCE=1; shift ;;
         --binary-path)   BINARY_PATH="${2:-}"; shift 2 ;;
         --timeout)       TIMEOUT_SEC="${2:-30}"; shift 2 ;;
         --skip-backup)   SKIP_BACKUP=1; shift ;;
@@ -140,9 +143,9 @@ if [ -n "$BINARY_PATH" ]; then
     fi
     STAGED_BIN="$BINARY_PATH"
     echo "[+] Using provided binary: $STAGED_BIN"
-elif [ "$BRANCH" != "main" ]; then
-    # Custom branch requested: bypass release assets and compile from git source
-    echo "[*] Branch '$BRANCH' specified, building directly from branch source..."
+elif [ "$FROM_SOURCE" -eq 1 ] || [ "$BRANCH" != "main" ]; then
+    # Direct compile from git source requested (bypasses pre-built release assets)
+    echo "[*] Building directly from git repository source (branch: $BRANCH)..."
 else
     # Check GitHub Releases for main branch (Linux ELF only)
     echo "[*] Checking for latest release from GitHub ($REPO)..."
