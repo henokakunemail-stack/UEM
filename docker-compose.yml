@@ -1,0 +1,29 @@
+services:
+  endpoint-mgmt-server:
+    build:
+      context: .
+      dockerfile: Dockerfile.server
+    container_name: endpoint-mgmt-server
+    restart: unless-stopped
+    ports:
+      - "8443:8443"
+    environment:
+      - HTTP_ADDR=:8443
+      - DB_PATH=/data/endpoint-mgmt.db
+      - LOG_FILE=/data/server.log
+      - JWT_SECRET=${JWT_SECRET:-generate-32-char-random-secret-key-prod}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin123456}
+      - ALLOWED_ORIGIN_DOMAINS=${ALLOWED_ORIGIN_DOMAINS:-localhost,127.0.0.1}
+      - TRUSTED_PROXIES=127.0.0.1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16
+    volumes:
+      - endpoint-data:/data
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8443/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
+volumes:
+  endpoint-data:
+    driver: local

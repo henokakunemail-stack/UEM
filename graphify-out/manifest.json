@@ -1110,9 +1110,9 @@
     "semantic_hash": "288877d6ee703aa767eca246d0ffc537"
   },
   "server/cmd/server/main.go": {
-    "mtime": 1792060130.532439,
-    "seen": 1792061215.558603,
-    "ast_hash": "33562ba8ece7677c5c9a725a66392c7e",
+    "mtime": 1792135362.0648136,
+    "seen": 1792135763.9078863,
+    "ast_hash": "33fb4d0c1e6ef60b4386fef1240961c1",
     "semantic_hash": ""
   },
   "server/cmd/server/route_contract_test.go": {
@@ -1128,10 +1128,10 @@
     "semantic_hash": "e7c8ad7ab63193cb3748bbbfa2f7b51b"
   },
   "server/cmd/server/web_embed.go": {
-    "mtime": 1790149941.7339623,
-    "seen": 1791858829.9288383,
-    "ast_hash": "e4658c56501ee9d4acf352e34f6f3154",
-    "semantic_hash": "e4658c56501ee9d4acf352e34f6f3154"
+    "mtime": 1792134771.7703078,
+    "seen": 1792135763.907895,
+    "ast_hash": "9638306f6aba9e663e2d596f3bca7b0f",
+    "semantic_hash": ""
   },
   "server/core/audit/audit.go": {
     "mtime": 1790586585.7903173,
@@ -1536,22 +1536,22 @@
     "semantic_hash": "59e60faa760813314a807d9b80ec3528"
   },
   "server/modules/assetlicense/repository.go": {
-    "mtime": 1791338926.971805,
-    "seen": 1791858829.9289706,
-    "ast_hash": "157bbad36d5a3cccbe312a01dd8db93f",
-    "semantic_hash": "157bbad36d5a3cccbe312a01dd8db93f"
+    "mtime": 1792135549.6012409,
+    "seen": 1792135763.9081519,
+    "ast_hash": "d01dbf13b9a043534355a477801dbc97",
+    "semantic_hash": ""
   },
   "server/modules/dashboard/dashboard_test.go": {
-    "mtime": 1790749512.6426704,
-    "seen": 1791858829.9289725,
-    "ast_hash": "51aec4615f1d923990cd4b798a45fe07",
-    "semantic_hash": "51aec4615f1d923990cd4b798a45fe07"
+    "mtime": 1792135061.0001733,
+    "seen": 1792135763.908159,
+    "ast_hash": "fcd0cee724282eeb1cd1febf95556689",
+    "semantic_hash": ""
   },
   "server/modules/dashboard/handler.go": {
-    "mtime": 1790749572.3160288,
-    "seen": 1791858829.9289746,
-    "ast_hash": "317dcbb7e31df63d376eb3d031dbc2d1",
-    "semantic_hash": "317dcbb7e31df63d376eb3d031dbc2d1"
+    "mtime": 1792134959.4720886,
+    "seen": 1792135763.9081612,
+    "ast_hash": "21dff20dce8fd7477a5afbf5575779ef",
+    "semantic_hash": ""
   },
   "server/modules/dashboard/model.go": {
     "mtime": 1790730423.5835948,
@@ -3195,6 +3195,36 @@
     "mtime": 1792061181.0343509,
     "seen": 1792061215.559879,
     "ast_hash": "e055251e0721b79ca706cfd1332bf963",
+    "semantic_hash": ""
+  },
+  "server/core/httpguard/apiratelimit.go": {
+    "mtime": 1792134635.4081964,
+    "seen": 1792135763.9080484,
+    "ast_hash": "809dd5e1b494dd7c3df190bc3fcabcda",
+    "semantic_hash": ""
+  },
+  "server/core/httpguard/apiratelimit_test.go": {
+    "mtime": 1792134649.8883743,
+    "seen": 1792135763.908051,
+    "ast_hash": "23650fd635ec2264dbb377ad43542ff5",
+    "semantic_hash": ""
+  },
+  "server/core/httpguard/cors.go": {
+    "mtime": 1792134903.6902616,
+    "seen": 1792135763.908059,
+    "ast_hash": "2591b1ad17ae2867b43220b7e5a43e71",
+    "semantic_hash": ""
+  },
+  "server/core/httpguard/cors_test.go": {
+    "mtime": 1792134911.2761257,
+    "seen": 1792135763.9080613,
+    "ast_hash": "760d8b14596f0e669743a79aaecc3ae7",
+    "semantic_hash": ""
+  },
+  "docker-compose.yml": {
+    "mtime": 1792135512.1621306,
+    "seen": 1792135763.9086351,
+    "ast_hash": "8ba58ee18d72d286d18b01e5393c118d",
     "semantic_hash": ""
   }
 }

@@ -272,3 +272,62 @@ func TestDashboardHTTPHandlers(t *testing.T) {
 		t.Fatalf("expected 200, got %d", w.Code)
 	}
 }
+
+func TestDashboardSummaryCache(t *testing.T) {
+	d := newTestDB(t)
+	repo := NewRepository(d)
+
+	testAuth := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ctx := rbac.WithRole(r.Context(), rbac.RoleViewer)
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
+	h := NewHandler(repo, testAuth).WithCacheTTL(200 * time.Millisecond)
+
+	r := chi.NewRouter()
+	h.Register(r)
+
+	now := time.Now().UTC()
+	seedDevice(t, d, "d1", "PC-HQ-01", "windows", "hq", "online", &now, nil)
+
+	// First call: populates cache
+	req1 := httptest.NewRequest(http.MethodGet, "/api/dashboard/summary", nil)
+	w1 := httptest.NewRecorder()
+	r.ServeHTTP(w1, req1)
+	if w1.Code != http.StatusOK {
+		t.Fatalf("req1 status=%d", w1.Code)
+	}
+
+	var s1 Summary
+	_ = json.Unmarshal(w1.Body.Bytes(), &s1)
+	if s1.TotalDevices != 1 {
+		t.Fatalf("expected 1 device, got %d", s1.TotalDevices)
+	}
+
+	// Add second device to DB directly
+	seedDevice(t, d, "d2", "PC-HQ-02", "windows", "hq", "online", &now, nil)
+
+	// Second call immediately: should hit cache and still return 1
+	req2 := httptest.NewRequest(http.MethodGet, "/api/dashboard/summary", nil)
+	w2 := httptest.NewRecorder()
+	r.ServeHTTP(w2, req2)
+	var s2 Summary
+	_ = json.Unmarshal(w2.Body.Bytes(), &s2)
+	if s2.TotalDevices != 1 {
+		t.Errorf("expected cached 1 device, got %d", s2.TotalDevices)
+	}
+
+	// Sleep past TTL
+	time.Sleep(250 * time.Millisecond)
+
+	// Third call: cache expired, should refresh and return 2
+	req3 := httptest.NewRequest(http.MethodGet, "/api/dashboard/summary", nil)
+	w3 := httptest.NewRecorder()
+	r.ServeHTTP(w3, req3)
+	var s3 Summary
+	_ = json.Unmarshal(w3.Body.Bytes(), &s3)
+	if s3.TotalDevices != 2 {
+		t.Errorf("expected refreshed 2 devices, got %d", s3.TotalDevices)
+	}
+}

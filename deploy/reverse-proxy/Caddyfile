@@ -1,0 +1,45 @@
+# Caddyfile for Enterprise Endpoint Manager
+# Automatic HTTPS, HTTP/2, HTTP/3, and Native WebSocket Proxying
+
+{
+    admin off
+    auto_https disable_redirects
+}
+
+:80 {
+    # Automatic HTTP to HTTPS redirect
+    redir https://{host}{uri} permanent
+}
+
+:443 {
+    tls /etc/ssl/certs/endpoint-mgmt.crt /etc/ssl/private/endpoint-mgmt.key
+
+    # Max body size for software package deployments
+    request_body {
+        max_size 500MB
+    }
+
+    # Security headers
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "SAMEORIGIN"
+        Referrer-Policy "strict-origin-when-cross-origin"
+    }
+
+    # Reverse proxy to the backend server with WebSocket support
+    reverse_proxy 127.0.0.1:8443 {
+        # Transport settings for long-lived agent connections
+        transport http {
+            read_timeout 86400s
+            write_timeout 86400s
+            keepalive 64
+        }
+
+        # Preserve client IP headers
+        header_up Host {host}
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Forwarded-Proto {scheme}
+    }
+}

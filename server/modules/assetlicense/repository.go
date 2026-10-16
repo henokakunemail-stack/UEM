@@ -337,13 +337,31 @@ func (r *Repository) ComputeCompliance(ctx context.Context) ([]*LicenseComplianc
 	if err != nil {
 		return nil, err
 	}
+	if len(licenses) == 0 {
+		return []*LicenseComplianceSummary{}, nil
+	}
+
+	// Batch fetch allocation counts in a single group-by query to avoid N+1 query loop
+	type allocRow struct {
+		LicenseID string `db:"license_id"`
+		Count     int    `db:"count"`
+	}
+	var allocRows []allocRow
+	_ = r.db.SelectContext(ctx, &allocRows, `
+		SELECT license_id, COUNT(*) as count
+		FROM license_allocations
+		GROUP BY license_id
+	`)
+	allocMap := make(map[string]int, len(allocRows))
+	for _, row := range allocRows {
+		allocMap[row.LicenseID] = row.Count
+	}
 
 	summaries := make([]*LicenseComplianceSummary, 0, len(licenses))
 	now := time.Now().UTC()
 
 	for _, lic := range licenses {
-		var allocatedCount int
-		_ = r.db.GetContext(ctx, &allocatedCount, `SELECT COUNT(*) FROM license_allocations WHERE license_id = ?`, lic.ID)
+		allocatedCount := allocMap[lic.ID]
 
 		// Check detected installations from device inventory
 		var detectedCount int

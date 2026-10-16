@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"sync"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/rbac"
@@ -11,16 +13,32 @@ import (
 
 // Handler serves the dashboard metrics endpoints.
 type Handler struct {
-	repo   *Repository
-	authMW func(http.Handler) http.Handler
+	repo       *Repository
+	authMW     func(http.Handler) http.Handler
+	cacheTTL   time.Duration
+	cacheMu    sync.RWMutex
+	cachedSum  *Summary
+	cachedTime time.Time
 }
 
-// NewHandler constructs a Handler.
+// NewHandler constructs a Handler with default 10s caching for summary aggregation.
 func NewHandler(repo *Repository, authMW func(http.Handler) http.Handler) *Handler {
 	if authMW == nil {
 		authMW = func(next http.Handler) http.Handler { return next }
 	}
-	return &Handler{repo: repo, authMW: authMW}
+	return &Handler{
+		repo:     repo,
+		authMW:   authMW,
+		cacheTTL: 10 * time.Second,
+	}
+}
+
+// WithCacheTTL configures the summary cache TTL.
+func (h *Handler) WithCacheTTL(ttl time.Duration) *Handler {
+	h.cacheMu.Lock()
+	defer h.cacheMu.Unlock()
+	h.cacheTTL = ttl
+	return h
 }
 
 // Register mounts the dashboard routes on the router.
@@ -38,11 +56,31 @@ func (h *Handler) Register(r chi.Router) {
 }
 
 func (h *Handler) getSummary(w http.ResponseWriter, r *http.Request) {
+	// Fast path: in-memory cache check
+	if h.cacheTTL > 0 {
+		h.cacheMu.RLock()
+		if h.cachedSum != nil && time.Since(h.cachedTime) < h.cacheTTL {
+			cached := *h.cachedSum
+			h.cacheMu.RUnlock()
+			writeJSON(w, http.StatusOK, cached)
+			return
+		}
+		h.cacheMu.RUnlock()
+	}
+
 	s, err := h.repo.GetSummary(r.Context())
 	if err != nil {
 		writeErr(w, err.Error())
 		return
 	}
+
+	if h.cacheTTL > 0 {
+		h.cacheMu.Lock()
+		h.cachedSum = &s
+		h.cachedTime = time.Now().UTC()
+		h.cacheMu.Unlock()
+	}
+
 	writeJSON(w, http.StatusOK, s)
 }
 

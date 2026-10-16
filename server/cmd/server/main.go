@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
 	"github.com/jmoiron/sqlx"
 	"github.com/rs/zerolog/log"
 
@@ -403,12 +404,39 @@ func buildServer(cfg config.Config, database *sqlx.DB) (*http.Server, func()) {
 	maintRepo := maintenance.NewRepository(database)
 	maintH := maintenance.NewHandler(maintRepo, hub, &auditAdapter{db: database}, jwtSvc.RequireAuth, deviceRepo)
 
+	// One origin policy, built once from ALLOWED_ORIGIN_DOMAINS, shared by CORS
+	// middleware and every WebSocket endpoint so the console is trusted consistently.
+	checkOrigin := auth.NewOriginChecker(cfg.AllowedOriginDomains)
+
 	r := chi.NewRouter()
+
+	// Resilience and request correlation middlewares.
+	r.Use(middleware.RequestID)
+	r.Use(middleware.RealIP)
+	r.Use(middleware.Recoverer)
+
+	// Cross-Origin Resource Sharing (CORS) support for REST API.
+	r.Use(httpguard.CORS(httpguard.CORSOptions{
+		OriginValidator:  checkOrigin,
+		AllowCredentials: true,
+		MaxAge:           86400,
+	}))
 
 	// Security headers on all responses.
 	// CSP: default-src 'self' allows same-origin scripts/styles/fonts;
 	// style-src 'unsafe-inline' needed for inline styles in the embedded SPA.
 	r.Use(httpguard.SecurityHeaders(httpguard.DefaultSecurityHeaders(cfg.TLSCertFile != "" && cfg.TLSKeyFile != "")))
+
+	// Token-bucket API rate limiter (300 req/min per client IP, burst 100).
+	// Bypasses the persistent agent WebSocket endpoint /api/agent/connect and health probes.
+	ipResolver := auth.NewClientIPResolver(cfg.TrustedProxies)
+	apiLimiter := httpguard.NewAPIRateLimiter(300, 100)
+	r.Use(apiLimiter.Middleware(func(req *http.Request) string {
+		if req.URL.Path == "/api/agent/connect" || req.URL.Path == "/healthz" || req.URL.Path == "/readyz" {
+			return ""
+		}
+		return ipResolver.ClientIP(req)
+	}))
 
 	r.Get("/readyz", func(w http.ResponseWriter, r *http.Request) {
 		if err := database.PingContext(r.Context()); err != nil {
@@ -470,10 +498,6 @@ func buildServer(cfg config.Config, database *sqlx.DB) (*http.Server, func()) {
 	enrollH := devicemgmt.NewEnrollmentHandler(deviceRepo, database)
 	enrollH.WithTrustedProxies(cfg.TrustedProxies)
 	enrollH.Register(r)
-
-	// One origin policy, built once from ALLOWED_ORIGIN_DOMAINS, shared by every
-	// WebSocket endpoint so the console is trusted consistently.
-	checkOrigin := auth.NewOriginChecker(cfg.AllowedOriginDomains)
 
 	// Phase 5: remote command execution and interactive terminal relay.
 	remoteExecRepo := remoteexec.NewRepository(database)
@@ -766,6 +790,7 @@ func buildServer(cfg config.Config, database *sqlx.DB) (*http.Server, func()) {
 	cleanup := func() {
 		wsH.Close()
 		loginH.Close()
+		apiLimiter.Close()
 		stopBackups()
 		stopBackground()
 	}
