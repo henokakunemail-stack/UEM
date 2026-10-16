@@ -1,0 +1,1331 @@
+<title>Dashboard Design Showcase</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+
+<style>
+/* Design System Tokens */
+:root {
+  --bg-app: #0b1018;
+  --bg-surface: #121926;
+  --bg-surface-elevated: #1a2334;
+  --bg-surface-subtle: #162030;
+  --border-subtle: #243247;
+  --border-strong: #3b4e6d;
+  --border-focus: #60a5fa;
+  --text-main: #f1f5f9;
+  --text-muted: #94a3b8;
+  --text-dim: #64748b;
+  --color-primary: #38bdf8;
+  --color-primary-hover: #0284c7;
+  --color-primary-subtle: rgba(56, 189, 248, 0.12);
+  --color-success: #34d399;
+  --color-success-subtle: rgba(52, 211, 153, 0.12);
+  --color-warning: #fbbf24;
+  --color-warning-subtle: rgba(251, 191, 36, 0.12);
+  --color-danger: #f87171;
+  --color-danger-subtle: rgba(248, 113, 113, 0.12);
+  --color-purple: #c084fc;
+  --color-purple-subtle: rgba(192, 132, 252, 0.12);
+  --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: 'JetBrains Mono', Consolas, monospace;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --shadow-sm: 0 2px 4px rgba(0,0,0,0.3);
+  --shadow-md: 0 6px 16px rgba(0,0,0,0.4);
+  --shadow-lg: 0 16px 36px rgba(0,0,0,0.5);
+  color-scheme: dark;
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --bg-app: #f8fafc;
+    --bg-surface: #ffffff;
+    --bg-surface-elevated: #f1f5f9;
+    --bg-surface-subtle: #f8fafc;
+    --border-subtle: #e2e8f0;
+    --border-strong: #cbd5e1;
+    --border-focus: #2563eb;
+    --text-main: #0f172a;
+    --text-muted: #475569;
+    --text-dim: #64748b;
+    --color-primary: #0284c7;
+    --color-primary-subtle: rgba(2, 132, 199, 0.1);
+    --color-success: #059669;
+    --color-success-subtle: rgba(5, 150, 105, 0.1);
+    --color-warning: #d97706;
+    --color-warning-subtle: rgba(217, 119, 6, 0.1);
+    --color-danger: #dc2626;
+    --color-danger-subtle: rgba(220, 38, 38, 0.1);
+    --color-purple: #7c3aed;
+    --color-purple-subtle: rgba(124, 58, 237, 0.1);
+    color-scheme: light;
+  }
+}
+
+:root[data-theme="dark"] {
+  --bg-app: #0b1018;
+  --bg-surface: #121926;
+  --bg-surface-elevated: #1a2334;
+  --bg-surface-subtle: #162030;
+  --border-subtle: #243247;
+  --border-strong: #3b4e6d;
+  --border-focus: #60a5fa;
+  --text-main: #f1f5f9;
+  --text-muted: #94a3b8;
+  --text-dim: #64748b;
+  --color-primary: #38bdf8;
+  --color-primary-hover: #0284c7;
+  --color-primary-subtle: rgba(56, 189, 248, 0.12);
+  --color-success: #34d399;
+  --color-success-subtle: rgba(52, 211, 153, 0.12);
+  --color-warning: #fbbf24;
+  --color-warning-subtle: rgba(251, 191, 36, 0.12);
+  --color-danger: #f87171;
+  --color-danger-subtle: rgba(248, 113, 113, 0.12);
+  --color-purple: #c084fc;
+  --color-purple-subtle: rgba(192, 132, 252, 0.12);
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: var(--bg-app);
+  color: var(--text-main);
+  font-family: var(--font-sans);
+  line-height: 1.5;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: max(20px, env(safe-area-inset-top, 0px));
+  min-height: 100vh;
+}
+
+/* Master Header & Navigation Switcher */
+.showcase-header {
+  max-width: 1380px;
+  margin: 0 auto 24px auto;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  padding: 20px 24px;
+  box-shadow: var(--shadow-md);
+}
+
+.showcase-title-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.brand-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--color-primary-subtle);
+  color: var(--color-primary);
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 999px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.showcase-title {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text-main);
+  margin-top: 6px;
+}
+
+.showcase-desc {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.template-nav {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 10px;
+}
+
+.nav-tab-btn {
+  background: var(--bg-surface-elevated);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-muted);
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.2s ease;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.nav-tab-btn:hover {
+  border-color: var(--border-strong);
+  color: var(--text-main);
+  background: var(--bg-surface-subtle);
+}
+
+.nav-tab-btn.active {
+  background: var(--color-primary-subtle);
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+  box-shadow: 0 0 0 1px var(--color-primary);
+}
+
+.nav-tab-num {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  opacity: 0.8;
+}
+
+.nav-tab-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.nav-tab-btn.active .nav-tab-name {
+  color: var(--color-primary);
+}
+
+.nav-tab-tag {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+/* Template Info Callout */
+.template-info-card {
+  max-width: 1380px;
+  margin: 0 auto 24px auto;
+  background: var(--bg-surface-subtle);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-md);
+  padding: 16px 20px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 14px;
+}
+
+.info-details h3 {
+  font-size: 15px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.info-details p {
+  font-size: 13px;
+  color: var(--text-muted);
+  max-width: 800px;
+}
+
+.tag-pill {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: var(--border-subtle);
+  color: var(--text-main);
+}
+
+/* Layout Canvas Container */
+.preview-container {
+  max-width: 1380px;
+  margin: 0 auto;
+}
+
+/* Template Content Switcher */
+.template-view {
+  display: none;
+  animation: fadeIn 0.25s ease-in-out;
+}
+
+.template-view.active {
+  display: block;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* COMMON UTILITIES */
+.kpi-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 18px;
+  position: relative;
+  box-shadow: var(--shadow-sm);
+}
+
+.card-title-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 14px;
+}
+
+.card-heading {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-main);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.status-pill {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.pill-success { background: var(--color-success-subtle); color: var(--color-success); border: 1px solid rgba(52,211,153,0.3); }
+.pill-warning { background: var(--color-warning-subtle); color: var(--color-warning); border: 1px solid rgba(251,191,36,0.3); }
+.pill-danger { background: var(--color-danger-subtle); color: var(--color-danger); border: 1px solid rgba(248,113,113,0.3); }
+.pill-primary { background: var(--color-primary-subtle); color: var(--color-primary); border: 1px solid rgba(56,189,248,0.3); }
+.pill-purple { background: var(--color-purple-subtle); color: var(--color-purple); border: 1px solid rgba(192,132,252,0.3); }
+
+/* SVG Icons Helper */
+.icon {
+  width: 16px;
+  height: 16px;
+  display: inline-block;
+  vertical-align: middle;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  fill: none;
+}
+
+/* ============================================================== */
+/* TEMPLATE 1: OPERATIONS & INCIDENT NOC (Split-Screen Control)  */
+/* ============================================================== */
+.t1-hero-bar {
+  background: linear-gradient(135deg, rgba(56,189,248,0.1), rgba(16,24,39,0.8));
+  border: 1px solid rgba(56,189,248,0.3);
+  border-radius: var(--radius-md);
+  padding: 16px 20px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.t1-hero-stat {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.t1-pulse-indicator {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--color-success);
+  box-shadow: 0 0 12px var(--color-success);
+  animation: pulseDot 2s infinite;
+}
+
+@keyframes pulseDot {
+  0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(52,211,153,0.7); }
+  70% { transform: scale(1); box-shadow: 0 0 0 8px rgba(52,211,153,0); }
+  100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(52,211,153,0); }
+}
+
+.t1-grid {
+  display: grid;
+  grid-template-columns: 2fr 1.2fr;
+  gap: 20px;
+}
+
+@media (max-width: 960px) {
+  .t1-grid { grid-template-columns: 1fr; }
+}
+
+.t1-queue-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  background: var(--bg-surface-elevated);
+  border-left: 3px solid var(--color-danger);
+  border-radius: var(--radius-sm);
+  margin-bottom: 10px;
+  font-size: 12px;
+}
+
+.t1-queue-item.warn {
+  border-left-color: var(--color-warning);
+}
+
+.t1-queue-item.info {
+  border-left-color: var(--color-primary);
+}
+
+.t1-btn-action {
+  background: var(--color-primary);
+  color: #0b1018;
+  border: none;
+  border-radius: 4px;
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+/* ============================================================== */
+/* TEMPLATE 2: EXECUTIVE KPI & FLEET MATRIX (Modern Bento Grid)   */
+/* ============================================================== */
+.t2-bento-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+@media (max-width: 1080px) {
+  .t2-bento-grid { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 600px) {
+  .t2-bento-grid { grid-template-columns: 1fr; }
+}
+
+.t2-kpi-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 18px;
+  position: relative;
+  overflow: hidden;
+}
+
+.t2-kpi-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: var(--accent-bar, var(--color-primary));
+}
+
+.t2-kpi-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.t2-kpi-val {
+  font-size: 30px;
+  font-weight: 700;
+  color: var(--text-main);
+  margin: 6px 0;
+  font-family: var(--font-mono);
+}
+
+.t2-kpi-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.t2-delta {
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.t2-delta.up { color: var(--color-success); }
+.t2-delta.down { color: var(--color-danger); }
+
+.t2-mid-grid {
+  display: grid;
+  grid-template-columns: 1.5fr 1fr;
+  gap: 20px;
+}
+
+@media (max-width: 900px) {
+  .t2-mid-grid { grid-template-columns: 1fr; }
+}
+
+.donut-bar-wrap {
+  margin: 12px 0;
+}
+
+.donut-bar-track {
+  height: 10px;
+  border-radius: 999px;
+  display: flex;
+  overflow: hidden;
+  background: var(--border-subtle);
+}
+
+.bar-segment {
+  height: 100%;
+  transition: width 0.3s ease;
+}
+
+.bar-win { background: #38bdf8; }
+.bar-lin { background: #fbbf24; }
+.bar-mac { background: #c084fc; }
+
+.donut-legend {
+  display: flex;
+  gap: 16px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+  font-size: 12px;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.legend-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+/* ============================================================== */
+/* TEMPLATE 3: ZERO-TRUST & SECURITY POSTURE SCORECARD            */
+/* ============================================================== */
+.t3-score-card {
+  background: radial-gradient(circle at top right, rgba(52,211,153,0.15), var(--bg-surface));
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  padding: 24px;
+  margin-bottom: 20px;
+  display: grid;
+  grid-template-columns: 180px 1fr 1fr;
+  gap: 24px;
+  align-items: center;
+}
+
+@media (max-width: 900px) {
+  .t3-score-card { grid-template-columns: 1fr; text-align: center; }
+}
+
+.t3-gauge-circle {
+  width: 140px;
+  height: 140px;
+  border-radius: 50%;
+  border: 10px solid var(--border-subtle);
+  border-top-color: var(--color-success);
+  border-right-color: var(--color-success);
+  border-bottom-color: var(--color-success);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  margin: 0 auto;
+}
+
+.t3-gauge-val {
+  font-size: 38px;
+  font-weight: 800;
+  color: var(--color-success);
+  font-family: var(--font-mono);
+  line-height: 1;
+}
+
+.t3-gauge-lbl {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-dim);
+  text-transform: uppercase;
+}
+
+.t3-risk-pill-row {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.t3-risk-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  background: var(--bg-surface-elevated);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+}
+
+/* ============================================================== */
+/* TEMPLATE 4: MODERN GLASS BENTO (Vercel / Linear Aesthetic)     */
+/* ============================================================== */
+.t4-glass-card {
+  background: rgba(18, 25, 38, 0.7);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-lg);
+  padding: 20px;
+  transition: transform 0.2s, border-color 0.2s;
+}
+
+.t4-glass-card:hover {
+  border-color: rgba(56, 189, 248, 0.4);
+}
+
+.t4-tabs-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 20px;
+  overflow-x: auto;
+}
+
+.t4-tab {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  padding: 8px 14px;
+  border-radius: 999px;
+  font-size: 12px;
+  color: var(--text-muted);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.t4-tab.active {
+  background: var(--text-main);
+  color: var(--bg-app);
+  font-weight: 600;
+}
+
+.t4-bento-layout {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr;
+  gap: 16px;
+}
+
+@media (max-width: 1024px) {
+  .t4-bento-layout { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 640px) {
+  .t4-bento-layout { grid-template-columns: 1fr; }
+}
+
+.t4-quick-terminal {
+  background: #06090e;
+  border: 1px solid #1a2436;
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: #7dd3fc;
+  margin-top: 12px;
+}
+
+/* ============================================================== */
+/* TEMPLATE 5: MULTI-BRANCH DISTRIBUTED ENTERPRISE HUB            */
+/* ============================================================== */
+.t5-branch-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.t5-branch-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 18px;
+  position: relative;
+}
+
+.t5-branch-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 12px;
+}
+
+.t5-branch-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.t5-branch-subtitle {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.t5-metrics-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 8px;
+  background: var(--bg-surface-elevated);
+  border-radius: var(--radius-sm);
+  padding: 10px;
+  text-align: center;
+  margin: 12px 0;
+}
+
+.t5-subval {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-main);
+  font-family: var(--font-mono);
+}
+
+.t5-sublbl {
+  font-size: 10px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+}
+
+/* Interactive Details Section */
+.comparison-footer {
+  max-width: 1380px;
+  margin: 32px auto 0 auto;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  padding: 24px;
+}
+
+.comp-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  margin-top: 14px;
+}
+
+.comp-table th, .comp-table td {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border-subtle);
+  text-align: left;
+}
+
+.comp-table th {
+  color: var(--text-dim);
+  text-transform: uppercase;
+  font-size: 11px;
+  letter-spacing: 0.5px;
+}
+</style>
+
+<!-- HEADER & TEMPLATE SELECTOR -->
+<div class="showcase-header">
+  <div class="showcase-title-row">
+    <div>
+      <span class="brand-badge">Design System Explorer</span>
+      <h1 class="showcase-title">5 Konsep Redesign Dashboard Utama</h1>
+      <p class="showcase-desc">Pilih salah satu template di bawah untuk melihat preview interaktif, arsitektur visual, dan komponen masing-masing.</p>
+    </div>
+  </div>
+
+  <div class="template-nav">
+    <button type="button" class="nav-tab-btn active" onclick="switchTemplate(1)">
+      <span class="nav-tab-num">Template 01</span>
+      <span class="nav-tab-name">NOC Command Center</span>
+      <span class="nav-tab-tag">Operational / Incident Triage</span>
+    </button>
+    <button type="button" class="nav-tab-btn" onclick="switchTemplate(2)">
+      <span class="nav-tab-num">Template 02</span>
+      <span class="nav-tab-name">Executive KPI Matrix</span>
+      <span class="nav-tab-tag">Clean Bento / Fleet Ratios</span>
+    </button>
+    <button type="button" class="nav-tab-btn" onclick="switchTemplate(3)">
+      <span class="nav-tab-num">Template 03</span>
+      <span class="nav-tab-name">Zero-Trust Posture</span>
+      <span class="nav-tab-tag">Compliance & Risk Score</span>
+    </button>
+    <button type="button" class="nav-tab-btn" onclick="switchTemplate(4)">
+      <span class="nav-tab-num">Template 04</span>
+      <span class="nav-tab-name">Modern Glass Bento</span>
+      <span class="nav-tab-tag">Linear / Vercel Aesthetic</span>
+    </button>
+    <button type="button" class="nav-tab-btn" onclick="switchTemplate(5)">
+      <span class="nav-tab-num">Template 05</span>
+      <span class="nav-tab-name">Multi-Site Hub</span>
+      <span class="nav-tab-tag">Branch & Regional Centric</span>
+    </button>
+  </div>
+</div>
+
+<!-- TEMPLATE DESCRIPTIVE CALLOUT -->
+<div class="template-info-card" id="infoCard">
+  <div class="info-details">
+    <h3 id="infoTitle">
+      <span class="tag-pill" id="infoPill">Template 1</span>
+      NOC Operations & Incident Command Center
+    </h3>
+    <p id="infoDesc">
+      Dirancang untuk IT Administrator & Helpdesk yang membutuhkan pandangan langsung ke anomali operasional. Memiliki status bar real-time, triase insiden sisi kiri, radar health, dan aksi cepat eksekusi remote terminal.
+    </p>
+  </div>
+  <div>
+    <span class="status-pill pill-primary" id="infoBestFor">Cocok untuk: Operasional Harian / SysAdmin</span>
+  </div>
+</div>
+
+<!-- ============================================================== -->
+<!-- PREVIEW VIEWPORT                                               -->
+<!-- ============================================================== -->
+<div class="preview-container">
+
+  <!-- ==================== TEMPLATE 1: NOC COMMAND CENTER ==================== -->
+  <div id="view-1" class="template-view active">
+    <div class="t1-hero-bar">
+      <div class="t1-hero-stat">
+        <div class="t1-pulse-indicator"></div>
+        <div>
+          <div style="font-size: 11px; text-transform: uppercase; color: var(--text-dim); font-weight: 700;">Live Fleet Stream</div>
+          <div style="font-size: 15px; font-weight: 700;">148 / 148 Endpoints Active • 94.2% Connection Stability</div>
+        </div>
+      </div>
+      <div style="display: flex; gap: 10px;">
+        <span class="status-pill pill-success">WebSocket: Connected (42ms)</span>
+        <span class="status-pill pill-warning">2 Disk Critical</span>
+      </div>
+    </div>
+
+    <!-- Quick KPI Row -->
+    <div class="kpi-row">
+      <div class="card">
+        <div class="card-title-bar">
+          <span style="font-size: 11px; color: var(--text-dim); text-transform: uppercase;">ONLINE ENDPOINTS</span>
+          <span class="status-pill pill-success">Live</span>
+        </div>
+        <div style="font-size: 28px; font-weight: 700; font-family: var(--font-mono); color: var(--color-success);">139 <span style="font-size: 14px; color: var(--text-dim);">/ 148</span></div>
+        <div style="font-size: 12px; color: var(--text-muted); margin-top: 4px;">9 devices awaiting heartbeat</div>
+      </div>
+      <div class="card">
+        <div class="card-title-bar">
+          <span style="font-size: 11px; color: var(--text-dim); text-transform: uppercase;">STORAGE RISKS</span>
+          <span class="status-pill pill-danger">Alert</span>
+        </div>
+        <div style="font-size: 28px; font-weight: 700; font-family: var(--font-mono); color: var(--color-danger);">2</div>
+        <div style="font-size: 12px; color: var(--text-muted); margin-top: 4px;">Drive C: &lt; 10% free space</div>
+      </div>
+      <div class="card">
+        <div class="card-title-bar">
+          <span style="font-size: 11px; color: var(--text-dim); text-transform: uppercase;">HW AUDIT EVENTS (24H)</span>
+          <span class="status-pill pill-warning">Notice</span>
+        </div>
+        <div style="font-size: 28px; font-weight: 700; font-family: var(--font-mono); color: var(--color-warning);">3</div>
+        <div style="font-size: 12px; color: var(--text-muted); margin-top: 4px;">RAM/SSD replacement logged</div>
+      </div>
+      <div class="card">
+        <div class="card-title-bar">
+          <span style="font-size: 11px; color: var(--text-dim); text-transform: uppercase;">ACTIVE SITES</span>
+          <span class="status-pill pill-primary">4 Branches</span>
+        </div>
+        <div style="font-size: 28px; font-weight: 700; font-family: var(--font-mono); color: var(--color-primary);">100%</div>
+        <div style="font-size: 12px; color: var(--text-muted); margin-top: 4px;">Jakarta, SBY, BDG, MDN</div>
+      </div>
+    </div>
+
+    <!-- Main NOC Grid -->
+    <div class="t1-grid">
+      <!-- Incident Triage Queue -->
+      <div class="card">
+        <div class="card-title-bar">
+          <h3 class="card-heading">
+            <svg class="icon" viewBox="0 0 24 24"><path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+            Active Incident & Triage Queue
+          </h3>
+          <span class="status-pill pill-danger">3 Actionable</span>
+        </div>
+
+        <div class="t1-queue-item">
+          <div>
+            <div style="font-weight: 600; color: var(--text-main);">FIN-JKT-L04: Free disk space below 5% (3.2 GB left)</div>
+            <div style="color: var(--text-dim); font-size: 11px;">Site: Jakarta HQ • Drive C: (Kingston SSD 256GB)</div>
+          </div>
+          <button class="t1-btn-action" style="background: var(--color-danger); color: #fff;">Clear Temp</button>
+        </div>
+
+        <div class="t1-queue-item">
+          <div>
+            <div style="font-weight: 600; color: var(--text-main);">OPS-SBY-D02: Consecutive offline threshold reached (&gt;48h)</div>
+            <div style="color: var(--text-dim); font-size: 11px;">Site: Surabaya Branch • Last Seen: Yesterday 14:22</div>
+          </div>
+          <button class="t1-btn-action">Ping / Wake</button>
+        </div>
+
+        <div class="t1-queue-item warn">
+          <div>
+            <div style="font-weight: 600; color: var(--text-main);">DEV-BDG-W01: RAM capacity changed from 32GB to 16GB</div>
+            <div style="color: var(--text-dim); font-size: 11px;">Site: Bandung Hub • Hardware Tamper Alert</div>
+          </div>
+          <button class="t1-btn-action" style="background: var(--color-warning); color: #000;">View Audit</button>
+        </div>
+      </div>
+
+      <!-- Live Event Feed & Agent Terminal -->
+      <div class="card">
+        <div class="card-title-bar">
+          <h3 class="card-heading">
+            <svg class="icon" viewBox="0 0 24 24"><path d="M4 17l6-6-6-6m8 14h8"/></svg>
+            Live Activity Feed
+          </h3>
+          <span style="font-size: 11px; color: var(--text-dim);">Auto-scroll</span>
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 8px; font-size: 12px;">
+          <div style="padding: 8px; background: var(--bg-surface-elevated); border-radius: 4px;">
+            <div style="display: flex; justify-content: space-between; color: var(--color-primary); font-weight: 600;">
+              <span>Policy Sync: Group Policy #4</span>
+              <span style="color: var(--text-dim); font-size: 11px;">1m ago</span>
+            </div>
+            <div style="color: var(--text-muted); font-size: 11px;">Applied Managed Admin Account to 139 devices</div>
+          </div>
+          <div style="padding: 8px; background: var(--bg-surface-elevated); border-radius: 4px;">
+            <div style="display: flex; justify-content: space-between; color: var(--color-success); font-weight: 600;">
+              <span>Agent Enrolled: MKT-MDN-L09</span>
+              <span style="color: var(--text-dim); font-size: 11px;">14m ago</span>
+            </div>
+            <div style="color: var(--text-muted); font-size: 11px;">Site auto-assigned: Medan Office</div>
+          </div>
+          <div style="padding: 8px; background: var(--bg-surface-elevated); border-radius: 4px;">
+            <div style="display: flex; justify-content: space-between; color: var(--color-purple); font-weight: 600;">
+              <span>Software Deployed: VS Code v1.94</span>
+              <span style="color: var(--text-dim); font-size: 11px;">32m ago</span>
+            </div>
+            <div style="color: var(--text-muted); font-size: 11px;">10/10 target devices reported success</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== TEMPLATE 2: EXECUTIVE KPI MATRIX ==================== -->
+  <div id="view-2" class="template-view">
+    <!-- Top Bento 4 Cards -->
+    <div class="t2-bento-grid">
+      <div class="t2-kpi-card" style="--accent-bar: var(--color-primary);">
+        <div class="t2-kpi-label">Managed Endpoints</div>
+        <div class="t2-kpi-val">148</div>
+        <div class="t2-kpi-foot">
+          <span>Active in directory</span>
+          <span class="t2-delta up">+4 this week</span>
+        </div>
+      </div>
+      <div class="t2-kpi-card" style="--accent-bar: var(--color-success);">
+        <div class="t2-kpi-label">Fleet Online Ratio</div>
+        <div class="t2-kpi-val">94%</div>
+        <div class="t2-kpi-foot">
+          <span>139 connected</span>
+          <span class="t2-delta up">+1.5% SLA</span>
+        </div>
+      </div>
+      <div class="t2-kpi-card" style="--accent-bar: var(--color-warning);">
+        <div class="t2-kpi-label">Patch Compliance</div>
+        <div class="t2-kpi-val">97.8%</div>
+        <div class="t2-kpi-foot">
+          <span>4 pending reboot</span>
+          <span class="t2-delta down">-0.4%</span>
+        </div>
+      </div>
+      <div class="t2-kpi-card" style="--accent-bar: var(--color-purple);">
+        <div class="t2-kpi-label">Hardware Asset Valuation</div>
+        <div class="t2-kpi-val">$142.5k</div>
+        <div class="t2-kpi-foot">
+          <span>Total hardware pool</span>
+          <span>12 warranty exp</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Mid Grid Breakdown -->
+    <div class="t2-mid-grid">
+      <div class="card">
+        <div class="card-title-bar">
+          <h3 class="card-heading">Operating System Distribution</h3>
+          <span class="status-pill pill-primary">Cross-Platform Fleet</span>
+        </div>
+        <div class="donut-bar-wrap">
+          <div class="donut-bar-track">
+            <div class="bar-segment bar-win" style="width: 74%;"></div>
+            <div class="bar-segment bar-lin" style="width: 18%;"></div>
+            <div class="bar-segment bar-mac" style="width: 8%;"></div>
+          </div>
+        </div>
+        <div class="donut-legend">
+          <div class="legend-item"><div class="legend-dot" style="background: #38bdf8;"></div> Windows 11/10 (110 devices - 74%)</div>
+          <div class="legend-item"><div class="legend-dot" style="background: #fbbf24;"></div> Linux Ubuntu/Rocky (26 devices - 18%)</div>
+          <div class="legend-item"><div class="legend-dot" style="background: #c084fc;"></div> macOS Sonoma/Ventura (12 devices - 8%)</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title-bar">
+          <h3 class="card-heading">Site Telemetry Health</h3>
+          <span class="status-pill pill-success">4/4 Online</span>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 10px; font-size: 13px;">
+          <div style="display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--border-subtle);">
+            <span>Jakarta Head Office</span>
+            <strong style="color: var(--color-success);">88 / 90 (97%)</strong>
+          </div>
+          <div style="display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--border-subtle);">
+            <span>Surabaya Branch</span>
+            <strong style="color: var(--color-success);">31 / 34 (91%)</strong>
+          </div>
+          <div style="display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--border-subtle);">
+            <span>Bandung Tech Hub</span>
+            <strong style="color: var(--color-success);">14 / 14 (100%)</strong>
+          </div>
+          <div style="display: flex; justify-content: space-between; padding: 6px 0;">
+            <span>Medan Representative</span>
+            <strong style="color: var(--color-warning);">6 / 10 (60%)</strong>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== TEMPLATE 3: ZERO-TRUST POSTURE ==================== -->
+  <div id="view-3" class="template-view">
+    <div class="t3-score-card">
+      <div class="t3-gauge-circle">
+        <div class="t3-gauge-val">96</div>
+        <div class="t3-gauge-lbl">Posture Score</div>
+      </div>
+      <div>
+        <h2 style="font-size: 18px; font-weight: 700; margin-bottom: 6px;">Zero-Trust Fleet Compliance: EXCELLENT</h2>
+        <p style="font-size: 13px; color: var(--text-muted); line-height: 1.5;">
+          Endpoints enforce disk encryption (BitLocker/LUKS), managed administrator account synchronization, automatic agent updates, and active network egress filters.
+        </p>
+      </div>
+      <div class="t3-risk-pill-row">
+        <div class="t3-risk-item">
+          <span>Local Admin Synchronization</span>
+          <span class="status-pill pill-success">100% Synced</span>
+        </div>
+        <div class="t3-risk-item">
+          <span>Network Egress Filtering</span>
+          <span class="status-pill pill-success">Active</span>
+        </div>
+        <div class="t3-risk-item">
+          <span>Unpatched CVE Risk</span>
+          <span class="status-pill pill-warning">2 Pending</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Security Vectors Grid -->
+    <div class="kpi-row">
+      <div class="card">
+        <h4 style="font-size: 13px; font-weight: 600; color: var(--text-muted); margin-bottom: 8px;">DISK ENCRYPTION</h4>
+        <div style="font-size: 24px; font-weight: 700;">146 <span style="font-size: 12px; color: var(--color-success); font-weight: 600;">(98.6%)</span></div>
+        <div style="font-size: 11px; color: var(--text-dim); margin-top: 4px;">2 Linux machines awaiting LUKS key</div>
+      </div>
+      <div class="card">
+        <h4 style="font-size: 13px; font-weight: 600; color: var(--text-muted); margin-bottom: 8px;">POLICY INTEGRITY</h4>
+        <div style="font-size: 24px; font-weight: 700; color: var(--color-success);">SHA-256 Valid</div>
+        <div style="font-size: 11px; color: var(--text-dim); margin-top: 4px;">No configuration drift detected</div>
+      </div>
+      <div class="card">
+        <h4 style="font-size: 13px; font-weight: 600; color: var(--text-muted); margin-bottom: 8px;">UNAUTHORIZED USB STORAGE</h4>
+        <div style="font-size: 24px; font-weight: 700; color: var(--color-primary);">0 Events</div>
+        <div style="font-size: 11px; color: var(--text-dim); margin-top: 4px;">Removable media blocked by policy</div>
+      </div>
+      <div class="card">
+        <h4 style="font-size: 13px; font-weight: 600; color: var(--text-muted); margin-bottom: 8px;">ORPHANED ASSETS</h4>
+        <div style="font-size: 24px; font-weight: 700; color: var(--color-warning);">1 Unassigned</div>
+        <div style="font-size: 11px; color: var(--text-dim); margin-top: 4px;">Dell Latitude 5420 in inventory</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== TEMPLATE 4: MODERN GLASS BENTO ==================== -->
+  <div id="view-4" class="template-view">
+    <div class="t4-tabs-row">
+      <div class="t4-tab active">All Endpoints (148)</div>
+      <div class="t4-tab">Developer Workstations (32)</div>
+      <div class="t4-tab">Executive Laptops (18)</div>
+      <div class="t4-tab">Branch POS / Terminals (54)</div>
+      <div class="t4-tab">Servers & Gateway (14)</div>
+    </div>
+
+    <div class="t4-bento-layout">
+      <!-- Big Hero Tile -->
+      <div class="t4-glass-card">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+          <span style="font-size: 11px; text-transform: uppercase; color: #38bdf8; font-weight: 700;">Global Fleet Velocity</span>
+          <span class="status-pill pill-primary">Vite Micro-Engine</span>
+        </div>
+        <h2 style="font-size: 24px; font-weight: 700; margin-bottom: 6px;">148 Connected Nodes</h2>
+        <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 16px;">
+          Latency average 22ms. In-memory rate limiting & WebSocket multiplexing active across all sites.
+        </p>
+
+        <div class="t4-quick-terminal">
+          $ fleetctl execute --site="Jakarta HQ" --cmd="systeminfo | findstr /B OS"
+          <br>&gt; Connected to 88 nodes... [88/88 Success (100%)]
+          <br>&gt; Execution latency: 480ms.
+        </div>
+      </div>
+
+      <!-- Quick Action Glass 1 -->
+      <div class="t4-glass-card">
+        <div style="font-size: 11px; text-transform: uppercase; color: var(--text-dim); font-weight: 600; margin-bottom: 8px;">QUICK LAUNCH</div>
+        <h4 style="font-size: 15px; font-weight: 700; margin-bottom: 12px;">Remote Web Shell</h4>
+        <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 14px;">Instant interactive VT100 PowerShell or Bash terminal directly on any online device.</p>
+        <button style="width: 100%; padding: 8px; background: var(--bg-surface-elevated); border: 1px solid var(--border-subtle); color: var(--text-main); border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer;">Open Terminal Modal</button>
+      </div>
+
+      <!-- Quick Action Glass 2 -->
+      <div class="t4-glass-card">
+        <div style="font-size: 11px; text-transform: uppercase; color: var(--text-dim); font-weight: 600; margin-bottom: 8px;">REMOTE DESKTOP</div>
+        <h4 style="font-size: 15px; font-weight: 700; margin-bottom: 12px;">Screen Sharing</h4>
+        <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 14px;">Bidirectional low-latency screen streaming with mouse/keyboard control over WebSocket.</p>
+        <button style="width: 100%; padding: 8px; background: var(--color-primary); color: #0b1018; border: none; border-radius: 6px; font-size: 12px; font-weight: 700; cursor: pointer;">Connect Session</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== TEMPLATE 5: MULTI-SITE DISTRIBUTED HUB ==================== -->
+  <div id="view-5" class="template-view">
+    <div style="margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center;">
+      <div>
+        <h2 style="font-size: 18px; font-weight: 700;">Regional Enterprise Branches</h2>
+        <p style="font-size: 13px; color: var(--text-muted);">Self-service site enrollment & branch-level telemetry breakdown</p>
+      </div>
+      <button style="background: var(--bg-surface-elevated); border: 1px solid var(--border-subtle); padding: 8px 14px; border-radius: 6px; font-size: 12px; color: var(--text-main); font-weight: 600; cursor: pointer;">+ Register New Branch Site</button>
+    </div>
+
+    <div class="t5-branch-grid">
+      <!-- Site 1: Jakarta HQ -->
+      <div class="t5-branch-card">
+        <div class="t5-branch-header">
+          <div>
+            <div class="t5-branch-title">Jakarta Head Office</div>
+            <div class="t5-branch-subtitle">Gedung Bursa Efek, Tower 2</div>
+          </div>
+          <span class="status-pill pill-success">Primary Hub</span>
+        </div>
+        <div class="t5-metrics-row">
+          <div><div class="t5-subval">90</div><div class="t5-sublbl">Total</div></div>
+          <div><div class="t5-subval" style="color: var(--color-success);">88</div><div class="t5-sublbl">Online</div></div>
+          <div><div class="t5-subval" style="color: var(--color-warning);">2</div><div class="t5-sublbl">Offline</div></div>
+        </div>
+        <div style="font-size: 12px; color: var(--text-muted); display: flex; justify-content: space-between;">
+          <span>Latency: 12ms</span>
+          <span style="color: var(--color-success); font-weight: 600;">97.7% Health</span>
+        </div>
+      </div>
+
+      <!-- Site 2: Surabaya -->
+      <div class="t5-branch-card">
+        <div class="t5-branch-header">
+          <div>
+            <div class="t5-branch-title">Surabaya Branch</div>
+            <div class="t5-branch-subtitle">Jl. Basuki Rahmat No. 45</div>
+          </div>
+          <span class="status-pill pill-primary">Branch</span>
+        </div>
+        <div class="t5-metrics-row">
+          <div><div class="t5-subval">34</div><div class="t5-sublbl">Total</div></div>
+          <div><div class="t5-subval" style="color: var(--color-success);">31</div><div class="t5-sublbl">Online</div></div>
+          <div><div class="t5-subval" style="color: var(--color-warning);">3</div><div class="t5-sublbl">Offline</div></div>
+        </div>
+        <div style="font-size: 12px; color: var(--text-muted); display: flex; justify-content: space-between;">
+          <span>Latency: 28ms</span>
+          <span style="color: var(--color-success); font-weight: 600;">91.2% Health</span>
+        </div>
+      </div>
+
+      <!-- Site 3: Bandung -->
+      <div class="t5-branch-card">
+        <div class="t5-branch-header">
+          <div>
+            <div class="t5-branch-title">Bandung Tech Hub</div>
+            <div class="t5-branch-subtitle">Dago IT Park No. 12</div>
+          </div>
+          <span class="status-pill pill-purple">Dev Center</span>
+        </div>
+        <div class="t5-metrics-row">
+          <div><div class="t5-subval">14</div><div class="t5-sublbl">Total</div></div>
+          <div><div class="t5-subval" style="color: var(--color-success);">14</div><div class="t5-sublbl">Online</div></div>
+          <div><div class="t5-subval" style="color: var(--text-dim);">0</div><div class="t5-sublbl">Offline</div></div>
+        </div>
+        <div style="font-size: 12px; color: var(--text-muted); display: flex; justify-content: space-between;">
+          <span>Latency: 18ms</span>
+          <span style="color: var(--color-success); font-weight: 600;">100% Health</span>
+        </div>
+      </div>
+
+      <!-- Site 4: Medan -->
+      <div class="t5-branch-card">
+        <div class="t5-branch-header">
+          <div>
+            <div class="t5-branch-title">Medan Representative</div>
+            <div class="t5-branch-subtitle">Podomoro City Office</div>
+          </div>
+          <span class="status-pill pill-warning">Attention</span>
+        </div>
+        <div class="t5-metrics-row">
+          <div><div class="t5-subval">10</div><div class="t5-sublbl">Total</div></div>
+          <div><div class="t5-subval" style="color: var(--color-warning);">6</div><div class="t5-sublbl">Online</div></div>
+          <div><div class="t5-subval" style="color: var(--color-danger);">4</div><div class="t5-sublbl">Offline</div></div>
+        </div>
+        <div style="font-size: 12px; color: var(--text-muted); display: flex; justify-content: space-between;">
+          <span>Latency: 45ms</span>
+          <span style="color: var(--color-warning); font-weight: 600;">60.0% Health</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ============================================================== -->
+<!-- COMPARISON & RECOMMENDATION TABLE                             -->
+<!-- ============================================================== -->
+<div class="comparison-footer">
+  <h3 style="font-size: 16px; font-weight: 700; margin-bottom: 4px;">Rangkuman & Perbandingan 5 Template</h3>
+  <p style="font-size: 13px; color: var(--text-muted);">Gunakan tabel di bawah ini untuk membandingkan fokus operasional dan kelebihan utama sebelum memilih implementasi.</p>
+
+  <div style="overflow-x: auto;">
+    <table class="comp-table">
+      <thead>
+        <tr>
+          <th>No</th>
+          <th>Nama Template</th>
+          <th>Fokus Utama</th>
+          <th>Struktur Visual</th>
+          <th>Kelebihan Utama</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>01</strong></td>
+          <td><strong style="color: var(--color-primary);">NOC Command Center</strong></td>
+          <td>Operasional Harian & Insiden</td>
+          <td>Split Canvas (Triase Kiri, Live Feed Kanan)</td>
+          <td>Tombol aksi cepat langsung (Clear disk, wake-on-lan, audit log)</td>
+        </tr>
+        <tr>
+          <td><strong>02</strong></td>
+          <td><strong style="color: var(--color-success);">Executive KPI Matrix</strong></td>
+          <td>Metrik & Rasio SLA</td>
+          <td>Bento 4-Grid + Donut Bar OS</td>
+          <td>Sangat bersih, representatif untuk CIO/Manajemen, indikator tren (+%)</td>
+        </tr>
+        <tr>
+          <td><strong>03</strong></td>
+          <td><strong style="color: var(--color-warning);">Zero-Trust Posture</strong></td>
+          <td>Kepatuhan Keamanan & Audit</td>
+          <td>Circular Gauge 0-100 + Risk Vector</td>
+          <td>Menonjolkan status enkripsi disk, integritas policy SHA-256, dan CVE</td>
+        </tr>
+        <tr>
+          <td><strong>04</strong></td>
+          <td><strong style="color: var(--color-purple);">Modern Glass Bento</strong></td>
+          <td>Ergonomi Canggih (Linear Style)</td>
+          <td>Glassmorphism Blur + Quick Terminal</td>
+          <td>UI modern, filter kategori cepat (laptops/servers), widget interaktif</td>
+        </tr>
+        <tr>
+          <td><strong>05</strong></td>
+          <td><strong style="color: #f43f5e);">Multi-Site Hub</strong></td>
+          <td>Multi-Cabang Geografis</td>
+          <td>Kartu Komparasi Cabang Berdampingan</td>
+          <td>Ideal untuk perusahaan dengan banyak kantor cabang (Jakarta, SBY, BDG, MDN)</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+const templateDetails = {
+  1: {
+    pill: 'Template 01',
+    title: 'NOC Operations & Incident Command Center',
+    desc: 'Dirancang untuk IT Administrator & Helpdesk yang membutuhkan pandangan langsung ke anomali operasional. Memiliki status bar real-time, triase insiden sisi kiri, radar health, dan aksi cepat eksekusi remote terminal.',
+    bestFor: 'Cocok untuk: Operasional Harian / SysAdmin'
+  },
+  2: {
+    pill: 'Template 02',
+    title: 'Executive KPI & Fleet Health Matrix',
+    desc: 'Menampilkan metrik performa tingkat tinggi dengan visualisasi bento grid, rasio koneksi armada (+delta SLA mingguan), breakdown OS horizontal bar, dan status sites yang rapi dan mudah dibaca oleh manajemen.',
+    bestFor: 'Cocok untuk: C-Level, IT Manager & Reporting'
+  },
+  3: {
+    pill: 'Template 03',
+    title: 'Zero-Trust & Fleet Security Posture',
+    desc: 'Berfokus pada kesehatan postur keamanan endpoint: gauge score 0-100, rasio enkripsi BitLocker/LUKS, kepatuhan SHA-256 group policy, deteksi perubahan hardware, serta patching CVE.',
+    bestFor: 'Cocok untuk: Security Operations & ISO/Audit'
+  },
+  4: {
+    pill: 'Template 04',
+    title: 'Modern Glass Bento Grid (Linear / Vercel Style)',
+    desc: 'Estetika dark glassmorphism modern dengan navigasi kategori perangkat (Workstations, POS, Laptops, Servers) dan widget interaktif seperti terminal launcher dan remote desktop screen sharing langsung.',
+    bestFor: 'Cocok untuk: Pengalaman UI Modern & Ergonomis'
+  },
+  5: {
+    pill: 'Template 05',
+    title: 'Multi-Branch Geographic Hub',
+    desc: 'Dioptimalkan untuk korporasi dengan banyak kantor cabang. Setiap cabang ditampilkan dalam kartu mandiri dengan metrik online/offline, latency koneksi, dan tombol pendaftaran branch site mandiri.',
+    bestFor: 'Cocok untuk: Korporasi Multi-Cabang / Retail'
+  }
+};
+
+function switchTemplate(num) {
+  // Update buttons
+  document.querySelectorAll('.nav-tab-btn').forEach((btn, idx) => {
+    btn.classList.toggle('active', (idx + 1) === num);
+  });
+
+  // Update views
+  document.querySelectorAll('.template-view').forEach((view, idx) => {
+    view.classList.toggle('active', (idx + 1) === num);
+  });
+
+  // Update Callout Info
+  const d = templateDetails[num];
+  if (d) {
+    document.getElementById('infoPill').textContent = d.pill;
+    document.getElementById('infoTitle').innerHTML = '<span class="tag-pill">' + d.pill + '</span> ' + d.title;
+    document.getElementById('infoDesc').textContent = d.desc;
+    document.getElementById('infoBestFor').textContent = d.bestFor;
+  }
+}
+</script>

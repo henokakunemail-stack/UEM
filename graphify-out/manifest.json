@@ -2250,9 +2250,9 @@
     "semantic_hash": "141070cf429b17f6d9cdb6dda476a257"
   },
   "web-console/src/App.tsx": {
-    "mtime": 1792060583.4552047,
-    "seen": 1792061215.5597043,
-    "ast_hash": "65ea4f2a578ffc92ae5e91d9a585714e",
+    "mtime": 1792139079.387722,
+    "seen": 1792143203.9563508,
+    "ast_hash": "c0f0aba98083e81c3f4872adb4a91efc",
     "semantic_hash": ""
   },
   "web-console/src/components/AlertsList.tsx": {
@@ -2316,9 +2316,9 @@
     "semantic_hash": "ed1c2a8a8af9da99072abe35abd11a5d"
   },
   "web-console/src/components/layout/ConsoleShell.tsx": {
-    "mtime": 1792060564.1179068,
-    "seen": 1792061215.559761,
-    "ast_hash": "c678e19a07c34fd26134e58ac0624f6e",
+    "mtime": 1792138840.038519,
+    "seen": 1792143203.9563868,
+    "ast_hash": "880ece7d12bc13c7c110b99e3f6b4dee",
     "semantic_hash": ""
   },
   "web-console/src/components/ui/ConfirmDialog.tsx": {
@@ -3191,12 +3191,6 @@
     "ast_hash": "d35693f897df4dbea4a727db29e81549",
     "semantic_hash": ""
   },
-  "web-console/src/pages/SecurityPosturePage.tsx": {
-    "mtime": 1792061181.0343509,
-    "seen": 1792061215.559879,
-    "ast_hash": "e055251e0721b79ca706cfd1332bf963",
-    "semantic_hash": ""
-  },
   "server/core/httpguard/apiratelimit.go": {
     "mtime": 1792134635.4081964,
     "seen": 1792135763.9080484,
@@ -3225,6 +3219,12 @@
     "mtime": 1792135512.1621306,
     "seen": 1792135763.9086351,
     "ast_hash": "8ba58ee18d72d286d18b01e5393c118d",
+    "semantic_hash": ""
+  },
+  "dashboard_templates_preview.html": {
+    "mtime": 1792139261.2344058,
+    "seen": 1792143203.9565332,
+    "ast_hash": "03e8204ddfb3b0aa0541ce9873038008",
     "semantic_hash": ""
   }
 }

@@ -31,7 +31,6 @@ const groups: { label: string; items: NavItem[] }[] = [
     { label: 'Remote control', path: '/remotecontrol', icon: ScreenShare, role: 'technician' },
   ] },
   { label: 'Security & assets', items: [
-    { label: 'Security posture', path: '/security-posture', icon: ShieldCheck, role: 'admin' },
     { label: 'Patch management', path: '/patches', icon: ShieldCheck },
     { label: 'Network filter', path: '/filter', icon: Globe },
     { label: 'Group policy', path: '/system-policy', icon: Sliders },
