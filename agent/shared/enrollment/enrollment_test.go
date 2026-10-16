@@ -32,7 +32,7 @@ func TestExchange_Success(t *testing.T) {
 	}))
 	defer server.Close()
 
-	creds, err := Exchange(server.URL, "valid-test-token")
+	creds, err := Exchange(server.URL, "valid-test-token", "")
 	if err != nil {
 		t.Fatalf("Exchange failed: %v", err)
 	}
@@ -47,13 +47,42 @@ func TestExchange_Success(t *testing.T) {
 	}
 }
 
+func TestExchange_WithSite(t *testing.T) {
+	var receivedSite string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			EnrollmentToken string `json:"enrollment_token"`
+			Site            string `json:"site"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		receivedSite = req.Site
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"device_id":     "dev-site-123",
+			"device_secret": "sec-site-xyz",
+		})
+	}))
+	defer server.Close()
+
+	creds, err := Exchange(server.URL, "valid-token", "Medan-Branch")
+	if err != nil {
+		t.Fatalf("Exchange with site failed: %v", err)
+	}
+	if creds.DeviceID != "dev-site-123" {
+		t.Errorf("expected DeviceID=dev-site-123, got %s", creds.DeviceID)
+	}
+	if receivedSite != "Medan-Branch" {
+		t.Errorf("expected server to receive site=Medan-Branch, got %s", receivedSite)
+	}
+}
+
 func TestExchange_InvalidToken(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid token", http.StatusUnauthorized)
 	}))
 	defer server.Close()
 
-	_, err := Exchange(server.URL, "bad-token")
+	_, err := Exchange(server.URL, "bad-token", "")
 	if err == nil {
 		t.Fatal("expected error for bad token, got nil")
 	}

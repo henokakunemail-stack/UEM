@@ -6,11 +6,12 @@ set -euo pipefail
 
 SERVER_URL="${1:-http://localhost:8443}"
 ENROLL_TOKEN="${2:-}"
+SITE="${3:-}"
 INSTALL_BIN="/usr/local/bin/endpoint-agent"
 CREDS_PATH="/etc/endpoint-agent/creds.json"
 
 if [ "$(id -u)" -ne 0 ]; then
-    echo "[-] This installer requires root privileges. Please run with sudo: sudo $0 [server_url] [enroll_token]"
+    echo "[-] This installer requires root privileges. Please run with sudo: sudo $0 [server_url] [enroll_token] [site]"
     exit 1
 fi
 
@@ -38,7 +39,11 @@ chmod 0755 "$INSTALL_BIN"
 
 if [ -n "$ENROLL_TOKEN" ]; then
     echo "[*] Enrolling device with $SERVER_URL..."
-    "$INSTALL_BIN" -server "$SERVER_URL" -enroll "$ENROLL_TOKEN" -enroll-only -creds "$CREDS_PATH" || echo "[!] Enrollment warning (will continue)"
+    if [ -n "$SITE" ]; then
+        "$INSTALL_BIN" -server "$SERVER_URL" -enroll "$ENROLL_TOKEN" -site "$SITE" -enroll-only -creds "$CREDS_PATH" || echo "[!] Enrollment warning (will continue)"
+    else
+        "$INSTALL_BIN" -server "$SERVER_URL" -enroll "$ENROLL_TOKEN" -enroll-only -creds "$CREDS_PATH" || echo "[!] Enrollment warning (will continue)"
+    fi
 fi
 
 echo "[*] Registering and starting systemd service 'endpoint-agent'..."

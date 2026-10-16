@@ -35,7 +35,7 @@ func TestRunEnrollOnly_Success(t *testing.T) {
 	tmpDir := t.TempDir()
 	credsPath := filepath.Join(tmpDir, "creds.json")
 
-	err := runEnrollOnly(server.URL, "test-token-abc", credsPath)
+	err := runEnrollOnly(server.URL, "test-token-abc", "", credsPath)
 	if err != nil {
 		t.Fatalf("runEnrollOnly failed: %v", err)
 	}
@@ -59,7 +59,7 @@ func TestRunEnrollOnly_MissingToken(t *testing.T) {
 	tmpDir := t.TempDir()
 	credsPath := filepath.Join(tmpDir, "creds.json")
 
-	err := runEnrollOnly("http://localhost:8443", "", credsPath)
+	err := runEnrollOnly("http://localhost:8443", "", "", credsPath)
 	if err == nil {
 		t.Fatal("expected error for empty token, got nil")
 	}
@@ -69,7 +69,7 @@ func TestRunEnrollOnly_MissingServer(t *testing.T) {
 	tmpDir := t.TempDir()
 	credsPath := filepath.Join(tmpDir, "creds.json")
 
-	err := runEnrollOnly("", "some-token", credsPath)
+	err := runEnrollOnly("", "some-token", "", credsPath)
 	if err == nil {
 		t.Fatal("expected error for empty server URL, got nil")
 	}
@@ -84,7 +84,7 @@ func TestRunEnrollOnly_InvalidToken(t *testing.T) {
 	tmpDir := t.TempDir()
 	credsPath := filepath.Join(tmpDir, "creds.json")
 
-	err := runEnrollOnly(server.URL, "bad-token", credsPath)
+	err := runEnrollOnly(server.URL, "bad-token", "", credsPath)
 	if err == nil {
 		t.Fatal("expected error for bad token, got nil")
 	}
@@ -113,7 +113,7 @@ func TestRunEnrollOnly_DeviceIDMismatch_OverwritesWithBackup(t *testing.T) {
 		t.Fatalf("failed to pre-populate creds: %v", err)
 	}
 
-	err := runEnrollOnly(server.URL, "valid-token", credsPath)
+	err := runEnrollOnly(server.URL, "valid-token", "", credsPath)
 	if err != nil {
 		t.Fatalf("expected successful re-enrollment with backup, got error: %v", err)
 	}
@@ -134,5 +134,34 @@ func TestRunEnrollOnly_DeviceIDMismatch_OverwritesWithBackup(t *testing.T) {
 	}
 	if bakCreds.DeviceID != "dev-old-id" {
 		t.Fatalf("expected backup device_id 'dev-old-id', got '%s'", bakCreds.DeviceID)
+	}
+}
+
+func TestRunEnrollOnly_WithSite(t *testing.T) {
+	var receivedSite string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			EnrollmentToken string `json:"enrollment_token"`
+			Site            string `json:"site"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		receivedSite = req.Site
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"device_id":     "dev-site-test",
+			"device_secret": "secret-site-test",
+		})
+	}))
+	defer server.Close()
+
+	tmpDir := t.TempDir()
+	credsPath := filepath.Join(tmpDir, "creds.json")
+
+	err := runEnrollOnly(server.URL, "site-token", "Surabaya-Branch", credsPath)
+	if err != nil {
+		t.Fatalf("runEnrollOnly with site failed: %v", err)
+	}
+	if receivedSite != "Surabaya-Branch" {
+		t.Errorf("expected server to receive site=Surabaya-Branch, got %s", receivedSite)
 	}
 }

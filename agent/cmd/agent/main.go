@@ -51,6 +51,7 @@ func main() {
 	var (
 		serverURL            string
 		enrollToken          string
+		enrollSite           string
 		enrollOnly           bool
 		credsPath            string
 		heartbeatSecs        int
@@ -62,6 +63,7 @@ func main() {
 	)
 	flag.StringVar(&serverURL, "server", envOr("AGENT_SERVER", "http://localhost:8443"), "central server URL")
 	flag.StringVar(&enrollToken, "enroll", "", "one-time enrollment token (first run only)")
+	flag.StringVar(&enrollSite, "site", envOr("AGENT_SITE", ""), "site / branch location label for device enrollment (e.g. Medan-Branch)")
 	flag.BoolVar(&enrollOnly, "enroll-only", false, "enroll device with server, save credentials, and exit immediately")
 	flag.StringVar(&credsPath, "creds", defaultCredsPath(), "path to persisted credentials")
 	flag.IntVar(&heartbeatSecs, "heartbeat", 20, "heartbeat interval in seconds")
@@ -75,7 +77,7 @@ func main() {
 	flag.Parse()
 
 	if enrollOnly {
-		if err := runEnrollOnly(serverURL, enrollToken, credsPath); err != nil {
+		if err := runEnrollOnly(serverURL, enrollToken, enrollSite, credsPath); err != nil {
 			log.Error().Err(err).Msg("enroll-only failed")
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
@@ -109,7 +111,7 @@ func main() {
 	// is exactly the contract the SCM handler expects.
 	if service.RunAsService() {
 		if err := service.Serve("endpoint-agent", func() error {
-			runAgent(serverURL, enrollToken, credsPath, heartbeatSecs)
+			runAgent(serverURL, enrollToken, enrollSite, credsPath, heartbeatSecs)
 			return nil
 		}); err != nil {
 			log.Error().Err(err).Msg("windows service exited with error")
@@ -117,7 +119,7 @@ func main() {
 		return
 	}
 
-	runAgent(serverURL, enrollToken, credsPath, heartbeatSecs)
+	runAgent(serverURL, enrollToken, enrollSite, credsPath, heartbeatSecs)
 }
 
 // runRCWorker is the whole of the session worker's behaviour: run one remote
@@ -196,7 +198,7 @@ func runRCWorker(cfgArg, credsPath string) {
 // the installer process does not block on the background agent daemon.
 //
 // ponytail: skip daemon init, metrics, inventory, websocket; exit immediately.
-func runEnrollOnly(serverURL, enrollToken, credsPath string) error {
+func runEnrollOnly(serverURL, enrollToken, enrollSite, credsPath string) error {
 	if strings.TrimSpace(enrollToken) == "" {
 		return errors.New("-enroll token is required when using -enroll-only")
 	}
@@ -211,7 +213,7 @@ func runEnrollOnly(serverURL, enrollToken, credsPath string) error {
 
 	info, _ := osProvider.Collect()
 	log.Info().Str("server", serverURL).Msg("enrolling with provided token (enroll-only)")
-	newCreds, err := enrollment.Exchange(serverURL, enrollToken, info)
+	newCreds, err := enrollment.Exchange(serverURL, enrollToken, enrollSite, info)
 	if err != nil {
 		return fmt.Errorf("enrollment exchange failed: %w", err)
 	}
@@ -234,7 +236,7 @@ func runEnrollOnly(serverURL, enrollToken, credsPath string) error {
 	return nil
 }
 
-func runAgent(serverURL, enrollToken, credsPath string, heartbeatSecs int) {
+func runAgent(serverURL, enrollToken, enrollSite, credsPath string, heartbeatSecs int) {
 	log.Info().Str("server", serverURL).Str("creds", credsPath).Msg("agent starting")
 
 	// Cleanup leftover backup binary from previous self-update
@@ -252,7 +254,7 @@ func runAgent(serverURL, enrollToken, credsPath string, heartbeatSecs int) {
 		}
 		info, _ := osProvider.Collect()
 		log.Info().Msg("enrolling with provided token")
-		newCreds, err := enrollment.Exchange(serverURL, enrollToken, info)
+		newCreds, err := enrollment.Exchange(serverURL, enrollToken, enrollSite, info)
 		if err != nil {
 			log.Fatal().Err(err).Msg("enrollment failed")
 		}

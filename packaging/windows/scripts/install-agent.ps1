@@ -13,11 +13,14 @@
     Target directory for agent binary. Default is C:\Program Files\EndpointAgent.
 .PARAMETER DataDir
     Directory for credentials and logs. Default is C:\ProgramData\EndpointAgent.
+.PARAMETER Site
+    Optional site or branch location label (e.g. Medan-Branch, Surabaya-HQ). Overrides token default.
 #>
 [CmdletBinding()]
 param(
     [string]$ServerUrl = "http://localhost:8443",
     [string]$EnrollToken = "",
+    [string]$Site = "",
     [string]$BinaryPath = "",
     [string]$InstallDir = "$env:ProgramFiles\EndpointAgent",
     [string]$DataDir = "$env:ProgramData\EndpointAgent"
@@ -104,7 +107,11 @@ Copy-Item -Path $resolvedBin -Destination $destExe -Force
 # 6. Run enrollment if token provided
 if ($EnrollToken) {
     Write-Host "[*] Enrolling device with server $ServerUrl..." -ForegroundColor Cyan
-    & $destExe -server $ServerUrl -enroll $EnrollToken -enroll-only -creds $credsPath
+    if ($Site) {
+        & $destExe -server $ServerUrl -enroll $EnrollToken -site $Site -enroll-only -creds $credsPath
+    } else {
+        & $destExe -server $ServerUrl -enroll $EnrollToken -enroll-only -creds $credsPath
+    }
     if ($LASTEXITCODE -ne 0 -and -not (Test-Path $credsPath)) {
         throw "[-] Device enrollment failed with exit code $LASTEXITCODE. Pastikan ServerUrl ($ServerUrl) dapat diakses dan token belum kadaluarsa. Instalasi dihentikan untuk mencegah service error."
     } elseif ($LASTEXITCODE -ne 0) {

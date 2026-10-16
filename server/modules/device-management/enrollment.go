@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -86,6 +87,7 @@ type enrollRequest struct {
 	OSName          string `json:"os_name"`
 	OSVersion       string `json:"os_version"`
 	AgentVersion    string `json:"agent_version"`
+	Site            string `json:"site,omitempty"`
 }
 
 type enrollResponse struct {
@@ -149,6 +151,14 @@ func (h *EnrollmentHandler) enroll(w http.ResponseWriter, r *http.Request) {
 			agentVer = &req.AgentVersion
 		}
 
+		var site *string
+		if sharedToken.Site != nil {
+			site = sharedToken.Site
+		}
+		if s := strings.TrimSpace(req.Site); s != "" {
+			site = &s
+		}
+
 		newDev := Device{
 			ID:               devID,
 			Hostname:         hostname,
@@ -158,7 +168,7 @@ func (h *EnrollmentHandler) enroll(w http.ResponseWriter, r *http.Request) {
 			Status:           StatusOffline,
 			EnrolledAt:       now,
 			DeviceSecretHash: HashToken(plain),
-			Site:             sharedToken.Site,
+			Site:             site,
 			CreatedAt:        now,
 			UpdatedAt:        now,
 		}
@@ -176,7 +186,7 @@ func (h *EnrollmentHandler) enroll(w http.ResponseWriter, r *http.Request) {
 
 		_ = audit.Log(r.Context(), h.db, "agent", devID, "device.enroll_shared", devID, map[string]string{
 			"token_id": sharedToken.ID, "token_name": sharedToken.Name,
-			"hostname": req.Hostname, "os_name": req.OSName,
+			"hostname": req.Hostname, "os_name": req.OSName, "site": newDev.SiteValue(),
 		})
 
 		writeJSON(w, http.StatusOK, enrollResponse{DeviceID: devID, DeviceSecret: plain})
@@ -215,6 +225,9 @@ func (h *EnrollmentHandler) enroll(w http.ResponseWriter, r *http.Request) {
 
 	if req.Hostname != "" || req.OSVersion != "" || req.AgentVersion != "" {
 		_ = h.repo.UpdateSystemInfo(r.Context(), dev.ID, req.Hostname, req.OSName, req.OSVersion, req.AgentVersion)
+	}
+	if s := strings.TrimSpace(req.Site); s != "" && dev.Site == nil {
+		_ = h.repo.UpdateDevice(r.Context(), dev.ID, "", s)
 	}
 	_ = audit.Log(r.Context(), h.db, "agent", dev.ID, "device.enroll", dev.ID, map[string]string{
 		"hostname": req.Hostname, "os_name": req.OSName,

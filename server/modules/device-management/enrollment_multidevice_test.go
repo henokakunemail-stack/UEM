@@ -139,3 +139,86 @@ func TestSharedMultiDeviceEnrollment_ExpiredToken(t *testing.T) {
 		t.Fatalf("enroll expired token status = %d, want 401: %s", w.Code, w.Body.String())
 	}
 }
+
+func TestSharedMultiDeviceEnrollment_PerDeviceSiteOverride(t *testing.T) {
+	ctx := context.Background()
+	d := newExpiryDB(t)
+	repo := NewRepository(d)
+
+	tokenPlain := "shared-site-override-token"
+	tokenHash := HashToken(tokenPlain)
+	tokenID := "tok-sites"
+	expiresAt := time.Now().UTC().Add(2 * time.Hour)
+	defaultSite := "Jakarta-HQ"
+
+	if err := repo.CreateSharedEnrollmentToken(ctx, tokenID, tokenHash, "Multi-Site Batch", &defaultSite, expiresAt, 0, "admin-1"); err != nil {
+		t.Fatalf("create shared enrollment token: %v", err)
+	}
+
+	r := chi.NewRouter()
+	NewEnrollmentHandler(repo, d).Register(r)
+
+	// Device 1 specifies custom branch site: Medan-Branch
+	body1, _ := json.Marshal(enrollRequest{
+		EnrollmentToken: tokenPlain,
+		Hostname:        "PC-MEDAN-01",
+		Site:            "Medan-Branch",
+	})
+	req1 := httptest.NewRequest(http.MethodPost, "/api/agent/enroll", bytes.NewReader(body1))
+	req1.Header.Set("Content-Type", "application/json")
+	w1 := httptest.NewRecorder()
+	r.ServeHTTP(w1, req1)
+	if w1.Code != http.StatusOK {
+		t.Fatalf("dev1 enroll status = %d: %s", w1.Code, w1.Body.String())
+	}
+	var resp1 enrollResponse
+	_ = json.Unmarshal(w1.Body.Bytes(), &resp1)
+
+	// Device 2 omits site -> should fall back to token default site: Jakarta-HQ
+	body2, _ := json.Marshal(enrollRequest{
+		EnrollmentToken: tokenPlain,
+		Hostname:        "PC-HQ-01",
+		Site:            "",
+	})
+	req2 := httptest.NewRequest(http.MethodPost, "/api/agent/enroll", bytes.NewReader(body2))
+	req2.Header.Set("Content-Type", "application/json")
+	w2 := httptest.NewRecorder()
+	r.ServeHTTP(w2, req2)
+	if w2.Code != http.StatusOK {
+		t.Fatalf("dev2 enroll status = %d: %s", w2.Code, w2.Body.String())
+	}
+	var resp2 enrollResponse
+	_ = json.Unmarshal(w2.Body.Bytes(), &resp2)
+
+	// Device 3 specifies custom branch site: Surabaya-Branch
+	body3, _ := json.Marshal(enrollRequest{
+		EnrollmentToken: tokenPlain,
+		Hostname:        "PC-SBY-01",
+		Site:            "Surabaya-Branch",
+	})
+	req3 := httptest.NewRequest(http.MethodPost, "/api/agent/enroll", bytes.NewReader(body3))
+	req3.Header.Set("Content-Type", "application/json")
+	w3 := httptest.NewRecorder()
+	r.ServeHTTP(w3, req3)
+	if w3.Code != http.StatusOK {
+		t.Fatalf("dev3 enroll status = %d: %s", w3.Code, w3.Body.String())
+	}
+	var resp3 enrollResponse
+	_ = json.Unmarshal(w3.Body.Bytes(), &resp3)
+
+	// Verify in database
+	dev1, err := repo.GetByID(ctx, resp1.DeviceID)
+	if err != nil || dev1.SiteValue() != "Medan-Branch" {
+		t.Fatalf("dev1 expected site Medan-Branch, got: %s (err: %v)", dev1.SiteValue(), err)
+	}
+
+	dev2, err := repo.GetByID(ctx, resp2.DeviceID)
+	if err != nil || dev2.SiteValue() != "Jakarta-HQ" {
+		t.Fatalf("dev2 expected fallback site Jakarta-HQ, got: %s (err: %v)", dev2.SiteValue(), err)
+	}
+
+	dev3, err := repo.GetByID(ctx, resp3.DeviceID)
+	if err != nil || dev3.SiteValue() != "Surabaya-Branch" {
+		t.Fatalf("dev3 expected site Surabaya-Branch, got: %s (err: %v)", dev3.SiteValue(), err)
+	}
+}

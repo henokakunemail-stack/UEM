@@ -12,6 +12,7 @@ import (
 	"os/user"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/henokakunemail-stack/Endpoint-Manager/agent/shared/osinfo"
@@ -27,10 +28,14 @@ type Credentials struct {
 
 // Exchange posts the enrollment token to the server and stores the returned secret.
 // If osinfo.Info is provided, it enriches the enrollment request with device facts.
-func Exchange(serverURL, token string, info ...osinfo.Info) (Credentials, error) {
+// site optionally specifies the physical/logical branch location of the device.
+func Exchange(serverURL, token, site string, info ...osinfo.Info) (Credentials, error) {
 	normURL := transport.NormalizeServerURL(serverURL)
 	payload := map[string]string{
 		"enrollment_token": token,
+	}
+	if s := strings.TrimSpace(site); s != "" {
+		payload["site"] = s
 	}
 	if len(info) > 0 {
 		if info[0].Hostname != "" {

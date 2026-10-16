@@ -1,8 +1,8 @@
 {
   "agent/cmd/agent/enroll_test.go": {
-    "mtime": 1792060278.824124,
-    "seen": 1792061215.557639,
-    "ast_hash": "706e86a7563673625944aab5530e5ffb",
+    "mtime": 1792129618.7382643,
+    "seen": 1792130361.311892,
+    "ast_hash": "f3d365b4c7fd960b9e54de46d75e6d52",
     "semantic_hash": ""
   },
   "agent/cmd/agent/inventory_darwin.go": {
@@ -24,9 +24,9 @@
     "semantic_hash": "22bf7b338bb5b22d45ecaa309db6914f"
   },
   "agent/cmd/agent/main.go": {
-    "mtime": 1792058201.239665,
-    "seen": 1792061215.5576873,
-    "ast_hash": "05e3942b62f18bfffc9deaae5e008de2",
+    "mtime": 1792129544.4527206,
+    "seen": 1792130361.3119173,
+    "ast_hash": "a150b114620a12ae4eed5a774136dbeb",
     "semantic_hash": ""
   },
   "agent/cmd/agent/osinfo_darwin.go": {
@@ -72,16 +72,16 @@
     "semantic_hash": "55779a2463528b32a165503775556539"
   },
   "agent/shared/enrollment/enrollment.go": {
-    "mtime": 1791872947.422757,
-    "seen": 1791872975.9042273,
-    "ast_hash": "1b78ba3259d4b89ee1a94d4a2409c12d",
+    "mtime": 1792129297.8611183,
+    "seen": 1792130361.3119423,
+    "ast_hash": "fe4d5243660d1dad758f775b688841a3",
     "semantic_hash": ""
   },
   "agent/shared/enrollment/enrollment_test.go": {
-    "mtime": 1790748865.8392625,
-    "seen": 1791858829.9284668,
-    "ast_hash": "40565f4c80d03a75a951e55c924191ec",
-    "semantic_hash": "40565f4c80d03a75a951e55c924191ec"
+    "mtime": 1792129327.898759,
+    "seen": 1792130361.3119447,
+    "ast_hash": "69edc3a2433f907a696f914a791cc1ac",
+    "semantic_hash": ""
   },
   "agent/shared/enrollment/io.go": {
     "mtime": 1790043227.5676084,
@@ -858,10 +858,10 @@
     "semantic_hash": "22e70bdeec8013f4004bcd117c8a73de"
   },
   "packaging/linux/scripts/install-agent.sh": {
-    "mtime": 1791791974.2183576,
-    "seen": 1791858829.928742,
-    "ast_hash": "cf0804969710dc1e2c3fe11df5bf38f4",
-    "semantic_hash": "cf0804969710dc1e2c3fe11df5bf38f4"
+    "mtime": 1792130135.1334448,
+    "seen": 1792130361.3122702,
+    "ast_hash": "d38c6abaa0e6e1efda48033ce892ec0d",
+    "semantic_hash": ""
   },
   "packaging/linux/scripts/install-server.ps1": {
     "mtime": 1791770371.6663198,
@@ -924,9 +924,9 @@
     "semantic_hash": "d3e5c1bbe9a818f725cb0483fb1d145f"
   },
   "packaging/windows/scripts/install-agent.ps1": {
-    "mtime": 1791872948.9180515,
-    "seen": 1791872975.9046814,
-    "ast_hash": "73b75b1ce1fc6d53c71b8b518f21cee2",
+    "mtime": 1792130119.795469,
+    "seen": 1792130361.3122964,
+    "ast_hash": "8d3822e0a5b945bc0388d4a1f838c6a2",
     "semantic_hash": ""
   },
   "packaging/windows/scripts/install-server.ps1": {
@@ -1584,9 +1584,9 @@
     "semantic_hash": "4535045c45f1fc5e64b02d7bf88a5afa"
   },
   "server/modules/device-management/enrollment.go": {
-    "mtime": 1792036199.4139178,
-    "seen": 1792040777.1271489,
-    "ast_hash": "b06ab9d21a8aeba54dc9330bfd701951",
+    "mtime": 1792129749.915156,
+    "seen": 1792130361.3127813,
+    "ast_hash": "99574d9100ad1cda71d6f161b99038f9",
     "semantic_hash": ""
   },
   "server/modules/device-management/enrollment_bodylimit_test.go": {
@@ -2268,9 +2268,9 @@
     "semantic_hash": ""
   },
   "web-console/src/components/EnrollTokenModal.tsx": {
-    "mtime": 1792058641.23666,
-    "seen": 1792061215.5597184,
-    "ast_hash": "e8edcb868cb5c4e3950b6a675f61e42c",
+    "mtime": 1792129867.132889,
+    "seen": 1792130361.313293,
+    "ast_hash": "b232bfd748e9209c587d901ac189f966",
     "semantic_hash": ""
   },
   "web-console/src/components/ErrorBoundary.tsx": {
@@ -2706,9 +2706,9 @@
     "semantic_hash": ""
   },
   "README.md": {
-    "mtime": 1791859383.787212,
-    "seen": 1791859395.9922345,
-    "ast_hash": "5028a1b835438c88fca2c4fba890ae33",
+    "mtime": 1792113001.633078,
+    "seen": 1792113024.6257875,
+    "ast_hash": "33b9ff14922d2a1bb89062259996ad8e",
     "semantic_hash": ""
   },
   "SECURITY.md": {
@@ -3162,9 +3162,9 @@
     "semantic_hash": ""
   },
   "server/modules/device-management/enrollment_multidevice_test.go": {
-    "mtime": 1792036199.4527252,
-    "seen": 1792040777.1271565,
-    "ast_hash": "f2ed3bca78f45d8658cb8c78d7978568",
+    "mtime": 1792129739.1938517,
+    "seen": 1792130361.312792,
+    "ast_hash": "440fbb0b05e67145469e3dd77577e76b",
     "semantic_hash": ""
   },
   "server/modules/securityaudit/audit_test.go": {

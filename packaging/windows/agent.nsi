@@ -43,6 +43,9 @@ Var ServerURL
 Var LabelToken
 Var TextToken
 Var EnrollToken
+Var LabelSite
+Var TextSite
+Var SiteLocation
 Var DATADIR
 Var UninstallToken
 Var UninstDialog
@@ -78,6 +81,13 @@ UninstPage custom un.ConfirmTokenPage un.ConfirmTokenPageLeave
     StrCpy $DATADIR "$APPDATA\EndpointAgent"
 !macroend
 
+Function .onInit
+    ${GetParameters} $R0
+    ${GetOptions} "$R0" "/SERVER=" $ServerURL
+    ${GetOptions} "$R0" "/TOKEN=" $EnrollToken
+    ${GetOptions} "$R0" "/SITE=" $SiteLocation
+FunctionEnd
+
 ; --- Custom Page: Server & Enrollment Configuration ---
 Function ServerConfigPage
     !insertmacro MUI_HEADER_TEXT "Server Configuration" "Enter central management server URL and optional enrollment token."
@@ -88,21 +98,31 @@ Function ServerConfigPage
     ${EndIf}
 
     ; Server URL Label and Textbox
-    ${NSD_CreateLabel} 0 0 100% 12u "Management Server URL (HTTPS/WSS):"
+    ${NSD_CreateLabel} 0 0 100% 10u "Management Server URL (HTTPS/WSS):"
     Pop $LabelServer
 
-    ${NSD_CreateText} 0 14u 100% 12u "http://localhost:8443"
+    ${If} $ServerURL == ""
+        StrCpy $ServerURL "http://localhost:8443"
+    ${EndIf}
+    ${NSD_CreateText} 0 11u 100% 12u "$ServerURL"
     Pop $TextServer
 
     ; Enrollment Token Label and Textbox
-    ${NSD_CreateLabel} 0 34u 100% 12u "Enrollment Token (Generate from Web Console -> Devices):"
+    ${NSD_CreateLabel} 0 27u 100% 10u "Enrollment Token (Generate from Web Console -> Devices):"
     Pop $LabelToken
 
-    ${NSD_CreateText} 0 48u 100% 12u ""
+    ${NSD_CreateText} 0 38u 100% 12u "$EnrollToken"
     Pop $TextToken
 
-    ${NSD_CreateLabel} 0 70u 100% 24u "Note: If enrollment token is left empty, the agent service will be installed with Administrator (LocalSystem) rights and will enroll once a token is supplied."
-    Pop $LabelToken
+    ; Site / Branch Location Label and Textbox
+    ${NSD_CreateLabel} 0 54u 100% 10u "Site / Lokasi Cabang (Opsional, contoh: Medan-Branch, Surabaya-HQ):"
+    Pop $LabelSite
+
+    ${NSD_CreateText} 0 65u 100% 12u "$SiteLocation"
+    Pop $TextSite
+
+    ${NSD_CreateLabel} 0 81u 100% 26u "Catatan: Jika token multi-device didistribusikan ke berbagai cabang, isi lokasi cabang di atas agar terdata otomatis. Jika dikosongkan, menggunakan lokasi default token."
+    Pop $0
 
     nsDialogs::Show
 FunctionEnd
@@ -110,6 +130,7 @@ FunctionEnd
 Function ServerConfigPageLeave
     ${NSD_GetText} $TextServer $ServerURL
     ${NSD_GetText} $TextToken $EnrollToken
+    ${NSD_GetText} $TextSite $SiteLocation
 
     ${If} $ServerURL == ""
         MessageBox MB_ICONEXCLAMATION|MB_OK "Server URL is required to configure agent communication."
@@ -148,7 +169,11 @@ Section "Install Agent" SecInstall
     ; 3. Run Enrollment if token provided
     ${If} $EnrollToken != ""
         DetailPrint "Enrolling device with central server..."
-        nsExec::ExecToLog '"$INSTDIR\endpoint-agent.exe" -server "$ServerURL" -enroll "$EnrollToken" -enroll-only -creds "$DATADIR\creds.json"'
+        ${If} $SiteLocation != ""
+            nsExec::ExecToLog '"$INSTDIR\endpoint-agent.exe" -server "$ServerURL" -enroll "$EnrollToken" -site "$SiteLocation" -enroll-only -creds "$DATADIR\creds.json"'
+        ${Else}
+            nsExec::ExecToLog '"$INSTDIR\endpoint-agent.exe" -server "$ServerURL" -enroll "$EnrollToken" -enroll-only -creds "$DATADIR\creds.json"'
+        ${EndIf}
         Pop $0
         ${If} $0 != 0
             ${IfNot} ${FileExists} "$DATADIR\creds.json"

@@ -108,12 +108,16 @@ export const EnrollTokenModal: React.FC<EnrollTokenModalProps> = ({
   // pastes points at the server they are actually looking at — not a hostname
   // baked into a build.
   const server = typeof window !== 'undefined' ? window.location.origin : ''
+  const siteArg = site.trim() ? ` -site "${site.trim()}"` : ''
   const commands = issued
     ? [
-        { os: 'windows', text: `${BINARY.windows} -server ${server} -enroll ${issued.enrollment_token} -creds "%ALLUSERSPROFILE%\EndpointAgent\creds.json"` },
+        {
+          os: 'windows',
+          text: `${BINARY.windows} -server ${server} -enroll ${issued.enrollment_token}${siteArg} -creds "%ALLUSERSPROFILE%\\EndpointAgent\\creds.json"`,
+        },
         {
           os: 'linux',
-          text: `${BINARY.linux} -server ${server} -enroll ${issued.enrollment_token}`,
+          text: `${BINARY.linux} -server ${server} -enroll ${issued.enrollment_token}${siteArg}`,
         },
       ]
     : []
@@ -434,6 +438,12 @@ export const EnrollTokenModal: React.FC<EnrollTokenModalProps> = ({
                 </div>
               </div>
             ))}
+
+            {issued.is_multi_use && (
+              <p className="form-hint" style={{ marginTop: '0.75rem', lineHeight: '1.4' }}>
+                <strong>Tip Multi-Cabang:</strong> Saat instalasi via GUI (<code>EndpointAgent-Setup.exe</code>), staf cabang dapat langsung mengetik nama cabang pada kolom <em>Site / Lokasi</em>. Jika via command line / skrip, sesuaikan argumen <code>-site &quot;&lt;Nama-Cabang&gt;&quot;</code> (contoh: <code>-site &quot;Medan-Branch&quot;</code>).
+              </p>
+            )}
           </div>
         </>
       )}
