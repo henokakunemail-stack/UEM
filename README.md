@@ -1,5 +1,6 @@
 # Enterprise Endpoint Management Platform
 
+[![Release](https://img.shields.io/badge/Release-v1.5.0-brightgreen.svg)](https://github.com/henokakunemail-stack/UEM/releases/tag/v1.5.0)
 [![Go Version](https://img.shields.io/badge/Go-1.26%2B-blue.svg)](https://golang.org)
 [![Pure Go](https://img.shields.io/badge/CGO-Disabled%20(Zero%20CGO)-success.svg)](https://golang.org)
 [![Web Console](https://img.shields.io/badge/Frontend-React%2019%20%2B%20TypeScript%20%2B%20Vite-blueviolet.svg)](web-console)
@@ -48,7 +49,7 @@ Enterprise-grade, central endpoint management and security compliance platform a
 
 ---
 
-## 📦 Complete Enterprise Capabilities (Phases 1 - 16)
+## 📦 Complete Enterprise Capabilities (Phases 1 - 17)
 
 | Phase | Module | Core Functionality |
 |---|---|---|
@@ -68,6 +69,7 @@ Enterprise-grade, central endpoint management and security compliance platform a
 | **Phase 14** | **IT Asset & License Management** | Hardware Asset Management (HAM) with configurable currency valuation, Software Asset Management (SAM) live seat reconciliation |
 | **Phase 15** | **Device Maintenance** | Server-defined maintenance jobs (disk cleanup, temp purge, cache clearing) with per-device step progress and fleet-wide progress reporting |
 | **Phase 16** | **Active Directory Group Policy** | Multi-tier policy inheritance (`all` < `group` < `device`), USB mass storage lock, corporate wallpaper enforcement, inactivity desktop lock, Windows Update mode (`AUOptions`), administrative tool lockdown |
+| **Phase 17** | **Security Posture & Compliance** | Automated 40-point pre-launch security auditor (OWASP, data/network security, tamper-evident audit chains, live posture dashboard & scoring) |
 
 ### Interactive remote control runs as the signed-in user
 
@@ -157,19 +159,21 @@ actually found.
 │   │   ├── rbac/                   # Role-Based Access Control context utilities
 │   │   ├── transport/              # Hub WebSocket manager & agent dispatch
 │   │   └── wsticket/               # Single-use WebSocket handshake tickets
-│   └── modules/                    # Enterprise business logic modules (Phases 3-15)
+│   └── modules/                    # Enterprise business logic modules (Phases 3-17)
 │       ├── agentupdate/            # Phase 13: agent self-update & rollout campaigns
 │       ├── alerting/               # Phase 9: rule evaluation, incidents, webhooks
 │       ├── assetlicense/           # Phase 14: hardware assets & software licenses
 │       ├── dashboard/              # Phase 3: executive fleet metrics
-│       ├── device-management/      # Phases 1-2: enrollment, inventory, groups, lifecycle
+│       ├── device-management/      # Phases 1-2: enrollment, inventory, groups, lifecycle, purge
 │       ├── maintenance/            # Phase 15: device maintenance jobs & steps
 │       ├── networkfilter/          # Phase 12: DNS/web filter policies
 │       ├── patch-management/       # Phase 6: patch scanning & install jobs
 │       ├── remote-exec/            # Phase 5: command execution & terminal relay
 │       ├── remotecontrol/          # Phase 11: screen capture & input relay
 │       ├── reports/                # Phase 8: streaming CSV/JSON exports
+│       ├── securityaudit/          # Phase 17: 40-point automated security posture engine
 │       ├── software-deployment/    # Phase 4 (+15): package repository & rollouts
+│       ├── systempolicy/           # Phase 16: Active Directory equivalent group policies
 │       ├── taskscheduler/          # Phase 10: script repository & scheduled jobs
 │       └── user-management/        # Phase 7: console users & role assignment
 ├── tests/                          # Go integration and unit test suites
@@ -178,7 +182,7 @@ actually found.
 │   │   ├── components/             # Reusable UI widgets, charts, and interactive modals
 │   │   ├── context/                # Authentication, theme & toast React contexts
 │   │   ├── hooks/                  # Permission and shared hooks
-│   │   ├── pages/                  # 16 operational views for all enterprise phases
+│   │   ├── pages/                  # 17 operational views for all enterprise phases
 │   │   ├── services/               # Typed REST API client & report download helpers
 │   │   └── types/                  # Shared DTO types mirroring the server responses
 │   ├── package.json
