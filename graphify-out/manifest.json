@@ -324,9 +324,9 @@
     "semantic_hash": "5c5d4a1416b1781a3427298b2e7278fe"
   },
   "agent/shared/remotecontrol/capture_windows.go": {
-    "mtime": 1792384594.7514198,
-    "seen": 1792388078.2079065,
-    "ast_hash": "0c71b1c68349b6b5eacbd569e73e481c",
+    "mtime": 1792392583.9209504,
+    "seen": 1792393212.0102465,
+    "ast_hash": "4c92edbdb1a24c6f091b3e79db30f329",
     "semantic_hash": ""
   },
   "agent/shared/remotecontrol/capture_windows_test.go": {
@@ -2298,9 +2298,9 @@
     "semantic_hash": "fc78dfac824d5ea5bf28e6010e6123f0"
   },
   "web-console/src/components/RemoteControlModal.tsx": {
-    "mtime": 1792059624.13514,
-    "seen": 1792061215.5597422,
-    "ast_hash": "b9507d8c31eefe400bb97cea24f26b85",
+    "mtime": 1792392826.3825462,
+    "seen": 1792393212.0111885,
+    "ast_hash": "09f39c7174042e4ffc4830da34a00210",
     "semantic_hash": ""
   },
   "web-console/src/components/RemoteExecModal.tsx": {

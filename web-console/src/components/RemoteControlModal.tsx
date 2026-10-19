@@ -79,6 +79,17 @@ const PREVENT_DEFAULT_KEYS = new Set([
   'End',
 ])
 
+const isSession0OrLocked = (msg: string): boolean => {
+  const lower = msg.toLowerCase()
+  return (
+    lower.includes('session 0') ||
+    lower.includes('workstation is locked') ||
+    lower.includes('no active logged-on user') ||
+    lower.includes('no interactive session') ||
+    lower.includes('no active console')
+  )
+}
+
 export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
   device,
   initialMode = 'full_control',
@@ -363,7 +374,7 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
         setCapabilities({ capture: false, mouse: false, keyboard: false, reason: msg.reason ?? '' })
         setStatus('error')
         let reason = msg.reason || 'This endpoint cannot stream a desktop. Remote control needs a platform capture backend.'
-        if (reason.toLowerCase().includes('session') || reason.toLowerCase().includes('desktop') || reason.toLowerCase().includes('capture') || reason.toLowerCase().includes('wts')) {
+        if (isSession0OrLocked(reason)) {
           reason = `${reason} (Note: Windows services run in Session 0; ensure an interactive user is logged into the physical desktop and the screen is unlocked).`
         }
         setErrorMessage(reason)
@@ -736,10 +747,16 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
               <Monitor className="remote-placeholder-icon" />
               <h3 className="remote-placeholder-title">Cannot Stream This Desktop</h3>
               <p className="remote-placeholder-text">{errorMessage}</p>
-              <p className="remote-placeholder-text">
-                Remote control needs a person logged in at the endpoint so the agent has a
-                desktop to attach to. Ask them to sign in, then start a new session.
-              </p>
+              {isSession0OrLocked(errorMessage) ? (
+                <p className="remote-placeholder-text">
+                  Remote control needs a person logged in at the endpoint so the agent has a
+                  desktop to attach to. Ask them to sign in, then start a new session.
+                </p>
+              ) : (
+                <p className="remote-placeholder-text">
+                  Remote desktop capture failed. Verify endpoint agent logs and screen capture prerequisites, then retry.
+                </p>
+              )}
               <button type="button" className="btn btn-secondary" onClick={onClose}>
                 Close Window
               </button>

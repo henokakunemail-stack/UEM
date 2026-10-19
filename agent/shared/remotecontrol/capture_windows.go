@@ -229,6 +229,13 @@ func (c *WindowsCapturer) Capabilities() Capabilities {
 	return caps
 }
 
+func cleanWin32Err(callErr error) error {
+	if callErr == nil || callErr == syscall.Errno(0) {
+		return errors.New("win32 error code 0 (display driver or DC format rejected DIB)")
+	}
+	return callErr
+}
+
 // probeCapture performs a 1x1 blit and reports why it failed, if it did.
 func (c *WindowsCapturer) probeCapture() error {
 	// The probe is the thing that decides whether the console is told the host
@@ -272,7 +279,33 @@ func (c *WindowsCapturer) probeCapture() error {
 		if r != 0 && sessionID == 0 {
 			extra = " (running in Windows Session 0: workstation is locked or has no active logged-on user session)"
 		}
-		return fmt.Errorf("BitBlt failed: %w%s", callErr, extra)
+		return fmt.Errorf("BitBlt failed: %w%s", cleanWin32Err(callErr), extra)
+	}
+
+	// Verify GetDIBits on the screen DC with the bitmap unselected from hdcMem.
+	// A driver or display mode that rejects GetDIBits must be caught here so
+	// Capabilities() accurately reflects host support before starting the stream.
+	procSelectObject.Call(hdcMem, old)
+	var bi bitmapInfoHeader
+	bi.BiSize = uint32(unsafe.Sizeof(bi))
+	bi.BiWidth = 1
+	bi.BiHeight = 1
+	bi.BiPlanes = 1
+	bi.BiBitCount = 32
+	bi.BiCompression = BI_RGB
+	bi.BiSizeImage = 4
+
+	var probePixel [4]byte
+	if ret, _, callErr := procGetDIBits.Call(
+		hdcScreen,
+		hBitmap,
+		0,
+		1,
+		uintptr(unsafe.Pointer(&probePixel[0])),
+		uintptr(unsafe.Pointer(&bi)),
+		0,
+	); ret == 0 {
+		return fmt.Errorf("GetDIBits probe failed: %w", cleanWin32Err(callErr))
 	}
 	return nil
 }
@@ -336,16 +369,17 @@ func (c *WindowsCapturer) CaptureScreen() ([]byte, int, int, error) {
 		if r != 0 && sessionID == 0 {
 			extra = " (running in Windows Session 0: workstation is locked or has no active logged-on user session)"
 		}
-		return nil, 0, 0, fmt.Errorf("bitblt failed on a %dx%d blit: %w%s", width, height, callErr, extra)
+		return nil, 0, 0, fmt.Errorf("bitblt failed on a %dx%d blit: %w%s", width, height, cleanWin32Err(callErr), extra)
 	}
 
 	var bi bitmapInfoHeader
 	bi.BiSize = uint32(unsafe.Sizeof(bi))
 	bi.BiWidth = int32(width)
-	bi.BiHeight = -int32(height) // negative for top-down bitmap
+	bi.BiHeight = int32(height) // positive for bottom-up bitmap (universal display driver support)
 	bi.BiPlanes = 1
 	bi.BiBitCount = 32
 	bi.BiCompression = BI_RGB
+	bi.BiSizeImage = uint32(width * height * 4)
 
 	// The DIB is read as 32-bit BGRA and handed back as it is. Converting it to
 	// RGBA and encoding it here is what made this a polled screenshot: the
@@ -357,11 +391,13 @@ func (c *WindowsCapturer) CaptureScreen() ([]byte, int, int, error) {
 	// decides to send get converted and encoded.
 	rawPixels := make([]byte, width*height*4)
 
-	// Win32 GDI requires hBitmap not be selected into hdcMem when calling GetDIBits
+	// Win32 GDI requires hBitmap not be selected into hdcMem when calling GetDIBits.
+	// Pass hdcScreen (which retains native 32-bpp format), NOT hdcMem (which holds
+	// the 1-bpp monochrome hOld stock bitmap).
 	procSelectObject.Call(hdcMem, hOld)
 
 	ret, _, callErr = procGetDIBits.Call(
-		hdcMem,
+		hdcScreen,
 		hBitmap,
 		0,
 		uintptr(height),
@@ -376,10 +412,19 @@ func (c *WindowsCapturer) CaptureScreen() ([]byte, int, int, error) {
 				procCloseDesktop.Call(hDesktop)
 			}
 		}
-		if callErr == nil {
-			callErr = errors.New("unknown win32 error")
-		}
-		return nil, 0, 0, fmt.Errorf("getdibits failed: %w", callErr)
+		return nil, 0, 0, fmt.Errorf("getdibits failed: %w", cleanWin32Err(callErr))
+	}
+
+	// Invert scanlines in-place: convert bottom-up DIB to top-down buffer expected by Damage.Diff.
+	stride := width * 4
+	rowBuf := make([]byte, stride)
+	for top := 0; top < height/2; top++ {
+		bottom := height - 1 - top
+		topOffset := top * stride
+		bottomOffset := bottom * stride
+		copy(rowBuf, rawPixels[topOffset:topOffset+stride])
+		copy(rawPixels[topOffset:topOffset+stride], rawPixels[bottomOffset:bottomOffset+stride])
+		copy(rawPixels[bottomOffset:bottomOffset+stride], rowBuf)
 	}
 
 	return rawPixels, width, height, nil
