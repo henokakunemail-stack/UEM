@@ -323,6 +323,8 @@ func (s *Session) readInputLoop() {
 }
 
 func (s *Session) streamFramesLoop() {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
 	defer s.Stop()
 
 	interval := minCaptureInterval

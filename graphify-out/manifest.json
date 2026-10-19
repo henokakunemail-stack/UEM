@@ -222,9 +222,9 @@
     "semantic_hash": "45ee77e9a6e1f14f4336371579756c0c"
   },
   "agent/shared/osinfo/osinfo.go": {
-    "mtime": 1792042232.6838653,
-    "seen": 1792042246.6195602,
-    "ast_hash": "1ebe52ea0d462106a2c56dfc4427e670",
+    "mtime": 1792385521.9607904,
+    "seen": 1792388078.2078593,
+    "ast_hash": "f3de765114f086ba5333671d6bee7bc9",
     "semantic_hash": ""
   },
   "agent/shared/patch/classify_windows_test.go": {
@@ -324,10 +324,10 @@
     "semantic_hash": "5c5d4a1416b1781a3427298b2e7278fe"
   },
   "agent/shared/remotecontrol/capture_windows.go": {
-    "mtime": 1791859383.9430828,
-    "seen": 1791859395.9916203,
-    "ast_hash": "6b9e494c9b6d7f268a6168ca29c0bc75",
-    "semantic_hash": "6b9e494c9b6d7f268a6168ca29c0bc75"
+    "mtime": 1792384594.7514198,
+    "seen": 1792388078.2079065,
+    "ast_hash": "0c71b1c68349b6b5eacbd569e73e481c",
+    "semantic_hash": ""
   },
   "agent/shared/remotecontrol/capture_windows_test.go": {
     "mtime": 1791791974.2084084,
@@ -348,10 +348,10 @@
     "semantic_hash": "d9757ea7c64c66c929005bbd3a8463d2"
   },
   "agent/shared/remotecontrol/session.go": {
-    "mtime": 1791859384.0023134,
-    "seen": 1791859395.9916265,
-    "ast_hash": "9a1d22f3bd20e6d93a57fb24ef8f7f31",
-    "semantic_hash": "9a1d22f3bd20e6d93a57fb24ef8f7f31"
+    "mtime": 1792384487.692018,
+    "seen": 1792388078.207918,
+    "ast_hash": "fd9aebe993483a44b84a366f5cb4969f",
+    "semantic_hash": ""
   },
   "agent/shared/remotecontrol/session0_commandline_test.go": {
     "mtime": 1791175048.6917942,
@@ -2214,9 +2214,9 @@
     "semantic_hash": "8861d70fac0403d1045e8fc8dd2761dc"
   },
   "update.sh": {
-    "mtime": 1792036200.2662635,
-    "seen": 1792040777.1274517,
-    "ast_hash": "f92555f43d51dc07539c07d870e61303",
+    "mtime": 1792144155.5808923,
+    "seen": 1792144192.730034,
+    "ast_hash": "7df003d67bfdc350ece40c8cbc572ead",
     "semantic_hash": ""
   },
   "web-console/.oxlintrc.json": {
@@ -2496,15 +2496,15 @@
     "semantic_hash": "e866e88869d5de5cac82cfa25ee435d0"
   },
   "web-console/src/services/api.ts": {
-    "mtime": 1792060720.9325845,
-    "seen": 1792061215.5599136,
-    "ast_hash": "8b1a5471bf0599e6811d743e56738d06",
+    "mtime": 1792374366.4475973,
+    "seen": 1792374979.8162298,
+    "ast_hash": "b38178f708d3b9ce340ceba71995b57a",
     "semantic_hash": ""
   },
   "web-console/src/types/api.ts": {
-    "mtime": 1792060709.8894765,
-    "seen": 1792061215.559918,
-    "ast_hash": "f364c3840cd400718b5f2720b55ec934",
+    "mtime": 1792374220.2690728,
+    "seen": 1792374979.8162363,
+    "ast_hash": "82bc8dc979728f440f65499170c91e23",
     "semantic_hash": ""
   },
   "web-console/tsconfig.app.json": {
@@ -2706,9 +2706,9 @@
     "semantic_hash": ""
   },
   "README.md": {
-    "mtime": 1792113001.633078,
-    "seen": 1792113024.6257875,
-    "ast_hash": "33b9ff14922d2a1bb89062259996ad8e",
+    "mtime": 1792385522.285898,
+    "seen": 1792388078.2093446,
+    "ast_hash": "7c045591077a4ec4203a380304ad87e2",
     "semantic_hash": ""
   },
   "SECURITY.md": {
@@ -2985,30 +2985,6 @@
     "mtime": 1790149264.5421576,
     "seen": 1791859357.0160916,
     "ast_hash": "7e840862161341271697daa99a40d76b",
-    "semantic_hash": ""
-  },
-  "web-console/public/icons.svg": {
-    "mtime": 1790149264.5444906,
-    "seen": 1791859357.016093,
-    "ast_hash": "3b4fcfcf393eca4d264dca4a4663bc37",
-    "semantic_hash": ""
-  },
-  "web-console/src/assets/hero.png": {
-    "mtime": 1790149264.5510144,
-    "seen": 1791859357.0160942,
-    "ast_hash": "aead493361b27e7510691c5d7072dfc1",
-    "semantic_hash": ""
-  },
-  "web-console/src/assets/react.svg": {
-    "mtime": 1790149264.5527527,
-    "seen": 1791859357.0160954,
-    "ast_hash": "f0402b67b6ce880f65666bb49e841696",
-    "semantic_hash": ""
-  },
-  "web-console/src/assets/vite.svg": {
-    "mtime": 1790149264.5575745,
-    "seen": 1791859357.0160966,
-    "ast_hash": "9960a24288958394ac50e57ff638b036",
     "semantic_hash": ""
   },
   "agent/shared/inventory/scheduler_test.go": {

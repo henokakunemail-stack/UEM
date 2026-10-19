@@ -259,6 +259,12 @@ func (c *WindowsCapturer) probeCapture() error {
 	defer procSelectObject.Call(hdcMem, old)
 
 	if ret, _, callErr := procBitBlt.Call(hdcMem, 0, 0, 1, 1, hdcScreen, 0, 0, uintptr(SRCCOPY|CAPTUREBLT)); ret == 0 {
+		tid, _, _ := procGetCurrentThreadID.Call()
+		if val, ok := attachedThreads.LoadAndDelete(tid); ok {
+			if hDesktop, ok := val.(uintptr); ok && hDesktop != 0 {
+				procCloseDesktop.Call(hDesktop)
+			}
+		}
 		var extra string
 		var sessionID uint32
 		pid, _, _ := procGetCurrentProcessId.Call()
@@ -310,7 +316,11 @@ func (c *WindowsCapturer) CaptureScreen() ([]byte, int, int, error) {
 	ret, _, callErr := procBitBlt.Call(hdcMem, 0, 0, uintptr(width), uintptr(height), hdcScreen, 0, 0, uintptr(SRCCOPY|CAPTUREBLT))
 	if ret == 0 {
 		tid, _, _ := procGetCurrentThreadID.Call()
-		attachedThreads.Delete(tid)
+		if val, ok := attachedThreads.LoadAndDelete(tid); ok {
+			if hDesktop, ok := val.(uintptr); ok && hDesktop != 0 {
+				procCloseDesktop.Call(hDesktop)
+			}
+		}
 		// The Win32 code is kept deliberately. A non-interactive window station
 		// (a service, a CI runner, a container) makes BitBlt fail with a code
 		// that no amount of code change will fix, and without it this error is
@@ -347,7 +357,10 @@ func (c *WindowsCapturer) CaptureScreen() ([]byte, int, int, error) {
 	// decides to send get converted and encoded.
 	rawPixels := make([]byte, width*height*4)
 
-	ret, _, _ = procGetDIBits.Call(
+	// Win32 GDI requires hBitmap not be selected into hdcMem when calling GetDIBits
+	procSelectObject.Call(hdcMem, hOld)
+
+	ret, _, callErr = procGetDIBits.Call(
 		hdcMem,
 		hBitmap,
 		0,
@@ -357,7 +370,16 @@ func (c *WindowsCapturer) CaptureScreen() ([]byte, int, int, error) {
 		0,
 	)
 	if ret == 0 {
-		return nil, 0, 0, fmt.Errorf("getdibits failed")
+		tid, _, _ := procGetCurrentThreadID.Call()
+		if val, ok := attachedThreads.LoadAndDelete(tid); ok {
+			if hDesktop, ok := val.(uintptr); ok && hDesktop != 0 {
+				procCloseDesktop.Call(hDesktop)
+			}
+		}
+		if callErr == nil {
+			callErr = errors.New("unknown win32 error")
+		}
+		return nil, 0, 0, fmt.Errorf("getdibits failed: %w", callErr)
 	}
 
 	return rawPixels, width, height, nil

@@ -1,395 +1,272 @@
-# Enterprise Endpoint Management Platform
+# 🛡️ Enterprise Endpoint Management Platform (UEM)
 
-[![Release](https://img.shields.io/badge/Release-v1.5.0-brightgreen.svg)](https://github.com/henokakunemail-stack/UEM/releases/tag/v1.5.0)
-[![Go Version](https://img.shields.io/badge/Go-1.26%2B-blue.svg)](https://golang.org)
-[![Pure Go](https://img.shields.io/badge/CGO-Disabled%20(Zero%20CGO)-success.svg)](https://golang.org)
-[![Web Console](https://img.shields.io/badge/Frontend-React%2019%20%2B%20TypeScript%20%2B%20Vite-blueviolet.svg)](web-console)
-[![Architecture](https://img.shields.io/badge/Architecture-Single--Binary%20Embedded-orange.svg)](#single-binary-delivery)
-[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+<div align="center">
 
-Enterprise-grade, central endpoint management and security compliance platform architected to manage 500+ to 10,000+ distributed endpoints (Windows, Linux, macOS) across distributed branch offices.
+[![Release](https://img.shields.io/badge/Release-v1.5.1+-brightgreen.svg?style=for-the-badge&logo=github)](https://github.com/henokakunemail-stack/UEM/releases)
+[![Go Version](https://img.shields.io/badge/Go-1.23%2B%20%7C%201.26%2B-blue.svg?style=for-the-badge&logo=go)](https://golang.org)
+[![Pure Go](https://img.shields.io/badge/CGO-Disabled%20(Zero%20CGO)-success.svg?style=for-the-badge&logo=linux)](https://golang.org)
+[![Web Console](https://img.shields.io/badge/Frontend-React%2019%20%2B%20TypeScript%20%2B%20Vite-blueviolet.svg?style=for-the-badge&logo=react)](web-console)
+[![Architecture](https://img.shields.io/badge/Architecture-Single--Binary%20Embedded-orange.svg?style=for-the-badge&logo=docker)](#-single-binary-delivery--architecture)
+[![License](https://img.shields.io/badge/License-MIT-green.svg?style=for-the-badge)](LICENSE)
 
----
+**Unified, high-performance endpoint management and corporate compliance platform designed to orchestrate 500 to 10,000+ distributed endpoints (Windows, Linux, macOS) across hybrid multi-branch environments.**
 
-## 🚀 Key Architectural Highlights
+[Features](#-key-capabilities) • [Architecture](#-architectural-highlights) • [Quick Start](#-quick-start-installation) • [Deployment](#-production-deployment) • [Updater](#-safe-in-place-updater) • [API & Security](#-production-hardening--security)
 
-1. **Zero CGO / Pure Go Standard**:
-   - Compiles cleanly (`CGO_ENABLED=0`) across five primary OS/CPU architectures:
-     - `windows/amd64`
-     - `linux/amd64`
-     - `linux/arm64` (aarch64)
-     - `darwin/amd64` (macOS Intel)
-     - `darwin/arm64` (macOS Apple Silicon)
-   - Uses `modernc.org/sqlite` for SQLite database operations with zero external C compiler runtime dependencies.
-
-2. **Outbound-Only Branch Network Topology**:
-   - Central server listens over secure HTTPS/WSS on whatever hostname you configure (e.g. `https://mgmt.example.com`).
-   - Distributed branch endpoints initiate **outbound-only** TLS WebSocket connections.
-   - **0 inbound ports** are required on branch firewalls/NAT routers.
-   - Automatic reconnect with full jitter backoff (1s - 60s) prevents thundering herd connection storms during network recovery.
-   - Persistent 20s WebSocket ping/pong heartbeats keep stateful NAT firewalls alive without idle timeouts.
-
-3. **Single-Binary Delivery with Embedded Web Console**:
-   - The Go server binary embeds the compiled React 19 + TypeScript + Vite SPA directly via Go's standard `embed.FS` (`server/cmd/server/web_embed.go`).
-   - Serves both REST/WebSocket APIs and the complete web console with client-side SPA routing fallback from a single self-contained executable.
-
-4. **High-Concurrency SQLite WAL Engine & Performance Hardening**:
-   - Write-Ahead Logging (`PRAGMA journal_mode=WAL;`).
-   - `PRAGMA busy_timeout=5000;`, `PRAGMA foreign_keys=ON;`, and `PRAGMA synchronous=NORMAL;`.
-   - Connection pool of 16 open / 4 idle (SQLite) and 25 open / 10 idle (PostgreSQL), with explicit lifetime limits (`SetConnMaxLifetime`: 1 hour SQLite, 30 min PostgreSQL; `SetConnMaxIdleTime`: 5 min) to prevent stale sockets across stateful proxies and firewalls.
-   - Hot query indexes (Phase 22): `idx_devices_secret_hash` for sub-second agent WebSocket frame validation, `idx_devices_enrollment_token` for fast enrollment consumption, composite `idx_devices_status_last_seen` and `idx_deploy_tasks_status_updated` for background sweepers, and `idx_audit_created_tail` for audit log queries.
-   - In-memory session cache: 15-second TTL read-through cache (`sync.RWMutex`) on `IsLive(ctx, jti)` checks in `auth_sessions`, eliminating redundant database roundtrips on every authenticated API call with instant invalidation on revocation.
-   - Write transactions take SQLite's write lock at `BEGIN` (`_txlock=immediate`) rather than at first write, so a batch that reads then writes is one atomic unit instead of a transaction built on a read that has already gone stale.
-
-5. **Optional PostgreSQL Backend**:
-   - SQLite stays the default and requires nothing: one binary, one file, no services. The single-binary standalone deployment is unchanged.
-   - Set `DB_URL` to a `postgres://` connection string (and optionally `DB_DRIVER=postgres`) to run on PostgreSQL instead. `DB_PATH` is ignored in that mode.
-   - The 24 migrations are written once in SQLite dialect and translated on the way out — `DATETIME` → `TIMESTAMPTZ`, `INSERT OR IGNORE` → `INSERT ... ON CONFLICT DO NOTHING`, `?` → `$N` — so the two backends cannot drift apart across releases.
-   - Automatic rebind driver (`postgres-rebind`) transparently maps `?` parameters to `$1..$N` placeholders, providing full operational query compatibility across both backends.
+</div>
 
 ---
 
-## 📦 Complete Enterprise Capabilities (Phases 1 - 17)
+## 🌟 Overview
 
-| Phase | Module | Core Functionality |
-|---|---|---|
-| **Phase 1** | **Core & Transport** | WebSocket TLS server/client, JWT authentication, RBAC authorization, revocable sessions, single-use WebSocket tickets, tamper-evident audit trail |
-| **Phase 2** | **Device Management** | Automated hardware inventory (CPU, RAM, Disks, NICs, Battery), dynamic groups, enrollment |
-| **Phase 3** | **Executive Dashboard** | Real-time fleet health KPIs, OS breakdown, storage capacity alerts, branch distribution charts |
-| **Phase 4** | **Software Deployment** | Silent software rollouts (MSI, EXE, PKG, DEB, RPM), batching, pre/post install verification |
-| **Phase 5** | **Remote Execution & CLI** | Real-time command execution (PowerShell, CMD, Bash, Sh), live streaming interactive PTY terminal |
-| **Phase 6** | **Patch Management** | Windows Update (WUA) and Linux/macOS package patch scanner, CVE tracking, scheduled reboots |
-| **Phase 7** | **User Management & RBAC** | Multi-operator console accounts (`admin`, `technician`, `viewer`), credential provisioning |
-| **Phase 8** | **Audit & Reports** | Streaming chunked CSV & JSON exports for compliance audits (ISO 27001 / SOC 2) |
-| **Phase 9** | **Alerting & Incidents** | Automated metric evaluations (Disk space <10%, offline agents, critical missing CVEs, deduplication) |
-| **Phase 10** | **Task Scheduler** | Script repository with cryptographic SHA-256 validation, cron and recurring fleet maintenance jobs |
-| **Phase 11** | **Remote Desktop Control** | Outbound reverse screen capture relay (MJPEG/Canvas), dirty rect damage tracking with partial delta encoding, dynamic frame-skip, mouse click and keyboard input transmission |
-| **Phase 12** | **Network & Web Filter** | Pure-Go DNS sinkholing (0.0.0.0), atomic hosts file manipulation with automatic local DNS cache flush, Whitelist/Blacklist policy modes (migration 0023) |
-| **Phase 13** | **Agent Self-Update** | Autonomous in-place binary upgrades, SHA-256 pre-execution validation, phased canary wave rollouts |
-| **Phase 14** | **IT Asset & License Management** | Hardware Asset Management (HAM) with configurable currency valuation, Software Asset Management (SAM) live seat reconciliation |
-| **Phase 15** | **Device Maintenance** | Server-defined maintenance jobs (disk cleanup, temp purge, cache clearing) with per-device step progress and fleet-wide progress reporting |
-| **Phase 16** | **Active Directory Group Policy** | Multi-tier policy inheritance (`all` < `group` < `device`), USB mass storage lock, corporate wallpaper enforcement, inactivity desktop lock, Windows Update mode (`AUOptions`), administrative tool lockdown |
-| **Phase 17** | **Security Posture & Compliance** | Automated 40-point pre-launch security auditor (OWASP, data/network security, tamper-evident audit chains, live posture dashboard & scoring) |
-
-### Interactive remote control runs as the signed-in user
-
-A remote-control session has to inject input into a desktop the operator can see,
-and the agent service does not have one: it runs in Session 0, where there is
-no interactive desktop, no visible cursor and no way to click anything. So when a
-session starts, the service asks Windows for the token of the console session
-(`WTSQueryUserToken`), duplicates it into a primary token
-(`DuplicateTokenEx(TokenPrimary)`), builds that user's environment block, and
-spawns the capture worker with `CreateProcessAsUser` on `winsta0\default`.
-
-Two consequences worth knowing before you use it:
-
-- **The desktop belongs to whoever is logged in.** If nobody is signed in on the
-  endpoint, there is no user token to borrow and the session is refused. This is
-  the correct answer — see the fallback note below.
-- **The worker is scoped to that session.** It runs in the console session's
-  session id, not the service's, and it is terminated when the session closes.
-
-### Silent uninstall refuses anything it cannot verify
-
-Uninstalling from **Device → Installed Software** never opens a window on the
-endpoint. The agent reads the program's own `UninstallString` /
-`QuietUninstallString` from the registry and runs the quiet variant only. If the
-program records no verifiable silent command, the request is **refused** and
-nothing is executed — an operator gets a refusal in the console instead of a
-dialog box appearing on someone's desktop. PostgreSQL, for example, is refused
-with the reason attached.
-
-The uninstall is a *request*, not a removal. The console says so plainly, and
-the list only changes once the agent reports a new inventory snapshot: click
-**Collect Inventory**, which waits for the agent's own `collected_at` to change
-rather than assuming a fixed delay, so what you see afterwards is what the agent
-actually found.
-
----
-
-## 📂 Repository Directory Structure
+UEM is a lightweight yet enterprise-grade Unified Endpoint Management system. It provides IT administrators, sysadmins, and security teams with unified control over distributed fleets with **zero open incoming ports** required on client networks.
 
 ```
-.
-├── agent/                          # Outbound agent source code (Pure Go)
-│   ├── cmd/agent/                  # Multi-platform agent entrypoint; per-OS shims that
-│   │                               # delegate to the collector package for that platform
-│   ├── shared/                     # Modular shared agent subsystems
-│   │   ├── enrollment/             # TLS token device enrollment
-│   │   ├── inventory/              # OS hardware spec collection + staggered scheduler
-│   │   ├── maintenance/            # Disk cleanup, temp purge, cache maintenance
-│   │   ├── networkfilter/          # DNS sinkhole & hosts policy engine
-│   │   ├── osinfo/                 # OS name/version/hostname collection
-│   │   ├── patch/                  # OS patch scanning & silent installation
-│   │   ├── remotecontrol/          # Remote desktop capture & mouse/keyboard replay
-│   │   ├── remoteexec/             # Shell command execution & interactive terminal
-│   │   ├── service/                # OS service registration (systemd, launchd, Windows SCM)
-│   │   ├── software/               # Software installer & uninstaller runner
-│   │   ├── transport/              # Outbound WebSocket client with keepalive
-│   │   └── update/                 # Autonomous agent binary self-updater
-│   ├── windows/  linux/  macos/    # Per-OS inventory collectors and OS info
-├── deploy/                         # Production Ubuntu deployment automation
-│   ├── install-ubuntu.sh           # One-click Ubuntu server setup script
-│   ├── nginx-endpoint.conf.template# Parameterized Nginx reverse proxy (HTTPS + WebSocket)
-│   ├── endpoint-mgmt.service       # Systemd daemon configuration
-│   └── README-UBUNTU-DEPLOY.md     # Step-by-step production server setup guide
-├── docs/                           # Architecture specifications & audit reports
-│   ├── architecture/               # Phase 0 through Phase 14 technical blueprints
-│   ├── installation/               # Server deployment guides (Linux, Windows, specs)
-│   └── readiness-reports/          # Verification scorecards and production audits
-├── packaging/                      # Agent & server installers
-│   ├── windows/                    # NSIS installers + build scripts
-│   ├── linux/                      # .deb package and Zenity/KDialog GUI installer
-│   └── darwin/                     # Apple .pkg installer and GUI uninstaller
-├── protocol/                       # The agent<->server wire contract, declared once
-│                                   # and aliased by both transport packages
-├── scripts/                        # Automated PowerShell E2E test suites
-├── server/                         # Central management server source code (Pure Go)
-│   ├── cmd/server/                 # Server entrypoint with embedded Web Console
-│   │   ├── dist/                   # Production React build embedded at compile time
-│   │   ├── main.go                 # HTTP server, routing, TLS, and graceful shutdown
-│   │   └── web_embed.go            # Go embed.FS declaration
-│   ├── core/                       # Core system foundations
-│   │   ├── audit/                  # Tamper-evident audit logging service
-│   │   ├── auth/                   # JWT, session store, login, rate limiting, origin policy
-│   │   ├── config/                 # Environment-driven runtime configuration
-│   │   ├── db/                     # SQLite WAL engine & sequential migrations (0001-0023)
-│   │   ├── httpguard/              # Request body size limits & security headers (CSP, HSTS)
-│   │   ├── logger/                 # zerolog setup and in-memory log tail
-│   │   ├── rbac/                   # Role-Based Access Control context utilities
-│   │   ├── transport/              # Hub WebSocket manager & agent dispatch
-│   │   └── wsticket/               # Single-use WebSocket handshake tickets
-│   └── modules/                    # Enterprise business logic modules (Phases 3-17)
-│       ├── agentupdate/            # Phase 13: agent self-update & rollout campaigns
-│       ├── alerting/               # Phase 9: rule evaluation, incidents, webhooks
-│       ├── assetlicense/           # Phase 14: hardware assets & software licenses
-│       ├── dashboard/              # Phase 3: executive fleet metrics
-│       ├── device-management/      # Phases 1-2: enrollment, inventory, groups, lifecycle, purge
-│       ├── maintenance/            # Phase 15: device maintenance jobs & steps
-│       ├── networkfilter/          # Phase 12: DNS/web filter policies
-│       ├── patch-management/       # Phase 6: patch scanning & install jobs
-│       ├── remote-exec/            # Phase 5: command execution & terminal relay
-│       ├── remotecontrol/          # Phase 11: screen capture & input relay
-│       ├── reports/                # Phase 8: streaming CSV/JSON exports
-│       ├── securityaudit/          # Phase 17: 40-point automated security posture engine
-│       ├── software-deployment/    # Phase 4 (+15): package repository & rollouts
-│       ├── systempolicy/           # Phase 16: Active Directory equivalent group policies
-│       ├── taskscheduler/          # Phase 10: script repository & scheduled jobs
-│       └── user-management/        # Phase 7: console users & role assignment
-├── tests/                          # Go integration and unit test suites
-├── web-console/                    # Modern React 19 + TypeScript + Vite Web Console
-│   ├── src/
-│   │   ├── components/             # Reusable UI widgets, charts, and interactive modals
-│   │   ├── context/                # Authentication, theme & toast React contexts
-│   │   ├── hooks/                  # Permission and shared hooks
-│   │   ├── pages/                  # 17 operational views for all enterprise phases
-│   │   ├── services/               # Typed REST API client & report download helpers
-│   │   └── types/                  # Shared DTO types mirroring the server responses
-│   ├── package.json
-│   └── vite.config.ts              # Builds straight into server/cmd/server/dist
-├── Dockerfile.server               # Container build for the management server
-├── go.mod, go.sum, LICENSE, SECURITY.md, CONTRIBUTING.md
+                           ┌────────────────────────────────────────┐
+                           │      UEM Central Server (Go + SPA)     │
+                           │  REST API + WebSocket Hub + SQLite WAL │
+                           └──────────────────┬─────────────────────┘
+                                              │
+                      HTTPS / WSS (Port 8443) │ Outbound-Only Persistent WebSockets
+                                              │ 0 Inbound Ports on Client Firewalls
+             ┌────────────────────────────────┼────────────────────────────────┐
+             ▼                                ▼                                ▼
+   ┌──────────────────┐             ┌──────────────────┐             ┌──────────────────┐
+   │   Headquarters   │             │  Branch Office   │             │   Remote / WFH   │
+   │  Windows 11 / 10 │             │   Linux Server   │             │  macOS (M-Series)│
+   │ Endpoint Agent   │             │ Endpoint Agent   │             │ Endpoint Agent   │
+   └──────────────────┘             └──────────────────┘             └──────────────────┘
+```
+
+---
+
+## 🚀 Key Capabilities
+
+| Domain | Features & Description |
+|---|---|
+| 🖥️ **Fleet Telemetry** | Real-time connection status (online/offline ratios), hardware specs (CPU, RAM, Disks, NICs, Battery), storage threshold alerts, and OS distribution breakdown. |
+| 🎮 **Remote Control & Shell** | Full interactive low-latency remote desktop streaming (session-aware input replay) and in-browser VT100 interactive shell terminal (PowerShell, CMD, Bash, Zsh). |
+| 🛡️ **Group Policy Engine** | Active Directory equivalent policy management: Removable USB Mass Storage lock, corporate wallpaper enforcement, inactivity screen lock, Windows Update (`AUOptions`), and managed local administrator accounts. |
+| 📦 **Software Deployment** | Silent enterprise package distribution (MSI, EXE, PKG, DEB, RPM) with batch execution, hash verification, pre/post-install health checks, and quiet uninstalls. |
+| 🩹 **Patch Management** | OS security update scanning via Windows Update API (WUA) and native Linux/macOS package managers with scheduled maintenance reboots. |
+| 🌐 **Network & Web Filter** | Pure-Go DNS sinkholing (0.0.0.0) with atomic hosts file manipulation, local DNS resolver cache flushing, and domain whitelist/blacklist policy modes. |
+| 🏢 **Multi-Site Enrollment** | Reusable multi-device enrollment tokens supporting branch self-service location assignment through interactive GUI installers and CLI flags (`-site`). |
+| 👤 **Managed Admin Account** | Non-destructive, idempotent local administrator provisioning across Windows (`S-1-5-32-544`), Linux (`sudo`/`wheel`), and macOS (`admin`) with credential streaming via stdin. |
+| 📊 **IT Asset & Licenses** | Hardware Asset Management (HAM) with cost valuation, serial tracking, warranty expiry alerts, and Software Asset Management (SAM) live seat compliance reconciliation. |
+| ⏰ **Task Scheduler** | Central script repository with cryptographic SHA-256 validation, recurring cron schedules, and fleet-wide maintenance tasks (disk cleanup, temp purge). |
+| 🔒 **Tamper-Evident Audit** | Comprehensive immutable audit trails for every administrative action, remote control session, and policy change with streaming CSV/JSON export. |
+
+---
+
+## 🏗️ Architectural Highlights
+
+### 1. Pure Go & Zero CGO
+- Compiles with `CGO_ENABLED=0` across 5 primary target architectures:
+  - `windows/amd64`
+  - `linux/amd64`
+  - `linux/arm64` (aarch64)
+  - `darwin/amd64` (macOS Intel)
+  - `darwin/arm64` (Apple Silicon M1/M2/M3/M4)
+- Uses `modernc.org/sqlite` for database operations without any external C runtime dependencies.
+
+### 2. Single-Binary Delivery with Embedded SPA
+- React 19 + TypeScript + Vite SPA web console is pre-built into `server/cmd/server/dist/` and embedded directly into the Go server binary via standard Go `embed.FS`.
+- Zero external assets or web server configuration needed: one executable serves both REST/WebSocket endpoints and the complete web application.
+
+### 3. Outbound-Only Branch Network Topology
+- Agents connect outward via TLS WebSockets (`wss://`).
+- Requires **zero open inbound ports** on client branch firewalls or NAT routers.
+- Full-jitter reconnection backoff (1s - 60s) prevents thundering herd connection storms during link recovery.
+- Bidirectional 20-second ping/pong frames keep stateful firewall NAT translation tables alive indefinitely.
+
+### 4. High-Performance SQLite WAL & Optional PostgreSQL
+- **SQLite WAL**: Operates with `PRAGMA journal_mode=WAL;`, `PRAGMA busy_timeout=5000;`, `PRAGMA foreign_keys=ON;`, and `PRAGMA synchronous=NORMAL;`.
+- **Immediate Write Transactions**: Database transactions acquire SQLite write locks immediately (`_txlock=immediate`) to guarantee atomicity and prevent stale reads.
+- **Hot Query Indexes**: Optimized query paths for agent secrets, token consumption, device status filtering, and audit log tailing.
+- **PostgreSQL Ready**: Switch transparently from SQLite to PostgreSQL by defining `DB_URL=postgres://...` with automatic query rebind (`?` → `$N`) and schema translations.
+
+---
+
+## ⚡ Production Hardening & Performance
+
+The platform incorporates comprehensive enterprise production-grade architecture patterns:
+
+- **Token-Bucket Rate Limiter**: Central in-memory API rate limiter (`httpguard.APIRateLimiter`) returning RFC-compliant headers (`RateLimit-Limit`, `RateLimit-Remaining`, `RateLimit-Reset`, `Retry-After`) with HTTP 429 protection.
+- **Gateway Resilience Middleware**: Chi HTTP router pipeline fortified with `middleware.RequestID` (`X-Request-ID`), `middleware.RealIP` (trusted proxy forwarding), and `middleware.Recoverer` (graceful panic recovery).
+- **CORS Defense**: Strict origin matching (`httpguard.CORS`) supporting localhost, same-host, and operator-defined wildcard domains (`*.example.com`).
+- **HTTP Cache Optimization**: Browser caching split into **immutable long-term caching** (`max-age=31536000, immutable`) for hashed Vite bundles and **strict cache-busting** (`no-cache, no-store, must-revalidate`) for SPA entrypoints.
+- **In-Memory TTL Caching**: Dashboard telemetry metrics cached with 10-second thread-safe `sync.RWMutex` to absorb burst traffic from multi-operator consoles.
+- **N+1 Query Elimination**: Batch SQL aggregation with `GROUP BY` across license allocations and device inventory, keeping compliance evaluations $O(1)$ instead of $O(N)$.
+- **Process Protection**: Windows background agents run in Session 0, spawning interactive capture workers via `CreateProcessAsUser` in the active user's desktop session (`winsta0\default`).
+
+---
+
+## 🚀 Quick-Start: Installation
+
+### 🖥️ Central Server
+
+| Platform | Method | Instructions |
+|---|---|---|
+| **Linux (Ubuntu/Debian)** | Automated Deploy Script | `curl -fsSL https://raw.githubusercontent.com/henokakunemail-stack/UEM/main/update.sh \| sudo bash` |
+| **Linux (From Git Source)** | In-Place Source Build | `cd ~/UEM && git pull origin main && sudo bash update.sh --from-source` |
+| **Windows Server** | NSIS Setup Wizard | Run `EndpointServer-Setup.exe` as Administrator (auto-provisions Windows Service on port `8443`). |
+| **Docker Compose** | Production Container | `docker compose up -d` (uses distroless container image with persistent `/data` volume). |
+
+#### Docker Compose Quickstart
+```yaml
+services:
+  endpoint-mgmt-server:
+    image: endpoint-mgmt-server
+    build:
+      context: .
+      dockerfile: Dockerfile.server
+    restart: unless-stopped
+    ports:
+      - "8443:8443"
+    environment:
+      - HTTP_ADDR=:8443
+      - DB_PATH=/data/endpoint-mgmt.db
+      - JWT_SECRET=your-32-character-random-secret-key-here
+      - ADMIN_PASSWORD=your-secure-admin-password
+    volumes:
+      - endpoint-data:/data
+
+volumes:
+  endpoint-data:
+    driver: local
+```
+
+---
+
+### 📱 Endpoint Agent Installation
+
+> **Step 1**: Open the Web Console → Navigate to **Devices** → Click **Generate Enrollment Token** (select multi-device or single-use).
+
+| OS Platform | Installation Method | Command / Procedure |
+|---|---|---|
+| **Windows 10 / 11 / Server** | GUI Setup Wizard | Run `EndpointAgent-Setup.exe` → Enter Server URL and Token. |
+| **Windows (Silent / GPO)** | Mass CLI Deployment | `endpoint-agent.exe -server https://server:8443 -enroll <TOKEN> -site "Jakarta HQ" -service install -service start` |
+| **Linux (Ubuntu / Debian)** | Debian Package | `sudo dpkg -i endpoint-agent_amd64.deb`<br>`sudo endpoint-agent -server https://server:8443 -enroll <TOKEN> -site "Branch-A"` |
+| **macOS (Intel & Apple Silicon)** | Installer Package | Run `EndpointAgent.pkg` then enroll via terminal:<br>`sudo endpoint-agent -server https://server:8443 -enroll <TOKEN>` |
+
+---
+
+## 🔄 Safe In-Place Updater
+
+The repository includes an intelligent server daemon updater that handles hot SQLite backups, atomic binary swapping (`.bak`), `.env` preservation, and health checks:
+
+```bash
+# Update directly from GitHub
+curl -fsSL https://raw.githubusercontent.com/henokakunemail-stack/UEM/main/update.sh | sudo bash
+
+# Or compile and update directly from latest local git source:
+cd ~/UEM
+git pull origin main
+sudo bash update.sh --from-source
+```
+
+---
+
+## 🌐 Production Reverse Proxy (Nginx & Caddy)
+
+Production templates supporting HTTP/2, HTTP/3, and 24-hour persistent WebSockets are available in `deploy/reverse-proxy/`:
+
+### Nginx Configuration Preview (`deploy/reverse-proxy/nginx.conf`)
+```nginx
+upstream endpoint_backend {
+    server 127.0.0.1:8443 max_fails=3 fail_timeout=10s;
+    keepalive 64;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name uem.example.com;
+
+    ssl_certificate     /etc/ssl/certs/endpoint-mgmt.crt;
+    ssl_certificate_key /etc/ssl/private/endpoint-mgmt.key;
+
+    # REST API & Embedded Web Console
+    location / {
+        proxy_pass http://endpoint_backend;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # Persistent 24-Hour WebSocket Transport (Agents, Shell, Remote Desktop)
+    location ~* ^/api/(agent/connect|devices/.*/terminal/ws|devices/.*/remotecontrol/ws) {
+        proxy_pass http://endpoint_backend;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_buffering off;
+        proxy_read_timeout 86400s;
+        proxy_send_timeout 86400s;
+    }
+}
 ```
 
 ---
 
 ## 🛠️ Building From Source
 
-### 1. Build Frontend Console
+### Prerequisites
+- **Go**: 1.23 or newer
+- **Node.js**: 20.x or newer & npm
+
+### 1. Build Web Console
 ```bash
 cd web-console
 npm install
 npm run build
-# Output goes directly to server/cmd/server/dist/ (vite.config.ts outDir),
-# which is the directory server/cmd/server/web_embed.go embeds. Run this BEFORE
-# building the server binary — go:embed captures the files at compile time, so a
-# server built against a stale dist serves the old console.
+# Compiles directly into server/cmd/server/dist/ for Go embedding
 ```
 
-### 2. Build Server Binary (Linux amd64 for Physical Ubuntu Server)
+### 2. Build Server Binary
 ```bash
-# Build standalone Linux server executable with embedded frontend
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o endpoint-mgmt-server ./server/cmd/server
+# Standalone Linux Server
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o endpoint-mgmt-server ./server/cmd/server
+
+# Standalone Windows Server
+CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -o endpoint-mgmt-server.exe ./server/cmd/server
 ```
 
-### 3. Build Agent Executables (All 5 Target Architectures)
+### 3. Build Agent Binaries (Cross-Platform)
 ```bash
 # Windows x86_64
-CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -o agent-windows-amd64.exe ./agent/cmd/agent
+CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -o agent-windows-amd64.exe ./agent/cmd/agent
 
 # Linux x86_64
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o agent-linux-amd64 ./agent/cmd/agent
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o agent-linux-amd64 ./agent/cmd/agent
 
-# Linux ARM64
-CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o agent-linux-arm64 ./agent/cmd/agent
-
-# macOS Intel (x86_64)
-CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -o agent-darwin-amd64 ./agent/cmd/agent
+# Linux ARM64 (Raspberry Pi, AWS Graviton)
+CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o agent-linux-arm64 ./agent/cmd/agent
 
 # macOS Apple Silicon (M1/M2/M3/M4)
-CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -o agent-darwin-arm64 ./agent/cmd/agent
+CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" -o agent-darwin-arm64 ./agent/cmd/agent
 ```
 
 ---
 
-## 🌐 Production Server Deployment
+## 🧪 Testing & Verification
 
-Nothing in this repository is tied to a particular domain. Every hostname,
-certificate path, and credential is a parameter you supply.
-
-### Linux (Ubuntu / Debian)
-
-The `deploy/` bundle installs the server, an isolated system user, a hardened
-systemd unit, and a parameterized nginx reverse proxy:
-
+Run the complete backend test suite:
 ```bash
-# 1. Copy the bundle to the server
-scp -r ./deploy/* user@your-server-ip:/tmp/deploy/
-
-# 2. Run the installer with YOUR hostname
-cd /tmp/deploy
-sudo ./install-ubuntu.sh --domain mgmt.example.com
-```
-
-The installer writes the nginx site by substituting `__DOMAIN__` and
-`__SSL_DIR__` into `deploy/nginx-endpoint.conf.template`, which:
-- Enforces TLS 1.2 and TLS 1.3 with modern ciphers.
-- Proxies standard HTTPS REST API calls.
-- Supports long-lived full-duplex WebSocket connections (`Upgrade $http_upgrade`)
-  with 24-hour read/send timeouts, so agent sockets survive normal idle timeouts.
-
-### Windows Server
-
-- **GUI / Automated Installer**: Download `EndpointServer-Setup.exe` from GitHub Releases (built via `packaging/windows/build-server.ps1` and `packaging/windows/server.nsi`). The wizard configures the service, ports, data folder, generates a 32+ char `JWT_SECRET`, and registers the `endpoint-mgmt-server` Windows Service automatically.
-- **Manual Setup**: See [`docs/installation/server-windows.md`](docs/installation/server-windows.md) for step-by-step SCM service registration and firewall configuration.
-
-### Container
-
-[`Dockerfile.server`](Dockerfile.server) builds the same single binary into a
-distroless image, with the console embedded at image build time and no root
-user. The database lives on a volume, so it survives a container replacement:
-
-```bash
-docker build -f Dockerfile.server -t endpoint-mgmt-server .
-
-docker volume create endpoint-mgmt-data
-
-docker run -d --name endpoint-mgmt \
-  -p 8443:8443 \
-  -e JWT_SECRET="$(openssl rand -hex 32)" \
-  -e ADMIN_PASSWORD='change-me-before-first-boot' \
-  -v endpoint-mgmt-data:/data \
-  endpoint-mgmt-server
-```
-
-`JWT_SECRET` has no default and the server refuses to start without it (minimum 32 characters enforced). Set it
-to the same value on every restart, or every issued token is invalidated.
-
----
-
-## ⚡ Quick-Start: Server & Agent Installation
-
-See the complete [GitHub Release & Installation Guide](docs/installation/release-guide.md) for full distribution asset details.
-
-### 🖥️ Central Server Quick-Start
-
-| Platform | Recommended Installation Method | Command / Procedure |
-|---|---|---|
-| **Windows Server** | NSIS Setup Wizard (`EndpointServer-Setup.exe`) | Run installer as Admin → Follow GUI wizard (auto-provisions Windows Service on port `8443`). |
-| **Linux (Ubuntu/Debian)** | Automated Deploy Script (`deploy/install-ubuntu.sh`) | `sudo ./deploy/install-ubuntu.sh --domain uem.example.com` |
-| **Docker** | Distroless Container Image | `docker run -d -p 8443:8443 -e JWT_SECRET=$(openssl rand -hex 32) -e ADMIN_PASSWORD=... -v uem-data:/data endpoint-mgmt-server` |
-| **Source Build** | Go 1.23+ & Node.js | `cd web-console && npm run build && cd .. && go build -o endpoint-mgmt-server ./server/cmd/server` |
-
-#### 🔄 Server Safe Update One-Liners (In-Place Upgrade with Auto-Rollback)
-Similar to CLI package updaters (`npm i -g <pkg>@latest`), UEM provides automated one-liner update scripts that safely upgrade the server daemon in-place (auto-detects installation, hot backups SQLite DB, rotates binary with `.bak`, strictly preserves existing `.env` / `JWT_SECRET`, and probes `/healthz` before finalizing):
-
-```powershell
-# Windows Server Update (PowerShell)
-irm https://raw.githubusercontent.com/henokakunemail-stack/UEM/main/packaging/windows/scripts/update-server.ps1 | iex
-```
-
-```bash
-# Linux Server Update (Bash)
-curl -fsSL https://raw.githubusercontent.com/henokakunemail-stack/UEM/main/packaging/linux/scripts/update-server.sh | sudo bash
-```
-
-### 📱 Endpoint Agent Quick-Start
-
-> **Prerequisite**: Generate an Enrollment Token in the Web Console (**Devices** → **Generate Enrollment Token**).
-
-| Platform | Recommended Installation Method | Command / Procedure |
-|---|---|---|
-| **Windows 10/11 / Server** | NSIS Setup Wizard (`EndpointAgent-Setup.exe`) | Run installer as Admin → Enter Server URL (`https://server:8443`) and Enrollment Token. |
-| **Windows (Mass/Silent)** | Command Line / GPO / Intune | `endpoint-agent.exe -server https://server:8443 -enroll <TOKEN>` then `-service install` and `-service start` |
-| **Linux (Debian/Ubuntu)** | Debian Package (`.deb`) | `sudo dpkg -i endpoint-agent_<ver>_amd64.deb` then `sudo endpoint-agent -server https://server:8443 -enroll <TOKEN>` |
-| **Linux (Standalone)** | Binary + systemd | `sudo endpoint-agent -server https://server:8443 -enroll <TOKEN>` then `-service install` and `-service start` |
-| **macOS (Intel & M-series)** | Apple Installer (`.pkg`) | Run `EndpointAgent-<ver>.pkg` then enroll via `sudo endpoint-agent -server https://server:8443 -enroll <TOKEN>` |
-
-### Full guides & documentation
-
-| Guide | Covers |
-|---|---|
-| [`docs/installation/release-guide.md`](docs/installation/release-guide.md) | **Complete GitHub Release packaging, download matrix, and installation guide** |
-| [`docs/installation/server-linux.md`](docs/installation/server-linux.md) | Ubuntu/Debian: systemd, TLS, firewall, backup verification, upgrade & rollback, hardening |
-| [`docs/installation/server-windows.md`](docs/installation/server-windows.md) | Windows Server: service registration, TLS, firewall, backup, upgrade |
-| [`docs/installation/agent-windows.md`](docs/installation/agent-windows.md) | Windows Agent: installation, silent deployment, service management |
-| [`docs/installation/agent-linux.md`](docs/installation/agent-linux.md) | Linux Agent: .deb package, systemd service, permissions |
-| [`deploy/README-UBUNTU-DEPLOY.md`](deploy/README-UBUNTU-DEPLOY.md) | Short-form Ubuntu quickstart |
-
----
-
-## 🧪 Verification & Automated Testing
-
-Run all Go tests — unit, integration and per-package — the same way CI does:
-```bash
+# Run all unit and integration tests (1,000+ tests)
 CGO_ENABLED=0 go test -count=1 ./...
 ```
 
-The integration suites alone:
+Verify frontend styling and TypeScript compilation:
 ```bash
-CGO_ENABLED=0 go test -v ./tests/integration/...
-```
-
-Run PowerShell end-to-end verification scripts against a running server and a
-real agent. These are Windows-only and are deliberately **not** part of CI — they
-need a live desktop, a real install, and a real endpoint, so they are a
-before-release check rather than a per-commit one:
-
-```powershell
-# Core and device lifecycle
-.\scripts\e2e-live.ps1           # Phase 1: core, transport, auth
-.\scripts\e2e-inventory.ps1      # Phase 2: hardware inventory
-
-# Operational modules
-.\scripts\e2e-dashboard.ps1            # Phase 3: dashboard & console
-.\scripts\e2e-software-deployment.ps1  # Phase 4: software rollouts
-.\scripts\e2e-remote-exec.ps1          # Phase 5: execution & live terminal
-.\scripts\e2e-patch-management.ps1     # Phase 6: patch scan & install
-.\scripts\e2e-user-management.ps1      # Phase 7: users & RBAC
-.\scripts\e2e-reports.ps1              # Phase 8: CSV/JSON exports
-.\scripts\e2e-alerting.ps1             # Phase 9: rules & incidents
-.\scripts\e2e-task-scheduler.ps1       # Phase 10: scripts & schedules
-.\scripts\e2e-remote-control.ps1       # Phase 11: screen capture & input
-.\scripts\e2e-network-filter.ps1       # Phase 12: DNS/web filter policies
-.\scripts\e2e-agent-update.ps1         # Phase 13: agent self-update rollouts
-.\scripts\e2e-asset-license.ps1        # Phase 14: assets & license seats
+cd web-console
+npm run build
 ```
 
 ---
 
-## 🔐 Security & Compliance
+## 📄 License & Attribution
 
-- **Role-Based Access Control**: Granular endpoint access authorization (`admin`, `technician`, `viewer`).
-- **Cryptographic Hash Verification**: All scripts, binaries, and patch installers are hashed with SHA-256 before remote dispatch.
-- **Audit Logging**: Every administrative action, command execution, and remote desktop connection is recorded with UTC timestamp, user ID, IP address, and change details.
-- **Encrypted Communication**: Mandatory TLS 1.2+ encryption on all agent-to-server WebSocket connections and REST endpoints.
-
----
-
-## 📚 Documentation & Guides
-
-- [Panduan Pembaruan / Update Guide (Windows & Linux)](docs/installation/update-guide.md)
-- [Panduan Rilis & Instalasi Lengkap (Release Guide)](docs/installation/release-guide.md)
-- [Instalasi Server Linux](docs/installation/server-linux.md)
-- [Instalasi Server Windows](docs/installation/server-windows.md)
-- [Deployment via Docker](docs/installation/docker.md)
+This project is licensed under the [MIT License](LICENSE).
+Built with pure Go and modern web standards for enterprise fleet resilience.

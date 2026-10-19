@@ -271,18 +271,6 @@ export interface PatchSummaryDTO {
   vulnerable_devices: number
 }
 
-export interface DevicePatchStatusDTO {
-  device_id: string
-  hostname: string
-  os_name: string
-  site: string
-  status: string
-  pending_count: number
-  critical_count: number
-  reboot_required: boolean
-  last_scan_at?: string | null
-}
-
 export interface PatchDetailDTO {
   id: string
   patch_id: string
@@ -526,32 +514,6 @@ export interface DirectoryConfigDTO {
   updated_by?: string
   updated_at?: string
 }
-
-// 40 Pre-Launch Security Checks
-export interface SecurityAuditItem {
-  id: number
-  part: number
-  number: number
-  title: string
-  category: 'core_app' | 'data_security' | 'network' | 'pipeline' | 'hardening'
-  status: 'pass' | 'warn' | 'fail'
-  description: string
-  evidence: string
-  remediation: string
-  owasp_tag: string
-}
-
-export interface SecurityAuditReport {
-  generated_at: string
-  grade: string
-  score: number
-  total_checks: number
-  passed: number
-  warned: number
-  failed: number
-  checks: SecurityAuditItem[]
-}
-
 
 // The add/update/deactivate split a preview produces. Re-derived from the
 // directory on every call rather than stored, so an Apply can never act on a

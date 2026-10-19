@@ -42,7 +42,6 @@ import type {
   DeviceGroupDTO,
   MaintenanceJobDTO,
   MaintenanceProgressDTO,
-  SecurityAuditReport,
   MaintenanceRunResponse,
   MaintenanceTaskDTO,
   TaskInfoDTO,
@@ -1181,16 +1180,5 @@ export const api = {
     const res = await fetchRaw('/api/system/backup/download-active')
     if (!res.ok) throw new Error(`Download failed: HTTP ${res.status}`)
     return res.blob()
-  },
-
-  // Security Posture & 40 Pre-Launch Security Audit
-  async getSecurityAudit(): Promise<SecurityAuditReport> {
-    return request<SecurityAuditReport>('/api/system/security-audit')
-  },
-
-  async runSecurityAudit(): Promise<SecurityAuditReport> {
-    return request<SecurityAuditReport>('/api/system/security-audit/run', {
-      method: 'POST',
-    })
   },
 }
