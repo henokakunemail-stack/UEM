@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jmoiron/sqlx"
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/config"
+	"github.com/jmoiron/sqlx"
 )
 
 type Evaluator struct {

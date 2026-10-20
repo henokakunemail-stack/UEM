@@ -993,10 +993,10 @@ func (h *Handler) ReconcileDeviceVersion(ctx context.Context, deviceID, version 
 			_ = h.repo.RecordTaskProgress(ctx, task.ID, "success", "")
 			_ = h.repo.UpdateDeviceAgentVersion(ctx, deviceID, version)
 			_ = h.auditor.Log(ctx, "device", deviceID, "agent_update.hello_reconciled", deviceID, map[string]string{
-				"task_id":        task.ID,
-				"version":        version,
-				"status":         "success",
-				"reason":         "Agent reconnected with target version via WebSocket",
+				"task_id": task.ID,
+				"version": version,
+				"status":  "success",
+				"reason":  "Agent reconnected with target version via WebSocket",
 			})
 			_ = h.repo.SyncCampaignStatus(ctx, task.ID)
 		}

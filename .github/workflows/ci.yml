@@ -39,6 +39,18 @@ jobs:
           # make the linter probe a C toolchain the runner may not have.
           CGO_ENABLED: "0"
 
+      - name: gofmt
+        # golangci-lint's formatter settings did not block: 21 unformatted
+        # files reached main with this job green. A plain gofmt -l is the
+        # check that cannot be configured away.
+        run: |
+          unformatted=$(gofmt -l server agent protocol tests)
+          if [ -n "$unformatted" ]; then
+            echo "These files need gofmt -w:"
+            echo "$unformatted"
+            exit 1
+          fi
+
       - name: Go build
         run: CGO_ENABLED=0 go build ./...
 

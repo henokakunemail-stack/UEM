@@ -29,7 +29,7 @@ const (
 type WindowsUpdateMode string
 
 const (
-	WindowsUpdateDefault     WindowsUpdateMode = "default"     // Windows default
+	WindowsUpdateDefault     WindowsUpdateMode = "default"      // Windows default
 	WindowsUpdateAutoInstall WindowsUpdateMode = "auto_install" // AUOptions = 4 (Auto download and schedule install)
 	WindowsUpdateNotifyOnly  WindowsUpdateMode = "notify_only"  // AUOptions = 2 (Notify before download)
 )
@@ -40,10 +40,10 @@ type PolicySettings struct {
 	USBStorageMode USBStorageMode `json:"usb_storage_mode"` // "allow", "block", "read_only"
 
 	// Desktop Personalization
-	WallpaperEnabled         bool              `json:"wallpaper_enabled"`
-	WallpaperURL             string            `json:"wallpaper_url,omitempty"`
-	WallpaperStyle           WallpaperStyle    `json:"wallpaper_style,omitempty"` // "fill", "fit", "stretch", "center", "tile"
-	WallpaperLocked          bool              `json:"wallpaper_locked"`          // Lock wallpaper to prevent user changes
+	WallpaperEnabled bool           `json:"wallpaper_enabled"`
+	WallpaperURL     string         `json:"wallpaper_url,omitempty"`
+	WallpaperStyle   WallpaperStyle `json:"wallpaper_style,omitempty"` // "fill", "fit", "stretch", "center", "tile"
+	WallpaperLocked  bool           `json:"wallpaper_locked"`          // Lock wallpaper to prevent user changes
 
 	// Firewall & Network Security
 	FirewallEnabled bool `json:"firewall_enabled"` // Enforce Windows Defender Firewall on all profiles
@@ -58,7 +58,7 @@ type PolicySettings struct {
 	DisableAutoplay bool `json:"disable_autoplay"` // Disable Windows Autoplay for all drive types
 
 	// Screen Saver
-	ScreenSaverTimeoutMinutes int `json:"screensaver_timeout_minutes"` // 0 = disabled, non-zero enables timeout
+	ScreenSaverTimeoutMinutes   int  `json:"screensaver_timeout_minutes"`   // 0 = disabled, non-zero enables timeout
 	ScreenSaverPasswordRequired bool `json:"screensaver_password_required"` // Require password on screen saver resume
 
 	// Security & Access Restrictions

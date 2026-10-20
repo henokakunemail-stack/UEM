@@ -46,11 +46,11 @@ import (
 	remoteexec "github.com/henokakunemail-stack/Endpoint-Manager/server/modules/remote-exec"
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/modules/remotecontrol"
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/modules/reports"
+	"github.com/henokakunemail-stack/Endpoint-Manager/server/modules/securityaudit"
 	softwaredeployment "github.com/henokakunemail-stack/Endpoint-Manager/server/modules/software-deployment"
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/modules/systempolicy"
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/modules/taskscheduler"
 	usermgmt "github.com/henokakunemail-stack/Endpoint-Manager/server/modules/user-management"
-	"github.com/henokakunemail-stack/Endpoint-Manager/server/modules/securityaudit"
 )
 
 // serviceName is the OS service registration the server installer writes and

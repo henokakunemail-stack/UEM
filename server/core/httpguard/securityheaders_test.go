@@ -259,4 +259,3 @@ func TestSecurityHeaders_PreservesHijacker(t *testing.T) {
 		t.Fatal("expected handler to hijack successfully")
 	}
 }
-

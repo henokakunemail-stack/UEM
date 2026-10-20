@@ -451,4 +451,3 @@ func (r *Repository) ConsumeSharedEnrollmentTokenAndCreateDevice(ctx context.Con
 
 	return tx.Commit()
 }
-

@@ -213,8 +213,8 @@ func (h *inventoryHandler) routes(r chi.Router) {
 			Post("/api/devices/{id}/retire", h.retireDevice)
 		r.With(h.authMW, rbac.RequireRole(rbac.RoleAdmin)).
 			Post("/api/devices/{id}/restore", h.restoreDevice)
-			r.With(h.authMW, rbac.RequireRole(rbac.RoleAdmin)).
-				Delete("/api/devices/{id}", h.deleteDevice)
+		r.With(h.authMW, rbac.RequireRole(rbac.RoleAdmin)).
+			Delete("/api/devices/{id}", h.deleteDevice)
 
 		r.With(h.authMW, rbac.RequireRole(rbac.RoleViewer)).Get("/api/groups", h.listGroups)
 		r.With(h.authMW, rbac.RequireRole(rbac.RoleAdmin)).Post("/api/groups", h.createGroup)

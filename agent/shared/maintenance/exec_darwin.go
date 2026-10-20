@@ -265,4 +265,3 @@ func darwinSystemIntegrity(ctx context.Context) (stepOutcome, error) {
 	out = appendLog(out, run(ctx, "/usr/sbin/diskutil", "apfs", "list"))
 	return out, nil
 }
-

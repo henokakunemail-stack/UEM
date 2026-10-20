@@ -683,4 +683,3 @@ if (Get-Command New-LocalUser -ErrorAction SilentlyContinue) {
 
 	return nil
 }
-

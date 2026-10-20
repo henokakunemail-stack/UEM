@@ -487,4 +487,3 @@ func windowsSystemIntegrity(ctx context.Context) (stepOutcome, error) {
 	out = appendLog(out, scan)
 	return out, nil
 }
-

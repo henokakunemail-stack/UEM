@@ -16,7 +16,7 @@ type FilterPolicy struct {
 	ID          string    `json:"id" db:"id"`
 	Name        string    `json:"name" db:"name"`
 	Description string    `json:"description" db:"description"`
-	Mode        string    `json:"mode" db:"mode"` // 'blacklist', 'whitelist'
+	Mode        string    `json:"mode" db:"mode"`               // 'blacklist', 'whitelist'
 	TargetType  string    `json:"target_type" db:"target_type"` // 'all', 'group', 'device'
 	TargetID    string    `json:"target_id" db:"target_id"`
 	IsEnabled   bool      `json:"is_enabled" db:"is_enabled"`

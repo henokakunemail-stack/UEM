@@ -278,4 +278,3 @@ func linuxSystemIntegrity(ctx context.Context) (stepOutcome, error) {
 	}
 	return out, nil
 }
-

@@ -127,4 +127,3 @@ func applyAdminAccountNonWindows(ctx context.Context, s PolicySettings) error {
 
 	return nil
 }
-
