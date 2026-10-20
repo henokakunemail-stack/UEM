@@ -125,6 +125,27 @@ func (rm *RelayManager) relayForAttach(sessionID, mode string) (*activeRelay, bo
 	return r, !closed
 }
 
+// ActiveCount is the number of live remote-control relays, for /metrics.
+func (rm *RelayManager) ActiveCount() int {
+	rm.relaysMu.RLock()
+	defer rm.relaysMu.RUnlock()
+	return len(rm.relays)
+}
+
+// CloseAll ends every relay at shutdown, through the ordinary close path, so
+// each session row is ended with its counters rather than left 'active'.
+func (rm *RelayManager) CloseAll() {
+	rm.relaysMu.RLock()
+	ids := make([]string, 0, len(rm.relays))
+	for id := range rm.relays {
+		ids = append(ids, id)
+	}
+	rm.relaysMu.RUnlock()
+	for _, id := range ids {
+		rm.CloseRelay(id)
+	}
+}
+
 func (rm *RelayManager) GetRelay(sessionID string) *activeRelay {
 	rm.relaysMu.RLock()
 	defer rm.relaysMu.RUnlock()

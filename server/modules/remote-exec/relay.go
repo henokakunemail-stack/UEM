@@ -49,6 +49,35 @@ func (r *TerminalRelay) Register(sessionID, deviceID, userID string, ws *websock
 }
 
 // Unregister removes a session.
+// ActiveCount is the number of open terminal sessions, for /metrics.
+func (r *TerminalRelay) ActiveCount() int {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return len(r.sessions)
+}
+
+// CloseAll ends every terminal session at shutdown. The operator's browser
+// sees its socket close and can reconnect -- to another node, behind a load
+// balancer -- instead of typing into a process that is exiting.
+func (r *TerminalRelay) CloseAll() {
+	r.mu.Lock()
+	sessions := make([]*ActiveTerminalSession, 0, len(r.sessions))
+	for _, s := range r.sessions {
+		sessions = append(sessions, s)
+	}
+	r.sessions = make(map[string]*ActiveTerminalSession)
+	r.mu.Unlock()
+	for _, s := range sessions {
+		s.markClosed()
+		s.writeMu.Lock()
+		_ = s.ws.WriteControl(websocket.CloseMessage,
+			websocket.FormatCloseMessage(websocket.CloseGoingAway, "server shutting down"),
+			time.Now().Add(2*time.Second))
+		s.writeMu.Unlock()
+		_ = s.ws.Close()
+	}
+}
+
 func (r *TerminalRelay) Unregister(sessionID string) {
 	r.mu.Lock()
 	sess, ok := r.sessions[sessionID]

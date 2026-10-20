@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"sync"
 	"time"
 
 	"github.com/jmoiron/sqlx"
@@ -19,6 +20,20 @@ type Evaluator struct {
 	db         *sqlx.DB
 	repo       *Repository
 	httpClient *http.Client
+	// webhooks tracks deliveries in flight, so shutdown can let them finish
+	// instead of cutting a notification off mid-request.
+	webhooks sync.WaitGroup
+}
+
+// WaitWebhooks waits up to timeout for in-flight webhook deliveries.
+func (e *Evaluator) WaitWebhooks(timeout time.Duration) {
+	done := make(chan struct{})
+	go func() { e.webhooks.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(timeout):
+		log.Warn().Msg("shutdown: alert webhooks still in flight were abandoned")
+	}
 }
 
 func isPrivateOrBlockedIP(ip net.IP) bool {
@@ -298,7 +313,9 @@ func (e *Evaluator) dispatchWebhook(rule *AlertRule, inc *AlertIncident) {
 		"timestamp":     inc.LastTriggeredAt.Format(time.RFC3339),
 	}
 
+	e.webhooks.Add(1)
 	go func(url string, data map[string]any) {
+		defer e.webhooks.Done()
 		bodyBytes, err := json.Marshal(data)
 		if err != nil {
 			return

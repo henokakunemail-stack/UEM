@@ -4,6 +4,7 @@ package main
 import (
 	"context"
 	"crypto/rand"
+	"crypto/subtle"
 	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
@@ -11,11 +12,13 @@ import (
 	"flag"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -32,6 +35,7 @@ import (
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/db"
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/httpguard"
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/logger"
+	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/metrics"
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/rbac"
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/transport"
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/wsticket"
@@ -182,7 +186,7 @@ func main() {
 // database rather than silently starting against an empty SQLite file.
 func openDatabase(cfg config.Config) (*sqlx.DB, error) {
 	if cfg.DBURL != "" {
-		return db.OpenWithDriver(cfg.DBDriver, cfg.DBURL)
+		return db.OpenWithDriver(cfg.DBDriver, withStatementTimeout(cfg.DBURL, cfg.DBStatementTimeout))
 	}
 	if d := strings.ToLower(cfg.DBDriver); d != "" && d != "sqlite" {
 		return nil, fmt.Errorf("DB_DRIVER=%s needs DB_URL to be set", cfg.DBDriver)
@@ -190,22 +194,50 @@ func openDatabase(cfg config.Config) (*sqlx.DB, error) {
 	return db.Open(cfg.DBPath)
 }
 
-func run(cfg config.Config, stopService *context.CancelFunc) error {
-	logger.Init(cfg.LogLevel, cfg.LogFile)
+// withStatementTimeout adds DB_STATEMENT_TIMEOUT to a PostgreSQL URL as a
+// session option, so a runaway query is cancelled by the database instead of
+// holding a pool connection until the whole pool is exhausted. A URL that
+// already sets statement_timeout, or a non-URL DSN, is left as written.
+func withStatementTimeout(dsn string, timeout time.Duration) string {
+	if timeout <= 0 || strings.Contains(dsn, "statement_timeout") ||
+		!(strings.HasPrefix(dsn, "postgres://") || strings.HasPrefix(dsn, "postgresql://")) {
+		return dsn
+	}
+	u, err := url.Parse(dsn)
+	if err != nil {
+		return dsn
+	}
+	q := u.Query()
+	opt := fmt.Sprintf("-c statement_timeout=%d", timeout.Milliseconds())
+	if existing := q.Get("options"); existing != "" {
+		opt = existing + " " + opt
+	}
+	q.Set("options", opt)
+	u.RawQuery = q.Encode()
+	return u.String()
+}
 
+func run(cfg config.Config, stopService *context.CancelFunc) error {
+	logger.InitWithRotation(cfg.LogLevel, cfg.LogFile, cfg.LogMaxMB, cfg.LogKeep)
+
+	// Errors are returned, not log.Fatal'd: Fatal exits on the spot and skips
+	// every deferred cleanup, and the caller already turns an error into a
+	// non-zero exit.
 	database, err := openDatabase(cfg)
 	if err != nil {
-		log.Fatal().Err(err).Str("driver", cfg.DBDriver).Msg("open database")
+		log.Error().Err(err).Str("driver", cfg.DBDriver).Msg("open database")
+		return fmt.Errorf("open database: %w", err)
 	}
 	defer database.Close()
+	applyPoolSettings(database, cfg)
 
 	// Phase 1 bootstrap: ensure an admin user exists so the console can log in.
 	if err := bootstrapAdmin(database); err != nil {
-		log.Fatal().Err(err).Msg("bootstrap admin")
+		log.Error().Err(err).Msg("bootstrap admin")
+		return fmt.Errorf("bootstrap admin: %w", err)
 	}
 
-	srv, stopBackground := buildServer(cfg, database)
-	defer stopBackground()
+	srv, app := buildServer(cfg, database)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -215,9 +247,27 @@ func run(cfg config.Config, stopService *context.CancelFunc) error {
 
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
+	var serveErr error
 	select {
 	case <-stop:
 	case <-ctx.Done():
+	case serveErr = <-app.serveErr:
+		log.Error().Err(serveErr).Msg("http server stopped")
+	}
+
+	// Shutdown, in an order where each step can still rely on the next:
+	//  1. readiness fails, and stays failing for ShutdownDrain, so a load
+	//     balancer stops sending new requests before anything closes;
+	//  2. the listener stops and in-flight requests finish;
+	//  3. sockets the HTTP server does not own -- agents and relays -- close,
+	//     so agents reconnect elsewhere instead of timing out against a dying
+	//     process; their disconnect cleanup still has the database;
+	//  4. background loops stop and in-flight webhooks finish;
+	//  5. the database closes (deferred above), last.
+	app.draining.Store(true)
+	if serveErr == nil && cfg.ShutdownDrain > 0 {
+		log.Info().Dur("drain", cfg.ShutdownDrain).Msg("shutting down: draining")
+		time.Sleep(cfg.ShutdownDrain)
 	}
 	log.Info().Msg("shutting down")
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -225,7 +275,33 @@ func run(cfg config.Config, stopService *context.CancelFunc) error {
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Error().Err(err).Msg("graceful shutdown")
 	}
-	return nil
+	app.teardown()
+	log.Info().Msg("shutdown complete")
+	return serveErr
+}
+
+// applyPoolSettings applies DB_MAX_OPEN, DB_MAX_IDLE and DB_CONN_LIFETIME over
+// the driver defaults set in db.OpenWithDriver. Zero leaves a default alone.
+func applyPoolSettings(d *sqlx.DB, cfg config.Config) {
+	if cfg.DBMaxOpen > 0 {
+		d.SetMaxOpenConns(cfg.DBMaxOpen)
+	}
+	if cfg.DBMaxIdle > 0 {
+		d.SetMaxIdleConns(cfg.DBMaxIdle)
+	}
+	if cfg.DBConnLifetime > 0 {
+		d.SetConnMaxLifetime(cfg.DBConnLifetime)
+	}
+}
+
+// serverApp is what run needs from buildServer to shut down in order.
+type serverApp struct {
+	// draining makes /readyz answer 503 from the moment shutdown starts.
+	draining atomic.Bool
+	// serveErr receives the listener's error if it stops on its own -- a port
+	// already in use, a bad certificate -- so run can shut down cleanly.
+	serveErr chan error
+	teardown func()
 }
 
 // ensureJWTSecret gives the server a signing secret on first run when the env
@@ -379,7 +455,9 @@ func handleServiceAction(action, httpAddr, envFile string) {
 // fails the build instead of silently 404-ing in the browser.
 //
 // The returned cleanup stops the background goroutines; main() passes nil.
-func buildServer(cfg config.Config, database *sqlx.DB) (*http.Server, func()) {
+func buildServer(cfg config.Config, database *sqlx.DB) (*http.Server, *serverApp) {
+	app := &serverApp{serveErr: make(chan error, 1)}
+	started := time.Now()
 	jwtSvc := auth.NewJWTService(cfg.JWTSecret, cfg.AccessTokenTTL, cfg.RefreshTokenTTL)
 	deviceRepo := devicemgmt.NewRepository(database)
 	hub := transport.NewHub()
@@ -437,6 +515,10 @@ func buildServer(cfg config.Config, database *sqlx.DB) (*http.Server, func()) {
 	// Resilience and request correlation middlewares.
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
+	// Metrics and the access log, outside Recoverer so a panic is still
+	// counted and logged as the 500 it became.
+	reg := metrics.NewRegistry()
+	r.Use(metrics.NewHTTP(reg).Middleware)
 	r.Use(middleware.Recoverer)
 
 	// Cross-Origin Resource Sharing (CORS) support for REST API.
@@ -456,23 +538,104 @@ func buildServer(cfg config.Config, database *sqlx.DB) (*http.Server, func()) {
 	ipResolver := auth.NewClientIPResolver(cfg.TrustedProxies)
 	apiLimiter := httpguard.NewAPIRateLimiter(300, 100)
 	r.Use(apiLimiter.Middleware(func(req *http.Request) string {
-		if req.URL.Path == "/api/agent/connect" || req.URL.Path == "/healthz" || req.URL.Path == "/readyz" {
+		if req.URL.Path == "/api/agent/connect" || req.URL.Path == "/healthz" || req.URL.Path == "/readyz" || req.URL.Path == "/metrics" {
 			return ""
 		}
 		return ipResolver.ClientIP(req)
 	}))
 
+	// leader is assigned once the background loops are wired below; the
+	// handlers read it per request.
+	var leader *cluster.Leader
+	isLeader := func() bool { return leader != nil && leader.IsLeader() }
+
+	// /readyz is what a load balancer routes on. It fails while the node is
+	// draining for shutdown, and when the database is unreachable -- a node
+	// that cannot reach the database cannot serve anything. The cluster bus
+	// being down is reported but not failed on: the node still serves its own
+	// agents and every request that does not need another node.
 	r.Get("/readyz", func(w http.ResponseWriter, r *http.Request) {
-		if err := database.PingContext(r.Context()); err != nil {
-			writeJSON(w, http.StatusServiceUnavailable, map[string]any{"status": "degraded", "error": "database unreachable: " + err.Error()})
+		body := map[string]any{"node": node.ID, "agents_online": hub.Count(), "leader": isLeader()}
+		if bus != nil {
+			body["cluster_bus"] = bus.Connected()
+		}
+		if app.draining.Load() {
+			body["status"] = "draining"
+			writeJSON(w, http.StatusServiceUnavailable, body)
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"status": "ready", "database": "ok", "agents_online": hub.Count()})
+		if err := database.PingContext(r.Context()); err != nil {
+			body["status"] = "degraded"
+			body["error"] = "database unreachable: " + err.Error()
+			writeJSON(w, http.StatusServiceUnavailable, body)
+			return
+		}
+		body["status"] = "ready"
+		body["database"] = "ok"
+		writeJSON(w, http.StatusOK, body)
 	})
 
+	// /healthz is liveness: the process is up and answering. It says which
+	// node and version answered, which is the first thing to know when two
+	// nodes disagree.
 	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "agents_online": hub.Count()})
+		writeJSON(w, http.StatusOK, map[string]any{
+			"status":         "ok",
+			"version":        serverVersion,
+			"node":           node.ID,
+			"uptime_seconds": int(time.Since(started).Seconds()),
+			"agents_online":  hub.Count(),
+			"leader":         isLeader(),
+		})
 	})
+
+	// /metrics, in the Prometheus text format. With METRICS_TOKEN set it
+	// requires that bearer token; compared in constant time so the token
+	// cannot be recovered by timing.
+	r.Get("/metrics", func(w http.ResponseWriter, r *http.Request) {
+		if cfg.MetricsToken != "" {
+			got := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+			if subtle.ConstantTimeCompare([]byte(got), []byte(cfg.MetricsToken)) != 1 {
+				w.Header().Set("WWW-Authenticate", "Bearer")
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
+		}
+		w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+		_ = reg.Write(w)
+	})
+	reg.GaugeFunc("em_build_info", "Server build and node identity.",
+		map[string]string{"version": serverVersion, "node": node.ID}, func() float64 { return 1 })
+	reg.GaugeFunc("em_uptime_seconds", "Seconds since this node started.", nil,
+		func() float64 { return time.Since(started).Seconds() })
+	reg.GaugeFunc("em_agents_connected", "Agent sockets held by this node.", nil,
+		func() float64 { return float64(hub.Count()) })
+	reg.GaugeFunc("em_leader", "1 when this node runs the leader-only background loops.", nil,
+		func() float64 {
+			if isLeader() {
+				return 1
+			}
+			return 0
+		})
+	reg.GaugeFunc("em_db_open_connections", "Open database connections.", nil,
+		func() float64 { return float64(database.Stats().OpenConnections) })
+	reg.GaugeFunc("em_db_in_use_connections", "Database connections in use.", nil,
+		func() float64 { return float64(database.Stats().InUse) })
+	reg.GaugeFunc("em_db_wait_count", "Requests that waited for a database connection, total.", nil,
+		func() float64 { return float64(database.Stats().WaitCount) })
+	if bus != nil {
+		reg.GaugeFunc("em_cluster_commands_forwarded", "Commands sent to an agent on another node, total.", nil,
+			func() float64 { return float64(bus.Forwarded.Load()) })
+		reg.GaugeFunc("em_cluster_commands_delivered", "Commands received from another node and delivered, total.", nil,
+			func() float64 { return float64(bus.Delivered.Load()) })
+		reg.GaugeFunc("em_cluster_bus_connected", "1 when the cluster bus listener is connected.", nil,
+			func() float64 {
+				if bus.Connected() {
+					return 1
+				}
+				return 0
+			})
+	}
 
 	// Server log tail, backing the console's "Log" menu. The audit trail
 	// (/api/audit-logs) records operator actions; this records what the server
@@ -769,7 +932,7 @@ func buildServer(cfg config.Config, database *sqlx.DB) (*http.Server, func()) {
 	// this, offline endpoints leave update campaigns stuck in 'in_progress' forever.
 	leaderOnly = append(leaderOnly, func(ctx context.Context) { go updateRepo.StartSweep(ctx, 30*time.Second, 10*time.Minute) })
 
-	leader := cluster.NewLeader(database)
+	leader = cluster.NewLeader(database)
 	go leader.Run(bgCtx, func(ctx context.Context) {
 		for _, start := range leaderOnly {
 			start(ctx)
@@ -815,13 +978,13 @@ func buildServer(cfg config.Config, database *sqlx.DB) (*http.Server, func()) {
 				Str("cert", cfg.TLSCertFile).Str("key", cfg.TLSKeyFile).
 				Msg("server listening (TLS)")
 			if err := srv.ListenAndServeTLS(cfg.TLSCertFile, cfg.TLSKeyFile); err != nil && !errors.Is(err, http.ErrServerClosed) {
-				log.Fatal().Err(err).Msg("https server")
+				app.serveErr <- fmt.Errorf("https server: %w", err)
 			}
 		} else {
 			log.Warn().Str("addr", cfg.HTTPAddr).
 				Msg("server listening (PLAINTEXT — set TLS_CERT_FILE and TLS_KEY_FILE for production)")
 			if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-				log.Fatal().Err(err).Msg("http server")
+				app.serveErr <- fmt.Errorf("http server: %w", err)
 			}
 		}
 	}()
@@ -847,15 +1010,31 @@ func buildServer(cfg config.Config, database *sqlx.DB) (*http.Server, func()) {
 	//
 	// Both are silent: the API keeps answering 200 while the thing that makes
 	// those answers correct quietly stops happening.
+	//
+	// The order matters. Agent sockets and relays close first, while the
+	// database is still open for their disconnect cleanup; the node then leaves
+	// the cluster so no other node routes to it; the heartbeat flusher writes
+	// its last batch; the background loops stop; and webhooks already sent get
+	// a moment to finish.
+	reg.GaugeFunc("em_relays_active", "Live relays on this node.", map[string]string{"kind": "remote_control"},
+		func() float64 { return float64(rcRelay.ActiveCount()) })
+	reg.GaugeFunc("em_relays_active", "Live relays on this node.", map[string]string{"kind": "terminal"},
+		func() float64 { return float64(termRelay.ActiveCount()) })
+
 	cleanup := func() {
+		hub.Close()
+		rcRelay.CloseAll()
+		termRelay.CloseAll()
 		node.Leave(context.Background())
 		wsH.Close()
 		loginH.Close()
 		apiLimiter.Close()
 		stopBackups()
 		stopBackground()
+		alertEval.WaitWebhooks(5 * time.Second)
 	}
-	return srv, cleanup
+	app.teardown = cleanup
+	return srv, app
 }
 
 // purgeSessions deletes auth_sessions rows past their TTL, on a timer, for the

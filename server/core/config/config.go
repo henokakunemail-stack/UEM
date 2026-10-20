@@ -58,6 +58,24 @@ type Config struct {
 	// stdout only. The console's "Log" menu tails this file, so on a systemd
 	// box the operator can point it at a real file and still read it in the UI.
 	LogFile string
+	// LogMaxMB and LogKeep rotate LOG_FILE: past LogMaxMB megabytes it is
+	// renamed aside and LogKeep old files are kept. LogMaxMB 0 disables it.
+	LogMaxMB int
+	LogKeep  int
+
+	// ShutdownDrain is how long the server answers 503 on /readyz before it
+	// stops accepting, so a load balancer stops sending new requests first.
+	ShutdownDrain time.Duration
+	// MetricsToken, when set, is required as "Authorization: Bearer <token>"
+	// on /metrics. Empty leaves /metrics open, for a scraper on a private
+	// network; the reverse proxy templates restrict it by address as well.
+	MetricsToken string
+
+	// Database pool. Zero keeps the built-in defaults for the driver.
+	DBMaxOpen          int
+	DBMaxIdle          int
+	DBConnLifetime     time.Duration
+	DBStatementTimeout time.Duration
 	// LogTailLines caps how many recent lines GET /api/logs holds in memory.
 	LogTailLines int
 
@@ -149,6 +167,14 @@ func Load() (Config, error) {
 		UpdateMinimumVersion:   strings.TrimSpace(getEnv("UPDATE_MINIMUM_VERSION", "")),
 		LogLevel:               getEnv("LOG_LEVEL", "info"),
 		LogFile:                getEnv("LOG_FILE", ""),
+		LogMaxMB:               getEnvInt("LOG_MAX_MB", 100),
+		LogKeep:                getEnvInt("LOG_KEEP", 5),
+		ShutdownDrain:          getDuration("SHUTDOWN_DRAIN", 5*time.Second),
+		MetricsToken:           getEnv("METRICS_TOKEN", ""),
+		DBMaxOpen:              getEnvInt("DB_MAX_OPEN", 0),
+		DBMaxIdle:              getEnvInt("DB_MAX_IDLE", 0),
+		DBConnLifetime:         getDuration("DB_CONN_LIFETIME", 0),
+		DBStatementTimeout:     getDuration("DB_STATEMENT_TIMEOUT", 0),
 		LogTailLines:           getEnvInt("LOG_TAIL_LINES", 2000),
 	}
 	if cfg.JWTSecret == "" {

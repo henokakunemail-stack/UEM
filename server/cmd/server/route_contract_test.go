@@ -61,7 +61,7 @@ func routesOf(t *testing.T) map[string]bool {
 	t.Cleanup(func() { database.Close() })
 
 	srv, stopBackground := buildServer(testConfig(t), database)
-	t.Cleanup(stopBackground)
+	t.Cleanup(stopBackground.teardown)
 
 	router, ok := srv.Handler.(chi.Routes)
 	if !ok {
@@ -389,7 +389,7 @@ func TestListEndpointResponseShape(t *testing.T) {
 
 	cfg := testConfig(t)
 	srv, stopBackground := buildServer(cfg, database)
-	t.Cleanup(stopBackground)
+	t.Cleanup(stopBackground.teardown)
 
 	ts := httptest.NewServer(srv.Handler)
 	t.Cleanup(ts.Close)
@@ -481,7 +481,7 @@ func TestListEndpointsNeverReturnNull(t *testing.T) {
 
 	cfg := testConfig(t)
 	srv, stopBackground := buildServer(cfg, database)
-	t.Cleanup(stopBackground)
+	t.Cleanup(stopBackground.teardown)
 
 	ts := httptest.NewServer(srv.Handler)
 	t.Cleanup(ts.Close)
@@ -558,7 +558,7 @@ func TestObjectEndpointsExposeTheirFields(t *testing.T) {
 
 	cfg := testConfig(t)
 	srv, stopBackground := buildServer(cfg, database)
-	t.Cleanup(stopBackground)
+	t.Cleanup(stopBackground.teardown)
 
 	ts := httptest.NewServer(srv.Handler)
 	t.Cleanup(ts.Close)
@@ -654,7 +654,7 @@ func TestHealthzAndReadyzEndpoints(t *testing.T) {
 
 	cfg := testConfig(t)
 	srv, stopBackground := buildServer(cfg, database)
-	t.Cleanup(stopBackground)
+	t.Cleanup(stopBackground.teardown)
 
 	ts := httptest.NewServer(srv.Handler)
 	t.Cleanup(ts.Close)

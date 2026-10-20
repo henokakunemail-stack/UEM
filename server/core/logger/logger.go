@@ -46,7 +46,19 @@ func Tail() []string {
 // level: debug|info|warn|error
 // file: optional path; when non-empty, logs are appended to it as well and that
 // file is the source the Log menu tails.
+// Default rotation for LOG_FILE when the caller does not choose one.
+const (
+	DefaultLogMaxMB = 100
+	DefaultLogKeep  = 5
+)
+
 func Init(level string, file string) {
+	InitWithRotation(level, file, DefaultLogMaxMB, DefaultLogKeep)
+}
+
+// InitWithRotation is Init with LOG_FILE rotated at maxMB, keeping keep old
+// files. maxMB <= 0 disables rotation.
+func InitWithRotation(level string, file string, maxMB, keep int) {
 	lvl, err := zerolog.ParseLevel(level)
 	if err != nil {
 		lvl = zerolog.InfoLevel
@@ -60,15 +72,20 @@ func Init(level string, file string) {
 
 	if file != "" {
 		if err := os.MkdirAll(filepath.Dir(file), 0755); err == nil {
-			f, err := os.OpenFile(file, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+			rf, err := openRotating(file, int64(maxMB)*1024*1024, keep)
 			if err != nil {
 				log.Warn().Err(err).Str("path", file).
 					Msg("LOG_FILE could not be opened; continuing with stdout only")
 			} else {
 				// A restart must not silently start a fresh log and lose the
-				// incident that led to it, so this is append-only, never truncate.
-				sinks = append(sinks, f)
-				rememberTailFrom(f, maxTailLines)
+				// incident that led to it, so this appends; size is bounded by
+				// rotation instead. The tail is read before the file joins the
+				// sinks: the handle is shared, and a write landing mid-read
+				// would move the offset the read depends on. (It was opened
+				// write-only before, so this read always failed and the Log
+				// menu started empty after every restart.)
+				rememberTailFrom(rf.file(), maxTailLines)
+				sinks = append(sinks, rf)
 			}
 		} else {
 			log.Warn().Err(err).Str("path", file).Msg("could not create log directory")

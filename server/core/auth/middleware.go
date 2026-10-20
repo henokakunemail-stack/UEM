@@ -8,6 +8,7 @@ import (
 
 	"github.com/rs/zerolog/log"
 
+	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/metrics"
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/rbac"
 )
 
@@ -145,6 +146,7 @@ func (s *JWTService) RequireAuth(next http.Handler) http.Handler {
 		}
 		ctx := r.Context()
 		ctx = context.WithValue(ctx, CtxUserID, claims.UserID)
+		metrics.SetUser(ctx, claims.UserID)
 		ctx = context.WithValue(ctx, CtxUsername, claims.Username)
 		// The session id travels on the access token as `sid`, which is the only
 		// place a request can learn which session it belongs to without asking
