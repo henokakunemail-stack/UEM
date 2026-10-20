@@ -209,8 +209,8 @@ func (s *dibSurface) close() {
 // blit copies the screen into the section and waits for GDI to finish writing
 // it. GDI batches drawing calls per thread, and the section's bits are only
 // guaranteed to hold the blit once the batch is flushed.
-func (s *dibSurface) blit(hdcScreen uintptr) error {
-	ret, _, callErr := procBitBlt.Call(s.hdcMem, 0, 0, uintptr(s.width), uintptr(s.height), hdcScreen, 0, 0, uintptr(SRCCOPY|CAPTUREBLT))
+func (s *dibSurface) blit(hdcScreen uintptr, srcX, srcY int) error {
+	ret, _, callErr := procBitBlt.Call(s.hdcMem, 0, 0, uintptr(s.width), uintptr(s.height), hdcScreen, uintptr(srcX), uintptr(srcY), uintptr(SRCCOPY|CAPTUREBLT))
 	if ret == 0 {
 		return cleanWin32Err(callErr)
 	}
@@ -234,6 +234,16 @@ type WindowsCapturer struct {
 	// section at once would hand each of them a mixture of both frames.
 	capMu sync.Mutex
 	surf  *dibSurface
+
+	// geoMu guards the monitor selection and the geometry of the last frame.
+	// Input runs on the relay's read goroutine and has to translate the
+	// operator's frame coordinates by the origin of whatever is being captured;
+	// sharing capMu would make every mouse move wait out a full-screen blit.
+	geoMu        sync.Mutex
+	selected     int
+	originX      int
+	originY      int
+	areaW, areaH int
 }
 
 func NewPlatformCapturer() ScreenCapturer {
@@ -253,7 +263,7 @@ func NewPlatformCapturer() ScreenCapturer {
 	// capability as missing when the fix is a single call away.
 	_ = attachToInputDesktop()
 
-	return &WindowsCapturer{held: make(map[uint16]bool)}
+	return &WindowsCapturer{held: make(map[uint16]bool), selected: monitorPrimary}
 }
 
 // attachToInputDesktop gives the calling thread a desktop to draw from.
@@ -399,7 +409,7 @@ func (c *WindowsCapturer) probeCapture() error {
 	}
 	defer surf.close()
 
-	if err := surf.blit(hdcScreen); err != nil {
+	if err := surf.blit(hdcScreen, 0, 0); err != nil {
 		reattachInputDesktop()
 		return fmt.Errorf("BitBlt failed: %w%s", err, sessionZeroHint())
 	}
@@ -413,10 +423,8 @@ func (c *WindowsCapturer) CaptureScreen() ([]byte, int, int, error) {
 	// desktop with no explanation.
 	_ = attachToInputDesktop()
 
-	w, _, _ := procGetSystemMetrics.Call(uintptr(SM_CXSCREEN))
-	h, _, _ := procGetSystemMetrics.Call(uintptr(SM_CYSCREEN))
-	width := int(w)
-	height := int(h)
+	area := c.captureRect()
+	width, height := area.Width, area.Height
 	if width <= 0 || height <= 0 {
 		return nil, 0, 0, fmt.Errorf("invalid screen dimensions: %dx%d", width, height)
 	}
@@ -444,7 +452,7 @@ func (c *WindowsCapturer) CaptureScreen() ([]byte, int, int, error) {
 		c.surf = surf
 	}
 
-	if err := c.surf.blit(hdcScreen); err != nil {
+	if err := c.surf.blit(hdcScreen, area.X, area.Y); err != nil {
 		// The Win32 code is kept deliberately. A non-interactive window station
 		// (a service, a CI runner, a container) makes BitBlt fail with a code
 		// that no amount of code change will fix, and without it this error is
@@ -485,8 +493,12 @@ func (c *WindowsCapturer) InjectMouseEvent(e InputEvent) error {
 	// SetCursorPos for the move, SendInput for the button and wheel events.
 	// Both operate in the same virtual-desktop coordinate space the frame was
 	// captured in, because the process is now DPI-aware.
+	// The console's coordinates are relative to the captured frame, which is
+	// not at the virtual desktop's origin once a secondary monitor -- or a
+	// monitor left of the primary, at negative coordinates -- is selected.
 	if e.X >= 0 && e.Y >= 0 {
-		_, _, _ = procSetCursorPos.Call(uintptr(e.X), uintptr(e.Y))
+		ox, oy := c.origin()
+		_, _, _ = procSetCursorPos.Call(uintptr(e.X+ox), uintptr(e.Y+oy))
 	}
 
 	var flags uint32

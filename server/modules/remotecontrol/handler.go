@@ -127,6 +127,13 @@ func (h *Handler) startSession(w http.ResponseWriter, r *http.Request) {
 		"mode":       session.SessionMode,
 		"relay_url":  "/api/agent/devices/" + deviceID + "/remotecontrol/ws?session=" + session.ID,
 	}
+	// The agent shows this name to the person at the endpoint while their
+	// screen is shared. Read back through the session row, which already joins
+	// the user, rather than trusting anything the request body says about who
+	// is asking.
+	if stored, err := h.repo.GetSessionByID(r.Context(), session.ID); err == nil && stored.OperatorName != "" {
+		cmdPayload["operator"] = stored.OperatorName
+	}
 	env := transport.Envelope{
 		Type:    transport.TypeCommand,
 		ID:      session.ID,
@@ -336,11 +343,12 @@ func (h *Handler) handleOperatorWS(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		// A refresh asks the agent for a full keyframe. It is not input, so it
-		// must not hit the view_only gate: a view-only console that missed the
-		// agent's first frame would otherwise only ever receive the rectangles
-		// that changed, and sit on a mostly blank desktop.
-		if isRefreshMessage(msg) {
+		// A refresh asks the agent for a full keyframe, and a monitor message
+		// picks which display to stream. Neither is input, so neither may hit
+		// the view_only gate: a view-only console that missed the agent's first
+		// frame would otherwise only ever receive the rectangles that changed,
+		// and a viewer could never look at the endpoint's second screen.
+		if isViewControlMessage(msg) {
 			_ = relay.ForwardControlMessage(msgType, msg)
 			continue
 		}
@@ -471,12 +479,17 @@ func parseModeMessage(msg []byte) (string, bool) {
 	return probe.Mode, true
 }
 
-// isRefreshMessage reports whether a console message is a keyframe request.
-func isRefreshMessage(msg []byte) bool {
+// isViewControlMessage reports whether a console message only changes what the
+// operator sees -- a keyframe request or a monitor selection -- and so is
+// allowed through in view_only.
+func isViewControlMessage(msg []byte) bool {
 	var probe struct {
 		Type string `json:"type"`
 	}
-	return json.Unmarshal(msg, &probe) == nil && probe.Type == "refresh"
+	if json.Unmarshal(msg, &probe) != nil {
+		return false
+	}
+	return probe.Type == "refresh" || probe.Type == "monitor"
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {

@@ -24,6 +24,10 @@ type SessionConfig struct {
 	DeviceID     string `json:"device_id,omitempty"`
 	DeviceSecret string `json:"device_secret,omitempty"`
 	ServerURL    string `json:"server_url,omitempty"`
+	// Operator is the console user's name, shown to the person at the endpoint
+	// in the session banner. Empty from an older server, which the banner reads
+	// as "an administrator".
+	Operator string `json:"operator,omitempty"`
 }
 
 // Credentials are the agent's per-device secret, the same pair every other
@@ -43,6 +47,14 @@ type Capabilities struct {
 	Mouse    bool   `json:"mouse"`
 	Keyboard bool   `json:"keyboard"`
 	Reason   string `json:"reason,omitempty"`
+
+	// The optional features. All omitempty, so a console that predates them
+	// sees the same hello it always did, and a newer console shows each control
+	// only when the endpoint has advertised it.
+	Monitors     []MonitorInfo `json:"monitors,omitempty"`
+	Clipboard    bool          `json:"clipboard,omitempty"`
+	FileTransfer bool          `json:"file_transfer,omitempty"`
+	MaxFileBytes int64         `json:"max_file_bytes,omitempty"`
 }
 
 // InputEvent is the operator's intent, decoded from the console. One struct for
@@ -62,6 +74,17 @@ type InputEvent struct {
 	Code int    `json:"code,omitempty"`
 	Key  string `json:"key,omitempty"`
 	Mode string `json:"mode,omitempty"`
+
+	// Feature messages: monitor selection, key combinations, clipboard text
+	// and file upload. See handleFeatureMessage.
+	Index int    `json:"index,omitempty"`
+	Combo string `json:"combo,omitempty"`
+	Text  string `json:"text,omitempty"`
+	ID    string `json:"id,omitempty"`
+	Name  string `json:"name,omitempty"`
+	Size  int64  `json:"size,omitempty"`
+	Seq   int    `json:"seq,omitempty"`
+	Data  string `json:"data,omitempty"`
 }
 
 // ScreenCapturer produces a frame, not an encoded image.
@@ -106,6 +129,24 @@ type Session struct {
 	mode             string
 	wakeChan         chan struct{}
 	refreshRequested atomic.Bool
+
+	files        *fileReceiver
+	progressMu   sync.Mutex
+	progressSent map[string]int64
+
+	// ownClipboardSeq is written by the input goroutine when the operator sets
+	// the clipboard and read by the stream loop; the rest of the endpoint state
+	// below belongs to the stream loop alone.
+	ownClipboardSeq   atomic.Uint32
+	ownClipboardText  atomic.Value
+	lastClipboardSeq  uint32
+	lastCursorX       int
+	lastCursorY       int
+	lastCursorVisible bool
+	quality           *qualityController
+	lastStats         time.Time
+
+	banner sessionBanner
 }
 
 func NewSession(cfg SessionConfig, serverBaseURL string, creds Credentials, capturer ScreenCapturer) *Session {
@@ -114,13 +155,17 @@ func NewSession(cfg SessionConfig, serverBaseURL string, creds Credentials, capt
 		mode = "full_control"
 	}
 	return &Session{
-		config:    SessionConfig{SessionID: cfg.SessionID, Mode: mode, RelayURL: cfg.RelayURL, DeviceID: cfg.DeviceID, DeviceSecret: cfg.DeviceSecret, ServerURL: cfg.ServerURL},
+		config:    SessionConfig{SessionID: cfg.SessionID, Mode: mode, RelayURL: cfg.RelayURL, DeviceID: cfg.DeviceID, DeviceSecret: cfg.DeviceSecret, ServerURL: cfg.ServerURL, Operator: cfg.Operator},
 		serverURL: serverBaseURL,
 		creds:     creds,
 		capturer:  capturer,
 		stopChan:  make(chan struct{}),
 		wakeChan:  make(chan struct{}, 1),
 		mode:      mode,
+
+		files:        newFileReceiver(defaultTransfersDir()),
+		progressSent: make(map[string]int64),
+		quality:      newQualityController(time.Now()),
 	}
 }
 
@@ -158,7 +203,7 @@ func (s *Session) Start(ctx context.Context) error {
 		"session_id":   s.config.SessionID,
 		"mode":         s.mode,
 		"os":           runtime.GOOS,
-		"capabilities": s.capturer.Capabilities(),
+		"capabilities": s.capabilities(),
 	}); err != nil {
 		// The dial succeeded, so this socket is now open and owned by nobody:
 		// the goroutines below were never started, so nothing else will close
@@ -171,6 +216,10 @@ func (s *Session) Start(ctx context.Context) error {
 		return fmt.Errorf("send rc hello: %w", err)
 	}
 
+	// Told before the first frame, not after: the person at the endpoint should
+	// know their screen is shared from the moment it is.
+	s.banner = showSessionBanner(bannerText(s.config.Operator, s.mode))
+
 	go s.readInputLoop()
 	go s.streamFramesLoop()
 
@@ -182,6 +231,10 @@ func (s *Session) Stop() {
 		// Lift held keys before the socket goes away. A session that ends while
 		// the operator is holding Ctrl must not leave it held on the endpoint.
 		_ = s.capturer.ReleaseAllKeys()
+		s.files.closeAll()
+		if s.banner != nil {
+			s.banner.Close()
+		}
 
 		// The close frame is a write like any other and has to take the same
 		// lock. gorilla/websocket permits exactly one concurrent writer: two
@@ -234,6 +287,9 @@ func (s *Session) setMode(m string) {
 	s.modeMu.Lock()
 	s.mode = m
 	s.modeMu.Unlock()
+	if s.banner != nil {
+		s.banner.SetText(bannerText(s.config.Operator, m))
+	}
 	if m == "view_only" {
 		_ = s.capturer.ReleaseAllKeys()
 	}
@@ -298,6 +354,10 @@ func (s *Session) readInputLoop() {
 		if in.Type == "refresh" {
 			s.refreshRequested.Store(true)
 			s.wakeCapture()
+			continue
+		}
+
+		if s.handleFeatureMessage(in) {
 			continue
 		}
 
@@ -399,6 +459,8 @@ func (s *Session) streamFramesLoop() {
 				continue
 			}
 			captureFailures = 0
+			s.pollEndpointState()
+			s.maybeSendStats(time.Now())
 			if len(pixels) == 0 {
 				timer.Reset(interval)
 				continue
@@ -431,18 +493,26 @@ func (s *Session) streamFramesLoop() {
 				idleTicks = 0
 			}
 
-			payload, err := EncodeFrame(pixels, width, height, rects)
+			payload, err := EncodeFrameQuality(pixels, width, height, rects, s.quality.quality)
 			if err != nil {
 				log.Error().Err(err).Msg("encode remote control frame")
 				timer.Reset(interval)
 				continue
 			}
 
+			// The write is timed with the lock held, because that is how long
+			// the socket refused the bytes: it is the link telling the agent to
+			// send less, and the quality controller listens to nothing else.
 			s.mu.Lock()
+			writeStart := time.Now()
 			err = s.conn.WriteMessage(websocket.BinaryMessage, payload)
+			took := time.Since(writeStart)
 			s.mu.Unlock()
 			if err != nil {
 				return
+			}
+			if s.quality.observe(len(payload), took, time.Now()) {
+				log.Debug().Int("quality", s.quality.quality).Dur("write", took).Msg("remote control quality adjusted")
 			}
 
 			// Only now is the baseline safe to advance. Doing it before the

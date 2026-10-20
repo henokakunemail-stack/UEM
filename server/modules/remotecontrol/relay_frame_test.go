@@ -22,15 +22,21 @@ func TestFrameWriteDeadlineGrowsWithTheFrame(t *testing.T) {
 	}
 }
 
-// A refresh is a keyframe request, not input, so it has to be recognised before
-// the view_only gate drops it.
-func TestRefreshIsRecognisedAsAControlMessage(t *testing.T) {
-	if !isRefreshMessage([]byte(`{"type":"refresh"}`)) {
-		t.Fatal("refresh not recognised")
+// A refresh and a monitor selection change only what the operator sees, so they
+// have to be recognised before the view_only gate drops them. Clipboard text,
+// key combinations and file chunks change the endpoint and must not be.
+func TestViewControlMessagesAreRecognised(t *testing.T) {
+	for _, m := range []string{`{"type":"refresh"}`, `{"type":"monitor","index":1}`} {
+		if !isViewControlMessage([]byte(m)) {
+			t.Fatalf("%s not recognised", m)
+		}
 	}
-	for _, m := range []string{`{"type":"mouse","action":"down"}`, `not json`, `{"type":"mode","mode":"view_only"}`} {
-		if isRefreshMessage([]byte(m)) {
-			t.Fatalf("%s treated as a refresh", m)
+	for _, m := range []string{
+		`{"type":"mouse","action":"down"}`, `not json`, `{"type":"mode","mode":"view_only"}`,
+		`{"type":"clipboard","text":"x"}`, `{"type":"keys","combo":"win"}`, `{"type":"file_chunk","id":"f"}`,
+	} {
+		if isViewControlMessage([]byte(m)) {
+			t.Fatalf("%s let through the view_only gate", m)
 		}
 	}
 }

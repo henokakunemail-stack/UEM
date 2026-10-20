@@ -43,6 +43,10 @@ type Rect struct {
 // corrupted canvas with no error.
 const frameVersion = 1
 
+// defaultQuality is the JPEG quality a frame is encoded at before the adaptive
+// controller has measured the link.
+const defaultQuality = 75
+
 // Damage tracks what changed since the last frame was sent.
 //
 // It holds two full frames rather than one, and that is deliberate. A tile
@@ -338,6 +342,13 @@ func (d *Damage) acknowledge(rects []Rect) {
 // arrives, and because a resolution change on the endpoint has to be able to
 // reach a console that is already connected.
 func EncodeFrame(pixels []byte, width, height int, rects []Rect) ([]byte, error) {
+	return EncodeFrameQuality(pixels, width, height, rects, defaultQuality)
+}
+
+// EncodeFrameQuality is EncodeFrame with the session's current JPEG quality. The
+// quality is what the adaptive controller lowers on a slow link and raises again
+// when there is headroom; the per-rectangle tiers below are offsets from it.
+func EncodeFrameQuality(pixels []byte, width, height int, rects []Rect, quality int) ([]byte, error) {
 	if len(rects) > 0xFF {
 		return nil, fmt.Errorf("frame carries %d rectangles, more than the header can name", len(rects))
 	}
@@ -367,7 +378,7 @@ func EncodeFrame(pixels []byte, width, height int, rects []Rect) ([]byte, error)
 		binary.BigEndian.PutUint16(dims[6:8], uint16(r.H))
 		buf = append(buf, dims[:]...)
 
-		encoded, err := encodeRect(pixels, rowBytes, r)
+		encoded, err := encodeRect(pixels, rowBytes, r, quality)
 		if err != nil {
 			return nil, err
 		}
@@ -385,7 +396,7 @@ func EncodeFrame(pixels []byte, width, height int, rects []Rect) ([]byte, error)
 // what the previous path did, and it is a full pass over 8MB that produces
 // bytes which are then thrown away whenever the diff finds the change was
 // smaller than the screen.
-func encodeRect(pixels []byte, rowBytes int, r Rect) ([]byte, error) {
+func encodeRect(pixels []byte, rowBytes int, r Rect, base int) ([]byte, error) {
 	img := image.NewRGBA(image.Rect(0, 0, r.W, r.H))
 	for y := 0; y < r.H; y++ {
 		src := pixels[(r.Y+y)*rowBytes+r.X*4:]
@@ -400,12 +411,16 @@ func encodeRect(pixels []byte, rowBytes int, r Rect) ([]byte, error) {
 
 	var out bytes.Buffer
 	area := r.W * r.H
-	quality := 75 // sharp text for small UI damage
+	// Small damage is usually text and keeps the base quality; large areas are
+	// usually a scrolled page or a window drag, where a softer image is the
+	// difference between a fluid move and a stalled one.
+	quality := base
 	if area > 200000 {
-		quality = 55 // ponytail: fixed 3-tier quality. Add client bandwidth estimation if ACK metrics exist.
+		quality = base - 20
 	} else if area > 60000 {
-		quality = 65
+		quality = base - 10
 	}
+	quality = max(quality, minQuality-10)
 	if err := jpeg.Encode(&out, img, &jpeg.Options{Quality: quality}); err != nil {
 		return nil, fmt.Errorf("encode rect: %w", err)
 	}

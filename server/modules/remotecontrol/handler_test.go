@@ -280,6 +280,7 @@ func TestStartSessionAcceptsBothModesAndTellsTheAgentWhichOne(t *testing.T) {
 					SessionID string `json:"session_id"`
 					Mode      string `json:"mode"`
 					RelayURL  string `json:"relay_url"`
+					Operator  string `json:"operator"`
 				} `json:"payload"`
 			}
 			if err := json.Unmarshal(hub.payload, &env); err != nil {
@@ -292,6 +293,11 @@ func TestStartSessionAcceptsBothModesAndTellsTheAgentWhichOne(t *testing.T) {
 				t.Errorf("agent was told session %q, the response says %q: the agent "+
 					"would attach to a relay the operator is not on",
 					env.Payload.SessionID, session.ID)
+			}
+			// The endpoint's banner names who is looking at the screen; the
+			// name comes from the users table, not from the request.
+			if env.Payload.Operator != "tech" {
+				t.Errorf("agent was told operator %q, want \"tech\"", env.Payload.Operator)
 			}
 			if env.Payload.Mode != tc.wantMode {
 				t.Errorf("agent was told mode %q, the session is %q",

@@ -322,7 +322,7 @@ func TestTheColourOrderIsSwappedNotJustCopied(t *testing.T) {
 	pixels[1] = 0x22 // green
 	pixels[2] = 0x33 // red
 
-	encoded, err := encodeRect(pixels, 4, Rect{W: 1, H: 1})
+	encoded, err := encodeRect(pixels, 4, Rect{W: 1, H: 1}, defaultQuality)
 	if err != nil {
 		t.Fatalf("encodeRect: %v", err)
 	}
@@ -484,11 +484,11 @@ func TestAdaptiveQualityReducesLargeDamagePayload(t *testing.T) {
 	largeRect := Rect{X: 0, Y: 0, W: 600, H: 400} // 240,000 px -> quality 55
 	smallRect := Rect{X: 0, Y: 0, W: 64, H: 64}   // 4,096 px -> quality 75
 
-	largeEncoded, err := encodeRect(pixels, w*4, largeRect)
+	largeEncoded, err := encodeRect(pixels, w*4, largeRect, defaultQuality)
 	if err != nil {
 		t.Fatalf("encode large rect: %v", err)
 	}
-	smallEncoded, err := encodeRect(pixels, w*4, smallRect)
+	smallEncoded, err := encodeRect(pixels, w*4, smallRect, defaultQuality)
 	if err != nil {
 		t.Fatalf("encode small rect: %v", err)
 	}
