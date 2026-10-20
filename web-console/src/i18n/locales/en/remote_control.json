@@ -22,16 +22,16 @@
   "duplicate_hostname": "Duplicate Hostname ({id})",
   "badge_desktop_title": "Desktop GUI screen capture supported",
   "badge_desktop": "Desktop",
-  "badge_terminal_only_title": "Desktop GUI capture Windows-only. Remote Terminal supported.",
+  "badge_terminal_only_title": "Desktop capture is available on Windows and Linux (X11). Remote Terminal supported.",
   "badge_terminal_only": "Terminal Only",
   "never": "Never",
   "start_title": "Open a live remote desktop session",
   "start_requires_technician": "Starting a session requires the technician role",
   "start_label": "Start remote desktop session on {hostname}",
   "start": "Start",
-  "terminal_hint": "Desktop GUI capture is Windows-only. Use Interactive Terminal from Devices page.",
+  "terminal_hint": "Desktop capture is available on Windows and Linux (X11). Use the Interactive Terminal from the Devices page.",
   "toast_terminal_available": "Terminal Available",
-  "terminal_title": "Desktop GUI is Windows-only. Click to open Remote Terminal.",
+  "terminal_title": "Open the remote terminal. Desktop capture is available on Windows and Linux (X11).",
   "terminal_label": "Open interactive terminal on {hostname}",
   "terminal": "Terminal",
   "session_history": "Session history",
@@ -133,5 +133,7 @@
   "capture_failed_hint": "Remote desktop capture failed. Verify endpoint agent logs and screen capture prerequisites, then retry.",
   "close_window": "Close Window",
   "session_ended_title": "Remote Session Ended",
-  "session_ended_text": "The desktop streaming session was closed by the operator or endpoint."
+  "session_ended_text": "The desktop streaming session was closed by the operator or endpoint.",
+  "badge_desktop_linux": "Desktop (X11) + Terminal",
+  "badge_desktop_linux_title": "Screen and input over X11, plus a full terminal. A Wayland desktop cannot be captured yet: the endpoint user can log in with an X11 (Xorg) session instead."
 }

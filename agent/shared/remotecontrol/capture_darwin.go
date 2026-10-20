@@ -5,8 +5,9 @@ package remotecontrol
 import "fmt"
 
 // DarwinCapturer reports itself as incapable rather than emitting a placeholder.
-// See the note on LinuxCapturer: the previous build returned a solid-grey JPEG
-// and a no-op injector, which made the console look live while nothing was.
+// An earlier build returned a solid-grey JPEG and a no-op injector, which made
+// the console look live while nothing was; a session that cannot work has to
+// say so on the first frame.
 //
 // ponytail: no CGDisplay streaming and no CGEvent posting. Both need cgo
 // (CoreGraphics), which this CGO-free build does not take on. Add them behind a

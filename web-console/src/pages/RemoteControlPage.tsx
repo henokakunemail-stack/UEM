@@ -51,6 +51,8 @@ export const RemoteControlPage: React.FC<{
     const s = osName.toLowerCase()
     return s.includes('windows') || s.includes('win')
   }
+  // Linux endpoints stream an X11 desktop (agent 1.5.4+) and keep the terminal.
+  const isLinux = (osName?: string) => (osName ?? '').toLowerCase().includes('linux')
 
   const [devices, setDevices] = useState<DeviceDTO[]>([])
   const [devicesLoading, setDevicesLoading] = useState(true)
@@ -258,7 +260,7 @@ export const RemoteControlPage: React.FC<{
                     <td data-label={t('remote_control.col_os')}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem', flexWrap: 'wrap' }}>
                         <span className="os-name">{d.os_name}</span>
-                        {isWindows(d.os_name) ? (
+                        {isWindows(d.os_name) || isLinux(d.os_name) ? (
                           <span
                             style={{
                               fontSize: '0.625rem',
@@ -269,9 +271,9 @@ export const RemoteControlPage: React.FC<{
                               border: '1px solid rgba(59, 130, 246, 0.3)',
                               fontWeight: 500,
                             }}
-                            title={t('remote_control.badge_desktop_title')}
+                            title={isLinux(d.os_name) ? t('remote_control.badge_desktop_linux_title') : t('remote_control.badge_desktop_title')}
                           >
-                            {t('remote_control.badge_desktop')}
+                            {isLinux(d.os_name) ? t('remote_control.badge_desktop_linux') : t('remote_control.badge_desktop')}
                           </span>
                         ) : (
                           <span
@@ -300,7 +302,39 @@ export const RemoteControlPage: React.FC<{
                       </span>
                     </td>
                     <td className="text-right" data-label={t('remote_control.col_session')}>
-                      {isWindows(d.os_name) ? (
+                      {isLinux(d.os_name) && (
+                        <span style={{ display: 'inline-flex', gap: '0.375rem' }}>
+                          <button
+                            type="button"
+                            className="btn btn-sm btn-primary"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              handleStart(d)
+                            }}
+                            disabled={!canOperate}
+                            title={canOperate ? t('remote_control.start_title') : t('remote_control.start_requires_technician')}
+                            aria-label={t('remote_control.start_label', { hostname: d.hostname })}
+                          >
+                            <Play size={12} />
+                            <span>{t('remote_control.start')}</span>
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-sm btn-secondary"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              onOpenTerminal?.(d, 'bash')
+                            }}
+                            disabled={!canOperate || !onOpenTerminal}
+                            title={t('remote_control.terminal_title')}
+                            aria-label={t('remote_control.terminal_label', { hostname: d.hostname })}
+                          >
+                            <Terminal size={12} />
+                            <span>{t('remote_control.terminal')}</span>
+                          </button>
+                        </span>
+                      )}
+                      {isLinux(d.os_name) ? null : isWindows(d.os_name) ? (
                         <button
                           type="button"
                           className="btn btn-sm btn-primary"

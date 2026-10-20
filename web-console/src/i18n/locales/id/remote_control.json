@@ -22,16 +22,16 @@
   "duplicate_hostname": "Hostname Duplikat ({id})",
   "badge_desktop_title": "Tangkapan layar GUI desktop didukung",
   "badge_desktop": "Desktop",
-  "badge_terminal_only_title": "Tangkapan GUI desktop hanya untuk Windows. Terminal jarak jauh didukung.",
+  "badge_terminal_only_title": "Capture desktop tersedia di Windows dan Linux (X11). Terminal jarak jauh didukung.",
   "badge_terminal_only": "Hanya Terminal",
   "never": "Tidak pernah",
   "start_title": "Buka sesi desktop jarak jauh langsung",
   "start_requires_technician": "Memulai sesi memerlukan peran teknisi",
   "start_label": "Mulai sesi desktop jarak jauh pada {hostname}",
   "start": "Mulai",
-  "terminal_hint": "Tangkapan GUI desktop hanya untuk Windows. Gunakan Terminal Interaktif dari halaman Perangkat.",
+  "terminal_hint": "Capture desktop tersedia di Windows dan Linux (X11). Gunakan Terminal Interaktif dari halaman Perangkat.",
   "toast_terminal_available": "Terminal Tersedia",
-  "terminal_title": "GUI desktop hanya untuk Windows. Klik untuk membuka Terminal jarak jauh.",
+  "terminal_title": "Buka terminal jarak jauh. Capture desktop tersedia di Windows dan Linux (X11).",
   "terminal_label": "Buka terminal interaktif pada {hostname}",
   "terminal": "Terminal",
   "session_history": "Riwayat sesi",
@@ -133,5 +133,7 @@
   "capture_failed_hint": "Tangkapan desktop jarak jauh gagal. Periksa log agen perangkat dan prasyarat tangkapan layar, lalu coba lagi.",
   "close_window": "Tutup Jendela",
   "session_ended_title": "Sesi Jarak Jauh Berakhir",
-  "session_ended_text": "Sesi siaran desktop ditutup oleh operator atau perangkat."
+  "session_ended_text": "Sesi siaran desktop ditutup oleh operator atau perangkat.",
+  "badge_desktop_linux": "Desktop (X11) + Terminal",
+  "badge_desktop_linux_title": "Layar dan input lewat X11, plus terminal penuh. Desktop Wayland belum bisa di-capture: pengguna endpoint bisa login dengan sesi X11 (Xorg)."
 }

@@ -8,8 +8,8 @@ import (
 )
 
 // OtherCapturer is the fallback for any other GOOS (freebsd, openbsd, js/wasm).
-// It reports itself as incapable; see the note on LinuxCapturer for why a
-// placeholder image is not an acceptable substitute.
+// It reports itself as incapable: a placeholder image would make the console
+// look live while nothing on the endpoint is being shown or controlled.
 type OtherCapturer struct{}
 
 func NewPlatformCapturer() ScreenCapturer {

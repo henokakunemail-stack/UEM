@@ -57,6 +57,10 @@ jobs:
       - name: Go vet
         run: CGO_ENABLED=0 go vet ./...
 
+      # The X11 remote-control tests drive a real X server; without Xvfb they
+      # skip, which would leave the Linux desktop path untested.
+      - name: Install Xvfb
+        run: command -v Xvfb || (sudo apt-get update && sudo apt-get install -y xvfb)
       - name: Go test
         run: CGO_ENABLED=0 go test -count=1 ./...
 
