@@ -8,6 +8,7 @@ import { RemoteExecModal } from './components/RemoteExecModal'
 import { AuthProvider, useAuth } from './context/AuthContext'
 import { ThemeProvider } from './context/ThemeContext'
 import { ToastProvider } from './context/ToastContext'
+import { I18nProvider } from './i18n/I18nContext'
 import { usePermission } from './hooks/usePermission'
 import { LoginPage } from './pages/LoginPage'
 import type { DeviceDTO } from './types/api'
@@ -133,7 +134,7 @@ function ConsoleRoot() {
 }
 
 export function App() {
-  return <ThemeProvider><AuthProvider><ToastProvider><BrowserRouter><ConsoleRoot /></BrowserRouter></ToastProvider></AuthProvider></ThemeProvider>
+  return <I18nProvider><ThemeProvider><AuthProvider><ToastProvider><BrowserRouter><ConsoleRoot /></BrowserRouter></ToastProvider></AuthProvider></ThemeProvider></I18nProvider>
 }
 
 export default App

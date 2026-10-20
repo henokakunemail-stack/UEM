@@ -783,7 +783,9 @@ export const NetworkFilterPage: React.FC = () => {
                             </span>
                           </td>
                           <td>
-                            <span className="font-mono">{s?.rules_applied ?? 0}</span>
+                            {/* A device that never synced has applied no count
+                                at all; 0 would claim it reported an empty rule set. */}
+                            <span className="font-mono">{s?.last_applied_at ? (s.rules_applied ?? 0) : '—'}</span>
                           </td>
                           <td>{renderStatus(s)}</td>
                           <td className="text-sm text-muted">

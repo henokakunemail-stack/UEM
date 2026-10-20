@@ -516,3 +516,9 @@ button.site-row { width: 100%; border: 0; font: inherit; text-align: left; }
 @media (max-width: 1279px) {
   .split-grid { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* EN / ID switch in the top bar. */
+.lang-toggle { display: inline-flex; gap: 2px; padding: 2px; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); background: var(--bg-surface-subtle); }
+.lang-toggle-btn { min-width: 32px; padding: 3px 6px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-dim); font-size: var(--text-xs); font-weight: 700; letter-spacing: 0.04em; cursor: pointer; }
+.lang-toggle-btn:hover { color: var(--text-main); }
+.lang-toggle-btn.active { background: var(--bg-surface-elevated); color: var(--text-main); box-shadow: 0 1px 2px rgb(0 0 0 / 0.12); }

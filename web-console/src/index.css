@@ -514,6 +514,14 @@ body {
 .kpi-card.neutral::before {
   background: var(--text-dim);
 }
+/* No data: a dashed rule and a muted value, so an empty card can never be
+   mistaken for a healthy zero. */
+.kpi-card.unknown::before {
+  background: repeating-linear-gradient(90deg, var(--text-dim) 0 6px, transparent 6px 12px);
+}
+.kpi-card.unknown .kpi-value {
+  color: var(--text-dim);
+}
 
 .kpi-header {
   display: flex;

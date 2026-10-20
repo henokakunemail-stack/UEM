@@ -665,7 +665,11 @@ export const SystemPolicyPage: React.FC = () => {
                 ) : (
                   deviceStates.map((s) => {
                     const d = devices.find((item) => item.id === s.device_id)
-                    const applied = s.applied_settings || DEFAULT_SETTINGS
+                    // What the device itself reported. Falling back to the
+                    // defaults here showed "USB: allow, Firewall: off" for a
+                    // device that had never reported anything -- a state the
+                    // console invented, presented as one it had observed.
+                    const applied = s.applied_settings
                     let badge = 'bg-zinc-500/10 text-zinc-400'
                     let label = 'Awaiting Sync'
                     if (s.status === 'synced') {
@@ -700,12 +704,16 @@ export const SystemPolicyPage: React.FC = () => {
                           )}
                         </td>
                         <td>
-                          <div className="text-xs text-muted space-y-0.5">
-                            <div>USB: <span className="text-main font-medium">{applied.usb_storage_mode}</span></div>
-                            <div>Wallpaper: <span className="text-main font-medium">{applied.wallpaper_enabled ? 'Enforced' : 'Off'}</span></div>
-                            <div>Timeout: <span className="text-main font-medium">{applied.inactivity_timeout_minutes ? `${applied.inactivity_timeout_minutes}m` : 'Disabled'}</span></div>
-                            <div>Admin: <span className="text-main font-medium">{applied.admin_account_enabled ? applied.admin_account_username || 'Enforced' : 'Unmanaged'}</span></div>
-                          </div>
+                          {applied ? (
+                            <div className="text-xs text-muted space-y-0.5">
+                              <div>USB: <span className="text-main font-medium">{applied.usb_storage_mode}</span></div>
+                              <div>Wallpaper: <span className="text-main font-medium">{applied.wallpaper_enabled ? 'Enforced' : 'Off'}</span></div>
+                              <div>Timeout: <span className="text-main font-medium">{applied.inactivity_timeout_minutes ? `${applied.inactivity_timeout_minutes}m` : 'Disabled'}</span></div>
+                              <div>Admin: <span className="text-main font-medium">{applied.admin_account_enabled ? applied.admin_account_username || 'Enforced' : 'Unmanaged'}</span></div>
+                            </div>
+                          ) : (
+                            <span className="text-xs text-muted">Not reported yet</span>
+                          )}
                         </td>
                         <td>
                           <span className="text-xs text-muted">

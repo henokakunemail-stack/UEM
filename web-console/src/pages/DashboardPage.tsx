@@ -63,6 +63,9 @@ export const DashboardPage: React.FC = () => {
   const [sites, setSites] = useState<SiteMetric[]>([])
   const [osMetrics, setOsMetrics] = useState<OSMetric[]>([])
   const [alerts, setAlerts] = useState<AlertItem[]>([])
+  // Whether the alert list has loaded at least once. An empty list that never
+  // arrived is not "no alerts", and the card must not say Normal for it.
+  const [alertsKnown, setAlertsKnown] = useState(false)
   const [activity, setActivity] = useState<ActivityItem[]>([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
@@ -98,8 +101,10 @@ export const DashboardPage: React.FC = () => {
       else failures.push('sites')
       if (osRes.status === 'fulfilled') setOsMetrics(osRes.value)
       else failures.push('OS breakdown')
-      if (alertRes.status === 'fulfilled') setAlerts(alertRes.value)
-      else failures.push('alerts')
+      if (alertRes.status === 'fulfilled') {
+        setAlerts(alertRes.value)
+        setAlertsKnown(true)
+      } else failures.push('alerts')
       if (actRes.status === 'fulfilled') setActivity(actRes.value)
       else failures.push('activity')
 
@@ -134,6 +139,12 @@ export const DashboardPage: React.FC = () => {
     return () => clearInterval(interval)
   }, [autoRefresh, loadData])
 
+  // known is false until the summary has loaded at least once. Every card
+  // driven by it then shows a dash and an unknown state instead of a zero: a
+  // zero from a request that failed used to read as "0 offline - Optimal" and
+  // "0 low disk - Healthy" while the console knew nothing at all.
+  const known = summary !== null
+  const unknown = '—'
   const total = summary?.total_devices ?? 0
   const online = summary?.online_devices ?? 0
   const offline = summary?.offline_devices ?? 0
@@ -204,39 +215,41 @@ export const DashboardPage: React.FC = () => {
           <div className="kpi-grid">
             <KPICard
               title="TOTAL MANAGED ENDPOINTS"
-              value={total}
-              subtitle={`${online} currently connected`}
+              value={known ? total : unknown}
+              subtitle={known ? `${online} currently connected` : 'Summary unavailable'}
               icon={<Laptop size={22} />}
-              variant="primary"
-              badge="Fleet Scale"
+              variant={known ? 'primary' : 'unknown'}
+              badge={known ? 'Fleet Scale' : 'Unknown'}
               onClick={() => goDevices()}
             />
             <KPICard
               title="FLEET ONLINE RATIO"
-              value={`${onlinePct}%`}
-              subtitle={`${offline} endpoints offline`}
+              value={known && total > 0 ? `${onlinePct}%` : unknown}
+              subtitle={!known ? 'Summary unavailable' : total === 0 ? 'No devices enrolled yet' : `${offline} endpoints offline`}
               icon={<Radio size={22} />}
-              variant={onlinePct >= 80 ? 'success' : onlinePct >= 50 ? 'warning' : 'danger'}
-              badge={onlinePct >= 80 ? 'Healthy' : 'Degraded'}
-              progress={{ current: online, total }}
+              // With no devices there is no ratio: 0% read as "Degraded" on a
+              // fresh install that had nothing wrong with it.
+              variant={!known ? 'unknown' : total === 0 ? 'neutral' : onlinePct >= 80 ? 'success' : onlinePct >= 50 ? 'warning' : 'danger'}
+              badge={!known ? 'Unknown' : total === 0 ? 'No devices' : onlinePct >= 80 ? 'Healthy' : 'Degraded'}
+              progress={known && total > 0 ? { current: online, total } : undefined}
               onClick={() => goDevices('?status=online')}
             />
             <KPICard
               title="ACTIVE SITES"
-              value={siteCount}
-              subtitle={siteCount > 0 ? 'Branches reporting telemetry' : 'No site assigned yet'}
+              value={known ? siteCount : unknown}
+              subtitle={!known ? 'Summary unavailable' : siteCount > 0 ? 'Branches reporting telemetry' : 'No site assigned yet'}
               icon={<Users size={22} />}
-              variant="neutral"
-              badge="Coverage"
+              variant={known ? 'neutral' : 'unknown'}
+              badge={known ? 'Coverage' : 'Unknown'}
               onClick={() => goDevices()}
             />
             <KPICard
               title="RETIRED / DECOMMISSIONED"
-              value={summary?.retired_devices ?? 0}
+              value={known ? (summary.retired_devices ?? 0) : unknown}
               subtitle="Excluded from telemetry"
               icon={<Wrench size={22} />}
-              variant="neutral"
-              badge="Lifecycle"
+              variant={known ? 'neutral' : 'unknown'}
+              badge={known ? 'Lifecycle' : 'Unknown'}
               onClick={() => goDevices('?status=retired')}
             />
           </div>
@@ -245,20 +258,20 @@ export const DashboardPage: React.FC = () => {
           <div className="kpi-grid">
             <KPICard
               title="OFFLINE DEVICES"
-              value={offline}
+              value={known ? offline : unknown}
               subtitle="Pending reconnection"
               icon={<WifiOff size={22} />}
-              variant={offline > 0 ? 'warning' : 'neutral'}
-              badge={offline > 0 ? 'Attention' : 'Optimal'}
+              variant={!known ? 'unknown' : offline > 0 ? 'warning' : 'neutral'}
+              badge={!known ? 'Unknown' : offline > 0 ? 'Attention' : 'Optimal'}
               onClick={() => goDevices('?status=offline')}
             />
             <KPICard
               title="LOW DISK ENDPOINTS"
-              value={lowDisk}
+              value={known ? lowDisk : unknown}
               subtitle="Below free-space threshold"
               icon={<HardDrive size={22} />}
-              variant={lowDisk > 0 ? 'danger' : 'success'}
-              badge={lowDisk > 0 ? 'Storage Risk' : 'Healthy'}
+              variant={!known ? 'unknown' : lowDisk > 0 ? 'danger' : 'success'}
+              badge={!known ? 'Unknown' : lowDisk > 0 ? 'Storage Risk' : 'Healthy'}
               // Deliberately not a filter link. /api/devices accepts only
               // status and site, and neither expresses free space, so a
               // ?disk=low link would be ignored server-side and land on the
@@ -267,19 +280,19 @@ export const DashboardPage: React.FC = () => {
             />
             <KPICard
               title="HARDWARE CHANGES (24H)"
-              value={hwChanges}
+              value={known ? hwChanges : unknown}
               subtitle="RAM / disk / CPU replacements"
               icon={<Wrench size={22} />}
-              variant={hwChanges > 0 ? 'warning' : 'neutral'}
-              badge={hwChanges > 0 ? 'Audit Event' : 'Stable'}
+              variant={!known ? 'unknown' : hwChanges > 0 ? 'warning' : 'neutral'}
+              badge={!known ? 'Unknown' : hwChanges > 0 ? 'Audit Event' : 'Stable'}
             />
             <KPICard
               title="ACTIVE HEALTH ALERTS"
-              value={alerts.length}
+              value={alertsKnown ? alerts.length : unknown}
               subtitle="Low disk and prolonged-offline conditions"
               icon={<AlertTriangle size={22} />}
-              variant={alerts.length > 0 ? 'warning' : 'success'}
-              badge={alerts.length > 0 ? 'Action Needed' : 'Normal'}
+              variant={!alertsKnown ? 'unknown' : alerts.length > 0 ? 'warning' : 'success'}
+              badge={!alertsKnown ? 'Unknown' : alerts.length > 0 ? 'Action Needed' : 'Normal'}
               onClick={() => navigate('/alerts')}
             />
           </div>

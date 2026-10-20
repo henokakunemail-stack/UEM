@@ -1,0 +1,14 @@
+{
+  "language": "Language",
+  "language_en": "English",
+  "language_id": "Bahasa Indonesia",
+  "unknown": "Unknown",
+  "not_reported": "Not reported yet",
+  "loading": "Loading...",
+  "cancel": "Cancel",
+  "close": "Close",
+  "save": "Save",
+  "delete": "Delete",
+  "confirm": "Confirm",
+  "retry": "Retry"
+}

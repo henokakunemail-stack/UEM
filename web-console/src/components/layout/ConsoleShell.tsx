@@ -3,6 +3,7 @@ import { Link, NavLink, useLocation } from 'react-router-dom'
 import { Activity, Bell, Boxes, CalendarClock, ChevronDown, ChevronRight, Database, FileChartColumn, Globe, History, KeyRound, LayoutDashboard, LogOut, Menu, Monitor, Package, Rocket, ScreenShare, ScrollText, Settings, ShieldCheck, Sliders, Users, Wrench, X, type LucideIcon } from 'lucide-react'
 import { useAuth } from '../../context/AuthContext'
 import { ThemeToggle } from '../../context/ThemeContext'
+import { LanguageToggle } from '../../i18n/LanguageToggle'
 import { usePermission } from '../../hooks/usePermission'
 
 interface NavItem {
@@ -175,6 +176,7 @@ export function ConsoleShell({ children }: { children: ReactNode }) {
             <Activity size={15} className={online === null ? 'text-warning' : 'text-success'} />
             <span>{!healthChecked ? 'Connecting…' : online === null ? 'Unavailable' : `${online} online`}</span>
           </span>
+          <LanguageToggle />
           <ThemeToggle />
           <div className="operator-profile"><span className="operator-avatar">{user?.usr?.slice(0, 1).toUpperCase()}</span>
             <span className="operator-name">{user?.usr}<small>{user?.rol}</small></span>

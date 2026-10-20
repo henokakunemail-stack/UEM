@@ -5,7 +5,9 @@ interface KPICardProps {
   value: string | number
   subtitle?: string
   icon: React.ReactNode
-  variant?: 'primary' | 'success' | 'warning' | 'danger' | 'neutral'
+  /** 'unknown' is for a value the console does not have -- the summary failed
+   *  to load, or nothing has reported yet. It never reads as healthy. */
+  variant?: 'primary' | 'success' | 'warning' | 'danger' | 'neutral' | 'unknown'
   badge?: string
   progress?: { current: number; total: number }
   onClick?: () => void
