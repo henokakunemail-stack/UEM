@@ -116,9 +116,9 @@ func (d dialect) columnExistsQuery() string {
 // database exactly as written and fails there if it is wrong.
 func (d dialect) translate(script string) string {
 	if !d.postgres {
-		return script
+		return dropDialectBlocks(script, "postgres-only")
 	}
-	s := script
+	s := dropDialectBlocks(script, "sqlite-only")
 	s = datetimeTypeRe.ReplaceAllString(s, "TIMESTAMPTZ")
 	s = byteColumnsRe.ReplaceAllString(s, "${1} BIGINT")
 	// SQLite attaches the conflict clause to the INSERT keyword; PostgreSQL
@@ -129,6 +129,38 @@ func (d dialect) translate(script string) string {
 	// the middle of a row list and fail with "syntax error at or near ON".
 	s = insertOrIgnoreRe.ReplaceAllString(s, "INSERT INTO ${1} (${2}) ${3} ON CONFLICT DO NOTHING;")
 	return s
+}
+
+// dropDialectBlocks removes the lines between "-- @<tag>" and "-- @end".
+//
+// A few statements have no common spelling at all -- SQLite's rowid has no
+// PostgreSQL counterpart -- and no textual rewrite can produce one from the
+// other. Those are written once per dialect inside marked blocks, and each
+// database receives only its own. The markers are comments, so a script read
+// without this pass is still valid SQL; it just runs both blocks and fails on
+// the foreign one, loudly.
+func dropDialectBlocks(script, tag string) string {
+	if !strings.Contains(script, "-- @"+tag) {
+		return script
+	}
+	lines := strings.Split(script, "\n")
+	kept := make([]string, 0, len(lines))
+	skipping := false
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		switch {
+		case trimmed == "-- @"+tag:
+			skipping = true
+			continue
+		case skipping && trimmed == "-- @end":
+			skipping = false
+			continue
+		case skipping:
+			continue
+		}
+		kept = append(kept, line)
+	}
+	return strings.Join(kept, "\n")
 }
 
 var (

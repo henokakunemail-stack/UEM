@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/jmoiron/sqlx"
+
+	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/db"
 )
 
 // genesisHash is the prev_hash of the first chained entry. Anchoring the chain
@@ -112,14 +114,14 @@ func chainLockFor(db *sqlx.DB) *sync.Mutex {
 // false break that no reader of the report can explain. One indexed single-row
 // lookup per audit write is cheap on an append-only table, and it is the only
 // version of this that cannot quietly lie.
-func writeChained(ctx context.Context, db *sqlx.DB, e Entry) error {
-	l := chainLockFor(db)
+func writeChained(ctx context.Context, dbHandle *sqlx.DB, e Entry) error {
+	l := chainLockFor(dbHandle)
 	l.Lock()
 	defer l.Unlock()
 
 	// A dedicated connection, because the transaction has to stay on one
 	// connection for the read-prev and the insert to be the same unit.
-	conn, err := db.Connx(ctx)
+	conn, err := dbHandle.Connx(ctx)
 	if err != nil {
 		return err
 	}
@@ -157,7 +159,17 @@ func writeChained(ctx context.Context, db *sqlx.DB, e Entry) error {
 		}
 	}()
 
-	prev, prevAt, err := tailHash(ctx, tx)
+	// The mutex above only serialises this process. With two server nodes on
+	// one PostgreSQL, both could read the same tail under READ COMMITTED and
+	// both append onto it, forking the chain -- and VerifyChain would then
+	// report tampering on a log nobody touched. The transaction-scoped lock is
+	// held until this transaction ends. On SQLite it is a no-op: the immediate
+	// BEGIN above already holds the database's single write lock.
+	if err := db.LockInTx(ctx, dbHandle, tx, db.LockAuditChain); err != nil {
+		return err
+	}
+
+	prev, prevAt, prevSeq, err := tailHash(ctx, tx)
 	if err != nil {
 		return err
 	}
@@ -171,7 +183,12 @@ func writeChained(ctx context.Context, db *sqlx.DB, e Entry) error {
 	// construction instead of by luck. Windows clock granularity is coarse
 	// enough that the ties this fixes are common, not exotic.
 	row := e
-	row.CreatedAt = time.Now().UTC()
+	// Microseconds, because that is all PostgreSQL's TIMESTAMPTZ keeps. The
+	// hash covers the timestamp at full printed precision, so a nanosecond
+	// value hashed here and read back truncated never recomputes: on
+	// PostgreSQL every entry reported "entry_hash does not recompute". SQLite
+	// keeps whatever it is given, so its existing entries still verify.
+	row.CreatedAt = time.Now().UTC().Truncate(time.Microsecond)
 	if row.CreatedAt.Before(prevAt) {
 		row.CreatedAt = prevAt
 	}
@@ -180,10 +197,10 @@ func writeChained(ctx context.Context, db *sqlx.DB, e Entry) error {
 
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO audit_logs (id, actor_type, actor_id, action, target_id, details,
-		                        created_at, prev_hash, entry_hash)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		                        created_at, prev_hash, entry_hash, seq)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		row.ID, row.ActorType, row.ActorID, row.Action, row.TargetID,
-		nullDetails(row.Details), row.CreatedAt, row.PrevHash, row.EntryHash); err != nil {
+		nullDetails(row.Details), row.CreatedAt, row.PrevHash, row.EntryHash, prevSeq+1); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {
@@ -193,24 +210,30 @@ func writeChained(ctx context.Context, db *sqlx.DB, e Entry) error {
 	return nil
 }
 
-// tailHash returns the newest chained entry's hash and the timestamp it belongs
-// to, or genesis when the table holds no chained entry.
-func tailHash(ctx context.Context, q sqlx.QueryerContext) (string, time.Time, error) {
+// tailHash returns the newest chained entry's hash, the timestamp it belongs
+// to and the highest seq in the table, or genesis when the table holds no
+// chained entry. seq is taken over every row, chained or not, so the next entry
+// always sorts after everything already there.
+func tailHash(ctx context.Context, q sqlx.QueryerContext) (string, time.Time, int64, error) {
+	var maxSeq sql.NullInt64
+	if err := q.QueryRowxContext(ctx, `SELECT MAX(seq) FROM audit_logs`).Scan(&maxSeq); err != nil {
+		return "", time.Time{}, 0, err
+	}
 	var last string
 	var at time.Time
 	err := q.QueryRowxContext(ctx,
 		`SELECT entry_hash, created_at FROM audit_logs
-		  WHERE entry_hash <> '' ORDER BY created_at DESC, rowid DESC LIMIT 1`).Scan(&last, &at)
+		  WHERE entry_hash <> '' ORDER BY created_at DESC, seq DESC LIMIT 1`).Scan(&last, &at)
 	if errors.Is(err, sql.ErrNoRows) {
-		return genesisHash, time.Time{}, nil
+		return genesisHash, time.Time{}, maxSeq.Int64, nil
 	}
 	if err != nil {
-		return "", time.Time{}, err
+		return "", time.Time{}, 0, err
 	}
 	if last == "" {
-		return genesisHash, time.Time{}, nil
+		return genesisHash, time.Time{}, maxSeq.Int64, nil
 	}
-	return last, at.UTC(), nil
+	return last, at.UTC(), maxSeq.Int64, nil
 }
 
 // nullDetails keeps a nil details argument NULL, which is what the pre-chain code
@@ -291,15 +314,17 @@ func (r verifyRow) entry() Entry {
 //
 // created_at alone cannot order the walk. Two entries can share a single
 // timestamp, and a tie broken arbitrarily would make a clean log report a break.
-// rowid is the tiebreak, and it is the same key writeChained appends by.
+// seq is the tiebreak, and it is the same key writeChained appends by. It was
+// SQLite's rowid until 0027; rowid does not exist on PostgreSQL, and seq carries
+// the same values on SQLite databases that predate it.
 func VerifyChain(ctx context.Context, db *sqlx.DB) (ChainReport, error) {
 	var rows []verifyRow
 	err := db.SelectContext(ctx, &rows, `
-		SELECT rowid, id, actor_type, COALESCE(actor_id, '') AS actor_id, action,
+		SELECT COALESCE(seq, 0) AS rowid, id, actor_type, COALESCE(actor_id, '') AS actor_id, action,
 		       COALESCE(target_id, '') AS target_id, COALESCE(details, '') AS details,
 		       created_at, prev_hash, entry_hash
 		  FROM audit_logs
-		 ORDER BY created_at ASC, rowid ASC`)
+		 ORDER BY created_at ASC, seq ASC`)
 	if err != nil {
 		return ChainReport{}, err
 	}

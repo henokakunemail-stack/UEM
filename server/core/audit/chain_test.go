@@ -542,7 +542,7 @@ func TestChainStateIsPerHandle(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		prev, _, err := tailHash(ctx, conn)
+		prev, _, _, err := tailHash(ctx, conn)
 		conn.Close()
 		if err != nil {
 			t.Fatal(err)
@@ -576,7 +576,7 @@ func TestOutOfBandInsertDoesNotCorruptTheChain(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	prev, prevAt, err := tailHash(ctx, conn)
+	prev, prevAt, _, err := tailHash(ctx, conn)
 	conn.Close()
 	if err != nil {
 		t.Fatal(err)

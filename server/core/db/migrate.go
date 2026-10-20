@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"embed"
 	"fmt"
 	"io/fs"
@@ -33,6 +34,14 @@ func Migrate(d *sqlx.DB) error {
 // registered the same database under a name the inference does not recognise
 // can still be migrated.
 func MigrateWithDialect(d *sqlx.DB, dia dialect) error {
+	// Two server nodes starting together would otherwise both find a migration
+	// unapplied and both run it; the second fails on the DDL or the version
+	// row and exits. On PostgreSQL the whole run is one node at a time. On
+	// SQLite this is a no-op, and the immediate-mode BEGIN below is the guard.
+	return withAdvisoryLock(context.Background(), d, dia.postgres, LockMigrate, func() error { return migrate(d, dia) })
+}
+
+func migrate(d *sqlx.DB, dia dialect) error {
 	if _, err := d.Exec(dia.schemaMigrationsDDL()); err != nil {
 		return fmt.Errorf("create schema_migrations: %w", err)
 	}

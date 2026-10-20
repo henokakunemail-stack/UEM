@@ -29,9 +29,26 @@ func TestDialect_SQLiteScriptsPassThroughUnchanged(t *testing.T) {
 	names := migrationNames(t)
 	for _, name := range names {
 		raw := readMigration(t, name)
-		if got := d.translate(raw); got != raw {
+		// The one change allowed on the SQLite path is dropping a block marked
+		// for PostgreSQL only; every other byte reaches SQLite as written.
+		if got := d.translate(raw); got != dropDialectBlocks(raw, "postgres-only") {
 			t.Errorf("%s was rewritten on the sqlite path", name)
 		}
+	}
+}
+
+// Each database gets its own marked block and never the other's: a rowid
+// statement reaching PostgreSQL, or a ROW_NUMBER() UPDATE ... FROM reaching an
+// older SQLite, fails the whole migration.
+func TestDialectBlocksReachOnlyTheirDatabase(t *testing.T) {
+	script := "A;\n-- @sqlite-only\nSQLITE;\n-- @end\nB;\n-- @postgres-only\nPG;\n-- @end\nC;\n"
+	sqlite := dialectFor("sqlite").translate(script)
+	pg := dialectFor("postgres").translate(script)
+	if want := "A;\n-- @sqlite-only\nSQLITE;\n-- @end\nB;\nC;\n"; sqlite != want {
+		t.Fatalf("sqlite got %q, want %q", sqlite, want)
+	}
+	if want := "A;\nB;\n-- @postgres-only\nPG;\n-- @end\nC;\n"; pg != want {
+		t.Fatalf("postgres got %q, want %q", pg, want)
 	}
 }
 
