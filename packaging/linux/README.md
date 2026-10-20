@@ -6,6 +6,27 @@ Folder ini menyediakan paket distribusi agen untuk sistem operasi Linux, baik da
 
 ## 1. Opsi Instalasi Klien Linux
 
+### Opsi utama: instalasi satu baris dari server (disarankan)
+Buka console → **Devices → Enroll device**, buat token, lalu salin perintah **Linux** yang muncul. Bentuknya:
+
+```bash
+curl -fsSL https://SERVER/install/linux.sh | sudo bash -s -- --server https://SERVER --token TOKEN [--site "Cabang"]
+```
+
+Script itu:
+- mengunduh agent untuk arsitektur mesin (x86_64 atau aarch64) dari server, hanya dengan token enrollment yang masih berlaku;
+- memeriksa checksum SHA-256;
+- memasang `/usr/local/bin/endpoint-agent`, mendaftarkan perangkat, lalu menjalankan service systemd `endpoint-agent`.
+
+Menjalankannya lagi akan memperbarui binary tanpa mendaftar ulang. Tambahkan `--insecure` hanya untuk server uji dengan sertifikat self-signed.
+
+Sumber binary di server, berurutan:
+1. rilis Linux aktif terbaru di menu **Agent Updates**;
+2. `DATA_DIR/agents` (atau `AGENT_BUNDLE_DIR` bila di-set), untuk salinan manual;
+3. folder `agents/` di sebelah binary server, yang ikut terpasang dari paket rilis `endpoint-server-linux-amd64.tar.gz` lewat `update-server.sh`.
+
+Terminal di console untuk perangkat Linux dan macOS adalah terminal penuh (PTY), seperti PuTTY: warna, Ctrl+C, Tab completion, serta `vim`, `top` dan `htop`.
+
 ### Opsi A: GUI Installer Interaktif (`install-gui.sh`)
 Cocok untuk pengguna desktop (Ubuntu Desktop, Linux Mint, Debian GNOME, Fedora, KDE):
 1. Pastikan paket `zenity` (standar di GNOME/Ubuntu) atau `kdialog` (KDE) terpasang.

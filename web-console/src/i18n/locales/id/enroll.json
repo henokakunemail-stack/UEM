@@ -52,5 +52,6 @@
   "tip_gui": "Saat instalasi via GUI (",
   "tip_field": "), staf cabang dapat langsung mengetik nama cabang pada kolom",
   "tip_cli": ". Jika via command line / skrip, sesuaikan argumen",
-  "tip_example": "(contoh:"
+  "tip_example": "(contoh:",
+  "linux_one_line": "Linux (instalasi satu baris, jalankan sebagai root)"
 }

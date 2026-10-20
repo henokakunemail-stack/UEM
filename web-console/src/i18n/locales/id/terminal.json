@@ -12,5 +12,14 @@
   "input_label": "Input shell jarak jauh",
   "input_placeholder": "Ketik perintah lalu tekan Enter...",
   "not_active": "Terminal tidak aktif",
-  "hint": "Sesi interaktif dialirkan dua arah melalui WebSocket keluar milik agen. Menutup jendela ini akan menghentikan proses shell di perangkat."
+  "hint": "Sesi interaktif dialirkan dua arah melalui WebSocket keluar milik agen. Menutup jendela ini akan menghentikan proses shell di perangkat.",
+  "mode_pty": "Terminal penuh",
+  "mode_pty_hint": "Shell berjalan di pseudo-terminal: ketikan, Ctrl+C, Tab completion dan program layar penuh bekerja seperti di PuTTY.",
+  "mode_line": "Mode baris",
+  "mode_line_hint": "Agent ini versi lama dan menjalankan shell tanpa terminal. Baris dikirim saat Enter; perbarui agent untuk terminal penuh.",
+  "copy": "Salin",
+  "copy_hint": "Salin teks yang dipilih (Ctrl+Shift+C)",
+  "paste": "Tempel",
+  "paste_hint": "Tempel dari clipboard (Ctrl+Shift+V)",
+  "pty_hint": "Ctrl+C menghentikan perintah yang sedang berjalan di endpoint. Gunakan Ctrl+Shift+C dan Ctrl+Shift+V untuk menyalin dan menempel. Menutup jendela ini mengakhiri shell."
 }

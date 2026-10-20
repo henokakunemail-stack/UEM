@@ -26,6 +26,11 @@ const BINARY: Record<string, string> = {
   macos: 'endpoint-agent',
 }
 
+/** Single-quotes a value for a POSIX shell command line. */
+function shellQuote(v: string): string {
+  return `'${v.replace(/'/g, "'\\''")}'`
+}
+
 /**
  * Mints a one-time enrollment token and shows it exactly once.
  *
@@ -120,8 +125,18 @@ export const EnrollTokenModal: React.FC<EnrollTokenModalProps> = ({
           text: `${BINARY.windows} -server ${server} -enroll ${issued.enrollment_token}${siteArg} -creds "%ALLUSERSPROFILE%\\EndpointAgent\\creds.json"`,
         },
         {
+          // Downloads the agent from this server, checks it, enrolls and
+          // installs the systemd service: nothing to copy to the machine first.
           os: 'linux',
-          text: `${BINARY.linux} -server ${server} -enroll ${issued.enrollment_token}${siteArg}`,
+          label: t('enroll.linux_one_line'),
+          text:
+            `curl -fsSL ${server}/install/linux.sh | sudo bash -s -- --server ${server} ` +
+            `--token ${issued.enrollment_token}${site.trim() ? ` --site ${shellQuote(site.trim())}` : ''}`,
+        },
+        {
+          os: 'macos',
+          label: 'macOS',
+          text: `${BINARY.macos} -server ${server} -enroll ${issued.enrollment_token}${siteArg}`,
         },
       ]
     : []
@@ -413,7 +428,7 @@ export const EnrollTokenModal: React.FC<EnrollTokenModalProps> = ({
             {commands.map((c) => (
               <div key={c.os} className="form-field" style={{ marginBottom: '0.75rem' }}>
                 <label className="form-label" htmlFor={`enroll-cmd-${c.os}`}>
-                  {c.os === 'windows' ? 'Windows' : 'Linux / macOS'}
+                  {'label' in c ? c.label : 'Windows'}
                 </label>
                 <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'stretch' }}>
                   <code

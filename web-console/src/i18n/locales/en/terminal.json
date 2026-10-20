@@ -12,5 +12,14 @@
   "input_label": "Remote shell input",
   "input_placeholder": "Type a command and press Enter...",
   "not_active": "Terminal not active",
-  "hint": "Interactive session streams bidirectionally over the agent's outbound WebSocket. Closing this window terminates the shell process on the endpoint."
+  "hint": "Interactive session streams bidirectionally over the agent's outbound WebSocket. Closing this window terminates the shell process on the endpoint.",
+  "mode_pty": "Full terminal",
+  "mode_pty_hint": "The shell runs on a pseudo-terminal: keystrokes, Ctrl+C, Tab completion and full-screen programs work as in PuTTY.",
+  "mode_line": "Line mode",
+  "mode_line_hint": "This agent is older and runs the shell without a terminal. Lines are sent on Enter; update the agent for a full terminal.",
+  "copy": "Copy",
+  "copy_hint": "Copy the selected text (Ctrl+Shift+C)",
+  "paste": "Paste",
+  "paste_hint": "Paste from the clipboard (Ctrl+Shift+V)",
+  "pty_hint": "Ctrl+C interrupts the running command on the endpoint. Use Ctrl+Shift+C and Ctrl+Shift+V to copy and paste. Closing this window ends the shell."
 }

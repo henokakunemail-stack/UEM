@@ -61,7 +61,16 @@ try {
     $env:GOARCH = "amd64"
     go build -ldflags "-s -w -X main.serverVersion=$CleanVer" -o "$DistDir/server-linux-amd64" ./server/cmd/server
     go build -ldflags "-s -w -X github.com/henokakunemail-stack/Endpoint-Manager/agent/shared/osinfo.Version=$CleanVer" -o "$DistDir/agent-linux-amd64" ./agent/cmd/agent
-    tar -czf "$DistDir/endpoint-server-linux-amd64.tar.gz" -C "$DistDir" server-linux-amd64
+    $env:GOARCH = "arm64"
+    go build -ldflags "-s -w -X github.com/henokakunemail-stack/Endpoint-Manager/agent/shared/osinfo.Version=$CleanVer" -o "$DistDir/agent-linux-arm64" ./agent/cmd/agent
+    $env:GOARCH = "amd64"
+    # The server tarball carries the Linux agents in agents/, which the server
+    # hands out through the one-line installer (/install/linux.sh).
+    $AgentsStage = Join-Path $DistDir "agents"
+    New-Item -ItemType Directory -Force $AgentsStage | Out-Null
+    Copy-Item "$DistDir/agent-linux-amd64", "$DistDir/agent-linux-arm64" $AgentsStage -Force
+    tar -czf "$DistDir/endpoint-server-linux-amd64.tar.gz" -C "$DistDir" server-linux-amd64 agents
+    Remove-Item $AgentsStage -Recurse -Force
 
     # 4. Compile Windows Binaries
     Write-Host "[2/5] Compiling Windows server & agent binaries..." -ForegroundColor Cyan

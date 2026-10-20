@@ -227,6 +227,16 @@ cp -p "$INSTALL_BIN" "$BAK_BIN"
 cp -p "$STAGED_BIN" "$INSTALL_BIN"
 chmod 0755 "$INSTALL_BIN"
 
+# Agent binaries for the one-line Linux installer (/install/linux.sh) travel in
+# the same package; the server looks for them in agents/ next to its binary.
+if [ -n "${STAGING_DIR:-}" ] && [ -d "${STAGING_DIR}/agents" ]; then
+    AGENTS_DIR="$(dirname "$INSTALL_BIN")/agents"
+    mkdir -p "$AGENTS_DIR"
+    cp -p "$STAGING_DIR"/agents/agent-linux-* "$AGENTS_DIR"/ 2>/dev/null || true
+    chmod 0755 "$AGENTS_DIR"/agent-linux-* 2>/dev/null || true
+    echo "[+] Updated agent installer binaries in $AGENTS_DIR"
+fi
+
 # Maintain file ownership if dedicated system user exists
 OWNER=$(stat -c '%U:%G' "$BAK_BIN" 2>/dev/null || echo "")
 if [ -n "$OWNER" ]; then

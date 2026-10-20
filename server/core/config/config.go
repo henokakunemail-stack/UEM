@@ -40,7 +40,12 @@ type Config struct {
 	// one server node it must be storage they all share (an NFS or SMB mount,
 	// or a volume both containers mount), or a file uploaded through one node
 	// is missing on the other.
-	DataDir        string
+	DataDir string
+	// AgentBundleDir holds agent binaries shipped with the server
+	// (agent-linux-amd64, agent-linux-arm64) for the one-line Linux installer,
+	// used when no release has been uploaded in Agent Updates. Defaults to
+	// DATA_DIR/agents.
+	AgentBundleDir string
 	BackupInterval time.Duration
 	BackupRetain   int
 
@@ -155,6 +160,7 @@ func Load() (Config, error) {
 		AgentOfflineAfter:    getDuration("AGENT_OFFLINE_AFTER", 90*time.Second),
 		BackupDir:            getEnv("BACKUP_DIR", defaultBackupDir(dbPath)),
 		DataDir:              getEnv("DATA_DIR", "data"),
+		AgentBundleDir:       getEnv("AGENT_BUNDLE_DIR", ""),
 		BackupInterval:       getDuration("BACKUP_INTERVAL", time.Hour),
 		BackupRetain:         getEnvInt("BACKUP_RETAIN", 24),
 		AllowedOriginDomains: getCSVEnv("ALLOWED_ORIGIN_DOMAINS"),

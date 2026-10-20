@@ -153,6 +153,24 @@ func (r *TerminalRelay) AcceptTerminalData(ctx context.Context, deviceID string,
 	return sess.WriteToBrowser("term.data", data)
 }
 
+// AcceptTerminalMode tells the browser how the agent runs the shell. Only
+// "pty" means anything today; anything else is dropped rather than relayed, so
+// an agent cannot push arbitrary message text into the console's mode switch.
+func (r *TerminalRelay) AcceptTerminalMode(ctx context.Context, deviceID string, sessionID string, mode string) error {
+	if mode != "pty" {
+		return nil
+	}
+	sess := r.Get(sessionID)
+	if sess == nil {
+		return nil
+	}
+	if sess.DeviceID != deviceID {
+		log.Warn().Str("session_id", sessionID).Str("expected_device", sess.DeviceID).Str("actual_device", deviceID).Msg("terminal mode rejected: device mismatch")
+		return errors.New("terminal session does not belong to reporting device")
+	}
+	return sess.WriteToBrowser("term.mode", mode)
+}
+
 // AcceptTerminalClose handles closure initiated by the agent.
 func (r *TerminalRelay) AcceptTerminalClose(ctx context.Context, deviceID string, sessionID string) error {
 	sess := r.Get(sessionID)

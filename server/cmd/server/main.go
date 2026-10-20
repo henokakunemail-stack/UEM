@@ -40,6 +40,7 @@ import (
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/rbac"
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/transport"
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/wsticket"
+	"github.com/henokakunemail-stack/Endpoint-Manager/server/modules/agentinstall"
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/modules/agentupdate"
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/modules/alerting"
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/modules/assetlicense"
@@ -858,6 +859,26 @@ func buildServer(cfg config.Config, database *sqlx.DB) (*http.Server, *serverApp
 		filepath.Join(cfg.DataDir, "agent-releases"), jwtSvc.RequireAuth, cfg.UpdateMinimumVersion).
 		WithSigningPublicKey(cfg.UpdateSigningPublicKey, cfg.UpdateMinimumVersion)
 	updateH.Register(r)
+
+	// One-line Linux agent installer: the script, and the binary handed out
+	// against a valid enrollment token.
+	// The release package carries agents/ next to the server binary, which is
+	// where the update scripts put it; DATA_DIR/agents is for a hand-placed copy.
+	bundleDir := cfg.AgentBundleDir
+	if bundleDir == "" {
+		bundleDir = filepath.Join(cfg.DataDir, "agents")
+	}
+	exeAgents := ""
+	if exe, err := os.Executable(); err == nil {
+		exeAgents = filepath.Join(filepath.Dir(exe), "agents")
+	}
+	agentinstall.NewHandler(deviceRepo, func(ctx context.Context, osName, arch string) (string, error) {
+		rel, err := updateRepo.LatestActiveRelease(ctx, osName, arch)
+		if err != nil {
+			return "", err
+		}
+		return rel.FilePath, nil
+	}, bundleDir, exeAgents).Register(r)
 
 	// Queued updates are delivered when the device reconnects, not when the
 	// operator presses Dispatch again. Wired here rather than at construction

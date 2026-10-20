@@ -272,6 +272,28 @@ func (r *Repository) findByEnrollmentTokenHash(ctx context.Context, tokenHash st
 	return d, nil
 }
 
+// EnrollmentTokenValid reports whether plaintext is an enrollment token that
+// would be accepted right now -- a device's one-time token or a shared token
+// with uses left -- without consuming it. The agent installer uses it to hand
+// the binary only to someone holding a token.
+func (r *Repository) EnrollmentTokenValid(ctx context.Context, plaintext string) (bool, error) {
+	if plaintext == "" {
+		return false, nil
+	}
+	hash := HashToken(plaintext)
+	if _, err := r.FindValidSharedEnrollmentToken(ctx, hash); err == nil {
+		return true, nil
+	} else if !errors.Is(err, ErrNotFound) {
+		return false, err
+	}
+	if _, err := r.findByEnrollmentTokenHash(ctx, hash); err == nil {
+		return true, nil
+	} else if !errors.Is(err, ErrNotFound) {
+		return false, err
+	}
+	return false, nil
+}
+
 // ReissueEnrollmentToken rotates credentials for an existing row and mints a new
 // one-time token in one conditional write. The old secret cannot reconnect as
 // soon as the write commits. A retired row cannot be resurrected by reissuing.

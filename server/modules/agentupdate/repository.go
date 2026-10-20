@@ -270,6 +270,21 @@ func (r *Repository) GetActiveReleaseForDevice(ctx context.Context, targetVersio
 	return &rel, nil
 }
 
+// LatestActiveRelease is the newest active release for an OS and
+// architecture, whatever its version: what a fresh install should get.
+func (r *Repository) LatestActiveRelease(ctx context.Context, osName, arch string) (*AgentRelease, error) {
+	var rel AgentRelease
+	err := r.db.GetContext(ctx, &rel, r.db.Rebind(`
+		SELECT * FROM agent_releases
+		WHERE LOWER(os_name) = ? AND LOWER(arch) = ? AND is_active = 1
+		ORDER BY created_at DESC
+		LIMIT 1`), strings.ToLower(osName), strings.ToLower(arch))
+	if err != nil {
+		return nil, fmt.Errorf("latest release for %s/%s: %w", osName, arch, err)
+	}
+	return &rel, nil
+}
+
 func (r *Repository) ListReleases(ctx context.Context) ([]*AgentRelease, error) {
 	list := []*AgentRelease{}
 	err := r.db.SelectContext(ctx, &list, `SELECT * FROM agent_releases ORDER BY created_at DESC`)

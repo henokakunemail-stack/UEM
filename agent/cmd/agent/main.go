@@ -454,13 +454,23 @@ func runAgent(serverURL, enrollToken, enrollSite, credsPath string, heartbeatSec
 		var p struct {
 			SessionID string `json:"session_id"`
 			Shell     string `json:"shell"`
+			Cols      uint16 `json:"cols"`
+			Rows      uint16 `json:"rows"`
 		}
 		_ = json.Unmarshal(payload, &p)
 		if p.SessionID == "" {
 			p.SessionID = id
 		}
 		sessID := p.SessionID
-		err := termMgr.StartSession(
+		// Linux and macOS run the shell on a pseudo-terminal; Windows keeps the
+		// pipe-based session it has always had.
+		start := termMgr.StartSession
+		if remoteexec.PTYSupported {
+			start = func(sid, shell string, onOutput func(string), onClose func()) error {
+				return termMgr.StartPTYSession(sid, shell, p.Cols, p.Rows, onOutput, onClose)
+			}
+		}
+		err := start(
 			sessID,
 			p.Shell,
 			func(output string) {
@@ -487,7 +497,36 @@ func runAgent(serverURL, enrollToken, enrollSite, credsPath string, heartbeatSec
 			log.Error().Err(err).Str("session_id", sessID).Msg("start terminal session")
 			return map[string]string{"error": err.Error()}
 		}
+		if remoteexec.PTYSupported {
+			// Tells the console this is a real terminal: it stops echoing and
+			// line-editing locally and passes every keystroke straight through.
+			// A console that predates this ignores the empty data.
+			_ = client.Send(transport.Envelope{
+				Type: transport.TypeTermData,
+				ID:   sessID,
+				Payload: map[string]string{
+					"session_id": sessID,
+					"mode":       "pty",
+				},
+			})
+		}
 		return map[string]string{"status": "opened"}
+	})
+
+	dispatcher.Register("term.resize", func(ctx context.Context, command, id string, payload json.RawMessage) any {
+		var p struct {
+			SessionID string `json:"session_id"`
+			Cols      uint16 `json:"cols"`
+			Rows      uint16 `json:"rows"`
+		}
+		_ = json.Unmarshal(payload, &p)
+		if p.SessionID == "" {
+			p.SessionID = id
+		}
+		if err := termMgr.Resize(p.SessionID, p.Cols, p.Rows); err != nil {
+			return map[string]string{"status": "rejected", "error": err.Error()}
+		}
+		return map[string]string{"status": "resized"}
 	})
 
 	dispatcher.Register("term.data", func(ctx context.Context, command, id string, payload json.RawMessage) any {

@@ -3,6 +3,7 @@ import { BrowserRouter, Link, Navigate, Route, Routes, useLocation, useNavigate,
 import { ConsoleShell } from './components/layout/ConsoleShell'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { InteractiveTerminalModal } from './components/InteractiveTerminalModal'
+import { isWindowsDevice } from './components/terminalPlatform'
 import { RemoteControlModal } from './components/RemoteControlModal'
 import { RemoteExecModal } from './components/RemoteExecModal'
 import { AuthProvider, useAuth } from './context/AuthContext'
@@ -31,6 +32,9 @@ const SettingsPage = lazy(() => import('./pages/SettingsPage').then(m => ({ defa
 const SoftwarePage = lazy(() => import('./pages/SoftwarePage').then(m => ({ default: m.SoftwarePage })))
 const SystemPolicyPage = lazy(() => import('./pages/SystemPolicyPage'))
 const TasksSchedulerPage = lazy(() => import('./pages/TasksSchedulerPage').then(m => ({ default: m.TasksSchedulerPage })))
+// xterm.js is a third of the console's weight; it loads when a Linux or macOS
+// terminal is first opened, not at login.
+const PtyTerminalModal = lazy(() => import('./components/PtyTerminalModal').then(m => ({ default: m.PtyTerminalModal })))
 const UsersPage = lazy(() => import('./pages/UsersPage').then(m => ({ default: m.UsersPage })))
 
 function Restricted({ role, children }: { role: 'technician' | 'admin'; children: ReactNode }) {
@@ -134,7 +138,9 @@ function ConsoleRoot() {
       </Suspense>
     </ErrorBoundary>
     <RemoteExecModal device={execDevice} onClose={() => setExecDevice(null)} />
-    <InteractiveTerminalModal device={termDevice} shell={termShell} onClose={() => setTermDevice(null)} />
+    {termDevice && !isWindowsDevice(termDevice)
+      ? <Suspense fallback={null}><PtyTerminalModal device={termDevice} shell={termShell} onClose={() => setTermDevice(null)} /></Suspense>
+      : <InteractiveTerminalModal device={termDevice} shell={termShell} onClose={() => setTermDevice(null)} />}
     <RemoteControlModal device={rcDevice} onClose={() => setRcDevice(null)} />
   </ConsoleShell>
 }

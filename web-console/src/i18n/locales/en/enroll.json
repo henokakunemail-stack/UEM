@@ -52,5 +52,6 @@
   "tip_gui": "When installing via the GUI (",
   "tip_field": "), branch staff can type the branch name directly in the",
   "tip_cli": " field. When using the command line or a script, set the argument",
-  "tip_example": "(example:"
+  "tip_example": "(example:",
+  "linux_one_line": "Linux (one-line install, run as root)"
 }

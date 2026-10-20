@@ -17,6 +17,31 @@ type ProcessSession struct {
 	Cancel    context.CancelFunc
 	closed    bool
 	mu        sync.Mutex
+	// resize is set only for pty sessions; a pipe has no window size.
+	resize func(cols, rows uint16) error
+}
+
+// Resize sets a pty session's window size, which the shell and full-screen
+// programs learn through SIGWINCH.
+func (m *TerminalManager) Resize(sessionID string, cols, rows uint16) error {
+	m.mu.RLock()
+	sess, exists := m.sessions[sessionID]
+	m.mu.RUnlock()
+	if !exists {
+		return errors.New("terminal session not found")
+	}
+	sess.mu.Lock()
+	defer sess.mu.Unlock()
+	if sess.closed {
+		return errors.New("terminal session is closed")
+	}
+	if sess.resize == nil {
+		return errors.New("terminal session has no window size")
+	}
+	if cols == 0 || rows == 0 {
+		return errors.New("window size must be positive")
+	}
+	return sess.resize(cols, rows)
 }
 
 type TerminalManager struct {

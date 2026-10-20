@@ -78,6 +78,10 @@ type UpdateQueue interface {
 type TerminalReceiver interface {
 	AcceptTerminalData(ctx context.Context, deviceID string, sessionID string, data string) error
 	AcceptTerminalClose(ctx context.Context, deviceID string, sessionID string) error
+	// AcceptTerminalMode passes on how the agent runs the shell ("pty" for a
+	// real terminal), so the console knows whether to echo and line-edit
+	// locally or send every keystroke through.
+	AcceptTerminalMode(ctx context.Context, deviceID string, sessionID string, mode string) error
 }
 
 // InventoryReceiver stores an inventory report. The transport passes raw JSON:
@@ -388,11 +392,15 @@ func (h *WSHandler) handleTermData(ctx context.Context, c *Conn, env Envelope) {
 	var p struct {
 		SessionID string `json:"session_id"`
 		Data      string `json:"data"`
+		Mode      string `json:"mode"`
 	}
 	b, _ := json.Marshal(env.Payload)
 	_ = json.Unmarshal(b, &p)
 	if p.SessionID == "" {
 		p.SessionID = env.ID
+	}
+	if p.SessionID != "" && p.Mode != "" {
+		_ = h.terminal.AcceptTerminalMode(ctx, c.DeviceID, p.SessionID, p.Mode)
 	}
 	if p.SessionID != "" && p.Data != "" {
 		_ = h.terminal.AcceptTerminalData(ctx, c.DeviceID, p.SessionID, p.Data)

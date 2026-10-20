@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -426,6 +427,12 @@ func (h *Handler) handleTerminalWS(w http.ResponseWriter, r *http.Request) {
 		"session_id": sessionID,
 		"shell":      shell,
 	}
+	// The browser's terminal size, so a pty shell starts at the right size
+	// instead of 80x24 until the first resize. Agents without a pty ignore it.
+	if cols, rows := termSize(r.URL.Query().Get("cols")), termSize(r.URL.Query().Get("rows")); cols > 0 && rows > 0 {
+		cmdPayload["cols"] = cols
+		cmdPayload["rows"] = rows
+	}
 	openEnv := transport.Envelope{
 		Type:    transport.TypeCommand,
 		ID:      sessionID,
@@ -494,8 +501,10 @@ func (h *Handler) handleTerminalWS(w http.ResponseWriter, r *http.Request) {
 		}
 
 		var clientMsg struct {
-			Type string `json:"type"` // "term.data", "term.close"
+			Type string `json:"type"` // "term.data", "term.resize", "term.close"
 			Data string `json:"data"`
+			Cols int    `json:"cols"`
+			Rows int    `json:"rows"`
 		}
 		if err := json.Unmarshal(msgBytes, &clientMsg); err != nil {
 			continue
@@ -503,6 +512,21 @@ func (h *Handler) handleTerminalWS(w http.ResponseWriter, r *http.Request) {
 
 		if clientMsg.Type == "term.close" {
 			break
+		}
+
+		if clientMsg.Type == "term.resize" {
+			cols, rows := clampTermSize(clientMsg.Cols), clampTermSize(clientMsg.Rows)
+			if cols == 0 || rows == 0 || h.hub == nil {
+				continue
+			}
+			b, _ := json.Marshal(transport.Envelope{
+				Type:    transport.TypeCommand,
+				ID:      sessionID,
+				Command: "term.resize",
+				Payload: map[string]any{"session_id": sessionID, "cols": cols, "rows": rows},
+			})
+			h.hub.SendTo(deviceID, b)
+			continue
 		}
 
 		if clientMsg.Type == "term.data" && clientMsg.Data != "" {
@@ -548,4 +572,25 @@ func writeErr(w http.ResponseWriter, code int, msg string) {
 
 func strPtr(s string) *string {
 	return &s
+}
+
+// maxTermDimension bounds a terminal's columns and rows. Nothing real is wider
+// than this, and a pty asked for 65535x65535 makes some programs allocate a
+// screen buffer of that size.
+const maxTermDimension = 1000
+
+// clampTermSize returns n when it is a usable terminal dimension, else 0.
+func clampTermSize(n int) int {
+	if n < 1 || n > maxTermDimension {
+		return 0
+	}
+	return n
+}
+
+func termSize(v string) int {
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return 0
+	}
+	return clampTermSize(n)
 }

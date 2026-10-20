@@ -71,6 +71,9 @@ jobs:
 
           # 2. Agent Linux amd64
           go build -ldflags "-s -w -X github.com/henokakunemail-stack/Endpoint-Manager/agent/shared/osinfo.Version=$cleanVer" -o dist/agent-linux-amd64 ./agent/cmd/agent
+          $env:GOARCH = "arm64"
+          go build -ldflags "-s -w -X github.com/henokakunemail-stack/Endpoint-Manager/agent/shared/osinfo.Version=$cleanVer" -o dist/agent-linux-arm64 ./agent/cmd/agent
+          $env:GOARCH = "amd64"
 
           # 3. Server Windows amd64
           $env:GOOS = "windows"
@@ -115,7 +118,11 @@ jobs:
           }
 
           # 6. Tarball for Linux server updater
-          tar -czf dist/endpoint-server-linux-amd64.tar.gz -C dist server-linux-amd64
+          # agents/ carries the Linux agents the one-line installer hands out.
+          New-Item -ItemType Directory -Force -Path dist/agents | Out-Null
+          Copy-Item dist/agent-linux-amd64, dist/agent-linux-arm64 dist/agents -Force
+          tar -czf dist/endpoint-server-linux-amd64.tar.gz -C dist server-linux-amd64 agents
+          Remove-Item dist/agents -Recurse -Force
 
           # 7. SHA256 checksums so operators can verify assets pre-deploy.
           $hashes = Get-ChildItem dist -File | ForEach-Object {
