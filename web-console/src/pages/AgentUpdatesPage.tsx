@@ -112,9 +112,30 @@ export const AgentUpdatesPage: React.FC<AgentUpdatesPageProps> = ({ activeTab: s
     loadData()
   }, [])
 
-  // Auto-refresh campaign details when inspecting an in_progress campaign
+  const fetchCampaignDetails = async (campaignId: string) => {
+    setDetailsLoading(true)
+    try {
+      const [tasks, logs] = await Promise.all([
+        api.getCampaignTasks(campaignId).catch(() => []),
+        api.getCampaignLogs(campaignId).catch(() => []),
+      ])
+      setCampaignTasks(tasks)
+      setCampaignLogs(logs)
+    } catch (err: any) {
+      toast.error(err.message || t('updates.details_load_failed'), t('updates.error'))
+    } finally {
+      setDetailsLoading(false)
+    }
+  }
+
+  // Auto-refresh campaign details when inspecting an in_progress campaign.
+  // The poller reads the selection through a ref so it always polls the
+  // campaign on screen; the ref is updated in an effect, not during render,
+  // where React may run a render that is then thrown away.
   const selectedCampaignRef = useRef(selectedCampaign)
-  selectedCampaignRef.current = selectedCampaign
+  useEffect(() => {
+    selectedCampaignRef.current = selectedCampaign
+  }, [selectedCampaign])
 
   useEffect(() => {
     if (!isDetailsModalOpen || !selectedCampaign) return
@@ -145,22 +166,6 @@ export const AgentUpdatesPage: React.FC<AgentUpdatesPageProps> = ({ activeTab: s
       return () => clearInterval(timer)
     }
   }, [isDetailsModalOpen, selectedCampaign?.id, selectedCampaign?.status])
-
-  const fetchCampaignDetails = async (campaignId: string) => {
-    setDetailsLoading(true)
-    try {
-      const [tasks, logs] = await Promise.all([
-        api.getCampaignTasks(campaignId).catch(() => []),
-        api.getCampaignLogs(campaignId).catch(() => []),
-      ])
-      setCampaignTasks(tasks)
-      setCampaignLogs(logs)
-    } catch (err: any) {
-      toast.error(err.message || t('updates.details_load_failed'), t('updates.error'))
-    } finally {
-      setDetailsLoading(false)
-    }
-  }
 
   const handleOpenDetails = (c: UpdateCampaignDTO) => {
     setSelectedCampaign(c)
