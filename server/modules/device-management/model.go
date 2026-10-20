@@ -41,8 +41,13 @@ type Device struct {
 	// empty patch list -- a device that was never scanned and a device that is
 	// fully patched both have zero pending rows.
 	LastPatchScanAt *time.Time `db:"last_patch_scan_at"`
-	CreatedAt       time.Time  `db:"created_at"`
-	UpdatedAt       time.Time  `db:"updated_at"`
+	// ConnectedNode is the server node holding this device's agent socket, and
+	// ConnectedAt when it took it. NULL when no node does. Written by the
+	// transport layer; read to route a command to the node that can deliver it.
+	ConnectedNode *string    `db:"connected_node" json:"-"`
+	ConnectedAt   *time.Time `db:"connected_at" json:"-"`
+	CreatedAt     time.Time  `db:"created_at"`
+	UpdatedAt     time.Time  `db:"updated_at"`
 }
 
 const (
