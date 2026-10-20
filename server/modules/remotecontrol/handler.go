@@ -145,10 +145,11 @@ func (h *Handler) startSession(w http.ResponseWriter, r *http.Request) {
 	// A session the agent never received cannot be repaired, so it is closed
 	// where it stands rather than left claiming to be live. Ending it here also
 	// means history shows what actually happened instead of a row that only a
-	// human reading the logs could reinterpret.
+	// human reading the logs could reinterpret. CloseRelay is the one close: it
+	// finds the relay registered above and ends the row with its (zero)
+	// counters, so a second EndSession here only repeated that write.
 	if !h.hub.SendTo(deviceID, envBytes) {
 		h.relay.CloseRelay(session.ID)
-		_ = h.repo.EndSession(r.Context(), session.ID, 0, 0, 0)
 		_ = h.audit.Log(r.Context(), "user", operatorID, "remotecontrol.session_start_failed", session.ID,
 			map[string]string{"device_id": deviceID, "reason": "agent send failed"})
 		writeErr(w, http.StatusServiceUnavailable,
@@ -302,7 +303,7 @@ func (h *Handler) handleOperatorWS(w http.ResponseWriter, r *http.Request) {
 	}
 	defer ws.Close()
 
-	relay, ok := h.relay.AttachOperator(sessionID, ws)
+	relay, ok := h.relay.AttachOperator(sessionID, session.SessionMode, ws)
 	if !ok {
 		_ = ws.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseInternalServerErr, "failed to attach to relay"))
 		return
@@ -377,6 +378,13 @@ func (h *Handler) handleAgentWS(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusForbidden, "this device does not own the requested session")
 		return
 	}
+	// A worker that dials after rc.stop -- it was already starting when the
+	// stop arrived -- must not bring the relay back. Attaching recreated it,
+	// and its eventual close wrote over the ended row.
+	if session.Status != "active" {
+		writeErr(w, http.StatusGone, "session is not active")
+		return
+	}
 
 	ws, err := h.upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -385,7 +393,7 @@ func (h *Handler) handleAgentWS(w http.ResponseWriter, r *http.Request) {
 	}
 	defer ws.Close()
 
-	relay, ok := h.relay.AttachAgent(sessionID, ws)
+	relay, ok := h.relay.AttachAgent(sessionID, session.SessionMode, ws)
 	if !ok {
 		_ = ws.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseInternalServerErr, "failed to attach to relay"))
 		return

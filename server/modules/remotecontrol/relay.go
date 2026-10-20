@@ -14,6 +14,12 @@ const (
 	agentWriteWait    = 10 * time.Second
 	operatorPongWait  = 60 * time.Second
 	agentPongWait     = 60 * time.Second
+
+	// attachTimeout is how long a registered relay waits for its first socket.
+	// rc.start is fire-and-forget, so an agent that received it and never
+	// dialled, with an operator who never opened the console, would otherwise
+	// hold the relay and an 'active' row until the server restarted.
+	attachTimeout = 2 * time.Minute
 )
 
 type activeRelay struct {
@@ -45,12 +51,16 @@ type RelayManager struct {
 	repo     *Repository
 	relays   map[string]*activeRelay
 	relaysMu sync.RWMutex
+
+	// attachTimeout is a field so tests can shorten it.
+	attachTimeout time.Duration
 }
 
 func NewRelayManager(repo *Repository) *RelayManager {
 	return &RelayManager{
-		repo:   repo,
-		relays: make(map[string]*activeRelay),
+		repo:          repo,
+		relays:        make(map[string]*activeRelay),
+		attachTimeout: attachTimeout,
 	}
 }
 
@@ -64,7 +74,55 @@ func (rm *RelayManager) RegisterSession(sessionID, mode string) *activeRelay {
 		closeChan: make(chan struct{}),
 	}
 	rm.relays[sessionID] = r
+	go rm.expireUnattached(r, rm.attachTimeout)
 	return r
+}
+
+// expireUnattached closes a relay that no agent and no operator ever attached
+// to within the timeout, which also ends its session row.
+func (rm *RelayManager) expireUnattached(r *activeRelay, timeout time.Duration) {
+	select {
+	case <-r.closeChan:
+		return
+	case <-time.After(timeout):
+	}
+	rm.relaysMu.RLock()
+	current := rm.relays[r.sessionID] == r
+	rm.relaysMu.RUnlock()
+	r.mu.Lock()
+	attached := r.agentWS != nil || r.operatorWS != nil
+	r.mu.Unlock()
+	if current && !attached {
+		log.Info().Str("session", r.sessionID).Msg("remote control relay expired: nothing attached")
+		rm.CloseRelay(r.sessionID)
+	}
+}
+
+// relayForAttach returns the relay a socket should join, creating it when it is
+// missing. A recreated relay takes its mode from the session row the handler
+// read, not a default: the old hard-coded full_control turned a view_only
+// session into a controllable one whenever its relay had to be rebuilt. A relay
+// that is closing is refused rather than revived.
+func (rm *RelayManager) relayForAttach(sessionID, mode string) (*activeRelay, bool) {
+	rm.relaysMu.Lock()
+	defer rm.relaysMu.Unlock()
+	r, exists := rm.relays[sessionID]
+	if !exists {
+		if mode != "view_only" {
+			mode = "full_control"
+		}
+		r = &activeRelay{
+			sessionID: sessionID,
+			mode:      mode,
+			closeChan: make(chan struct{}),
+		}
+		rm.relays[sessionID] = r
+		return r, true
+	}
+	r.mu.Lock()
+	closed := r.closed
+	r.mu.Unlock()
+	return r, !closed
 }
 
 func (rm *RelayManager) GetRelay(sessionID string) *activeRelay {
@@ -102,18 +160,13 @@ func startKeepalive(ws *websocket.Conn, closeChan <-chan struct{}, period time.D
 	}
 }
 
-func (rm *RelayManager) AttachOperator(sessionID string, ws *websocket.Conn) (*activeRelay, bool) {
-	rm.relaysMu.Lock()
-	r, exists := rm.relays[sessionID]
-	if !exists {
-		r = &activeRelay{
-			sessionID: sessionID,
-			mode:      "full_control",
-			closeChan: make(chan struct{}),
-		}
-		rm.relays[sessionID] = r
+// AttachOperator joins the operator socket to the session's relay. mode is the
+// session row's mode and is used only if the relay has to be recreated.
+func (rm *RelayManager) AttachOperator(sessionID, mode string, ws *websocket.Conn) (*activeRelay, bool) {
+	r, ok := rm.relayForAttach(sessionID, mode)
+	if !ok {
+		return nil, false
 	}
-	rm.relaysMu.Unlock()
 
 	r.mu.Lock()
 	r.operatorWS = ws
@@ -141,18 +194,13 @@ func (rm *RelayManager) AttachOperator(sessionID string, ws *websocket.Conn) (*a
 	return r, true
 }
 
-func (rm *RelayManager) AttachAgent(sessionID string, ws *websocket.Conn) (*activeRelay, bool) {
-	rm.relaysMu.Lock()
-	r, exists := rm.relays[sessionID]
-	if !exists {
-		r = &activeRelay{
-			sessionID: sessionID,
-			mode:      "full_control",
-			closeChan: make(chan struct{}),
-		}
-		rm.relays[sessionID] = r
+// AttachAgent joins the agent socket to the session's relay. mode is the
+// session row's mode and is used only if the relay has to be recreated.
+func (rm *RelayManager) AttachAgent(sessionID, mode string, ws *websocket.Conn) (*activeRelay, bool) {
+	r, ok := rm.relayForAttach(sessionID, mode)
+	if !ok {
+		return nil, false
 	}
-	rm.relaysMu.Unlock()
 
 	r.mu.Lock()
 	r.agentWS = ws
@@ -168,12 +216,9 @@ func (rm *RelayManager) AttachAgent(sessionID string, ws *websocket.Conn) (*acti
 }
 
 func (rm *RelayManager) CloseRelay(sessionID string) {
-	rm.relaysMu.Lock()
+	rm.relaysMu.RLock()
 	r, exists := rm.relays[sessionID]
-	if exists {
-		delete(rm.relays, sessionID)
-	}
-	rm.relaysMu.Unlock()
+	rm.relaysMu.RUnlock()
 
 	// The durable row is closed whether or not a relay object was ever
 	// registered. EndSession used to sit below the `r == nil` early return, so
@@ -193,16 +238,14 @@ func (rm *RelayManager) CloseRelay(sessionID string) {
 	// 'ended' status is what this branch owns; the counters belong to the relay
 	// that closed them, so it reports only the status.
 	//
-	// The two closes race, and the other ordering is just as bad. If this branch
-	// lands first it takes the row to 'ended', and the relay-present close is
-	// still coming with the counters it snapshotted. EndSession's update is not
-	// gated on the status for that reason: a guard that protected the first
-	// ordering discarded the counters in the second, and the e2e run caught it --
-	// a history row reporting an empty desktop for a session the log showed
-	// streaming one frame and one input. Unconditional is safe because the
-	// relay-present path is the only writer of the counters, and CloseSession's
-	// own `WHERE status = 'active'` keeps this branch from clobbering a row the
-	// other close already finished.
+	// The two closes race, and the other ordering used to be just as bad: this
+	// branch landed first, took the row to 'ended', and the relay-present close
+	// arrived later with the counters it snapshotted. The relay-present path now
+	// keeps its map entry until EndSession has written, so a concurrent close
+	// finds the relay, sees it closing and returns; this branch is reached only
+	// once the counters are already on the row. That is what lets EndSession be
+	// limited to 'active' rows, which keeps a relay recreated after the session
+	// ended from overwriting the finished row.
 	if !exists || r == nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -239,6 +282,13 @@ func (rm *RelayManager) CloseRelay(sessionID string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_ = rm.repo.EndSession(ctx, sessionID, frames, totalBytes, inputs)
+
+	// Released only after the counters are written; see the comment above.
+	rm.relaysMu.Lock()
+	if rm.relays[sessionID] == r {
+		delete(rm.relays, sessionID)
+	}
+	rm.relaysMu.Unlock()
 	log.Info().Str("session", sessionID).Int("frames", frames).Int("inputs", inputs).Msg("remote control relay closed")
 }
 

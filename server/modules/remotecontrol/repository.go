@@ -111,6 +111,13 @@ func (r *Repository) GetSessionByID(ctx context.Context, id string) (*RemoteCont
 	return &s, nil
 }
 
+// EndSession closes an active session with the relay's telemetry. It touches
+// only a row that is still 'active'. Without that guard a relay recreated by a
+// late attach after the session was stopped -- a worker that dialled after
+// rc.stop -- overwrote the finished row's counters and ended_at with its own,
+// near-empty ones when it closed. CloseRelay writes these counters before it
+// releases the relay's map entry, so no status-only close can end the row
+// first and make this guard discard real counts.
 func (r *Repository) EndSession(ctx context.Context, id string, frames int, bytes int64, inputEvents int) error {
 	now := time.Now().UTC()
 	res, err := r.db.ExecContext(ctx, `
@@ -120,16 +127,34 @@ func (r *Repository) EndSession(ctx context.Context, id string, frames int, byte
 			bytes_transmitted = ?,
 			input_events_count = ?,
 			ended_at = ?
-		WHERE id = ?
+		WHERE id = ? AND status = 'active'
 	`, frames, bytes, inputEvents, now, id)
 	if err != nil {
 		return fmt.Errorf("end rc session: %w", err)
 	}
 	rows, _ := res.RowsAffected()
 	if rows == 0 {
-		return fmt.Errorf("session not found")
+		return fmt.Errorf("session not found or already ended")
 	}
 	return nil
+}
+
+// EndStaleSessions marks every 'active' session ended. Relays live only in
+// memory, so at server start no session can still be live: any row still
+// 'active' belongs to a process that exited without closing it, and would
+// otherwise read as an open session in history forever.
+func (r *Repository) EndStaleSessions(ctx context.Context) (int64, error) {
+	res, err := r.db.ExecContext(ctx, `
+		UPDATE remote_control_sessions SET
+			status = 'ended',
+			ended_at = ?
+		WHERE status = 'active'
+	`, time.Now().UTC())
+	if err != nil {
+		return 0, fmt.Errorf("end stale rc sessions: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	return n, nil
 }
 
 func (r *Repository) ListSessionsByDevice(ctx context.Context, deviceID string, limit int) ([]RemoteControlSession, error) {
