@@ -2298,9 +2298,9 @@
     "semantic_hash": "fc78dfac824d5ea5bf28e6010e6123f0"
   },
   "web-console/src/components/RemoteControlModal.tsx": {
-    "mtime": 1792460949.8446567,
-    "seen": 1792460988.9536572,
-    "ast_hash": "6ac6dedbb7ea80b846cb68b7151db912",
+    "mtime": 1792464146.0056534,
+    "seen": 1792464297.5395446,
+    "ast_hash": "977b90a9e45ab34da4db383d11369276",
     "semantic_hash": ""
   },
   "web-console/src/components/RemoteExecModal.tsx": {
@@ -2502,9 +2502,9 @@
     "semantic_hash": ""
   },
   "web-console/src/types/api.ts": {
-    "mtime": 1792374220.2690728,
-    "seen": 1792374979.8162363,
-    "ast_hash": "82bc8dc979728f440f65499170c91e23",
+    "mtime": 1792463750.9367487,
+    "seen": 1792464297.539764,
+    "ast_hash": "41832644e0f18b5c67f8655e07f7c35c",
     "semantic_hash": ""
   },
   "web-console/tsconfig.app.json": {

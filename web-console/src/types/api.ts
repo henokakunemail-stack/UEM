@@ -840,11 +840,27 @@ export interface RemoteControlSessionDTO {
 // cannot actually work: `capture: false` means the endpoint will never send a
 // real desktop, and saying so up front is the difference between an honest
 // error and a black rectangle.
+/** One display on the endpoint, in its virtual-desktop coordinates. */
+export interface RemoteMonitor {
+  index: number
+  x: number
+  y: number
+  width: number
+  height: number
+  primary: boolean
+}
+
 export interface RemoteControlCapabilities {
   capture: boolean
   mouse: boolean
   keyboard: boolean
   reason?: string
+  /** Optional features. An older agent sends none of them, and every control
+   *  that depends on one stays hidden rather than sending into a void. */
+  monitors?: RemoteMonitor[]
+  clipboard?: boolean
+  file_transfer?: boolean
+  max_file_bytes?: number
 }
 
 /** One live login, as the server reports it. The jti is the handle a revocation

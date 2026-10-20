@@ -8,9 +8,14 @@ import {
   AlertCircle,
   RefreshCw,
   Keyboard,
+  ClipboardPaste,
+  ClipboardCopy,
+  Upload,
+  Command,
 } from 'lucide-react'
 import { api } from '../services/api'
 import { Modal } from './ui'
+import { useToast } from '../context/ToastContext'
 import type {
   DeviceDTO,
   RemoteControlCapabilities,
@@ -64,6 +69,54 @@ interface FrameRect {
  *  behind it; the last position in a frame is the only one that matters. */
 const MOUSE_SEND_INTERVAL_MS = 16
 
+/** Raw bytes per upload chunk. Base64 makes it ~256KB on the wire: big enough
+ *  that a 200MB file is not a million messages, small enough that one chunk
+ *  never holds a screen update back for long. */
+const FILE_CHUNK_BYTES = 192 * 1024
+
+/** The socket's send queue is allowed this much before an upload waits. Without
+ *  a bound, reading a large file queues all of it at once and every input
+ *  event the operator sends sits behind it. */
+const UPLOAD_HIGH_WATER_BYTES = 1024 * 1024
+
+/** Combinations the browser or the operator's own OS takes before the page
+ *  sees them, so they can only be sent by name. Names match keyCombos in
+ *  agent/shared/remotecontrol/features.go. */
+const KEY_COMBOS: { combo: string; label: string }[] = [
+  { combo: 'ctrl_shift_esc', label: 'Ctrl+Shift+Esc (Task Manager)' },
+  { combo: 'alt_tab', label: 'Alt+Tab' },
+  { combo: 'win', label: 'Windows key' },
+  { combo: 'win_r', label: 'Win+R (Run)' },
+  { combo: 'win_e', label: 'Win+E (Explorer)' },
+  { combo: 'win_d', label: 'Win+D (Desktop)' },
+  { combo: 'print_screen', label: 'Print Screen' },
+]
+
+interface FileTransfer {
+  id: string
+  name: string
+  size: number
+  sent: number
+  received: number
+  status: 'sending' | 'saved' | 'failed'
+  path?: string
+  error?: string
+}
+
+/** Base64 of an ArrayBuffer without String.fromCharCode(...bytes), which
+ *  overflows the call stack on a 192KB chunk. */
+const toBase64 = (buf: ArrayBuffer): string => {
+  const bytes = new Uint8Array(buf)
+  let binary = ''
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000))
+  }
+  return btoa(binary)
+}
+
+const formatBytes = (n: number): string =>
+  n >= 1024 * 1024 ? `${(n / (1024 * 1024)).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`
+
 const PREVENT_DEFAULT_KEYS = new Set([
   'Tab',
   'Backspace',
@@ -112,6 +165,21 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false)
   const [capabilities, setCapabilities] = useState<RemoteControlCapabilities | null>(null)
   const [awaitingFirstFrame, setAwaitingFirstFrame] = useState<boolean>(false)
+  // The endpoint's view of things the frames do not carry.
+  const [monitorIndex, setMonitorIndex] = useState<number | null>(null)
+  const [remoteCursor, setRemoteCursor] = useState<{ x: number; y: number; visible: boolean } | null>(null)
+  const [pointerInside, setPointerInside] = useState<boolean>(false)
+  const [stats, setStats] = useState<{ quality: number; kbps: number } | null>(null)
+  const [remoteClipboard, setRemoteClipboard] = useState<string | null>(null)
+  const [clipboardDraft, setClipboardDraft] = useState<string | null>(null)
+  // Which way the fallback box is for: text the operator is about to send, or
+  // endpoint text the browser would not write to the operator's clipboard.
+  const [clipboardDirection, setClipboardDirection] = useState<'send' | 'receive'>('send')
+  const [keysOpen, setKeysOpen] = useState<boolean>(false)
+  const keysMenuRef = useRef<HTMLDivElement | null>(null)
+  const [transfers, setTransfers] = useState<FileTransfer[]>([])
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const toast = useToast()
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
@@ -151,6 +219,10 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
     // Whether this session has painted decides how a capture failure is shown,
     // so a previous device's frames must not count for this one.
     lastFrameAtRef.current = 0
+    setRemoteCursor(null)
+    setStats(null)
+    setRemoteClipboard(null)
+    setTransfers([])
 
     const initSession = async () => {
       try {
@@ -362,6 +434,16 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
         reason?: string
         mode?: RemoteControlMode
         capabilities?: RemoteControlCapabilities
+        x?: number
+        y?: number
+        visible?: boolean
+        quality?: number
+        kbps?: number
+        index?: number
+        text?: string
+        id?: string
+        path?: string
+        received?: number
       }
       try {
         msg = JSON.parse(raw)
@@ -372,6 +454,34 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
       if (msg.type === 'hello') {
         setCapabilities(msg.capabilities ?? null)
         if (msg.mode) setMode(msg.mode)
+        const primary = msg.capabilities?.monitors?.find((m) => m.primary)
+        setMonitorIndex(primary ? primary.index : null)
+      } else if (msg.type === 'cursor') {
+        setRemoteCursor({ x: msg.x ?? 0, y: msg.y ?? 0, visible: Boolean(msg.visible) })
+      } else if (msg.type === 'stats') {
+        setStats({ quality: msg.quality ?? 0, kbps: msg.kbps ?? 0 })
+      } else if (msg.type === 'monitor_changed') {
+        setMonitorIndex(msg.index ?? null)
+      } else if (msg.type === 'clipboard') {
+        const text = msg.text ?? ''
+        setRemoteClipboard(text)
+        // Copying straight to the operator's clipboard needs the page to have
+        // focus and permission; when the browser refuses, the button below
+        // copies it on the operator's click instead.
+        navigator.clipboard?.writeText(text).catch(() => {})
+      } else if (msg.type === 'file_progress' || msg.type === 'file_saved' || msg.type === 'file_failed') {
+        setTransfers((prev) =>
+          prev.map((t) => {
+            if (t.id !== msg.id) return t
+            if (msg.type === 'file_progress') return { ...t, received: msg.received ?? t.received }
+            if (msg.type === 'file_saved') return { ...t, status: 'saved', received: t.size, path: msg.path }
+            return { ...t, status: 'failed', error: msg.reason }
+          })
+        )
+        if (msg.type === 'file_saved') toast.success(`Saved on the endpoint as ${msg.path}`, 'File sent')
+        if (msg.type === 'file_failed') toast.error(msg.reason || 'The endpoint refused the file', 'File not sent')
+      } else if (msg.type === 'clipboard_failed' || msg.type === 'monitor_failed') {
+        toast.error(msg.reason || 'The endpoint refused the request', 'Remote control')
       } else if (msg.type === 'capture_failed' && lastFrameAtRef.current > 0) {
         // The desktop was already streaming, so this is the agent saying a few
         // grabs in a row failed -- a UAC prompt, the lock screen, a display
@@ -461,6 +571,123 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
       ws.send(JSON.stringify({ type: 'keyboard', action: 'release' }))
     }
   }, [])
+
+  // The Keys menu closes on a click anywhere else or on Escape, like any menu.
+  // Escape is caught before it bubbles to the viewport, which would forward it
+  // to the endpoint.
+  useEffect(() => {
+    if (!keysOpen) return
+    const onDown = (e: MouseEvent) => {
+      if (!keysMenuRef.current?.contains(e.target as Node)) setKeysOpen(false)
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation()
+        setKeysOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey, true)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey, true)
+    }
+  }, [keysOpen])
+
+  // Choosing which monitor to watch is not input, so it bypasses the view_only
+  // gate in `send`, the same way the relay and the agent let it through.
+  const selectMonitor = useCallback((index: number) => {
+    const ws = wsRef.current
+    setMonitorIndex(index)
+    if (!ws || ws.readyState !== WebSocket.OPEN) return
+    ws.send(JSON.stringify({ type: 'monitor', index }))
+  }, [])
+
+  const sendKeys = useCallback(
+    (combo: string) => {
+      setKeysOpen(false)
+      send({ type: 'keys', combo })
+      viewportRef.current?.focus()
+    },
+    [send]
+  )
+
+  const sendClipboardText = useCallback(
+    (text: string) => {
+      send({ type: 'clipboard', text })
+      setClipboardDraft(null)
+      toast.info('Clipboard text sent to the endpoint. Paste it there with Ctrl+V.', 'Clipboard')
+    },
+    [send, toast]
+  )
+
+  // Reading the operator's clipboard needs permission; when the browser
+  // refuses (or the page is not on HTTPS), a text box takes the paste instead.
+  const pasteToRemote = useCallback(async () => {
+    try {
+      const text = await navigator.clipboard.readText()
+      if (text) {
+        sendClipboardText(text)
+        return
+      }
+    } catch {
+      // fall through to the manual box
+    }
+    setClipboardDirection('send')
+    setClipboardDraft('')
+  }, [sendClipboardText])
+
+  const copyFromRemote = useCallback(async () => {
+    if (remoteClipboard === null) return
+    try {
+      await navigator.clipboard.writeText(remoteClipboard)
+      toast.success('The endpoint clipboard is now on your clipboard.', 'Clipboard')
+    } catch {
+      setClipboardDirection('receive')
+      setClipboardDraft(remoteClipboard)
+    }
+  }, [remoteClipboard, toast])
+
+  // Upload in chunks over the session socket, waiting whenever the socket's
+  // send queue is past the high-water mark, so a large file never queues up
+  // ahead of the operator's own mouse and keyboard input.
+  const uploadFile = useCallback(
+    async (file: File) => {
+      const ws = wsRef.current
+      if (!ws || ws.readyState !== WebSocket.OPEN || modeRef.current === 'view_only') return
+      const limit = capabilities?.max_file_bytes ?? 0
+      if (limit > 0 && file.size > limit) {
+        toast.error(`${file.name} is ${formatBytes(file.size)}; the endpoint accepts up to ${formatBytes(limit)}.`, 'File too large')
+        return
+      }
+      const id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+      setTransfers((prev) => [
+        ...prev.filter((t) => t.status === 'sending').slice(-3),
+        { id, name: file.name, size: file.size, sent: 0, received: 0, status: 'sending' },
+      ])
+      const fail = (error: string) =>
+        setTransfers((prev) => prev.map((t) => (t.id === id ? { ...t, status: 'failed', error } : t)))
+
+      ws.send(JSON.stringify({ type: 'file_begin', id, name: file.name, size: file.size }))
+      let seq = 0
+      for (let offset = 0; offset < file.size; offset += FILE_CHUNK_BYTES) {
+        while (ws.readyState === WebSocket.OPEN && ws.bufferedAmount > UPLOAD_HIGH_WATER_BYTES) {
+          await new Promise((r) => window.setTimeout(r, 25))
+        }
+        if (ws.readyState !== WebSocket.OPEN) {
+          fail('The session closed during the upload.')
+          return
+        }
+        const data = toBase64(await file.slice(offset, offset + FILE_CHUNK_BYTES).arrayBuffer())
+        ws.send(JSON.stringify({ type: 'file_chunk', id, seq, data }))
+        seq++
+        const sent = Math.min(file.size, offset + FILE_CHUNK_BYTES)
+        setTransfers((prev) => prev.map((t) => (t.id === id ? { ...t, sent } : t)))
+      }
+      ws.send(JSON.stringify({ type: 'file_end', id }))
+    },
+    [capabilities, toast]
+  )
 
   const getCanvasCoords = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current
@@ -616,6 +843,14 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
   // A platform that cannot capture will never paint. Say so in the toolbar
   // rather than leaving the operator waiting on a black rectangle.
   const captureUnavailable = capabilities !== null && !capabilities.capture
+  const live = status === 'active' || status === 'stalled'
+  const viewOnly = mode === 'view_only'
+  const monitors = capabilities?.monitors ?? []
+  // In Control mode the operator's own pointer is over the desktop and marks
+  // the spot; the endpoint's pointer is drawn when the operator cannot see it
+  // otherwise -- in View mode, or with their pointer outside the canvas.
+  const showRemoteCursor =
+    live && remoteCursor?.visible && resolution.width > 0 && (viewOnly || !pointerInside)
 
   return (
     <Modal
@@ -651,6 +886,11 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
             <span title="Screen updates per second. An update carries only the rectangles that changed, so a still desktop sends none — that is the point, not a stall.">
               {fps} upd/s
             </span>
+            {stats && (
+              <span title="Image quality the endpoint is encoding at, adapted to how fast this link drains, and the rate it is sending.">
+                Q{stats.quality} · {stats.kbps} kbps
+              </span>
+            )}
             <span>{formatMB(bytesReceived)}</span>
             {capabilities && (
               <span
@@ -665,6 +905,105 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
           </div>
 
           <div className="remote-actions">
+            {monitors.length > 1 && (
+              <select
+                className="select-input remote-monitor-select"
+                aria-label="Endpoint monitor"
+                value={monitorIndex ?? ''}
+                disabled={!live}
+                onChange={(e) => selectMonitor(Number(e.target.value))}
+              >
+                {monitors.map((m) => (
+                  <option key={m.index} value={m.index}>
+                    Monitor {m.index + 1}
+                    {m.primary ? ' (primary)' : ''} · {m.width}×{m.height}
+                  </option>
+                ))}
+                <option value={-1}>All monitors</option>
+              </select>
+            )}
+
+            <div className="remote-menu" ref={keysMenuRef}>
+              <button
+                type="button"
+                className="btn btn-sm btn-secondary"
+                onClick={() => setKeysOpen((o) => !o)}
+                disabled={!live || viewOnly}
+                aria-expanded={keysOpen}
+                aria-haspopup="menu"
+                title="Send a key combination your browser cannot pass through"
+              >
+                <Command size={14} />
+                <span>Keys</span>
+              </button>
+              {keysOpen && (
+                <div className="remote-menu-list" role="menu">
+                  {KEY_COMBOS.map((k) => (
+                    <button
+                      key={k.combo}
+                      type="button"
+                      role="menuitem"
+                      className="remote-menu-item"
+                      onClick={() => sendKeys(k.combo)}
+                    >
+                      {k.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {capabilities?.clipboard && (
+              <>
+                <button
+                  type="button"
+                  className="btn btn-sm btn-secondary"
+                  onClick={pasteToRemote}
+                  disabled={!live || viewOnly}
+                  title="Send your clipboard text to the endpoint's clipboard"
+                >
+                  <ClipboardPaste size={14} />
+                  <span>Send clipboard</span>
+                </button>
+                {remoteClipboard !== null && (
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-secondary"
+                    onClick={copyFromRemote}
+                    title="Copy the text last copied on the endpoint"
+                  >
+                    <ClipboardCopy size={14} />
+                    <span>Copy remote</span>
+                  </button>
+                )}
+              </>
+            )}
+
+            {capabilities?.file_transfer && (
+              <>
+                <button
+                  type="button"
+                  className="btn btn-sm btn-secondary"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={!live || viewOnly}
+                  title="Send a file to the endpoint's Downloads\Remote Transfers folder"
+                >
+                  <Upload size={14} />
+                  <span>Send file</span>
+                </button>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  hidden
+                  onChange={(e) => {
+                    const file = e.target.files?.[0]
+                    e.target.value = ''
+                    if (file) void uploadFile(file)
+                  }}
+                />
+              </>
+            )}
+
             <div className="remote-mode-switch" role="group" aria-label="Remote input mode">
               <button
                 type="button"
@@ -705,6 +1044,67 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
           </div>
         </div>
 
+        {clipboardDraft !== null && (
+          <div className="remote-clipboard-panel">
+            <label className="form-label" htmlFor="remote-clipboard-text">
+              {clipboardDirection === 'send'
+                ? 'Your browser did not allow reading your clipboard. Paste the text here to send it.'
+                : 'Your browser did not allow writing to your clipboard. Copy the endpoint text from here (Ctrl+C).'}
+            </label>
+            <textarea
+              id="remote-clipboard-text"
+              className="text-input remote-clipboard-text"
+              rows={3}
+              value={clipboardDraft}
+              readOnly={clipboardDirection === 'receive'}
+              onChange={(e) => setClipboardDraft(e.target.value)}
+              onFocus={(e) => {
+                if (clipboardDirection === 'receive') e.currentTarget.select()
+              }}
+              autoFocus
+            />
+            <div className="remote-clipboard-actions">
+              <button type="button" className="btn btn-sm btn-secondary" onClick={() => setClipboardDraft(null)}>
+                Close
+              </button>
+              {clipboardDirection === 'send' && (
+                <button
+                  type="button"
+                  className="btn btn-sm btn-primary"
+                  disabled={!clipboardDraft || viewOnly}
+                  onClick={() => sendClipboardText(clipboardDraft)}
+                >
+                  Send to endpoint
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
+        {transfers.length > 0 && (
+          <ul className="remote-transfers" aria-label="File transfers">
+            {transfers.map((t) => {
+              const done = t.status === 'saved' ? t.size : Math.max(t.sent, t.received)
+              const pct = t.size > 0 ? Math.round((done / t.size) * 100) : 100
+              return (
+                <li key={t.id} className="remote-transfer">
+                  <span className="remote-transfer-name" title={t.path || t.name}>
+                    {t.name}
+                  </span>
+                  <progress className="remote-transfer-bar" max={100} value={pct} />
+                  <span className="remote-transfer-state">
+                    {t.status === 'saved'
+                      ? 'Saved'
+                      : t.status === 'failed'
+                        ? t.error || 'Failed'
+                        : `${pct}% of ${formatBytes(t.size)}`}
+                  </span>
+                </li>
+              )
+            })}
+          </ul>
+        )}
+
         {/* The viewport keeps its own dark ground because it shows an arbitrary
             remote desktop; the dialog chrome around it uses console tokens. It
             is focusable and auto-focused, because it is the keyboard target. */}
@@ -727,7 +1127,20 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
               onMouseUp={handleMouseUp}
               onContextMenu={handleContextMenu}
               onWheel={handleWheel}
+              onMouseEnter={() => setPointerInside(true)}
+              onMouseLeave={() => setPointerInside(false)}
               className={`remote-canvas ${mode === 'full_control' ? 'remote-canvas-control' : 'remote-canvas-view'}`}
+            />
+          )}
+
+          {showRemoteCursor && remoteCursor && (
+            <span
+              className="remote-cursor"
+              aria-hidden="true"
+              style={{
+                left: `${(remoteCursor.x / resolution.width) * 100}%`,
+                top: `${(remoteCursor.y / resolution.height) * 100}%`,
+              }}
             />
           )}
 
