@@ -3,6 +3,7 @@ package networkfilter
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"net"
 	"net/url"
@@ -112,7 +113,8 @@ func (p *DNSProxy) serve(ctx context.Context) {
 		_ = p.conn.SetReadDeadline(time.Now().Add(1 * time.Second))
 		n, remoteAddr, err := p.conn.ReadFrom(buf)
 		if err != nil {
-			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+			var netErr net.Error
+			if errors.As(err, &netErr) && netErr.Timeout() {
 				continue
 			}
 			select {
@@ -265,7 +267,7 @@ func parseDNSQuestion(data []byte) (name string, qtype, qclass uint16, qEnd int,
 }
 
 // buildSinkholeResponse creates an RFC 1035 response pointing A queries to 0.0.0.0 and AAAA to ::.
-func buildSinkholeResponse(req []byte, _ string, qtype, qclass uint16, qEnd int) []byte {
+func buildSinkholeResponse(req []byte, _ string, qtype, _ uint16, qEnd int) []byte {
 	if len(req) < 12 || qEnd > len(req) {
 		return nil
 	}
@@ -297,7 +299,8 @@ func buildSinkholeResponse(req []byte, _ string, qtype, qclass uint16, qEnd int)
 	resp = append(resp, req[12:qEnd]...)
 
 	// 3. Answer Section
-	if qtype == 1 { // A Record -> 0.0.0.0
+	switch qtype {
+	case 1: // A Record -> 0.0.0.0
 		answer := []byte{
 			0xc0, 0x0c, // Pointer to domain in question
 			0x00, 0x01, // Type A
@@ -307,7 +310,7 @@ func buildSinkholeResponse(req []byte, _ string, qtype, qclass uint16, qEnd int)
 			0x00, 0x00, 0x00, 0x00, // 0.0.0.0
 		}
 		resp = append(resp, answer...)
-	} else if qtype == 28 { // AAAA Record -> ::
+	case 28: // AAAA Record -> ::
 		answer := []byte{
 			0xc0, 0x0c, // Pointer to domain in question
 			0x00, 0x1c, // Type AAAA

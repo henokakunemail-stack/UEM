@@ -137,8 +137,15 @@ try {
     # 7. Validate Live Dashboard Telemetry
     Write-Host "`n6. Validating Executive Dashboard Telemetry..."
 
-    # 7a. Summary
-    $summary = Invoke-RestMethod -Uri "$base/api/dashboard/summary" -Headers $authHeader
+    # 7a. Summary. The server caches the summary for 10 seconds, and the
+    # empty-fleet query above primed that cache moments ago, so poll until a
+    # fresh one shows the agent rather than reading the cached empty fleet once.
+    $summary = $null
+    for ($i = 0; $i -lt 30; $i++) {
+        $summary = Invoke-RestMethod -Uri "$base/api/dashboard/summary" -Headers $authHeader
+        if ($summary.total_devices -ge 1 -and $summary.online_devices -ge 1) { break }
+        Start-Sleep -Milliseconds 500
+    }
     Write-Host "  - Total Devices: $($summary.total_devices)"
     Write-Host "  - Online Devices: $($summary.online_devices)"
     Write-Host "  - Fleet Online Ratio: $($summary.online_pct)%"

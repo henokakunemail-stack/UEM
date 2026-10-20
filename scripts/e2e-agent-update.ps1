@@ -295,11 +295,11 @@ try {
     $auditLogs = Invoke-RestMethod -Uri "$base/api/audit-logs" -Method GET -Headers $adminHeaders
     $uploadAudit = $auditLogs.logs | Where-Object { $_.action -eq "agent_update.release_upload" }
     $dispatchAudit = $auditLogs.logs | Where-Object { $_.action -eq "agent_update.device_dispatched" }
-    $completeAudit = $auditLogs.logs | Where-Object { $_.action -eq "agent_update.completed" }
+    $completeAudit = $auditLogs.logs | Where-Object { $_.action -eq "agent_update.task_success" }
 
     if (-not $uploadAudit) { throw "Expected audit log for agent_update.release_upload" }
     if (-not $dispatchAudit) { throw "Expected audit log for agent_update.device_dispatched" }
-    if (-not $completeAudit) { throw "Expected audit log for agent_update.completed" }
+    if (-not $completeAudit) { throw "Expected audit log for agent_update.task_success" }
 
     Write-Host "  [PASS] Audit logs verified for release upload, device dispatch, and update completion" -ForegroundColor Green
 

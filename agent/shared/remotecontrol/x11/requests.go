@@ -74,7 +74,7 @@ func (xc *Conn) GetImage(x, y, w, h int) ([]byte, error) {
 	src := r[32:]
 	n := w * h * 4
 	if len(src) < n {
-		return nil, fmt.Errorf("X GetImage returned %d bytes for %dx%d", len(src), w, h)
+		return nil, fmt.Errorf("x11 GetImage returned %d bytes for %dx%d", len(src), w, h)
 	}
 	return toBGRA(src[:n], s.Visual), nil
 }

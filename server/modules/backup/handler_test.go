@@ -76,7 +76,7 @@ func TestBackup_ListAndCreate(t *testing.T) {
 	h.Register(r)
 
 	// List initially empty
-	req := httptest.NewRequest("GET", "/api/system/backups", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/system/backups", nil)
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, req)
 
@@ -92,7 +92,7 @@ func TestBackup_ListAndCreate(t *testing.T) {
 	}
 
 	// Create backup
-	req = httptest.NewRequest("POST", "/api/system/backup/create", nil)
+	req = httptest.NewRequest(http.MethodPost, "/api/system/backup/create", nil)
 	rec = httptest.NewRecorder()
 	r.ServeHTTP(rec, req)
 
@@ -109,7 +109,7 @@ func TestBackup_ListAndCreate(t *testing.T) {
 	}
 
 	// List again - should have 1 item
-	req = httptest.NewRequest("GET", "/api/system/backups", nil)
+	req = httptest.NewRequest(http.MethodGet, "/api/system/backups", nil)
 	rec = httptest.NewRecorder()
 	r.ServeHTTP(rec, req)
 
@@ -140,7 +140,7 @@ func TestBackup_DownloadAndDelete(t *testing.T) {
 	h.Register(r)
 
 	// Create backup
-	req := httptest.NewRequest("POST", "/api/system/backup/create", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/system/backup/create", nil)
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, req)
 
@@ -148,7 +148,7 @@ func TestBackup_DownloadAndDelete(t *testing.T) {
 	_ = json.NewDecoder(rec.Body).Decode(&created)
 
 	// Download backup
-	req = httptest.NewRequest("GET", "/api/system/backup/download/"+created.Filename, nil)
+	req = httptest.NewRequest(http.MethodGet, "/api/system/backup/download/"+created.Filename, nil)
 	rec = httptest.NewRecorder()
 	r.ServeHTTP(rec, req)
 
@@ -163,7 +163,7 @@ func TestBackup_DownloadAndDelete(t *testing.T) {
 	}
 
 	// Path traversal test
-	req = httptest.NewRequest("GET", "/api/system/backup/download/..%2F..%2Fsecret.db", nil)
+	req = httptest.NewRequest(http.MethodGet, "/api/system/backup/download/..%2F..%2Fsecret.db", nil)
 	rec = httptest.NewRecorder()
 	r.ServeHTTP(rec, req)
 	if rec.Code != http.StatusBadRequest && rec.Code != http.StatusNotFound {
@@ -171,7 +171,7 @@ func TestBackup_DownloadAndDelete(t *testing.T) {
 	}
 
 	// Delete backup
-	req = httptest.NewRequest("DELETE", "/api/system/backup/"+created.Filename, nil)
+	req = httptest.NewRequest(http.MethodDelete, "/api/system/backup/"+created.Filename, nil)
 	rec = httptest.NewRecorder()
 	r.ServeHTTP(rec, req)
 
@@ -180,7 +180,7 @@ func TestBackup_DownloadAndDelete(t *testing.T) {
 	}
 
 	// Verify deleted
-	req = httptest.NewRequest("GET", "/api/system/backup/download/"+created.Filename, nil)
+	req = httptest.NewRequest(http.MethodGet, "/api/system/backup/download/"+created.Filename, nil)
 	rec = httptest.NewRecorder()
 	r.ServeHTTP(rec, req)
 	if rec.Code != http.StatusNotFound {
@@ -213,7 +213,7 @@ func TestBackup_Restore(t *testing.T) {
 	h.Register(r)
 
 	// Create a valid backup
-	req := httptest.NewRequest("POST", "/api/system/backup/create", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/system/backup/create", nil)
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, req)
 
@@ -221,7 +221,7 @@ func TestBackup_Restore(t *testing.T) {
 	_ = json.NewDecoder(rec.Body).Decode(&created)
 
 	// Restore valid backup
-	req = httptest.NewRequest("POST", "/api/system/backup/restore/"+created.Filename, nil)
+	req = httptest.NewRequest(http.MethodPost, "/api/system/backup/restore/"+created.Filename, nil)
 	rec = httptest.NewRecorder()
 	r.ServeHTTP(rec, req)
 
@@ -247,7 +247,7 @@ func TestBackup_Restore(t *testing.T) {
 	corruptPath := filepath.Join(backupDir, "corrupt.db")
 	_ = os.WriteFile(corruptPath, []byte("NOT A SQLITE FILE"), 0o600)
 
-	req = httptest.NewRequest("POST", "/api/system/backup/restore/corrupt.db", nil)
+	req = httptest.NewRequest(http.MethodPost, "/api/system/backup/restore/corrupt.db", nil)
 	rec = httptest.NewRecorder()
 	r.ServeHTTP(rec, req)
 
@@ -292,7 +292,7 @@ func TestBackup_UploadRestore(t *testing.T) {
 	_, _ = io.Copy(part, bytes.NewReader(data))
 	_ = writer.Close()
 
-	req := httptest.NewRequest("POST", "/api/system/backup/upload-restore", body)
+	req := httptest.NewRequest(http.MethodPost, "/api/system/backup/upload-restore", body)
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, req)
@@ -322,7 +322,7 @@ func TestBackup_RBAC(t *testing.T) {
 	r := chi.NewRouter()
 	h.Register(r)
 
-	req := httptest.NewRequest("GET", "/api/system/backups", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/system/backups", nil)
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, req)
 

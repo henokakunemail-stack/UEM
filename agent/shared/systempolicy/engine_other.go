@@ -25,13 +25,14 @@ func (n *nonWinBackend) Apply(ctx context.Context, client *http.Client, serverUR
 	var degraded []string
 
 	// Linux USB Storage Restriction
-	if s.USBStorageMode == USBStorageBlock {
+	switch s.USBStorageMode {
+	case USBStorageBlock:
 		// Blacklist usb-storage and uas kernel modules to block flash drives and external disks
 		_ = os.WriteFile("/etc/modprobe.d/endpoint-block-usb.conf", []byte("blacklist usb_storage\nblacklist uas\n"), 0644)
 		_ = exec.CommandContext(ctx, "modprobe", "-r", "uas").Run()
 		_ = exec.CommandContext(ctx, "modprobe", "-r", "usb_storage").Run()
 		applied++
-	} else if s.USBStorageMode == USBStorageAllow {
+	case USBStorageAllow:
 		_ = os.Remove("/etc/modprobe.d/endpoint-block-usb.conf")
 	}
 
@@ -69,7 +70,7 @@ func (n *nonWinBackend) Apply(ctx context.Context, client *http.Client, serverUR
 func applyAdminAccountNonWindows(ctx context.Context, s PolicySettings) error {
 	username := strings.TrimSpace(s.AdminAccountUsername)
 	for _, r := range username {
-		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '-') {
+		if (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && (r < '0' || r > '9') && r != '_' && r != '-' {
 			return fmt.Errorf("invalid username: '%s'", username)
 		}
 	}

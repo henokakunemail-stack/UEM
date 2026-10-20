@@ -1,24 +1,17 @@
 package integration
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/go-chi/chi/v5"
 	_ "modernc.org/sqlite"
 
 	agentfilter "github.com/henokakunemail-stack/Endpoint-Manager/agent/shared/networkfilter"
-	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/auth"
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/db"
-	devicemgmt "github.com/henokakunemail-stack/Endpoint-Manager/server/modules/device-management"
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/modules/networkfilter"
 )
 
@@ -273,25 +266,9 @@ func TestNetworkFilter_AgentHostsEngine(t *testing.T) {
 	}
 }
 
-type testHubRecorder struct {
-	onSend func([]byte)
-}
-
-func (t *testHubRecorder) Online(string) bool { return true }
-func (t *testHubRecorder) SendTo(_ string, b []byte) bool {
-	if t.onSend != nil {
-		t.onSend(b)
-	}
-	return true
-}
-
-type mockFilterAudit struct{}
-
-func (m mockFilterAudit) Log(context.Context, string, string, string, string, map[string]string) error {
-	return nil
-}
-
-func TestNetworkFilter_AutoDispatchAndRestoreAccess(t *testing.T) {
+// The rule is added through the repository and the agent engine applies and
+// later restores the hosts file. Dispatch to the agent is not exercised here.
+func TestNetworkFilter_RuleAppliedAndAccessRestored(t *testing.T) {
 	database, err := db.Open(filepath.Join(t.TempDir(), "integration_dispatch.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -299,7 +276,6 @@ func TestNetworkFilter_AutoDispatchAndRestoreAccess(t *testing.T) {
 	defer database.Close()
 
 	repo := networkfilter.NewRepository(database)
-	deviceRepo := devicemgmt.NewRepository(database)
 	now := time.Now().UTC()
 
 	// Seed online device
@@ -309,13 +285,6 @@ func TestNetworkFilter_AutoDispatchAndRestoreAccess(t *testing.T) {
 	`, now, now, now, now); err != nil {
 		t.Fatal(err)
 	}
-
-	var capturedMessages [][]byte
-	hub := &testHubRecorder{onSend: func(msg []byte) {
-		capturedMessages = append(capturedMessages, msg)
-	}}
-
-	handler := networkfilter.NewHandler(repo, hub, deviceRepo, mockFilterAudit{}, nil)
 
 	// 1. Create policy targeting dev-detik
 	pol := &networkfilter.FilterPolicy{
@@ -330,21 +299,7 @@ func TestNetworkFilter_AutoDispatchAndRestoreAccess(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// 2. Add rule via HTTP handler
-	rulePayload, _ := json.Marshal(map[string]string{
-		"pattern":  "detik.com",
-		"action":   "block",
-		"category": "news",
-	})
-	req := httptest.NewRequest(http.MethodPost, "/api/filter/policies/"+pol.ID+"/rules", bytes.NewReader(rulePayload))
-	rctx := chi.NewRouteContext()
-	rctx.URLParams.Add("id", pol.ID)
-	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
-	req = req.WithContext(context.WithValue(req.Context(), auth.CtxUserID, "admin"))
-	rec := httptest.NewRecorder()
-
-	capturedMessages = nil
-	// Add rule through repo and trigger dispatch
+	// 2. Add the rule through the repository.
 	_ = repo.AddRule(context.Background(), &networkfilter.FilterRule{
 		PolicyID: pol.ID, RuleType: "domain", Pattern: "detik.com", Action: "block", Category: "news",
 	})
@@ -416,7 +371,4 @@ func TestNetworkFilter_AutoDispatchAndRestoreAccess(t *testing.T) {
 	if !strings.Contains(string(cleanHosts), "127.0.0.1 localhost") {
 		t.Fatal("original localhost entry missing")
 	}
-
-	_ = rec
-	_ = handler
 }

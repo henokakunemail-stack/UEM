@@ -427,7 +427,7 @@ func (h *Handler) addRule(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "pattern is required")
 		return
 	}
-	action := "block"
+	var action string
 	if policy.Mode == "whitelist" {
 		action = "allow"
 		if req.Action != "" && req.Action != "allow" {

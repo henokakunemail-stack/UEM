@@ -214,7 +214,7 @@ func openDatabase(cfg config.Config) (*sqlx.DB, error) {
 // already sets statement_timeout, or a non-URL DSN, is left as written.
 func withStatementTimeout(dsn string, timeout time.Duration) string {
 	if timeout <= 0 || strings.Contains(dsn, "statement_timeout") ||
-		!(strings.HasPrefix(dsn, "postgres://") || strings.HasPrefix(dsn, "postgresql://")) {
+		(!strings.HasPrefix(dsn, "postgres://") && !strings.HasPrefix(dsn, "postgresql://")) {
 		return dsn
 	}
 	u, err := url.Parse(dsn)
@@ -561,7 +561,10 @@ func buildServer(cfg config.Config, database *sqlx.DB) (*http.Server, *serverApp
 
 	// Resilience and request correlation middlewares.
 	r.Use(middleware.RequestID)
-	r.Use(middleware.RealIP)
+	// The client address, taken from X-Forwarded-For only behind a proxy listed
+	// in TRUSTED_PROXIES (chi's RealIP trusted the header from anyone).
+	ipResolver := auth.NewClientIPResolver(cfg.TrustedProxies)
+	r.Use(ipResolver.Middleware)
 	// Metrics and the access log, outside Recoverer so a panic is still
 	// counted and logged as the 500 it became.
 	reg := metrics.NewRegistry()
@@ -582,7 +585,6 @@ func buildServer(cfg config.Config, database *sqlx.DB) (*http.Server, *serverApp
 
 	// Token-bucket API rate limiter (300 req/min per client IP, burst 100).
 	// Bypasses the persistent agent WebSocket endpoint /api/agent/connect and health probes.
-	ipResolver := auth.NewClientIPResolver(cfg.TrustedProxies)
 	apiLimiter := httpguard.NewAPIRateLimiter(300, 100)
 	r.Use(apiLimiter.Middleware(func(req *http.Request) string {
 		if req.URL.Path == "/api/agent/connect" || req.URL.Path == "/healthz" || req.URL.Path == "/readyz" || req.URL.Path == "/metrics" {

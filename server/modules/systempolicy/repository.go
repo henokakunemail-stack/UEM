@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"time"
@@ -59,7 +60,7 @@ func (r *Repository) GetByID(ctx context.Context, id string) (*SystemPolicy, err
 	      FROM system_policies WHERE id = ?`
 	var p SystemPolicy
 	if err := r.db.GetContext(ctx, &p, r.db.Rebind(q), id); err != nil {
-		if err == sql.ErrNoRows {
+		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("get system policy %s: %w", id, err)
@@ -131,7 +132,7 @@ func (r *Repository) GetDeviceState(ctx context.Context, deviceID string) (*Devi
 	      FROM device_system_policy_states WHERE device_id = ?`
 	var s DeviceSystemPolicyState
 	if err := r.db.GetContext(ctx, &s, r.db.Rebind(q), deviceID); err != nil {
-		if err == sql.ErrNoRows {
+		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("get device policy state %s: %w", deviceID, err)

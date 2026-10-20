@@ -178,7 +178,7 @@ func (e *Evaluator) Evaluate(ctx context.Context) AuditReport {
 		}
 	}
 
-	grade := "F"
+	var grade string
 	switch {
 	case score >= 95:
 		grade = "A+"
@@ -484,7 +484,7 @@ func (e *Evaluator) checkDBNotPublic() CheckItem {
 
 func (e *Evaluator) checkDBFilePermissions() CheckItem {
 	status := StatusPass
-	evidence := "Database file and credential permissions verified."
+	var evidence string
 	remediation := "Maintain strict file permissions (0600 on UNIX, LocalSystem/Admin ACLs on Windows)."
 
 	dbPath := e.cfg.DBPath
@@ -748,7 +748,7 @@ func (e *Evaluator) checkAdminRouteSecurity() CheckItem {
 
 func (e *Evaluator) checkDefaultPasswordChanged(ctx context.Context) CheckItem {
 	status := StatusPass
-	evidence := "Default setup password check verified."
+	var evidence string
 	remediation := "Change administrator passwords on first login."
 
 	var count int
@@ -818,12 +818,11 @@ func (e *Evaluator) checkWebhookVerification() CheckItem {
 
 func (e *Evaluator) checkLicenseCompliance(ctx context.Context) CheckItem {
 	status := StatusPass
-	evidence := "Asset and software license allocation tracking active."
 	remediation := "Review license expiry dates regularly under Asset & License management."
 
 	var count int
 	_ = e.db.GetContext(ctx, &count, `SELECT COUNT(*) FROM software_licenses`)
-	evidence = fmt.Sprintf("Software license tracking table initialized with %d managed license pool(s).", count)
+	evidence := fmt.Sprintf("Software license tracking table initialized with %d managed license pool(s).", count)
 
 	return CheckItem{
 		ID:          32,
@@ -841,7 +840,7 @@ func (e *Evaluator) checkLicenseCompliance(ctx context.Context) CheckItem {
 
 func (e *Evaluator) checkReleaseAntiTamper() CheckItem {
 	status := StatusPass
-	evidence := "Release packages verified with SHA-256 checksums."
+	var evidence string
 	remediation := "Configure Ed25519 signing key in server config for cryptographic agent update verification."
 
 	if e.cfg.UpdateSigningPublicKey != "" {

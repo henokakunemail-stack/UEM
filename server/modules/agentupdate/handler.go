@@ -935,14 +935,15 @@ func (h *Handler) handleAgentReport(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Log status transparently to audit trail so operators can track rollout stages
-	if req.Status == "failed" || req.Status == "rollback" {
+	switch req.Status {
+	case "failed", "rollback":
 		_ = h.auditor.Log(r.Context(), "device", deviceID, "agent_update.task_failed", deviceID, map[string]string{
 			"task_id":        req.TaskID,
 			"status":         req.Status,
 			"target_version": req.TargetVersion,
 			"error":          req.ErrorMessage,
 		})
-	} else if req.Status == "downloading" || req.Status == "verifying" || req.Status == "swapping" {
+	case "downloading", "verifying", "swapping":
 		_ = h.auditor.Log(r.Context(), "device", deviceID, "agent_update.task_progress", deviceID, map[string]string{
 			"task_id":        req.TaskID,
 			"status":         req.Status,

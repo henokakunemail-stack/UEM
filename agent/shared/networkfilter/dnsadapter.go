@@ -243,7 +243,8 @@ func getActiveLinuxInterface() string {
 // GetPrimaryUpstreamDNS discovers the local network's existing DNS server (gateway/DHCP DNS),
 // falling back to 1.1.1.1 if not determinable.
 func GetPrimaryUpstreamDNS() string {
-	if runtime.GOOS == "windows" {
+	switch runtime.GOOS {
+	case "windows":
 		adapters, err := getConnectedWindowsAdapters()
 		if err == nil {
 			for _, a := range adapters {
@@ -255,7 +256,7 @@ func GetPrimaryUpstreamDNS() string {
 				}
 			}
 		}
-	} else if runtime.GOOS == "linux" {
+	case "linux":
 		data, err := os.ReadFile("/etc/resolv.conf")
 		if err == nil {
 			scanner := bufio.NewScanner(bytes.NewReader(data))

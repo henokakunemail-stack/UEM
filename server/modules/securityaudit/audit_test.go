@@ -68,9 +68,10 @@ func TestEvaluatorAllChecks(t *testing.T) {
 	// Verify both parts exist
 	part1Count, part2Count := 0, 0
 	for _, c := range report.Checks {
-		if c.Part == 1 {
+		switch c.Part {
+		case 1:
 			part1Count++
-		} else if c.Part == 2 {
+		case 2:
 			part2Count++
 		}
 	}

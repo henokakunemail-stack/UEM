@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
+	"errors"
 
 	"github.com/jmoiron/sqlx"
 	"github.com/lib/pq"
@@ -45,23 +46,9 @@ func (c *rebindConn) PrepareContext(ctx context.Context, query string) (driver.S
 	return c.Conn.Prepare(rebind(query))
 }
 
-func (c *rebindConn) Exec(query string, args []driver.Value) (driver.Result, error) {
-	if exec, ok := c.Conn.(driver.Execer); ok {
-		return exec.Exec(rebind(query), args)
-	}
-	return nil, driver.ErrSkip
-}
-
 func (c *rebindConn) ExecContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
 	if exec, ok := c.Conn.(driver.ExecerContext); ok {
 		return exec.ExecContext(ctx, rebind(query), args)
-	}
-	return nil, driver.ErrSkip
-}
-
-func (c *rebindConn) Query(query string, args []driver.Value) (driver.Rows, error) {
-	if q, ok := c.Conn.(driver.Queryer); ok {
-		return q.Query(rebind(query), args)
 	}
 	return nil, driver.ErrSkip
 }
@@ -74,10 +61,15 @@ func (c *rebindConn) QueryContext(ctx context.Context, query string, args []driv
 }
 
 func (c *rebindConn) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.Tx, error) {
-	if btx, ok := c.Conn.(driver.ConnBeginTx); ok {
-		return btx.BeginTx(ctx, opts)
+	// database/sql calls the Context forms (ExecContext, QueryContext, BeginTx)
+	// whenever a connection has them, so those are the only ones wrapped. pq's
+	// connection implements ConnBeginTx; a driver that did not would have no
+	// way to honour opts, and failing says so instead of ignoring them.
+	btx, ok := c.Conn.(driver.ConnBeginTx)
+	if !ok {
+		return nil, errors.New("postgres-rebind: the wrapped connection does not support BeginTx")
 	}
-	return c.Conn.Begin()
+	return btx.BeginTx(ctx, opts)
 }
 
 func (c *rebindConn) Ping(ctx context.Context) error {

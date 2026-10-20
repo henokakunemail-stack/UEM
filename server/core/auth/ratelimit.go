@@ -296,6 +296,22 @@ func (r *ClientIPResolver) forwardedFor(rq *http.Request) string {
 	return ""
 }
 
+// Middleware puts the resolved client address in r.RemoteAddr for everything
+// downstream: access log, audit entries, rate limiters. It replaces chi's
+// RealIP, which copied X-Forwarded-For into RemoteAddr from any caller -- so a
+// client could name its own address on every request, rotate it past the
+// login lockout and the API rate limit, and write whatever it liked into the
+// audit trail. Here the headers count only when the connection comes from a
+// trusted proxy, exactly as ClientIP decides.
+func (r *ClientIPResolver) Middleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, rq *http.Request) {
+		if ip := r.ClientIP(rq); ip != remoteHost(rq.RemoteAddr) {
+			rq.RemoteAddr = ip
+		}
+		next.ServeHTTP(w, rq)
+	})
+}
+
 func remoteHost(remoteAddr string) string {
 	host, _, err := net.SplitHostPort(remoteAddr)
 	if err == nil && host != "" {

@@ -101,18 +101,22 @@ export function main() {
   // bundle actually lands. Reading web-console/dist here would check a directory
   // nothing writes to any more — and a stale one that would still "pass".
   const distAssets = join(root, '..', 'server', 'cmd', 'server', 'dist', 'assets')
-  let cssFile
+  // Every stylesheet the build emitted: a lazy-loaded chunk (the xterm terminal)
+  // brings its own CSS file, and which file a directory listing returns first
+  // differs between Windows and Linux. Checking only the first one passed
+  // locally and failed CI with every class reported missing.
+  let cssFiles
   try {
-    cssFile = readdirSync(distAssets).find((f) => f.endsWith('.css'))
+    cssFiles = readdirSync(distAssets).filter((f) => f.endsWith('.css')).sort()
   } catch {
-    cssFile = undefined
+    cssFiles = []
   }
-  if (!cssFile) {
+  if (cssFiles.length === 0) {
     console.error('No build output in server/cmd/server/dist/assets. Run `npm run build` first.')
     process.exit(2)
   }
 
-  const css = readFileSync(join(distAssets, cssFile), 'utf-8')
+  const css = cssFiles.map((f) => readFileSync(join(distAssets, f), 'utf-8')).join('\n')
   // Match both `.name` and escaped forms like `.md\:inline` and `.w-\[85vh\]`.
   const defined = new Set(
     [...css.matchAll(/\.((?:[a-zA-Z0-9_-]|\\.)+)/g)].map((m) => m[1].replace(/\\/g, ''))
@@ -156,7 +160,7 @@ export function main() {
     process.exit(1)
   }
 
-  console.log(`OK: every className in ${files.length} components resolves to a real CSS rule (${cssFile})`)
+  console.log(`OK: every className in ${files.length} components resolves to a real CSS rule (${cssFiles.join(', ')})`)
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main()

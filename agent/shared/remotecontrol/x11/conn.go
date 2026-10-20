@@ -166,11 +166,11 @@ func NewConn(c net.Conn, auth *Auth, screen int) (*Conn, error) {
 	}
 	head := make([]byte, 8)
 	if _, err := io.ReadFull(c, head); err != nil {
-		return nil, fmt.Errorf("X setup: %w", err)
+		return nil, fmt.Errorf("x11 setup: %w", err)
 	}
 	more := make([]byte, int(le.Uint16(head[6:]))*4)
 	if _, err := io.ReadFull(c, more); err != nil {
-		return nil, fmt.Errorf("X setup: %w", err)
+		return nil, fmt.Errorf("x11 setup: %w", err)
 	}
 	switch head[0] {
 	case 1:
@@ -179,9 +179,9 @@ func NewConn(c net.Conn, auth *Auth, screen int) (*Conn, error) {
 		if n > len(more) {
 			n = len(more)
 		}
-		return nil, fmt.Errorf("X server refused the connection: %s", strings.TrimSpace(string(more[:n])))
+		return nil, fmt.Errorf("the X server refused the connection: %s", strings.TrimSpace(string(more[:n])))
 	default:
-		return nil, errors.New("X server asked for further authentication, which is not supported")
+		return nil, errors.New("the X server asked for further authentication, which is not supported")
 	}
 
 	xc := &Conn{c: c, ext: map[string]extInfo{}}
@@ -193,7 +193,7 @@ func NewConn(c net.Conn, auth *Auth, screen int) (*Conn, error) {
 
 func (xc *Conn) parseSetup(b []byte, want int) error {
 	if len(b) < 32 {
-		return errors.New("X setup reply too short")
+		return errors.New("x11 setup reply too short")
 	}
 	xc.ridBase = le.Uint32(b[4:])
 	xc.ridMask = le.Uint32(b[8:])
@@ -206,14 +206,14 @@ func (xc *Conn) parseSetup(b []byte, want int) error {
 	bppFor := map[byte]byte{}
 	for i := 0; i < numFormats; i++ {
 		if off+8 > len(b) {
-			return errors.New("X setup: truncated formats")
+			return errors.New("x11 setup: truncated formats")
 		}
 		bppFor[b[off]] = b[off+1]
 		off += 8
 	}
 	for s := 0; s < numScreens; s++ {
 		if off+40 > len(b) {
-			return errors.New("X setup: truncated screens")
+			return errors.New("x11 setup: truncated screens")
 		}
 		scr := Screen{
 			Root:      le.Uint32(b[off:]),
@@ -230,13 +230,13 @@ func (xc *Conn) parseSetup(b []byte, want int) error {
 		off += 40
 		for d := 0; d < numDepths; d++ {
 			if off+8 > len(b) {
-				return errors.New("X setup: truncated depths")
+				return errors.New("x11 setup: truncated depths")
 			}
 			nVis := int(le.Uint16(b[off+2:]))
 			off += 8
 			for v := 0; v < nVis; v++ {
 				if off+24 > len(b) {
-					return errors.New("X setup: truncated visuals")
+					return errors.New("x11 setup: truncated visuals")
 				}
 				if le.Uint32(b[off:]) == scr.Visual.ID {
 					scr.Visual.RedMask = le.Uint32(b[off+8:])
@@ -252,7 +252,7 @@ func (xc *Conn) parseSetup(b []byte, want int) error {
 			return nil
 		}
 	}
-	return fmt.Errorf("X display has no screen %d", want)
+	return fmt.Errorf("the X display has no screen %d", want)
 }
 
 // Close closes the connection.
@@ -263,7 +263,7 @@ func (xc *Conn) NewID() (uint32, error) {
 	xc.mu.Lock()
 	defer xc.mu.Unlock()
 	if xc.ridMask == 0 {
-		return 0, errors.New("X server gave no resource ids")
+		return 0, errors.New("the X server gave no resource ids")
 	}
 	step := xc.ridMask & -xc.ridMask
 	xc.ridNext += step
@@ -279,7 +279,7 @@ func (xc *Conn) send(opcode, data byte, body []byte) (uint16, error) {
 	n := 4 + len(body)
 	total := pad4(n)
 	if total/4 > 0xffff {
-		return 0, errors.New("X request too large")
+		return 0, errors.New("x11 request too large")
 	}
 	req := make([]byte, total)
 	req[0], req[1] = opcode, data
@@ -345,7 +345,7 @@ func (xc *Conn) reply(seq uint16) ([]byte, error) {
 		// Sequence numbers are 16-bit; anything "after" ours means our reply
 		// was lost, which the protocol does not allow. Stop rather than hang.
 		if int16(got-seq) > 0 {
-			return nil, fmt.Errorf("X reply for request %d never arrived", seq)
+			return nil, fmt.Errorf("x11 reply for request %d never arrived", seq)
 		}
 	}
 }
