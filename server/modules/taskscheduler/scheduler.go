@@ -177,7 +177,17 @@ func (s *Scheduler) pollDueSchedules(ctx context.Context) {
 				continue
 			}
 
-			if sched.LastRunAt == nil || now.Sub(*sched.LastRunAt) >= time.Duration(intervalMins)*time.Minute {
+			interval := time.Duration(intervalMins) * time.Minute
+			if sched.LastRunAt == nil || now.Sub(*sched.LastRunAt) >= interval {
+				claimed, err := s.repo.ClaimDueRun(ctx, sched.ID, now, interval)
+				if err != nil {
+					log.Warn().Err(err).Str("schedule", sched.ID).Msg("claim due schedule")
+					continue
+				}
+				if !claimed {
+					// Another poll (or another server node) fired it first.
+					continue
+				}
 				log.Info().Str("schedule", sched.ID).Str("name", sched.Name).Msg("triggering due interval schedule")
 				_, _ = s.TriggerSchedule(ctx, sched.ID, "system-scheduler")
 			}

@@ -26,6 +26,7 @@ import (
 	"github.com/henokakunemail-stack/Endpoint-Manager/agent/shared/service"
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/audit"
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/auth"
+	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/cluster"
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/config"
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/db"
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/httpguard"
@@ -550,6 +551,13 @@ func buildServer(cfg config.Config, database *sqlx.DB) (*http.Server, func()) {
 	// by the cleanup closure at the end of this function; see the note there.
 	bgCtx, stopBackground := context.WithCancel(context.Background())
 
+	// leaderOnly collects the loops that must run on exactly one server node.
+	// Each one either acts on shared rows (the scheduler fires scripts, the
+	// evaluator opens incidents and sends webhooks) or would only duplicate work
+	// (the sweeps, the session purge). They start once this node is elected and
+	// stop if it loses leadership; on SQLite the only node is always leader.
+	var leaderOnly []func(context.Context)
+
 	// Expired session rows are reaped on a timer rather than at login. They are
 	// only deleted after expiry, so the interval is a cleanliness knob, not a
 	// correctness one: a late purge leaves the table a little larger and changes
@@ -561,26 +569,28 @@ func buildServer(cfg config.Config, database *sqlx.DB) (*http.Server, func()) {
 	// anything from hourly to daily is fine, and hourly keeps a fleet that
 	// refreshes constantly from accumulating a week's worth of dead rows between
 	// sweeps.
-	go purgeSessions(bgCtx, sessionStore, time.Hour)
+	leaderOnly = append(leaderOnly, func(ctx context.Context) { go purgeSessions(ctx, sessionStore, time.Hour) })
 
 	// Phase 9: alerting & notification engine.
 	alertRepo := alerting.NewRepository(database)
 	alertEval := alerting.NewEvaluator(database, alertRepo)
 	alertH := alerting.NewHandler(alertRepo, alertEval, &auditAdapter{db: database}, jwtSvc.RequireAuth)
 	alertH.Register(r)
-	alertEval.StartBackgroundEvaluator(bgCtx, 30*time.Second)
+	leaderOnly = append(leaderOnly, func(ctx context.Context) { alertEval.StartBackgroundEvaluator(ctx, 30*time.Second) })
 
 	// Phase 10: task scheduler & script repository.
 	schedRepo := taskscheduler.NewRepository(database)
 	schedulerSvc := taskscheduler.NewScheduler(schedRepo, hub)
 	schedH := taskscheduler.NewHandler(schedRepo, schedulerSvc, &auditAdapter{db: database}, jwtSvc.RequireAuth, deviceRepo)
 	schedH.Register(r)
-	schedulerSvc.StartBackgroundScheduler(bgCtx, 30*time.Second)
+	leaderOnly = append(leaderOnly, func(ctx context.Context) { schedulerSvc.StartBackgroundScheduler(ctx, 30*time.Second) })
 
 	// Scheduled-task device runs stranded by an agent that vanished mid-script.
 	// SyncRunStatus only runs from the agent result handler, so a device run
 	// that never reports leaves its parent at 'running' forever.
-	go schedRepo.StartSweep(bgCtx, taskscheduler.SweepInterval, taskscheduler.AbandonGrace)
+	leaderOnly = append(leaderOnly, func(ctx context.Context) {
+		go schedRepo.StartSweep(ctx, taskscheduler.SweepInterval, taskscheduler.AbandonGrace)
+	})
 
 	// Phase 11: remote control & screen capture relay.
 	rcRepo := remotecontrol.NewRepository(database)
@@ -712,17 +722,26 @@ func buildServer(cfg config.Config, database *sqlx.DB) (*http.Server, func()) {
 	// the agent posts progress over HTTP from a goroutine, and a logout, an
 	// agent update, or a pulled power cord all end that goroutine silently. This
 	// reaps them so a rollout does not read as 'still running' forever.
-	go runDeploymentSweep(bgCtx, softRepo)
+	leaderOnly = append(leaderOnly, func(ctx context.Context) { go runDeploymentSweep(ctx, softRepo) })
 
 	// Maintenance tasks stranded by an agent that took the command and then
 	// never reported. Nothing else closes them: the job status is written only
 	// from a task's terminal report, so one silent task holds its job 'running'
 	// and the console polls it forever.
-	go maintRepo.StartSweep(bgCtx, maintenance.SweepInterval, maintenance.AbandonGrace)
+	leaderOnly = append(leaderOnly, func(ctx context.Context) {
+		go maintRepo.StartSweep(ctx, maintenance.SweepInterval, maintenance.AbandonGrace)
+	})
 
 	// Agent update tasks stranded on offline devices or dead agents. Without
 	// this, offline endpoints leave update campaigns stuck in 'in_progress' forever.
-	go updateRepo.StartSweep(bgCtx, 30*time.Second, 10*time.Minute)
+	leaderOnly = append(leaderOnly, func(ctx context.Context) { go updateRepo.StartSweep(ctx, 30*time.Second, 10*time.Minute) })
+
+	leader := cluster.NewLeader(database)
+	go leader.Run(bgCtx, func(ctx context.Context) {
+		for _, start := range leaderOnly {
+			start(ctx)
+		}
+	})
 
 	// Periodic online database backups. VACUUM INTO takes a consistent
 	// snapshot without stopping the server, so a failed backup is logged but

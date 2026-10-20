@@ -345,6 +345,29 @@ func (r *Repository) GetTargetDeviceIDs(ctx context.Context, targetType, targetI
 
 // --- Run Tracking ---
 
+// ClaimDueRun takes a due interval schedule for this poll, atomically.
+//
+// The poller reads every schedule, decides which are due, then fires them. With
+// two server nodes, or a poll that overlaps a slow previous one, both readers
+// see the same schedule as due and the script runs twice on every target. The
+// claim moves last_run_at only if it is still at or before the due threshold, so
+// exactly one claimer changes the row and only that one fires. A manual "run
+// now" does not claim: an operator asking twice means twice.
+func (r *Repository) ClaimDueRun(ctx context.Context, scheduleID string, now time.Time, interval time.Duration) (bool, error) {
+	res, err := r.db.ExecContext(ctx, `
+		UPDATE task_schedules SET last_run_at = ?
+		 WHERE id = ? AND is_enabled = 1 AND (last_run_at IS NULL OR last_run_at <= ?)`,
+		now, scheduleID, now.Add(-interval))
+	if err != nil {
+		return false, fmt.Errorf("claim schedule %s: %w", scheduleID, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("claim schedule %s: %w", scheduleID, err)
+	}
+	return n == 1, nil
+}
+
 // CreateRun records a new run of the schedule and moves the schedule's own
 // run timestamps forward.
 //

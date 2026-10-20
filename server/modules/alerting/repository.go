@@ -237,7 +237,27 @@ func (r *Repository) UpsertIncident(ctx context.Context, ruleID, deviceID, sever
 		) VALUES (?, ?, ?, ?, ?, ?, 'open', 1, ?, ?)
 	`, newID, ruleID, deviceID, severity, title, message, now, now)
 	if insertErr != nil {
-		return nil, false, fmt.Errorf("insert incident: %w", insertErr)
+		// idx_alert_dedup allows one active incident per rule and device. An
+		// insert that loses to a concurrent one -- an overlapping evaluation,
+		// or another server node -- is the same trigger seen twice, so it is
+		// counted on the incident that won rather than reported as a failure.
+		var winner string
+		if err := r.db.GetContext(ctx, &winner, `
+			SELECT id FROM alert_incidents
+			WHERE rule_id = ? AND device_id = ? AND status != 'resolved'
+			LIMIT 1`, ruleID, deviceID); err != nil {
+			return nil, false, fmt.Errorf("insert incident: %w", insertErr)
+		}
+		if _, err := r.db.ExecContext(ctx, `
+			UPDATE alert_incidents SET
+				trigger_count = trigger_count + 1,
+				message = ?,
+				last_triggered_at = ?
+			WHERE id = ?`, message, now, winner); err != nil {
+			return nil, false, fmt.Errorf("update incident trigger: %w", err)
+		}
+		inc, _ := r.GetIncidentByID(ctx, winner)
+		return inc, false, nil
 	}
 
 	inc, _ := r.GetIncidentByID(ctx, newID)
