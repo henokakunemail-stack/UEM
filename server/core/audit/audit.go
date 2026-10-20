@@ -47,6 +47,10 @@ type Entry struct {
 	// second query, but not populated by List unless asked.
 	PrevHash  string `db:"prev_hash" json:"prev_hash,omitempty"`
 	EntryHash string `db:"entry_hash" json:"entry_hash,omitempty"`
+	// HashTime is the created_at text the hash was computed over, when the
+	// stored timestamp may have lost precision since (see 0027). Empty means
+	// created_at itself is exact.
+	HashTime string `db:"hash_time" json:"-"`
 }
 
 // List returns the most recent entries.

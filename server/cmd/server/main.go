@@ -33,6 +33,7 @@ import (
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/cluster"
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/config"
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/db"
+	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/dbmove"
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/httpguard"
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/logger"
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/metrics"
@@ -89,12 +90,20 @@ func main() {
 		serviceAction string
 		backupPath    string
 		restorePath   string
+		moveToPG      bool
+		moveFrom      string
+		moveTo        string
+		moveForce     bool
 	)
 	flag.StringVar(&httpAddr, "addr", "", "HTTP listen address override (default from HTTP_ADDR, else :8443)")
 	flag.StringVar(&envFile, "env-file", "", "read KEY=VALUE runtime settings from a file (used by the service, which has no environment block)")
 	flag.StringVar(&serviceAction, "service", "", "OS service management action (install|uninstall|start|stop|status)")
 	flag.StringVar(&backupPath, "backup", "", "take a WAL-safe hot backup of the database to the specified path")
 	flag.StringVar(&restorePath, "restore", "", "restore database from source file to active DB path")
+	flag.BoolVar(&moveToPG, "migrate-to-postgres", false, "copy the SQLite database into PostgreSQL (with -from and -to)")
+	flag.StringVar(&moveFrom, "from", "", "with -migrate-to-postgres: the SQLite file (default DB_PATH)")
+	flag.StringVar(&moveTo, "to", "", "with -migrate-to-postgres: the PostgreSQL URL (default DB_URL)")
+	flag.BoolVar(&moveForce, "force", false, "with -migrate-to-postgres: replace the contents of a PostgreSQL database that already holds data")
 	flag.Parse()
 
 	// A service launched by the SCM inherits nothing from the operator's
@@ -130,6 +139,10 @@ func main() {
 		}
 		println("database restored successfully from:", restorePath, "to:", dbPath)
 		return
+	}
+
+	if moveToPG {
+		os.Exit(runMoveToPostgres(moveFrom, moveTo, moveForce))
 	}
 
 	if serviceAction != "" {
@@ -215,6 +228,39 @@ func withStatementTimeout(dsn string, timeout time.Duration) string {
 	q.Set("options", opt)
 	u.RawQuery = q.Encode()
 	return u.String()
+}
+
+// runMoveToPostgres is the -migrate-to-postgres command: an offline copy of
+// the SQLite database into PostgreSQL. Like -backup it does not need the rest
+// of the configuration, and it never writes to the SQLite file.
+func runMoveToPostgres(from, to string, force bool) int {
+	if from == "" {
+		from = config.DBPathOrDefault()
+	}
+	if to == "" {
+		to = os.Getenv("DB_URL")
+	}
+	if to == "" {
+		fmt.Fprintln(os.Stderr, "migrate-to-postgres: pass -to postgres://user:pass@host:5432/db?sslmode=require (or set DB_URL)")
+		return 2
+	}
+	fmt.Printf("Copying %s into PostgreSQL...\n", from)
+	res, err := dbmove.Move(context.Background(), dbmove.Options{
+		From: from, To: to, Force: force,
+		Logf: func(format string, args ...any) { fmt.Printf(format+"\n", args...) },
+	})
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "migrate-to-postgres failed:", err)
+		return 1
+	}
+	total := 0
+	for _, t := range res.Tables {
+		total += t.Target
+	}
+	fmt.Printf("Done: %d tables, %d rows. Audit chain on PostgreSQL: %s.\n", len(res.Tables), total,
+		map[bool]string{true: "verified", false: "NOT verified (it did not verify on SQLite either)"}[res.AuditChainOK])
+	fmt.Println("Next: set DB_URL to the PostgreSQL URL in the server's env file and restart the server.")
+	return 0
 }
 
 func run(cfg config.Config, stopService *context.CancelFunc) error {

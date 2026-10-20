@@ -66,5 +66,13 @@ UPDATE audit_logs SET seq = numbered.n
 -- @end
 CREATE INDEX IF NOT EXISTS idx_audit_created_seq ON audit_logs(created_at, seq);
 
+-- The exact timestamp text an entry was hashed with. SQLite keeps a timestamp
+-- at whatever precision it was given (nanoseconds); PostgreSQL keeps
+-- microseconds. Moving an existing log to PostgreSQL would otherwise make every
+-- entry written before the move fail to recompute -- a clean log reported as
+-- tampered. The migration tool fills this from the full-precision SQLite value;
+-- new entries record it as they are written.
+ALTER TABLE audit_logs ADD COLUMN hash_time TEXT;
+
 -- Alert incidents need nothing here: idx_alert_dedup (0008) already allows at
 -- most one active incident per rule and device, on every node.

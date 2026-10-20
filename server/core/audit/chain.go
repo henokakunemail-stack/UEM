@@ -193,14 +193,15 @@ func writeChained(ctx context.Context, dbHandle *sqlx.DB, e Entry) error {
 		row.CreatedAt = prevAt
 	}
 	row.PrevHash = prev
+	row.HashTime = row.CreatedAt.UTC().Format(time.RFC3339Nano)
 	row.EntryHash = entryHashOf(row)
 
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO audit_logs (id, actor_type, actor_id, action, target_id, details,
-		                        created_at, prev_hash, entry_hash, seq)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		                        created_at, prev_hash, entry_hash, seq, hash_time)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		row.ID, row.ActorType, row.ActorID, row.Action, row.TargetID,
-		nullDetails(row.Details), row.CreatedAt, row.PrevHash, row.EntryHash, prevSeq+1); err != nil {
+		nullDetails(row.Details), row.CreatedAt, row.PrevHash, row.EntryHash, prevSeq+1, row.HashTime); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {
@@ -257,6 +258,18 @@ func nullDetails(s string) any {
 // began. Prefixing each field with its own length makes that boundary part of
 // what is hashed, and the tag stops a field added later from reproducing an
 // older byte string.
+// EntryHash is the chain hash of e, for tools that write or check audit rows
+// outside this package (the database mover and its tests).
+func EntryHash(e Entry) string { return entryHashOf(e) }
+
+// hashTimeOf is the timestamp text an entry is hashed over.
+func hashTimeOf(e Entry) string {
+	if e.HashTime != "" {
+		return e.HashTime
+	}
+	return e.CreatedAt.UTC().Format(time.RFC3339Nano)
+}
+
 func entryHashOf(e Entry) string {
 	var buf bytes.Buffer
 	buf.WriteString(hashVersion)
@@ -267,7 +280,7 @@ func entryHashOf(e Entry) string {
 		{"action", e.Action},
 		{"target_id", e.TargetID},
 		{"details", e.Details},
-		{"created_at", e.CreatedAt.UTC().Format(time.RFC3339Nano)},
+		{"created_at", hashTimeOf(e)},
 	}
 	var n [8]byte
 	for _, f := range fields {
@@ -294,6 +307,7 @@ type verifyRow struct {
 	CreatedAt time.Time `db:"created_at"`
 	PrevHash  string    `db:"prev_hash"`
 	EntryHash string    `db:"entry_hash"`
+	HashTime  string    `db:"hash_time"`
 }
 
 func (r verifyRow) entry() Entry {
@@ -307,6 +321,7 @@ func (r verifyRow) entry() Entry {
 		CreatedAt: r.CreatedAt,
 		PrevHash:  r.PrevHash,
 		EntryHash: r.EntryHash,
+		HashTime:  r.HashTime,
 	}
 }
 
@@ -322,7 +337,7 @@ func VerifyChain(ctx context.Context, db *sqlx.DB) (ChainReport, error) {
 	err := db.SelectContext(ctx, &rows, `
 		SELECT COALESCE(seq, 0) AS rowid, id, actor_type, COALESCE(actor_id, '') AS actor_id, action,
 		       COALESCE(target_id, '') AS target_id, COALESCE(details, '') AS details,
-		       created_at, prev_hash, entry_hash
+		       created_at, prev_hash, entry_hash, COALESCE(hash_time, '') AS hash_time
 		  FROM audit_logs
 		 ORDER BY created_at ASC, seq ASC`)
 	if err != nil {
