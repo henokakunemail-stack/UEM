@@ -27,8 +27,8 @@ type WSHandler struct {
 	// nodeID is this server node's identity. When set, the handler records
 	// which node holds each agent socket and only marks a device offline if
 	// this node still owns it. Empty in tests that build a bare handler.
-	nodeID string
-	flusher      *HeartbeatFlusher
+	nodeID  string
+	flusher *HeartbeatFlusher
 	// inventory accepts agent collection reports. Optional: nil means reports are
 	// logged and dropped, which keeps Phase 1 deployments working unchanged.
 	inventory InventoryReceiver

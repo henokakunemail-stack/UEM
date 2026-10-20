@@ -37,6 +37,9 @@ type LoginHandler struct {
 	// session record. It honours the forwarding headers only from a trusted
 	// peer, so an attacker cannot rotate X-Forwarded-For to dodge the lockout.
 	clientIP *ClientIPResolver
+	// lockout counts failures per account in the database, so it holds
+	// across server nodes and across source addresses.
+	lockout accountLockout
 }
 
 func NewLoginHandler(db *sqlx.DB, jwt *JWTService) *LoginHandler {
@@ -46,6 +49,7 @@ func NewLoginHandler(db *sqlx.DB, jwt *JWTService) *LoginHandler {
 		sessions: NewSessionStore(db, jwt.refreshTokenTTL),
 		limiter:  NewIPRateLimiter(5, 1*time.Minute, 5*time.Minute),
 		clientIP: NewClientIPResolver(nil),
+		lockout:  accountLockout{db: db},
 	}
 }
 
@@ -149,6 +153,14 @@ func (h *LoginHandler) login(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "username and password required")
 		return
 	}
+	// Checked before the password, so a locked account is not a free oracle
+	// for whether the next guess would have been right.
+	if wait := h.lockout.lockedFor(r.Context(), req.Username); wait > 0 {
+		waitSec := int(wait.Seconds()) + 1
+		w.Header().Set("Retry-After", strconv.Itoa(waitSec))
+		writeErr(w, http.StatusTooManyRequests, fmt.Sprintf("too many failed login attempts, please try again in %d seconds", waitSec))
+		return
+	}
 
 	var u struct {
 		ID           string `db:"id"`
@@ -168,6 +180,7 @@ func (h *LoginHandler) login(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		// Do not leak whether the username exists.
 		h.limiter.RecordFailure(clientIP)
+		h.lockout.recordFailure(r.Context(), req.Username)
 		log.Debug().Err(err).Str("username", req.Username).Msg("login unknown user")
 		writeErr(w, http.StatusUnauthorized, "invalid credentials")
 		return
@@ -179,6 +192,7 @@ func (h *LoginHandler) login(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := ComparePassword(u.PasswordHash, req.Password); err != nil {
 		h.limiter.RecordFailure(clientIP)
+		h.lockout.recordFailure(r.Context(), req.Username)
 		writeErr(w, http.StatusUnauthorized, "invalid credentials")
 		return
 	}
@@ -207,6 +221,7 @@ func (h *LoginHandler) login(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.limiter.RecordSuccess(clientIP)
+	h.lockout.reset(r.Context(), req.Username)
 	// Stamped after the credential check, so a failed login never refreshes
 	// last_login_at. The column is what the console shows as "last seen on the
 	// console" and what an operator reads during an incident, and a failure

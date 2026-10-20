@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -549,7 +550,7 @@ func buildServer(cfg config.Config, database *sqlx.DB) (*http.Server, func()) {
 
 	// Phase 4: software package repository and deployment engine.
 	softRepo := softwaredeployment.NewRepository(database)
-	softH := softwaredeployment.NewHandler(softRepo, hub, &auditAdapter{db: database}, "./data/packages", jwtSvc.RequireAuth, deviceRepo)
+	softH := softwaredeployment.NewHandler(softRepo, hub, &auditAdapter{db: database}, filepath.Join(cfg.DataDir, "packages"), jwtSvc.RequireAuth, deviceRepo)
 	softH.Register(r)
 
 	// Phase 5: remote execution & terminal routes.
@@ -645,7 +646,7 @@ func buildServer(cfg config.Config, database *sqlx.DB) (*http.Server, func()) {
 	// Phase 13: agent self-update & rollout management.
 	updateRepo := agentupdate.NewRepository(database)
 	updateH := agentupdate.NewHandler(updateRepo, hub, deviceRepo, &auditAdapter{db: database},
-		"./data/agent-releases", jwtSvc.RequireAuth, cfg.UpdateMinimumVersion).
+		filepath.Join(cfg.DataDir, "agent-releases"), jwtSvc.RequireAuth, cfg.UpdateMinimumVersion).
 		WithSigningPublicKey(cfg.UpdateSigningPublicKey, cfg.UpdateMinimumVersion)
 	updateH.Register(r)
 
@@ -660,7 +661,8 @@ func buildServer(cfg config.Config, database *sqlx.DB) (*http.Server, func()) {
 
 	// Endpoint system policies (Active Directory GPO-like management).
 	sysPolicyRepo := systempolicy.NewRepository(database)
-	sysPolicyH := systempolicy.NewHandler(sysPolicyRepo, hub, deviceRepo, &auditAdapter{db: database}, jwtSvc.RequireAuth)
+	sysPolicyH := systempolicy.NewHandler(sysPolicyRepo, hub, deviceRepo, &auditAdapter{db: database}, jwtSvc.RequireAuth).
+		WithDataDir(cfg.DataDir)
 	sysPolicyH.Register(r)
 	wsH.WithSystemPolicySync(sysPolicyH)
 

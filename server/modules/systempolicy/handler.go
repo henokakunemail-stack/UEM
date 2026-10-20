@@ -41,6 +41,15 @@ type Handler struct {
 	devices        *devicemgmt.Repository
 	audit          AuditLogger
 	authMiddleware func(http.Handler) http.Handler
+	// wallpaperDir is where uploaded wallpapers are stored. See WithDataDir.
+	wallpaperDir string
+}
+
+// WithDataDir stores wallpapers under dataDir. The default is the working
+// directory's data folder, which is what it has always been.
+func (h *Handler) WithDataDir(dataDir string) *Handler {
+	h.wallpaperDir = filepath.Join(dataDir, "wallpapers")
+	return h
 }
 
 func NewHandler(
@@ -56,6 +65,7 @@ func NewHandler(
 		devices:        devices,
 		audit:          audit,
 		authMiddleware: authMiddleware,
+		wallpaperDir:   filepath.Join("data", "wallpapers"),
 	}
 }
 
@@ -585,7 +595,7 @@ func (h *Handler) wallpaperUpload(w http.ResponseWriter, r *http.Request) {
 	_, _ = rand.Read(randBytes)
 	newFilename := fmt.Sprintf("wallpaper_%s%s", hex.EncodeToString(randBytes), ext)
 
-	uploadDir := filepath.Join("data", "wallpapers")
+	uploadDir := h.wallpaperDir
 	if err := os.MkdirAll(uploadDir, 0755); err != nil {
 		writeErr(w, http.StatusInternalServerError, "failed to create wallpaper directory")
 		return
@@ -613,7 +623,7 @@ func (h *Handler) wallpaperUpload(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) serveWallpaper(w http.ResponseWriter, r *http.Request) {
 	filename := filepath.Base(chi.URLParam(r, "filename"))
-	filePath := filepath.Join("data", "wallpapers", filename)
+	filePath := filepath.Join(h.wallpaperDir, filename)
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
 		http.NotFound(w, r)
 		return

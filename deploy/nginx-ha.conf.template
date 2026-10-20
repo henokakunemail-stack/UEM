@@ -1,0 +1,121 @@
+# Nginx template for running TWO OR MORE Endpoint Management server nodes on
+# one PostgreSQL database. See README-HA.md for the whole setup.
+#
+# Placeholders (replace by hand):
+#   __DOMAIN__   public hostname, e.g. mgmt.example.com
+#   __SSL_DIR__  certificate directory, e.g. /etc/ssl/endpoint-mgmt
+#   __NODE1__    first node, e.g. 10.0.0.11:8443
+#   __NODE2__    second node, e.g. 10.0.0.12:8443
+#
+# Why routing is by device and not round-robin
+# ---------------------------------------------
+# Remote control and the remote terminal relay two sockets through the server:
+# the operator's browser and the device's agent. Both must be on the same node,
+# because the relay lives in that node's memory. Every request that names a
+# device -- in the path (/api/devices/<id>/..., /api/agent/devices/<id>/...)
+# or, for the agent's own socket, in the X-Device-Id header -- is therefore
+# hashed on the device id, so all of one device's traffic reaches one node.
+# Everything else (the console, reports, settings) has no device and is spread
+# across the nodes.
+#
+# Commands an operator sends through any node still reach the agent wherever
+# its socket is: the server forwards them between nodes itself (PostgreSQL
+# LISTEN/NOTIFY). Device hashing is only what keeps the relays together.
+
+# Device id from the path, if the request names one.
+map $request_uri $em_device_from_path {
+    ~^/api/(?:agent/)?devices/(?<em_dev>[A-Za-z0-9_-]+)  $em_dev;
+    default                                               "";
+}
+
+# The agent's own socket (/api/agent/connect) names its device in a header.
+map $em_device_from_path $em_device_key {
+    ""       $http_x_device_id;
+    default  $em_device_from_path;
+}
+
+# No device at all: spread by request.
+map $em_device_key $em_hash_key {
+    ""       $request_id;
+    default  $em_device_key;
+}
+
+upstream endpoint_cluster {
+    hash $em_hash_key consistent;
+    # A node that stops answering is taken out of rotation; its devices move to
+    # the remaining node, and their agents reconnect there within seconds.
+    server __NODE1__ max_fails=2 fail_timeout=10s;
+    server __NODE2__ max_fails=2 fail_timeout=10s;
+    keepalive 64;
+}
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name __DOMAIN__;
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name __DOMAIN__;
+
+    ssl_certificate     __SSL_DIR__/__DOMAIN__.fullchain.crt;
+    ssl_certificate_key __SSL_DIR__/__DOMAIN__.key;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers on;
+    ssl_session_timeout 1d;
+    ssl_session_cache shared:SSL:50m;
+    ssl_session_tickets off;
+
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "no-referrer-when-downgrade" always;
+
+    client_max_body_size 1024M;
+    client_body_buffer_size 128k;
+
+    # Readiness drives failover: a node that is shutting down answers 503 here
+    # first, so it stops receiving traffic before it closes its sockets.
+    location = /readyz {
+        proxy_pass http://endpoint_cluster;
+    }
+
+    # /metrics is for the monitoring network only.
+    location = /metrics {
+        allow 10.0.0.0/8;
+        allow 172.16.0.0/12;
+        allow 192.168.0.0/16;
+        deny all;
+        proxy_pass http://endpoint_cluster;
+    }
+
+    location / {
+        proxy_pass http://endpoint_cluster;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_connect_timeout 10s;
+        proxy_read_timeout 60s;
+        proxy_send_timeout 60s;
+        proxy_next_upstream error timeout http_502 http_503;
+    }
+
+    # Long-lived WebSockets: the agent socket and both relays.
+    location ~* ^/api/(agent/connect|agent/devices/.*/remotecontrol/ws|devices/.*/(terminal|remotecontrol)/ws) {
+        proxy_pass http://endpoint_cluster;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+    }
+}
