@@ -126,6 +126,12 @@ func TestWorkerCommandLineReachesAGoChildIntact(t *testing.T) {
 		{"trailing backslash", `C:\`},
 		{"trailing backslash after space", `C:\Program Files\`},
 		{"doubled trailing backslash", `C:\a\\`},
+		// A backslash run followed by a quote inside the argument. The run is
+		// doubled on the way out, and the loop once advanced by the doubled
+		// count, so the quote after the run was skipped and never emitted.
+		{"interior quote after backslash", `a\"b`},
+		{"interior quote after backslash run", `C:\x\\"y`},
+		{"interior quote", `a"b`},
 	}
 
 	want := SessionConfig{

@@ -584,6 +584,14 @@ func buildServer(cfg config.Config, database *sqlx.DB) (*http.Server, func()) {
 
 	// Phase 11: remote control & screen capture relay.
 	rcRepo := remotecontrol.NewRepository(database)
+	// Relays are in memory only, so a session still 'active' at start was left
+	// by a process that exited without closing it. Ended here, before any
+	// route is served, so history never shows it as live.
+	if n, err := rcRepo.EndStaleSessions(bgCtx); err != nil {
+		log.Warn().Err(err).Msg("end stale remote control sessions")
+	} else if n > 0 {
+		log.Info().Int64("sessions", n).Msg("ended remote control sessions left active by a previous run")
+	}
 	rcRelay := remotecontrol.NewRelayManager(rcRepo)
 	rcH := remotecontrol.NewHandler(rcRepo, rcRelay, hub, deviceRepo, &auditAdapter{db: database}, jwtSvc.RequireAuth, checkOrigin)
 	rcH.Register(r)

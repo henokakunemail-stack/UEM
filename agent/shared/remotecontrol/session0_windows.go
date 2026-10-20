@@ -287,10 +287,13 @@ func quoteArg(arg string) string {
 			for i+run < len(arg) && arg[i+run] == '\\' {
 				run++
 			}
+			// The emitted count may be doubled; the loop must still advance by
+			// the run as it appears in arg, or the quote after it is skipped.
+			emit := run
 			if i+run >= len(arg) || arg[i+run] == '"' {
-				run *= 2
+				emit *= 2
 			}
-			b.WriteString(strings.Repeat(`\`, run))
+			b.WriteString(strings.Repeat(`\`, emit))
 			i += run - 1
 		case '"':
 			b.WriteString(`\"`)
