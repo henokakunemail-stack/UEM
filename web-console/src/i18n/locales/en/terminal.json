@@ -1,0 +1,16 @@
+{
+  "ticket_failed": "Failed to obtain a connection ticket.",
+  "open_failed": "Failed to open terminal connection.",
+  "session_terminated": "*** Remote shell session terminated ***",
+  "connection_error": "Terminal connection error. The endpoint may be offline.",
+  "title": "Live Interactive Terminal",
+  "shell_suffix": "{shell} shell",
+  "status_connecting": "CONNECTING",
+  "status_active": "ACTIVE",
+  "status_closed": "CLOSED",
+  "status_error": "ERROR",
+  "input_label": "Remote shell input",
+  "input_placeholder": "Type a command and press Enter...",
+  "not_active": "Terminal not active",
+  "hint": "Interactive session streams bidirectionally over the agent's outbound WebSocket. Closing this window terminates the shell process on the endpoint."
+}

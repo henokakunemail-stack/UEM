@@ -1,5 +1,6 @@
 import React from 'react'
 import { Boxes, Laptop, MonitorSmartphone, PieChart, Terminal } from 'lucide-react'
+import { useT } from '../i18n/core'
 import type { OSMetric } from '../types/api'
 
 interface OSDistributionProps {
@@ -23,6 +24,7 @@ const OS_CONFIG: Record<
 const FALLBACK = { varName: '--os-other', icon: Boxes }
 
 export const OSDistribution: React.FC<OSDistributionProps> = ({ metrics }) => {
+  const { t } = useT()
   const total = metrics.reduce((acc, m) => acc + m.count, 0)
   const getConfig = (name: string) => OS_CONFIG[name.toLowerCase()] ?? FALLBACK
 
@@ -32,11 +34,11 @@ export const OSDistribution: React.FC<OSDistributionProps> = ({ metrics }) => {
         <div className="card-header">
           <div className="card-title-group">
             <PieChart size={18} className="card-icon" />
-            <h3 className="card-title">Operating System Distribution</h3>
+            <h3 className="card-title">{t('dashboard.os_title')}</h3>
           </div>
-          <span className="card-badge">0 Monitored</span>
+          <span className="card-badge">{t('dashboard.monitored_count', { count: 0 })}</span>
         </div>
-        <div className="empty-state">No OS telemetry reported</div>
+        <div className="empty-state">{t('dashboard.no_os_telemetry')}</div>
       </div>
     )
   }
@@ -46,9 +48,9 @@ export const OSDistribution: React.FC<OSDistributionProps> = ({ metrics }) => {
       <div className="card-header">
         <div className="card-title-group">
           <PieChart size={18} className="card-icon" />
-          <h3 className="card-title">Operating System Distribution</h3>
+          <h3 className="card-title">{t('dashboard.os_title')}</h3>
         </div>
-        <span className="card-badge">{total} Monitored</span>
+        <span className="card-badge">{t('dashboard.monitored_count', { count: total })}</span>
       </div>
 
       <div className="os-content">
@@ -59,9 +61,9 @@ export const OSDistribution: React.FC<OSDistributionProps> = ({ metrics }) => {
         <div
           className="os-stacked-bar"
           role="img"
-          aria-label={`Operating system distribution: ${metrics
+          aria-label={t('dashboard.os_distribution_aria', { list: metrics
             .map((m) => `${m.os_name} ${m.pct}%`)
-            .join(', ')}`}
+            .join(', ') })}
         >
           {metrics.map((m) => {
             const cfg = getConfig(m.os_name)
@@ -76,7 +78,7 @@ export const OSDistribution: React.FC<OSDistributionProps> = ({ metrics }) => {
                   width: `${Math.min(100, Math.max(0, m.pct))}%`,
                   backgroundColor: `var(${cfg.varName})`,
                 }}
-                title={`${m.os_name}: ${m.count} devices (${m.pct}%)`}
+                title={t('dashboard.os_segment_title', { os: m.os_name, count: m.count, pct: m.pct })}
               />
             )
           })}
@@ -102,7 +104,7 @@ export const OSDistribution: React.FC<OSDistributionProps> = ({ metrics }) => {
                 </div>
                 <div className="os-card-meta">
                   <span className="os-card-title">{m.os_name}</span>
-                  <span className="os-card-count">{m.count} devices</span>
+                  <span className="os-card-count">{t('dashboard.devices_count', { count: m.count })}</span>
                 </div>
                 <div
                   className="os-card-pct-badge"

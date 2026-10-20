@@ -30,13 +30,15 @@ import type {
   DeviceDTO,
   DeviceGroupDTO,
 } from '../types/api'
+import { useT } from '../i18n/core'
 
+// descKey is a dictionary key, looked up with t() at render time.
 const INSTALL_ARG_PRESETS = [
-  { label: 'NSIS (/S)', args: '/S', desc: 'Case-sensitive uppercase. Notepad++, VLC' },
-  { label: 'Inno Setup (/VERYSILENT ...)', args: '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART', desc: 'VS Code, Git, etc.' },
-  { label: 'InstallShield (/s /v"/qn")', args: '/s /v"/qn"', desc: 'InstallShield packages' },
-  { label: 'Generic SFX (/s)', args: '/s', desc: 'WinRAR, 7-Zip SFX' },
-  { label: 'MSI wrapper (/quiet /norestart)', args: '/quiet /norestart', desc: 'MSI-wrapped installers' },
+  { label: 'NSIS (/S)', args: '/S', descKey: 'software.preset_nsis_desc' },
+  { label: 'Inno Setup (/VERYSILENT ...)', args: '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART', descKey: 'software.preset_inno_desc' },
+  { label: 'InstallShield (/s /v"/qn")', args: '/s /v"/qn"', descKey: 'software.preset_installshield_desc' },
+  { label: 'Generic SFX (/s)', args: '/s', descKey: 'software.preset_sfx_desc' },
+  { label: 'MSI wrapper (/quiet /norestart)', args: '/quiet /norestart', descKey: 'software.preset_msi_desc' },
 ]
 
 const UNINSTALL_ARG_PRESETS = [
@@ -47,6 +49,24 @@ const UNINSTALL_ARG_PRESETS = [
 ]
 
 type PackageType = 'msi' | 'exe' | 'deb' | 'rpm' | 'pkg' | 'script'
+
+// Server enums with a translated label; anything else is shown as sent.
+const TARGET_KEYS: Record<string, string> = {
+  all: 'software.target_all_short',
+  group: 'software.target_group_short',
+  device: 'software.target_device_short',
+}
+const TASK_STATUS_KEYS: Record<string, string> = {
+  pending: 'software.task_pending',
+  queued: 'software.task_queued',
+  dispatched: 'software.task_dispatched',
+  downloading: 'software.task_downloading',
+  installing: 'software.task_installing',
+  uninstalling: 'software.task_uninstalling',
+  success: 'software.task_success',
+  failed: 'software.task_failed',
+  failed_lost: 'software.task_failed_lost',
+}
 
 export type SoftwareTab = 'packages' | 'deployments'
 
@@ -67,6 +87,7 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
   const [search, setSearch] = useState('')
   const [statusMsg, setStatusMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
   const toast = useToast()
+  const { t } = useT()
 
   // Upload Modal State
   const [showUploadModal, setShowUploadModal] = useState(false)
@@ -161,7 +182,7 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
       setDevices(devListRes.devices || [])
       setGroups(grpList || [])
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Failed to fetch data'
+      const msg = err instanceof Error ? err.message : t('software.fetch_failed')
       setStatusMsg({ type: 'error', text: msg })
     } finally {
       setLoading(false)
@@ -175,13 +196,13 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
   const handleUpload = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!selectedFile) {
-      setStatusMsg({ type: 'error', text: 'Please select an installer file' })
+      setStatusMsg({ type: 'error', text: t('software.select_installer') })
       return
     }
     if (needsSilentArgs) {
       setStatusMsg({
         type: 'error',
-        text: 'This .exe package needs silent-install arguments. Without them the installer opens a window on the endpoint and blocks there.',
+        text: t('software.exe_needs_args'),
       })
       return
     }
@@ -199,9 +220,9 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
       formData.append('file', selectedFile)
 
       await api.uploadPackage(formData)
-      const successText = `Package ${uploadName} uploaded successfully`
+      const successText = t('software.uploaded', { name: uploadName })
       setStatusMsg({ type: 'success', text: successText })
-      toast.success(successText, 'Package Uploaded')
+      toast.success(successText, t('software.uploaded_title'))
       setShowUploadModal(false)
       setUploadName('')
       setUploadVersion('')
@@ -210,9 +231,9 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
       setSelectedFile(null)
       fetchData()
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Upload failed'
+      const msg = err instanceof Error ? err.message : t('software.upload_failed')
       setStatusMsg({ type: 'error', text: msg })
-      toast.error(msg, 'Upload Failed')
+      toast.error(msg, t('software.upload_failed_title'))
     } finally {
       setUploading(false)
     }
@@ -223,7 +244,7 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
     if (!editingPackage) return
 
     if (editingPackage.package_type === 'exe' && editInstallArgs.trim() === '') {
-      const msg = 'Install arguments are required for .exe packages'
+      const msg = t('software.exe_args_required')
       setStatusMsg({ type: 'error', text: msg })
       toast.error(msg)
       return
@@ -237,15 +258,15 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
         install_args: editInstallArgs,
         uninstall_args: editUninstallArgs,
       })
-      const successText = `Package ${editName} updated successfully`
+      const successText = t('software.updated', { name: editName })
       setStatusMsg({ type: 'success', text: successText })
-      toast.success(successText, 'Package Updated')
+      toast.success(successText, t('software.updated_title'))
       setEditingPackage(null)
       fetchData()
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Failed to update package'
+      const msg = err instanceof Error ? err.message : t('software.update_failed')
       setStatusMsg({ type: 'error', text: msg })
-      toast.error(msg, 'Update Failed')
+      toast.error(msg, t('software.update_failed_title'))
     } finally {
       setSavingEdit(false)
     }
@@ -257,13 +278,13 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
     setDeletingPackage(true)
     try {
       await api.deletePackage(id)
-      const successText = `Package ${name} deleted successfully`
+      const successText = t('software.deleted', { name })
       setStatusMsg({ type: 'success', text: successText })
       toast.info(successText)
       setPackagePendingDelete(null)
       fetchData()
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Failed to delete package'
+      const msg = err instanceof Error ? err.message : t('software.delete_failed')
       setStatusMsg({ type: 'error', text: msg })
       toast.error(msg)
     } finally {
@@ -274,18 +295,18 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
   const handleCreateDeployment = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!deployPackageId || !deployName) {
-      setStatusMsg({ type: 'error', text: 'Please complete all required fields' })
+      setStatusMsg({ type: 'error', text: t('software.complete_required') })
       return
     }
 
     if (deployTargetType === 'device' && !deployTargetId) {
-      const msg = 'Please select a target endpoint'
+      const msg = t('software.select_endpoint_error')
       setStatusMsg({ type: 'error', text: msg })
       toast.error(msg)
       return
     }
     if (deployTargetType === 'group' && !deployTargetId) {
-      const msg = 'Please select a device group'
+      const msg = t('software.select_group_error')
       setStatusMsg({ type: 'error', text: msg })
       toast.error(msg)
       return
@@ -296,9 +317,9 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
     // about a field the operator never saw.
     const selected = packages.find((p) => p.id === deployPackageId)
     if (deployAction === 'uninstall' && selected && !selected.uninstall_args?.trim()) {
-      const msg = `${selected.name} has no uninstall arguments. An uninstaller with no silent switches opens a window on the endpoint. Edit the package and set them first.`
+      const msg = t('software.no_uninstall_args', { name: selected.name })
       setStatusMsg({ type: 'error', text: msg })
-      toast.error(msg, 'Cannot Uninstall')
+      toast.error(msg, t('software.cannot_uninstall'))
       return
     }
 
@@ -312,13 +333,16 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
         target_id: deployTargetId,
         action: deployAction,
       })
-      const verb = deployAction === 'uninstall' ? 'Removal' : 'Deployment'
-      const successText = `${verb} initiated! ${res.tasks_total} target(s) queued, ${res.dispatched_live} dispatched live.`
+      const isRemoval = deployAction === 'uninstall'
+      const successText = t(isRemoval ? 'software.removal_initiated' : 'software.deployment_initiated', {
+        total: res.tasks_total,
+        live: res.dispatched_live,
+      })
       setStatusMsg({
         type: 'success',
         text: successText,
       })
-      toast.success(successText, `${verb} Dispatched`)
+      toast.success(successText, t(isRemoval ? 'software.removal_dispatched' : 'software.deployment_dispatched'))
       setShowDeployModal(false)
       setDeployName('')
       setDeployPackageId('')
@@ -327,9 +351,9 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
       onTabChange('deployments')
       fetchData()
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Failed to trigger deployment'
+      const msg = err instanceof Error ? err.message : t('software.deploy_failed')
       setStatusMsg({ type: 'error', text: msg })
-      toast.error(msg, 'Deployment Failed')
+      toast.error(msg, t('software.deploy_failed_title'))
     } finally {
       setDeploying(false)
     }
@@ -342,7 +366,7 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
       const tasks = await api.getDeploymentTasks(dep.id)
       setDeploymentTasks(tasks)
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Failed to load tasks'
+      const msg = err instanceof Error ? err.message : t('software.tasks_load_failed')
       setStatusMsg({ type: 'error', text: msg })
     } finally {
       setLoadingTasks(false)
@@ -375,10 +399,10 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
         <div>
           <h1 className="page-title">
             <Package size={20} className="text-primary" />
-            Software Deployment
+            {t('software.title')}
           </h1>
           <p className="page-subtitle">
-            Silent multi-platform distribution with integrity verification and progress tracking
+            {t('software.subtitle')}
           </p>
         </div>
         <div className="header-controls">
@@ -389,7 +413,7 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
             disabled={loading}
           >
             <RefreshCw size={16} className={loading ? 'spinning' : ''} />
-            <span>Refresh</span>
+            <span>{t('software.refresh')}</span>
           </button>
           {canDeploy && (
             <>
@@ -399,20 +423,20 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
                 onClick={() => setShowUploadModal(true)}
               >
                 <UploadCloud size={16} />
-                <span>Upload Package</span>
+                <span>{t('software.upload_package')}</span>
               </button>
               <button
                 type="button"
                 className="btn btn-primary"
                 onClick={() => {
                   setDeployPackageId(packages[0]?.id || '')
-                  setDeployName(`Deploy ${packages[0]?.name || 'Package'} - ${new Date().toLocaleDateString()}`)
+                  setDeployName(t('software.default_deploy_name_dated', { name: packages[0]?.name || t('software.package'), date: new Date().toLocaleDateString() }))
                   setShowDeployModal(true)
                 }}
                 disabled={packages.length === 0}
               >
                 <Play size={16} />
-                <span>New Deployment</span>
+                <span>{t('software.new_deployment')}</span>
               </button>
             </>
           )}
@@ -430,7 +454,7 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
             type="button"
             onClick={() => setStatusMsg(null)}
             className="close-btn"
-            aria-label="Dismiss message"
+            aria-label={t('software.dismiss_message')}
           >
             <X size={16} />
           </button>
@@ -441,18 +465,18 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
       <div className="kpi-grid">
         <div className="kpi-card">
           <div className="kpi-header">
-            <span className="kpi-label">Repository Packages</span>
+            <span className="kpi-label">{t('software.kpi_packages')}</span>
             <span className="kpi-icon">
               <Package size={16} />
             </span>
           </div>
           <div className="kpi-value">{packages.length}</div>
-          <div className="kpi-hint">Cross-platform installers ready</div>
+          <div className="kpi-hint">{t('software.kpi_packages_hint')}</div>
         </div>
 
         <div className="kpi-card">
           <div className="kpi-header">
-            <span className="kpi-label">Active Deployments</span>
+            <span className="kpi-label">{t('software.kpi_active')}</span>
             <span className="kpi-icon">
               <Play size={16} />
             </span>
@@ -460,12 +484,12 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
           <div className="kpi-value">
             {deployments.filter((d) => d.status === 'running').length}
           </div>
-          <div className="kpi-hint">In-progress rollout jobs</div>
+          <div className="kpi-hint">{t('software.kpi_active_hint')}</div>
         </div>
 
         <div className="kpi-card">
           <div className="kpi-header">
-            <span className="kpi-label">Total Endpoints Targeted</span>
+            <span className="kpi-label">{t('software.kpi_targeted')}</span>
             <span className="kpi-icon">
               <Server size={16} />
             </span>
@@ -473,12 +497,12 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
           <div className="kpi-value">
             {deployments.reduce((acc, d) => acc + d.total_tasks, 0)}
           </div>
-          <div className="kpi-hint">Across all deployment tasks</div>
+          <div className="kpi-hint">{t('software.kpi_targeted_hint')}</div>
         </div>
 
         <div className="kpi-card">
           <div className="kpi-header">
-            <span className="kpi-label">Execution Success Rate</span>
+            <span className="kpi-label">{t('software.kpi_success')}</span>
             <span className="kpi-icon">
               <CheckCircle2 size={16} />
             </span>
@@ -490,7 +514,7 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
               return total > 0 ? `${((success / total) * 100).toFixed(1)}%` : '100%'
             })()}
           </div>
-          <div className="kpi-hint">Cryptographic verified runs</div>
+          <div className="kpi-hint">{t('software.kpi_success_hint')}</div>
         </div>
       </div>
 
@@ -503,7 +527,7 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
             onClick={() => onTabChange('packages')}
           >
             <Package size={16} />
-            <span>Package Repository ({packages.length})</span>
+            <span>{t('software.tab_packages', { count: packages.length })}</span>
           </button>
           <button
             type="button"
@@ -511,7 +535,7 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
             onClick={() => onTabChange('deployments')}
           >
             <Rocket size={16} />
-            <span>Deployments &amp; Rollouts ({deployments.length})</span>
+            <span>{t('software.tab_deployments', { count: deployments.length })}</span>
           </button>
         </div>
 
@@ -520,8 +544,8 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
           <input
             type="text"
             className="search-input"
-            placeholder={activeTab === 'packages' ? 'Search packages...' : 'Search deployments...'}
-            aria-label={activeTab === 'packages' ? 'Search packages' : 'Search deployments'}
+            placeholder={activeTab === 'packages' ? t('software.search_packages_placeholder') : t('software.search_deployments_placeholder')}
+            aria-label={activeTab === 'packages' ? t('software.search_packages') : t('software.search_deployments')}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
@@ -531,24 +555,24 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
       {/* TAB 1: Package Repository */}
       {activeTab === 'packages' && (
         <div className="table-card">
-          <DataTable label="Package repository">
+          <DataTable label={t('software.packages_table_label')}>
             <table className="data-table">
               <thead>
                 <tr>
-                  <th>Package Name</th>
-                  <th>Target OS</th>
-                  <th>Type</th>
-                  <th>File &amp; Size</th>
-                  <th>SHA-256 Hash</th>
-                  <th>Install Flags</th>
-                  <th className="text-right">Actions</th>
+                  <th>{t('software.col_package_name')}</th>
+                  <th>{t('software.col_target_os')}</th>
+                  <th>{t('software.col_type')}</th>
+                  <th>{t('software.col_file_size')}</th>
+                  <th>{t('software.col_hash')}</th>
+                  <th>{t('software.col_install_flags')}</th>
+                  <th className="text-right">{t('software.col_actions')}</th>
                 </tr>
               </thead>
               <tbody>
                 {filteredPackages.length === 0 ? (
                   <tr>
                     <td colSpan={7} className="py-8 text-center text-muted">
-                      No software packages in repository. Click "Upload Package" to add your first installer.
+                      {t('software.no_packages')}
                     </td>
                   </tr>
                 ) : (
@@ -580,7 +604,7 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
                       </td>
                       <td>
                         <span className="font-mono text-sm text-muted">
-                          {pkg.install_args || '(default silent)'}
+                          {pkg.install_args || t('software.default_silent')}
                         </span>
                       </td>
                       <td className="text-right">
@@ -590,7 +614,7 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
                               <button
                                 type="button"
                                 className="btn btn-sm btn-secondary"
-                                title="Edit Switches"
+                                title={t('software.edit_switches')}
                                 onClick={() => {
                                   setEditingPackage(pkg)
                                   setEditName(pkg.name)
@@ -600,14 +624,14 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
                                 }}
                               >
                                 <Edit2 size={14} />
-                                <span>Edit</span>
+                                <span>{t('software.edit')}</span>
                               </button>
                               <button
                                 type="button"
                                 className="btn btn-sm btn-secondary"
                                 onClick={() => {
                                   setDeployPackageId(pkg.id)
-                                  setDeployName(`Deploy ${pkg.name} v${pkg.version}`)
+                                  setDeployName(t('software.default_deploy_name', { name: pkg.name, version: pkg.version }))
                                   const onlineDev = devices.find((d) => d.status === 'online') || devices[0]
                                   if (onlineDev && !deployTargetId) {
                                     setDeployTargetId(onlineDev.id)
@@ -616,7 +640,7 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
                                 }}
                               >
                                 <Play size={14} />
-                                <span>Deploy</span>
+                                <span>{t('software.deploy')}</span>
                               </button>
                             </>
                           )}
@@ -625,7 +649,7 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
                               type="button"
                               className="btn btn-sm btn-secondary"
                               onClick={() => setPackagePendingDelete({ id: pkg.id, name: pkg.name })}
-                              aria-label={`Delete package ${pkg.name}`}
+                              aria-label={t('software.delete_package_label', { name: pkg.name })}
                             >
                               <Trash2 size={14} className="text-danger" />
                             </button>
@@ -644,25 +668,25 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
       {/* TAB 2: Deployments & Rollouts */}
       {activeTab === 'deployments' && (
         <div className="table-card">
-          <DataTable label="Deployments and rollouts">
+          <DataTable label={t('software.deployments_table_label')}>
             <table className="data-table">
               <thead>
                 <tr>
-                  <th>Deployment Name</th>
-                  <th>Operation</th>
-                  <th>Package</th>
-                  <th>Target Scope</th>
-                  <th>Status</th>
-                  <th>Progress</th>
-                  <th>Started</th>
-                  <th className="text-right">Actions</th>
+                  <th>{t('software.col_deployment_name')}</th>
+                  <th>{t('software.col_operation')}</th>
+                  <th>{t('software.col_package')}</th>
+                  <th>{t('software.col_target_scope')}</th>
+                  <th>{t('software.col_status')}</th>
+                  <th>{t('software.col_progress')}</th>
+                  <th>{t('software.col_started')}</th>
+                  <th className="text-right">{t('software.col_actions')}</th>
                 </tr>
               </thead>
               <tbody>
                 {filteredDeployments.length === 0 ? (
                   <tr>
                     <td colSpan={7} className="py-8 text-center text-muted">
-                      No deployments initiated yet. Select a package and click "Deploy" to start a rollout.
+                      {t('software.no_deployments')}
                     </td>
                   </tr>
                 ) : (
@@ -682,35 +706,35 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
                               than leaving an operator to infer it from the name. */}
                           {dep.action === 'uninstall' ? (
                             <span className="status-pill danger">
-                              <Trash2 size={12} /> Uninstall
+                              <Trash2 size={12} /> {t('software.op_uninstall')}
                             </span>
                           ) : (
                             <span className="status-pill online">
-                              <Play size={12} /> Install
+                              <Play size={12} /> {t('software.op_install')}
                             </span>
                           )}
                         </td>
                         <td>
                           <div>{dep.package_name || dep.package_id}</div>
-                          <div className="text-sm text-dim">v{dep.package_version || 'latest'}</div>
+                          <div className="text-sm text-dim">v{dep.package_version || t('software.latest')}</div>
                         </td>
                         <td>
                           <span className="os-badge">
-                            {dep.target_type} {dep.target_id ? `(${dep.target_id})` : ''}
+                            {TARGET_KEYS[dep.target_type] ? t(TARGET_KEYS[dep.target_type]) : dep.target_type} {dep.target_id ? `(${dep.target_id})` : ''}
                           </span>
                         </td>
                         <td>
                           {dep.status === 'completed' ? (
                             <span className="status-pill online">
-                              <CheckCircle2 size={12} /> Completed
+                              <CheckCircle2 size={12} /> {t('software.status_completed')}
                             </span>
                           ) : dep.status === 'running' ? (
                             <span className="status-pill primary">
-                              <Clock size={12} className="spinning" /> In Progress
+                              <Clock size={12} className="spinning" /> {t('software.status_in_progress')}
                             </span>
                           ) : (
                             <span className="status-pill danger">
-                              <XCircle size={12} /> Failed
+                              <XCircle size={12} /> {t('software.status_failed')}
                             </span>
                           )}
                         </td>
@@ -735,7 +759,7 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
                             onClick={() => handleOpenTasks(dep)}
                           >
                             <Terminal size={14} />
-                            <span>View Tasks</span>
+                            <span>{t('software.view_tasks')}</span>
                           </button>
                         </td>
                       </tr>
@@ -752,7 +776,7 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
       <Modal
         open={showUploadModal}
         onClose={() => !uploading && setShowUploadModal(false)}
-        title="Upload Software Package"
+        title={t('software.upload_modal_title')}
         size="md"
         dismissible={!uploading}
         footer={
@@ -763,7 +787,7 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
               onClick={() => setShowUploadModal(false)}
               disabled={uploading}
             >
-              Cancel
+              {t('common.cancel')}
             </button>
             <button
               type="submit"
@@ -774,10 +798,10 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
               {uploading ? (
                 <>
                   <RefreshCw size={16} className="spinning" />
-                  <span>Computing SHA-256 &amp; Uploading...</span>
+                  <span>{t('software.uploading')}</span>
                 </>
               ) : (
-                'Upload &amp; Index'
+                t('software.upload_index')
               )}
             </button>
           </>
@@ -787,28 +811,28 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
           <div className="form-row">
             <div className="form-group">
               <label className="form-label" htmlFor="pkg-name">
-                Package Name
+                {t('software.col_package_name')}
               </label>
               <input
                 id="pkg-name"
                 type="text"
                 className="form-input"
                 required
-                placeholder="e.g. 7-Zip Archiver"
+                placeholder={t('software.name_placeholder')}
                 value={uploadName}
                 onChange={(e) => setUploadName(e.target.value)}
               />
             </div>
             <div className="form-group">
               <label className="form-label" htmlFor="pkg-version">
-                Version
+                {t('software.version')}
               </label>
               <input
                 id="pkg-version"
                 type="text"
                 className="form-input"
                 required
-                placeholder="e.g. 24.08"
+                placeholder={t('software.version_placeholder')}
                 value={uploadVersion}
                 onChange={(e) => setUploadVersion(e.target.value)}
               />
@@ -818,7 +842,7 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
           <div className="form-row">
             <div className="form-group">
               <label className="form-label" htmlFor="pkg-os">
-                Target Operating System
+                {t('software.target_os_full')}
               </label>
               <select
                 id="pkg-os"
@@ -833,7 +857,7 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
             </div>
             <div className="form-group">
               <label className="form-label" htmlFor="pkg-type">
-                Package Format
+                {t('software.package_format')}
               </label>
               <select
                 id="pkg-type"
@@ -843,22 +867,22 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
               >
                 {uploadOS === 'windows' && (
                   <>
-                    <option value="msi">MSI (Windows Installer)</option>
-                    <option value="exe">EXE (Executable)</option>
-                    <option value="script">PowerShell Script (.ps1)</option>
+                    <option value="msi">{t('software.format_msi')}</option>
+                    <option value="exe">{t('software.format_exe')}</option>
+                    <option value="script">{t('software.format_ps1')}</option>
                   </>
                 )}
                 {uploadOS === 'linux' && (
                   <>
-                    <option value="deb">DEB (Debian/Ubuntu)</option>
-                    <option value="rpm">RPM (RHEL/CentOS)</option>
-                    <option value="script">Shell Script (.sh)</option>
+                    <option value="deb">{t('software.format_deb')}</option>
+                    <option value="rpm">{t('software.format_rpm')}</option>
+                    <option value="script">{t('software.format_sh')}</option>
                   </>
                 )}
                 {uploadOS === 'macos' && (
                   <>
-                    <option value="pkg">PKG (Apple Installer)</option>
-                    <option value="script">Shell Script (.sh)</option>
+                    <option value="pkg">{t('software.format_pkg')}</option>
+                    <option value="script">{t('software.format_sh')}</option>
                   </>
                 )}
               </select>
@@ -867,8 +891,8 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
 
           <div className="form-group">
             <label className="form-label" htmlFor="pkg-args">
-              Silent Install Arguments
-              {uploadType === 'exe' && <span className="form-label-required">required for .exe</span>}
+              {t('software.install_args')}
+              {uploadType === 'exe' && <span className="form-label-required">{t('software.required_for_exe')}</span>}
             </label>
             <input
               id="pkg-args"
@@ -887,13 +911,13 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
             />
             {uploadType === 'exe' && (
               <div className="mt-2 flex flex-wrap gap-1.5 items-center">
-                <span className="text-xs text-dim mr-1">Presets:</span>
+                <span className="text-xs text-dim mr-1">{t('software.presets')}</span>
                 {INSTALL_ARG_PRESETS.map((preset) => (
                   <button
                     key={preset.label}
                     type="button"
                     className="btn btn-sm btn-secondary font-mono text-xs py-0.5 px-2"
-                    title={preset.desc}
+                    title={t(preset.descKey)}
                     onClick={() => setUploadInstallArgs(preset.args)}
                   >
                     {preset.label}
@@ -903,31 +927,31 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
             )}
             <span className="form-hint">
               {uploadType === 'exe'
-                ? 'Required. Case-sensitive: NSIS requires uppercase /S. Inno Setup requires /VERYSILENT /SUPPRESSMSGBOXES /NORESTART.'
-                : 'Leave blank to use the default silent flags.'}
+                ? t('software.install_args_hint_exe')
+                : t('software.install_args_hint')}
             </span>
             {needsSilentArgs && selectedFile && (
               <span className="form-hint form-hint-error">
-                {selectedFile.name} has no silent-install arguments yet. Click a preset above or enter arguments before uploading.
+                {t('software.file_needs_args', { name: selectedFile.name })}
               </span>
             )}
           </div>
 
           <div className="form-group">
             <label className="form-label" htmlFor="pkg-uninstall-args">
-              Silent Uninstall Arguments
-              <span className="text-xs text-dim ml-1">(enables remote removal)</span>
+              {t('software.uninstall_args')}
+              <span className="text-xs text-dim ml-1">{t('software.enables_removal')}</span>
             </label>
             <input
               id="pkg-uninstall-args"
               type="text"
               className="form-input font-mono"
-              placeholder={uploadType === 'msi' ? '/qn /norestart' : '/S or /VERYSILENT /SUPPRESSMSGBOXES /NORESTART'}
+              placeholder={uploadType === 'msi' ? '/qn /norestart' : t('software.uninstall_args_placeholder')}
               value={uploadUninstallArgs}
               onChange={(e) => setUploadUninstallArgs(e.target.value)}
             />
             <div className="mt-2 flex flex-wrap gap-1.5 items-center">
-              <span className="text-xs text-dim mr-1">Presets:</span>
+              <span className="text-xs text-dim mr-1">{t('software.presets')}</span>
               {UNINSTALL_ARG_PRESETS.map((preset) => (
                 <button
                   key={preset.label}
@@ -940,13 +964,13 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
               ))}
             </div>
             <span className="form-hint">
-              Used when remote software removal is dispatched. If blank, remote uninstallation will not be permitted.
+              {t('software.uninstall_args_hint')}
             </span>
           </div>
 
           <div className="form-group">
             <label className="form-label" htmlFor="pkg-file">
-              Installer Binary File
+              {t('software.installer_file')}
             </label>
             <input
               id="pkg-file"
@@ -962,7 +986,7 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
             />
             {selectedFile && (
               <span className="form-hint">
-                {selectedFile.name} · detected as <strong>{uploadType}</strong> ·{' '}
+                {selectedFile.name} · {t('software.detected_as')} <strong>{uploadType}</strong> ·{' '}
                 {formatBytes(selectedFile.size)}
               </span>
             )}
@@ -974,7 +998,7 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
       <Modal
         open={editingPackage !== null}
         onClose={() => !savingEdit && setEditingPackage(null)}
-        title={editingPackage ? `Edit ${editingPackage.name} Switches` : 'Edit Package'}
+        title={editingPackage ? t('software.edit_modal_title', { name: editingPackage.name }) : t('software.edit_package')}
         size="md"
         dismissible={!savingEdit}
         footer={
@@ -985,7 +1009,7 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
               onClick={() => setEditingPackage(null)}
               disabled={savingEdit}
             >
-              Cancel
+              {t('common.cancel')}
             </button>
             <button
               type="submit"
@@ -996,10 +1020,10 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
               {savingEdit ? (
                 <>
                   <RefreshCw size={16} className="spinning" />
-                  <span>Saving...</span>
+                  <span>{t('software.saving')}</span>
                 </>
               ) : (
-                'Save Changes'
+                t('software.save_changes')
               )}
             </button>
           </>
@@ -1009,7 +1033,7 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
           <div className="form-row">
             <div className="form-group">
               <label className="form-label" htmlFor="edit-pkg-name">
-                Package Name
+                {t('software.col_package_name')}
               </label>
               <input
                 id="edit-pkg-name"
@@ -1022,7 +1046,7 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
             </div>
             <div className="form-group">
               <label className="form-label" htmlFor="edit-pkg-version">
-                Version
+                {t('software.version')}
               </label>
               <input
                 id="edit-pkg-version"
@@ -1037,8 +1061,8 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
 
           <div className="form-group">
             <label className="form-label" htmlFor="edit-pkg-args">
-              Silent Install Arguments
-              {editingPackage?.package_type === 'exe' && <span className="form-label-required">required for .exe</span>}
+              {t('software.install_args')}
+              {editingPackage?.package_type === 'exe' && <span className="form-label-required">{t('software.required_for_exe')}</span>}
             </label>
             <input
               id="edit-pkg-args"
@@ -1050,13 +1074,13 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
             />
             {editingPackage?.package_type === 'exe' && (
               <div className="mt-2 flex flex-wrap gap-1.5 items-center">
-                <span className="text-xs text-dim mr-1">Presets:</span>
+                <span className="text-xs text-dim mr-1">{t('software.presets')}</span>
                 {INSTALL_ARG_PRESETS.map((preset) => (
                   <button
                     key={preset.label}
                     type="button"
                     className="btn btn-sm btn-secondary font-mono text-xs py-0.5 px-2"
-                    title={preset.desc}
+                    title={t(preset.descKey)}
                     onClick={() => setEditInstallArgs(preset.args)}
                   >
                     {preset.label}
@@ -1065,13 +1089,13 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
               </div>
             )}
             <span className="form-hint">
-              Case-sensitive switches used during unattended deployment (e.g. /S for NSIS).
+              {t('software.edit_install_args_hint')}
             </span>
           </div>
 
           <div className="form-group">
             <label className="form-label" htmlFor="edit-pkg-uninstall-args">
-              Silent Uninstall Arguments
+              {t('software.uninstall_args')}
             </label>
             <input
               id="edit-pkg-uninstall-args"
@@ -1081,7 +1105,7 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
               onChange={(e) => setEditUninstallArgs(e.target.value)}
             />
             <div className="mt-2 flex flex-wrap gap-1.5 items-center">
-              <span className="text-xs text-dim mr-1">Presets:</span>
+              <span className="text-xs text-dim mr-1">{t('software.presets')}</span>
               {UNINSTALL_ARG_PRESETS.map((preset) => (
                 <button
                   key={preset.label}
@@ -1094,7 +1118,7 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
               ))}
             </div>
             <span className="form-hint">
-              Required for software removal via Software Deployments.
+              {t('software.edit_uninstall_args_hint')}
             </span>
           </div>
         </form>
@@ -1104,7 +1128,7 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
       <Modal
         open={showDeployModal}
         onClose={() => !deploying && setShowDeployModal(false)}
-        title={deployAction === 'uninstall' ? 'Launch Software Removal' : 'Launch Software Deployment'}
+        title={deployAction === 'uninstall' ? t('software.launch_removal') : t('software.launch_deployment')}
         size="md"
         dismissible={!deploying}
         footer={
@@ -1115,7 +1139,7 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
               onClick={() => setShowDeployModal(false)}
               disabled={deploying}
             >
-              Cancel
+              {t('common.cancel')}
             </button>
             <button
               type="submit"
@@ -1126,12 +1150,12 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
               {deploying ? (
                 <>
                   <RefreshCw size={16} className="spinning" />
-                  <span>Dispatching Jobs...</span>
+                  <span>{t('software.dispatching')}</span>
                 </>
               ) : deployAction === 'uninstall' ? (
-                'Start Removal'
+                t('software.start_removal')
               ) : (
-                'Start Deployment'
+                t('software.start_deployment')
               )}
             </button>
           </>
@@ -1140,7 +1164,7 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
         <form id="deploy-form" onSubmit={handleCreateDeployment}>
           <div className="form-group">
             <label className="form-label" htmlFor="deploy-name">
-              Deployment Name
+              {t('software.col_deployment_name')}
             </label>
             <input
               id="deploy-name"
@@ -1154,7 +1178,7 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
 
           <div className="form-group">
             <label className="form-label" htmlFor="deploy-package">
-              Software Package
+              {t('software.software_package')}
             </label>
             <select
               id="deploy-package"
@@ -1172,7 +1196,7 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
 
           <div className="form-group">
             <label className="form-label" htmlFor="deploy-action">
-              Operation
+              {t('software.col_operation')}
             </label>
             <select
               id="deploy-action"
@@ -1180,21 +1204,17 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
               value={deployAction}
               onChange={(e) => setDeployAction(e.target.value as typeof deployAction)}
             >
-              <option value="install">Install package</option>
-              <option value="uninstall">Uninstall package</option>
+              <option value="install">{t('software.install_package')}</option>
+              <option value="uninstall">{t('software.uninstall_package')}</option>
             </select>
             {deployAction === 'uninstall' && deployPackageId && !selectedDeployPkg?.uninstall_args?.trim() && (
               <span className="form-hint form-hint-error">
-                {selectedDeployPkg?.name} has no uninstall arguments. An uninstaller with no silent
-                switches opens a window on the endpoint and waits for a person, so this deployment
-                will be refused. Edit the package and set its uninstall arguments first.
+                {t('software.uninstall_refused', { name: selectedDeployPkg?.name ?? '' })}
               </span>
             )}
             {deployAction === 'uninstall' && (
               <span className="form-hint">
-                The agent finds the program on the endpoint and removes it there. Nothing is
-                downloaded, and a package that is not installed on a machine is reported as
-                already compliant rather than as a failure.
+                {t('software.uninstall_explainer')}
               </span>
             )}
           </div>
@@ -1202,7 +1222,7 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
           <div className="form-row">
             <div className="form-group">
               <label className="form-label" htmlFor="deploy-scope">
-                Target Scope
+                {t('software.col_target_scope')}
               </label>
               <select
                 id="deploy-scope"
@@ -1221,18 +1241,18 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
                   }
                 }}
               >
-                <option value="all">All Compatible Devices</option>
-                <option value="group">Static Device Group</option>
-                <option value="device">Single Endpoint</option>
+                <option value="all">{t('software.scope_all')}</option>
+                <option value="group">{t('software.scope_group')}</option>
+                <option value="device">{t('software.scope_device')}</option>
               </select>
             </div>
             <div className="form-group">
               <label className="form-label" htmlFor="deploy-target-id">
                 {deployTargetType === 'device'
-                  ? 'Target Endpoint'
+                  ? t('software.target_endpoint')
                   : deployTargetType === 'group'
-                    ? 'Target Device Group'
-                    : 'Target Scope'}
+                    ? t('software.target_group')
+                    : t('software.col_target_scope')}
               </label>
               {deployTargetType === 'device' ? (
                 <>
@@ -1244,7 +1264,7 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
                     onChange={(e) => setDeployTargetId(e.target.value)}
                   >
                     <option value="" disabled>
-                      Select an endpoint...
+                      {t('software.select_endpoint')}
                     </option>
                     {devices.map((d) => {
                       const isOnline = d.status === 'online'
@@ -1253,33 +1273,34 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
                         selectedDeployPkg.os_target.toLowerCase() === d.os_name.toLowerCase()
                       return (
                         <option key={d.id} value={d.id}>
-                          {isOnline ? '🟢' : '⚪'} {d.hostname} ({isOnline ? 'Online' : 'Offline'} · {d.os_name}
-                          {!osMatch ? ' · OS Mismatch' : ''})
+                          {isOnline ? '🟢' : '⚪'} {d.hostname} ({isOnline ? t('software.online') : t('software.offline')} · {d.os_name}
+                          {!osMatch ? ` · ${t('software.os_mismatch')}` : ''})
                         </option>
                       )
                     })}
                   </select>
                   {devices.length === 0 && (
                     <span className="form-hint form-hint-error">
-                      No enrolled endpoints found. Agents must be registered first.
+                      {t('software.no_endpoints')}
                     </span>
                   )}
                   {selectedDevice && (
                     <span className="form-hint">
                       {selectedDevice.status === 'online' ? (
                         <span className="text-success font-semibold">
-                          🟢 {selectedDevice.hostname} is online via WebSocket. Deployment will dispatch immediately.
+                          🟢 {t('software.device_online', { hostname: selectedDevice.hostname })}
                         </span>
                       ) : (
                         <span className="text-warning">
-                          ⚪ {selectedDevice.hostname} is offline. Task will queue and execute when agent reconnects.
+                          ⚪ {t('software.device_offline', { hostname: selectedDevice.hostname })}
                         </span>
                       )}
                       {selectedDeployPkg?.os_target &&
                         selectedDeployPkg.os_target.toLowerCase() !== selectedDevice.os_name.toLowerCase() && (
                           <div className="text-danger mt-1">
-                            ⚠️ Warning: Package targets <strong>{selectedDeployPkg.os_target}</strong>, but{' '}
-                            {selectedDevice.hostname} runs <strong>{selectedDevice.os_name}</strong>.
+                            ⚠️ {t('software.os_warning_targets')} <strong>{selectedDeployPkg.os_target}</strong>
+                            {t('software.os_warning_runs', { hostname: selectedDevice.hostname })}{' '}
+                            <strong>{selectedDevice.os_name}</strong>.
                           </div>
                         )}
                     </span>
@@ -1295,17 +1316,17 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
                     onChange={(e) => setDeployTargetId(e.target.value)}
                   >
                     <option value="" disabled>
-                      Select a device group...
+                      {t('software.select_group')}
                     </option>
                     {groups.map((grp) => (
                       <option key={grp.id} value={grp.id}>
-                        📁 {grp.name} ({grp.member_count} {grp.member_count === 1 ? 'device' : 'devices'})
+                        📁 {grp.name} ({grp.member_count === 1 ? t('software.group_members_one', { count: grp.member_count }) : t('software.group_members', { count: grp.member_count })})
                       </option>
                     ))}
                   </select>
                   {groups.length === 0 && (
                     <span className="form-hint form-hint-error">
-                      No device groups exist. Create groups in Device Management or select Single Endpoint.
+                      {t('software.no_groups')}
                     </span>
                   )}
                 </>
@@ -1315,7 +1336,7 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
                   type="text"
                   className="form-input text-dim"
                   disabled
-                  value={`All active ${selectedDeployPkg?.os_target || 'compatible'} endpoints in fleet`}
+                  value={selectedDeployPkg?.os_target ? t('software.all_os_endpoints', { os: selectedDeployPkg.os_target }) : t('software.all_compatible_endpoints')}
                 />
               )}
             </div>
@@ -1323,10 +1344,7 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
 
           <div className="security-notice">
             <AlertCircle size={16} />
-            <span>
-              Online endpoints receive execution triggers immediately via persistent WebSocket transport.
-              Packages are cryptographically validated against SHA-256 before silent background installation.
-            </span>
+            <span>{t('software.security_notice')}</span>
           </div>
         </form>
       </Modal>
@@ -1335,68 +1353,72 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
       <Modal
         open={viewingDeployment !== null}
         onClose={() => setViewingDeployment(null)}
-        title="Deployment Tasks"
+        title={t('software.tasks_modal_title')}
         size="lg"
         description={
           viewingDeployment
-            ? `${viewingDeployment.name} · package ${viewingDeployment.package_name} · target ${viewingDeployment.target_type}`
+            ? t('software.tasks_modal_description', {
+                name: viewingDeployment.name,
+                package: viewingDeployment.package_name ?? '',
+                target: TARGET_KEYS[viewingDeployment.target_type] ? t(TARGET_KEYS[viewingDeployment.target_type]) : viewingDeployment.target_type,
+              })
             : undefined
         }
         footer={
           <button type="button" className="btn btn-secondary" onClick={() => setViewingDeployment(null)}>
-            Close
+            {t('common.close')}
           </button>
         }
       >
         {loadingTasks ? (
           <div className="py-8 text-center text-muted">
             <RefreshCw size={24} className="spinning" />
-            <div>Loading execution logs...</div>
+            <div>{t('software.loading_logs')}</div>
           </div>
         ) : deploymentTasks.length === 0 ? (
-          <div className="py-8 text-center text-muted">No tasks generated for this deployment.</div>
+          <div className="py-8 text-center text-muted">{t('software.no_tasks')}</div>
         ) : (
-          deploymentTasks.map((t) => (
-            <div key={t.id} className="form-group">
+          deploymentTasks.map((task) => (
+            <div key={task.id} className="form-group">
               <div className="card-title-group">
                 <Server size={16} className="text-muted" />
-                <span className="font-mono font-semibold text-main">{t.hostname || t.device_id}</span>
-                {t.site && <span className="os-badge">{t.site}</span>}
+                <span className="font-mono font-semibold text-main">{task.hostname || task.device_id}</span>
+                {task.site && <span className="os-badge">{task.site}</span>}
                 <span
                   className={`status-pill ${
-                    t.status === 'success'
+                    task.status === 'success'
                       ? 'online'
-                      : t.status === 'failed' || t.status === 'failed_lost'
+                      : task.status === 'failed' || task.status === 'failed_lost'
                         ? 'danger'
-                        : t.status === 'installing' ||
-                            t.status === 'uninstalling' ||
-                            t.status === 'downloading'
+                        : task.status === 'installing' ||
+                            task.status === 'uninstalling' ||
+                            task.status === 'downloading'
                           ? 'primary'
                           : 'offline'
                   }`}
                 >
-                  {t.status === 'failed_lost' ? 'failed (agent lost)' : t.status}
+                  {TASK_STATUS_KEYS[task.status] ? t(TASK_STATUS_KEYS[task.status]) : task.status}
                 </span>
-                {(t.output_log || t.error_message) && (
+                {(task.output_log || task.error_message) && (
                   <button
                     type="button"
                     className="btn-action"
-                    onClick={() => setExpandedTaskId(expandedTaskId === t.id ? null : t.id)}
+                    onClick={() => setExpandedTaskId(expandedTaskId === task.id ? null : task.id)}
                   >
-                    {expandedTaskId === t.id ? 'Hide Logs' : 'View Logs'}
+                    {expandedTaskId === task.id ? t('software.hide_logs') : t('software.view_logs')}
                   </button>
                 )}
               </div>
 
-              {expandedTaskId === t.id && (
+              {expandedTaskId === task.id && (
                 <>
-                  {t.exit_code !== undefined && t.exit_code !== null && (
+                  {task.exit_code !== undefined && task.exit_code !== null && (
                     <div className="text-sm text-muted font-mono">
-                      Exit Code: <span className="exit-code-badge">{t.exit_code}</span>
+                      {t('software.exit_code')} <span className="exit-code-badge">{task.exit_code}</span>
                     </div>
                   )}
-                  {t.error_message && <div className="alert-banner alert-error">{t.error_message}</div>}
-                  {t.output_log && <pre className="terminal-log-output">{t.output_log}</pre>}
+                  {task.error_message && <div className="alert-banner alert-error">{task.error_message}</div>}
+                  {task.output_log && <pre className="terminal-log-output">{task.output_log}</pre>}
                 </>
               )}
             </div>
@@ -1406,13 +1428,13 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
 
       <ConfirmDialog
         open={packagePendingDelete !== null}
-        title="Delete package"
+        title={t('software.delete_title')}
         message={
           packagePendingDelete
-            ? `Delete package "${packagePendingDelete.name}"? This action cannot be undone.`
+            ? t('software.delete_confirm', { name: packagePendingDelete.name })
             : ''
         }
-        confirmLabel="Delete"
+        confirmLabel={t('common.delete')}
         pending={deletingPackage}
         onConfirm={handleDeletePackage}
         onCancel={() => setPackagePendingDelete(null)}

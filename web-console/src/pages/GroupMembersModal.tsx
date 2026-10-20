@@ -6,6 +6,7 @@ import { usePermission } from '../hooks/usePermission'
 import { useToast } from '../context/ToastContext'
 import { api } from '../services/api'
 import type { DeviceDTO } from '../types/api'
+import { useT } from '../i18n/core'
 
 const PAGE = 200
 
@@ -28,6 +29,7 @@ export const GroupMembersModal: React.FC<{
 }> = ({ open, groupId, groupName, onClose, onChanged }) => {
   const { can } = usePermission()
   const toast = useToast()
+  const { t } = useT()
 
   const [members, setMembers] = useState<DeviceDTO[]>([])
   const [all, setAll] = useState<DeviceDTO[]>([])
@@ -51,13 +53,13 @@ export const GroupMembersModal: React.FC<{
       setAll(allRes.devices || [])
     } catch (err: unknown) {
       toast.error(
-        err instanceof Error ? err.message : 'Failed to load group members',
-        'Members Unavailable'
+        err instanceof Error ? err.message : t('groups.members_load_failed'),
+        t('groups.members_unavailable_title')
       )
     } finally {
       setLoading(false)
     }
-  }, [groupId, toast])
+  }, [groupId, toast, t])
 
   useEffect(() => {
     if (open) load()
@@ -84,15 +86,15 @@ export const GroupMembersModal: React.FC<{
       // the real count is the whole point of returning it.
       toast.success(
         added === selected.size
-          ? `Added ${added} device(s) to "${groupName}"`
-          : `Added ${added} of ${selected.size} selected; the rest were already members`,
-        'Members Added'
+          ? t('groups.added_all', { count: added, group: groupName })
+          : t('groups.added_partial', { added, selected: selected.size }),
+        t('groups.added_title')
       )
       setSelected(new Set())
       await load()
       onChanged()
     } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : 'Failed to add members', 'Add Failed')
+      toast.error(err instanceof Error ? err.message : t('groups.add_failed'), t('groups.add_failed_title'))
     } finally {
       setSaving(false)
     }
@@ -102,13 +104,13 @@ export const GroupMembersModal: React.FC<{
     setSaving(true)
     try {
       await api.removeGroupMember(groupId, device.id)
-      toast.success(`Removed ${device.hostname} from "${groupName}"`, 'Member Removed')
+      toast.success(t('groups.removed', { hostname: device.hostname, group: groupName }), t('groups.removed_title'))
       await load()
       onChanged()
     } catch (err: unknown) {
       toast.error(
-        err instanceof Error ? err.message : 'Failed to remove member',
-        'Remove Failed'
+        err instanceof Error ? err.message : t('groups.remove_failed'),
+        t('groups.remove_failed_title')
       )
     } finally {
       setSaving(false)
@@ -133,19 +135,19 @@ export const GroupMembersModal: React.FC<{
     <Modal
       open={open}
       onClose={onClose}
-      title={`Members of "${groupName}"`}
+      title={t('groups.members_title', { group: groupName })}
       size="xl"
-      description="A group can belong to a device only once. Devices already in the group are not offered in the add list."
+      description={t('groups.members_description')}
       footer={
         <>
           <span className="filter-hint" style={{ margin: 0 }}>
             {selected.size > 0
-              ? `${selected.size} selected`
-              : `${members.length} member(s), ${candidates.length} available`}
+              ? t('groups.selected_count', { count: selected.size })
+              : t('groups.members_summary', { members: members.length, available: candidates.length })}
           </span>
           <div className="btn-group">
             <button type="button" className="btn btn-secondary" onClick={onClose}>
-              Close
+              {t('common.close')}
             </button>
             {can('admin') && (
               <button
@@ -155,7 +157,7 @@ export const GroupMembersModal: React.FC<{
                 disabled={selected.size === 0 || saving}
               >
                 {saving && <RefreshCw size={14} className="spinning" />}
-                <span>Add selected</span>
+                <span>{t('groups.add_selected')}</span>
               </button>
             )}
           </div>
@@ -165,26 +167,26 @@ export const GroupMembersModal: React.FC<{
       {loading ? (
         <div className="table-loader">
           <RefreshCw size={24} className="spinning" />
-          <span>Loading members...</span>
+          <span>{t('groups.loading_members')}</span>
         </div>
       ) : (
         <>
-          <h3 className="card-title">Current members ({members.length})</h3>
-          <DataTable label={`Members of ${groupName}`}>
+          <h3 className="card-title">{t('groups.current_members', { count: members.length })}</h3>
+          <DataTable label={t('groups.members_table', { group: groupName })}>
             <thead>
               <tr>
-                <th>Hostname</th>
-                <th>OS</th>
-                <th>Site</th>
-                <th>Status</th>
-                <th className="text-right">{can('admin') ? 'Actions' : ''}</th>
+                <th>{t('groups.col_hostname')}</th>
+                <th>{t('groups.col_os')}</th>
+                <th>{t('groups.col_site')}</th>
+                <th>{t('groups.col_status')}</th>
+                <th className="text-right">{can('admin') ? t('groups.col_actions') : ''}</th>
               </tr>
             </thead>
             <tbody>
               {members.length === 0 ? (
                 <tr>
                   <td colSpan={5} className="text-center py-8">
-                    This group has no devices yet.
+                    {t('groups.no_members')}
                   </td>
                 </tr>
               ) : (
@@ -198,7 +200,7 @@ export const GroupMembersModal: React.FC<{
                           className="btn btn-icon btn-ghost"
                           onClick={() => remove(d)}
                           disabled={saving}
-                          aria-label={`Remove ${d.hostname} from ${groupName}`}
+                          aria-label={t('groups.remove_label', { hostname: d.hostname, group: groupName })}
                         >
                           <UserMinus size={14} />
                         </button>
@@ -210,15 +212,15 @@ export const GroupMembersModal: React.FC<{
             </tbody>
           </DataTable>
 
-          <h3 className="card-title">Add devices ({candidates.length})</h3>
-          <DataTable label={`Devices available to add to ${groupName}`}>
+          <h3 className="card-title">{t('groups.add_devices', { count: candidates.length })}</h3>
+          <DataTable label={t('groups.candidates_table', { group: groupName })}>
             <thead>
               <tr>
-                {can('admin') && <th className="text-center">Select</th>}
-                <th>Hostname</th>
-                <th>OS</th>
-                <th>Site</th>
-                <th>Status</th>
+                {can('admin') && <th className="text-center">{t('groups.col_select')}</th>}
+                <th>{t('groups.col_hostname')}</th>
+                <th>{t('groups.col_os')}</th>
+                <th>{t('groups.col_site')}</th>
+                <th>{t('groups.col_status')}</th>
               </tr>
             </thead>
             <tbody>
@@ -226,8 +228,8 @@ export const GroupMembersModal: React.FC<{
                 <tr>
                   <td colSpan={5} className="text-center py-8">
                     {all.length === 0
-                      ? 'No devices are enrolled yet.'
-                      : 'Every enrolled device is already in this group.'}
+                      ? t('groups.none_enrolled')
+                      : t('groups.all_in_group')}
                   </td>
                 </tr>
               ) : (
@@ -240,7 +242,7 @@ export const GroupMembersModal: React.FC<{
                           checked={selected.has(d.id)}
                           onChange={() => toggle(d.id)}
                           disabled={saving}
-                          aria-label={`Select ${d.hostname}`}
+                          aria-label={t('groups.select_device', { hostname: d.hostname })}
                         />
                       </td>
                     )}

@@ -8,10 +8,12 @@ import {
   ShieldAlert,
 } from 'lucide-react'
 import { DataTable } from '../components/ui/DataTable'
+import { useT } from '../i18n/core'
 import { api } from '../services/api'
 import type { ActivityItem } from '../types/api'
 
 export const AuditPage: React.FC = () => {
+  const { t } = useT()
   const [logs, setLogs] = useState<ActivityItem[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -28,7 +30,7 @@ export const AuditPage: React.FC = () => {
     } catch (err: unknown) {
       // An empty table plus "no records found" reads as "nothing happened",
       // which is the opposite of what a failed fetch means.
-      setError(err instanceof Error ? err.message : 'Failed to load the audit trail')
+      setError(err instanceof Error ? err.message : t('audit.load_failed'))
     } finally {
       setLoading(false)
     }
@@ -52,9 +54,9 @@ export const AuditPage: React.FC = () => {
     <div className="page-container audit-page">
       <div className="page-header">
         <div>
-          <h1 className="page-title">Security &amp; Operations Audit Trail</h1>
+          <h1 className="page-title">{t('audit.title')}</h1>
           <p className="page-subtitle">
-            Append-only log of administrative actions, device lifecycle events, and agent dispatches
+            {t('audit.subtitle')}
           </p>
         </div>
         <div className="header-controls">
@@ -65,7 +67,7 @@ export const AuditPage: React.FC = () => {
             disabled={loading}
           >
             <RefreshCw size={16} className={loading ? 'spinning' : ''} />
-            <span>Refresh</span>
+            <span>{t('audit.refresh')}</span>
           </button>
         </div>
       </div>
@@ -83,8 +85,8 @@ export const AuditPage: React.FC = () => {
           <input
             type="text"
             className="search-input"
-            placeholder="Filter the loaded trail by action, operator, or target…"
-            aria-label="Filter the loaded audit records"
+            placeholder={t('audit.search_placeholder')}
+            aria-label={t('audit.search_aria')}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
@@ -92,14 +94,14 @@ export const AuditPage: React.FC = () => {
       </div>
 
       <div className="table-card">
-        <DataTable label="Audit records">
+        <DataTable label={t('audit.table_label')}>
           <thead>
             <tr>
-              <th>Timestamp</th>
-              <th>Operator / Actor</th>
-              <th>Action</th>
-              <th>Target Endpoint / Entity</th>
-              <th>Details</th>
+              <th>{t('audit.col_timestamp')}</th>
+              <th>{t('audit.col_actor')}</th>
+              <th>{t('audit.col_action')}</th>
+              <th>{t('audit.col_target')}</th>
+              <th>{t('audit.col_details')}</th>
             </tr>
           </thead>
           <tbody>
@@ -108,7 +110,7 @@ export const AuditPage: React.FC = () => {
                 <td colSpan={5} className="text-center py-8">
                   <div className="table-loader">
                     <RefreshCw size={24} className="spinning" />
-                    <span>Reading audit records...</span>
+                    <span>{t('audit.reading')}</span>
                   </div>
                 </td>
               </tr>
@@ -119,8 +121,8 @@ export const AuditPage: React.FC = () => {
                     <Shield size={32} />
                     <p>
                       {logs.length === 0
-                        ? 'No audit trail records found'
-                        : 'No records match the current filter'}
+                        ? t('audit.no_records')
+                        : t('audit.no_match')}
                     </p>
                   </div>
                 </td>
@@ -128,17 +130,17 @@ export const AuditPage: React.FC = () => {
             ) : (
               filteredLogs.map((item) => (
                 <tr key={item.id}>
-                  <td data-label="Timestamp">
+                  <td data-label={t('audit.col_timestamp')}>
                     <span className="timestamp-cell">
                       {new Date(item.created_at).toLocaleString()}
                     </span>
                   </td>
-                  <td data-label="Operator / Actor">
+                  <td data-label={t('audit.col_actor')}>
                     <span className="actor-badge">
                       {item.actor_type}:{item.actor_id}
                     </span>
                   </td>
-                  <td data-label="Action">
+                  <td data-label={t('audit.col_action')}>
                     <div className="action-cell">
                       {item.action.includes('enroll') ? (
                         <CheckCircle2 size={14} className="text-success" />
@@ -150,14 +152,14 @@ export const AuditPage: React.FC = () => {
                       <strong>{item.action}</strong>
                     </div>
                   </td>
-                  <td data-label="Target Endpoint / Entity">
+                  <td data-label={t('audit.col_target')}>
                     <span className="font-mono text-sm">{item.target_id || '—'}</span>
                   </td>
                   {/* The old "VERIFIED" pill claimed a cryptographic
                       verification the API never returns — the row has no
                       signature field. Showing the server's own detail text is
                       the honest column. */}
-                  <td data-label="Details" className="text-sm text-muted">
+                  <td data-label={t('audit.col_details')} className="text-sm text-muted">
                     {item.details || '—'}
                   </td>
                 </tr>

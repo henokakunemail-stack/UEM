@@ -1,0 +1,16 @@
+{
+  "ticket_failed": "Gagal mendapatkan tiket koneksi.",
+  "open_failed": "Gagal membuka koneksi terminal.",
+  "session_terminated": "*** Sesi shell jarak jauh dihentikan ***",
+  "connection_error": "Kesalahan koneksi terminal. Perangkat mungkin sedang offline.",
+  "title": "Terminal Interaktif Langsung",
+  "shell_suffix": "shell {shell}",
+  "status_connecting": "MENGHUBUNGKAN",
+  "status_active": "AKTIF",
+  "status_closed": "DITUTUP",
+  "status_error": "KESALAHAN",
+  "input_label": "Input shell jarak jauh",
+  "input_placeholder": "Ketik perintah lalu tekan Enter...",
+  "not_active": "Terminal tidak aktif",
+  "hint": "Sesi interaktif dialirkan dua arah melalui WebSocket keluar milik agen. Menutup jendela ini akan menghentikan proses shell di perangkat."
+}

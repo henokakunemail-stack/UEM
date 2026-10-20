@@ -24,6 +24,7 @@ import { ConfirmDialog } from '../components/ui/ConfirmDialog'
 import { Modal } from '../components/ui/Modal'
 import { KPICard } from '../components/KPICard'
 import { useToast } from '../context/ToastContext'
+import { useT } from '../i18n/core'
 import type {
   DeviceDTO,
   DeviceGroupDTO,
@@ -67,11 +68,13 @@ const PolicyScopeFields: React.FC<{
   devices: DeviceDTO[]
   idPrefix: string
   onChange: (next: { target_type: 'all' | 'group' | 'device'; target_id: string }) => void
-}> = ({ targetType, targetId, groups, devices, idPrefix, onChange }) => (
+}> = ({ targetType, targetId, groups, devices, idPrefix, onChange }) => {
+  const { t } = useT()
+  return (
   <>
     <div className="form-group">
       <label className="form-label" htmlFor={`${idPrefix}-scope`}>
-        Target Scope
+        {t('policy.scope_label')}
       </label>
       <select
         id={`${idPrefix}-scope`}
@@ -84,16 +87,16 @@ const PolicyScopeFields: React.FC<{
           })
         }
       >
-        <option value="all">Entire Fleet (All Devices)</option>
-        <option value="group">Device Group</option>
-        <option value="device">Single Device</option>
+        <option value="all">{t('policy.scope_all')}</option>
+        <option value="group">{t('policy.scope_group')}</option>
+        <option value="device">{t('policy.scope_device')}</option>
       </select>
     </div>
 
     {targetType === 'group' && (
       <div className="form-group">
         <label className="form-label" htmlFor={`${idPrefix}-group`}>
-          Select Device Group
+          {t('policy.select_group_label')}
         </label>
         <select
           id={`${idPrefix}-group`}
@@ -102,15 +105,15 @@ const PolicyScopeFields: React.FC<{
           value={targetId}
           onChange={(e) => onChange({ target_type: 'group', target_id: e.target.value })}
         >
-          <option value="">-- Select Group --</option>
+          <option value="">{t('policy.select_group_placeholder')}</option>
           {groups.map((g) => (
             <option key={g.id} value={g.id}>
-              {g.name} ({g.member_count} device{g.member_count === 1 ? '' : 's'})
+              {t(g.member_count === 1 ? 'policy.group_option_one' : 'policy.group_option', { name: g.name, count: g.member_count })}
             </option>
           ))}
         </select>
         {groups.length === 0 && (
-          <p className="form-hint">No device groups defined. Create one under Devices first.</p>
+          <p className="form-hint">{t('policy.no_groups')}</p>
         )}
       </div>
     )}
@@ -118,7 +121,7 @@ const PolicyScopeFields: React.FC<{
     {targetType === 'device' && (
       <div className="form-group">
         <label className="form-label" htmlFor={`${idPrefix}-device`}>
-          Select Device
+          {t('policy.select_device_label')}
         </label>
         <select
           id={`${idPrefix}-device`}
@@ -127,7 +130,7 @@ const PolicyScopeFields: React.FC<{
           value={targetId}
           onChange={(e) => onChange({ target_type: 'device', target_id: e.target.value })}
         >
-          <option value="">-- Select Device --</option>
+          <option value="">{t('policy.select_device_placeholder')}</option>
           {devices.map((d) => (
             <option key={d.id} value={d.id}>
               {d.hostname} ({d.os_name}, {d.status})
@@ -137,11 +140,13 @@ const PolicyScopeFields: React.FC<{
       </div>
     )}
   </>
-)
+  )
+}
 
 export const SystemPolicyPage: React.FC = () => {
   const { can } = usePermission()
   const toast = useToast()
+  const { t } = useT()
   const isAdmin = can('admin')
   const isTechnician = can('technician')
 
@@ -181,7 +186,7 @@ export const SystemPolicyPage: React.FC = () => {
     const file = e.target.files?.[0]
     if (!file) return
     if (!file.type.startsWith('image/')) {
-      toast.error('Please select a valid image file (PNG, JPG, BMP, WebP)')
+      toast.error(t('policy.wallpaper_invalid_file'))
       return
     }
     setUploadingWallpaper(true)
@@ -191,9 +196,9 @@ export const SystemPolicyPage: React.FC = () => {
         ...prev,
         wallpaper_url: res.wallpaper_url,
       }))
-      toast.success('Wallpaper image uploaded and staged successfully')
+      toast.success(t('policy.wallpaper_uploaded'))
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Wallpaper upload failed')
+      toast.error(err instanceof Error ? err.message : t('policy.wallpaper_upload_failed'))
     } finally {
       setUploadingWallpaper(false)
       if (wallpaperInputRef.current) {
@@ -216,7 +221,7 @@ export const SystemPolicyPage: React.FC = () => {
       setGroups(groupsData)
       setDevices(devicesData.devices || [])
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to load system policies')
+      toast.error(err instanceof Error ? err.message : t('policy.load_failed'))
     } finally {
       setLoading(false)
     }
@@ -270,7 +275,7 @@ export const SystemPolicyPage: React.FC = () => {
           is_enabled: formIsEnabled,
           settings: formSettings,
         })
-        toast.success('Policy updated successfully')
+        toast.success(t('policy.updated'))
       } else {
         await api.createSystemPolicy({
           name: formName,
@@ -281,32 +286,32 @@ export const SystemPolicyPage: React.FC = () => {
           is_enabled: formIsEnabled,
           settings: formSettings,
         })
-        toast.success('Policy created successfully')
+        toast.success(t('policy.created'))
       }
       setModalOpen(false)
       loadData()
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Save policy failed')
+      toast.error(err instanceof Error ? err.message : t('policy.save_failed'))
     }
   }
 
   const handleToggleEnabled = async (p: SystemPolicyDTO) => {
     try {
       await api.updateSystemPolicy(p.id, { is_enabled: !p.is_enabled })
-      toast.info(`Policy ${p.name} ${p.is_enabled ? 'disabled' : 'enabled'}`)
+      toast.info(t(p.is_enabled ? 'policy.toggled_disabled' : 'policy.toggled_enabled', { name: p.name }))
       loadData()
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Toggle policy failed')
+      toast.error(err instanceof Error ? err.message : t('policy.toggle_failed'))
     }
   }
 
   const handleApplyNow = async (p: SystemPolicyDTO) => {
     try {
       await api.applySystemPolicy(p.id)
-      toast.info(`Applying policy ${p.name} to online targets...`)
+      toast.info(t('policy.applying', { name: p.name }))
       setTimeout(loadData, 1500)
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Apply policy failed')
+      toast.error(err instanceof Error ? err.message : t('policy.apply_failed'))
     }
   }
 
@@ -315,12 +320,12 @@ export const SystemPolicyPage: React.FC = () => {
     setDeletePending(true)
     try {
       await api.deleteSystemPolicy(policyToDelete.id)
-      toast.info(`Policy ${policyToDelete.name} deleted`)
+      toast.info(t('policy.deleted', { name: policyToDelete.name }))
       setDeleteConfirmOpen(false)
       setPolicyToDelete(null)
       loadData()
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Delete policy failed')
+      toast.error(err instanceof Error ? err.message : t('policy.delete_failed'))
     } finally {
       setDeletePending(false)
     }
@@ -330,24 +335,24 @@ export const SystemPolicyPage: React.FC = () => {
     setSyncingDeviceId(deviceId)
     try {
       await api.syncDeviceSystemPolicy(deviceId)
-      toast.success('Sync command dispatched to device')
+      toast.success(t('policy.sync_dispatched'))
       setTimeout(loadData, 2000)
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Sync device failed')
+      toast.error(err instanceof Error ? err.message : t('policy.sync_failed'))
     } finally {
       setSyncingDeviceId(null)
     }
   }
 
   const resolveTargetName = (targetType: string, targetId: string) => {
-    if (targetType === 'all') return 'Entire Fleet'
+    if (targetType === 'all') return t('policy.target_entire_fleet')
     if (targetType === 'group') {
       const g = groups.find((item) => item.id === targetId)
-      return g ? `Group: ${g.name}` : `Group (${targetId.substring(0, 8)})`
+      return g ? t('policy.target_group', { name: g.name }) : t('policy.target_group_id', { id: targetId.substring(0, 8) })
     }
     if (targetType === 'device') {
       const d = devices.find((item) => item.id === targetId)
-      return d ? `Device: ${d.hostname}` : `Device (${targetId.substring(0, 8)})`
+      return d ? t('policy.target_device', { name: d.hostname }) : t('policy.target_device_id', { id: targetId.substring(0, 8) })
     }
     return targetType
   }
@@ -370,10 +375,10 @@ export const SystemPolicyPage: React.FC = () => {
         <div>
           <div className="flex items-center gap-2">
             <Sliders className="h-6 w-6 text-primary" />
-            <h1 className="text-2xl font-bold text-main tracking-tight">Group Policy (GPO)</h1>
+            <h1 className="text-2xl font-bold text-main tracking-tight">{t('policy.title')}</h1>
           </div>
           <p className="text-sm text-muted mt-1">
-            Active Directory-style centralized endpoint management: USB port storage locking, corporate wallpaper, inactivity screen lock, and OS restrictions.
+            {t('policy.subtitle')}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -384,7 +389,7 @@ export const SystemPolicyPage: React.FC = () => {
             disabled={loading}
           >
             <RefreshCw className={`h-4 w-4 ${loading ? 'spinning' : ''}`} />
-            <span>Refresh</span>
+            <span>{t('policy.refresh')}</span>
           </button>
           {isAdmin && (
             <button
@@ -393,7 +398,7 @@ export const SystemPolicyPage: React.FC = () => {
               onClick={handleOpenCreate}
             >
               <Plus className="h-4 w-4" />
-              <span>Create Policy</span>
+              <span>{t('policy.create_policy')}</span>
             </button>
           )}
         </div>
@@ -402,30 +407,30 @@ export const SystemPolicyPage: React.FC = () => {
       {/* KPI Overview Cards */}
       <div className="kpi-grid">
         <KPICard
-          title="ACTIVE POLICIES"
+          title={t('policy.kpi_active_title')}
           value={`${activePolicies} / ${totalPolicies}`}
-          subtitle="Enforced across fleet"
+          subtitle={t('policy.kpi_active_subtitle')}
           icon={<Shield size={20} />}
           variant="primary"
         />
         <KPICard
-          title="USB MASS STORAGE LOCK"
-          value={usbRestrictedCount > 0 ? 'Enforced' : 'Unrestricted'}
-          subtitle="Mouse & keyboard functional"
+          title={t('policy.kpi_usb_title')}
+          value={usbRestrictedCount > 0 ? t('policy.enforced') : t('policy.unrestricted')}
+          subtitle={t('policy.kpi_usb_subtitle')}
           icon={<HardDrive size={20} />}
           variant={usbRestrictedCount > 0 ? 'warning' : 'neutral'}
         />
         <KPICard
-          title="CORPORATE WALLPAPER"
-          value={wallpaperEnforcedCount > 0 ? `${wallpaperEnforcedCount} Policies` : 'Off'}
-          subtitle="Desktop background managed"
+          title={t('policy.kpi_wallpaper_title')}
+          value={wallpaperEnforcedCount > 0 ? t('policy.kpi_wallpaper_value', { count: wallpaperEnforcedCount }) : t('policy.off')}
+          subtitle={t('policy.kpi_wallpaper_subtitle')}
           icon={<ImageIcon size={20} />}
           variant="neutral"
         />
         <KPICard
-          title="FLEET COMPLIANCE"
+          title={t('policy.kpi_compliance_title')}
           value={syncedDevicesCount}
-          subtitle="Synced endpoints"
+          subtitle={t('policy.kpi_compliance_subtitle')}
           icon={<CheckCircle2 size={20} />}
           variant="success"
         />
@@ -438,37 +443,37 @@ export const SystemPolicyPage: React.FC = () => {
           className={`btn ${activeTab === 'policies' ? 'btn-primary' : 'btn-secondary'}`}
           onClick={() => setActiveTab('policies')}
         >
-          Policies ({policies.length})
+          {t('policy.tab_policies', { count: policies.length })}
         </button>
         <button
           type="button"
           className={`btn ${activeTab === 'compliance' ? 'btn-primary' : 'btn-secondary'}`}
           onClick={() => setActiveTab('compliance')}
         >
-          Device Compliance ({deviceStates.length})
+          {t('policy.tab_compliance', { count: deviceStates.length })}
         </button>
       </div>
 
       {/* Tab: Policies */}
       {activeTab === 'policies' && (
         <div className="table-card">
-          <DataTable label="Group policies">
+          <DataTable label={t('policy.table_label')}>
             <table className="data-table">
               <thead>
                 <tr>
-                  <th>Policy Name</th>
-                  <th>Target Scope</th>
-                  <th>Priority</th>
-                  <th>Enforced Rules</th>
-                  <th>Status</th>
-                  <th>Actions</th>
+                  <th>{t('policy.col_name')}</th>
+                  <th>{t('policy.scope_label')}</th>
+                  <th>{t('policy.col_priority')}</th>
+                  <th>{t('policy.col_rules')}</th>
+                  <th>{t('policy.col_status')}</th>
+                  <th>{t('policy.col_actions')}</th>
                 </tr>
               </thead>
               <tbody>
                 {policies.length === 0 ? (
                   <tr>
                     <td colSpan={6} className="text-center py-6 text-muted">
-                      No system policies defined yet. Click &apos;Create Policy&apos; to configure endpoint GPO rules.
+                      {t('policy.empty_policies')}
                     </td>
                   </tr>
                 ) : (
@@ -492,77 +497,77 @@ export const SystemPolicyPage: React.FC = () => {
                           <div className="flex flex-wrap gap-1">
                             {s.usb_storage_mode === 'block' && (
                               <span className="px-1.5 py-0.5 rounded text-xs bg-red-500/10 text-red-400 border border-red-500/20">
-                                USB Blocked
+                                {t('policy.badge_usb_blocked')}
                               </span>
                             )}
                             {s.usb_storage_mode === 'read_only' && (
                               <span className="px-1.5 py-0.5 rounded text-xs bg-amber-500/10 text-amber-400 border border-amber-500/20">
-                                USB Read-Only
+                                {t('policy.badge_usb_read_only')}
                               </span>
                             )}
                             {s.wallpaper_enabled && (
                               <span className="px-1.5 py-0.5 rounded text-xs bg-blue-500/10 text-blue-400 border border-blue-500/20">
-                                Wallpaper{s.wallpaper_locked ? ' (Locked)' : ''}
+                                {s.wallpaper_locked ? t('policy.badge_wallpaper_locked') : t('policy.badge_wallpaper')}
                               </span>
                             )}
                             {s.firewall_enabled && (
                               <span className="px-1.5 py-0.5 rounded text-xs bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">
-                                Firewall
+                                {t('policy.badge_firewall')}
                               </span>
                             )}
                             {s.defender_protection_enabled && (
                               <span className="px-1.5 py-0.5 rounded text-xs bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
-                                Defender
+                                {t('policy.badge_defender')}
                               </span>
                             )}
                             {s.disable_autoplay && (
                               <span className="px-1.5 py-0.5 rounded text-xs bg-orange-500/10 text-orange-400 border border-orange-500/20">
-                                No Autoplay
+                                {t('policy.badge_no_autoplay')}
                               </span>
                             )}
                             {s.disable_powershell && (
                               <span className="px-1.5 py-0.5 rounded text-xs bg-yellow-500/10 text-yellow-400 border border-yellow-500/20">
-                                No PS
+                                {t('policy.badge_no_ps')}
                               </span>
                             )}
                             {s.screensaver_timeout_minutes ? (
                               <span className="px-1.5 py-0.5 rounded text-xs bg-pink-500/10 text-pink-400 border border-pink-500/20">
-                                SS {s.screensaver_timeout_minutes}m{s.screensaver_password_required ? ' (Pwd)' : ''}
+                                {t(s.screensaver_password_required ? 'policy.badge_screensaver_pwd' : 'policy.badge_screensaver', { minutes: s.screensaver_timeout_minutes })}
                               </span>
                             ) : null}
                             {s.inactivity_timeout_minutes > 0 && (
                               <span className="px-1.5 py-0.5 rounded text-xs bg-purple-500/10 text-purple-400 border border-purple-500/20">
-                                Lock {s.inactivity_timeout_minutes}m
+                                {t('policy.badge_lock', { minutes: s.inactivity_timeout_minutes })}
                               </span>
                             )}
                             {s.disable_task_mgr && (
                               <span className="px-1.5 py-0.5 rounded text-xs bg-zinc-500/10 text-zinc-300 border border-zinc-500/20">
-                                No TaskMgr
+                                {t('policy.badge_no_taskmgr')}
                               </span>
                             )}
                             {s.disable_cmd && (
                               <span className="px-1.5 py-0.5 rounded text-xs bg-zinc-500/10 text-zinc-300 border border-zinc-500/20">
-                                No CMD
+                                {t('policy.badge_no_cmd')}
                               </span>
                             )}
                             {s.disable_registry_tools && (
                               <span className="px-1.5 py-0.5 rounded text-xs bg-zinc-500/10 text-zinc-300 border border-zinc-500/20">
-                                No Regedit
+                                {t('policy.badge_no_regedit')}
                               </span>
                             )}
                             {s.disable_control_panel && (
                               <span className="px-1.5 py-0.5 rounded text-xs bg-zinc-500/10 text-zinc-300 border border-zinc-500/20">
-                                No Control Panel
+                                {t('policy.badge_no_control_panel')}
                               </span>
                             )}
                             {s.windows_update_mode === 'auto_install' && (
                               <span className="px-1.5 py-0.5 rounded text-xs bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                                Auto Update
+                                {t('policy.badge_auto_update')}
                               </span>
                             )}
                             {s.admin_account_enabled && s.admin_account_username && (
                               <span className="px-1.5 py-0.5 rounded text-xs bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                                Admin: {s.admin_account_username}
+                                {t('policy.badge_admin', { name: s.admin_account_username })}
                               </span>
                             )}
                           </div>
@@ -580,7 +585,7 @@ export const SystemPolicyPage: React.FC = () => {
                                 p.is_enabled ? 'bg-emerald-400' : 'bg-zinc-400'
                               }`}
                             />
-                            {p.is_enabled ? 'Enabled' : 'Disabled'}
+                            {p.is_enabled ? t('policy.enabled') : t('policy.disabled')}
                           </span>
                         </td>
                         <td>
@@ -589,7 +594,7 @@ export const SystemPolicyPage: React.FC = () => {
                               <button
                                 type="button"
                                 className="btn-action p-1.5 text-muted hover:text-main"
-                                title={p.is_enabled ? 'Disable' : 'Enable'}
+                                title={p.is_enabled ? t('policy.action_disable') : t('policy.action_enable')}
                                 onClick={() => handleToggleEnabled(p)}
                               >
                                 <Power size={15} />
@@ -599,7 +604,7 @@ export const SystemPolicyPage: React.FC = () => {
                               <button
                                 type="button"
                                 className="btn-action p-1.5 text-muted hover:text-main"
-                                title="Apply now to online devices"
+                                title={t('policy.action_apply_now')}
                                 onClick={() => handleApplyNow(p)}
                               >
                                 <Send size={15} />
@@ -609,7 +614,7 @@ export const SystemPolicyPage: React.FC = () => {
                               <button
                                 type="button"
                                 className="btn-action p-1.5 text-muted hover:text-main"
-                                title="Edit policy"
+                                title={t('policy.action_edit')}
                                 onClick={() => handleOpenEdit(p)}
                               >
                                 <Edit2 size={15} />
@@ -619,7 +624,7 @@ export const SystemPolicyPage: React.FC = () => {
                               <button
                                 type="button"
                                 className="btn-action p-1.5 text-muted hover:text-red-400"
-                                title="Delete policy"
+                                title={t('policy.action_delete')}
                                 onClick={() => {
                                   setPolicyToDelete(p)
                                   setDeleteConfirmOpen(true)
@@ -643,23 +648,23 @@ export const SystemPolicyPage: React.FC = () => {
       {/* Tab: Compliance */}
       {activeTab === 'compliance' && (
         <div className="table-card">
-          <DataTable label="Device compliance">
+          <DataTable label={t('policy.compliance_table_label')}>
             <table className="data-table">
               <thead>
                 <tr>
-                  <th>Device</th>
-                  <th>Policy Version</th>
-                  <th>Enforcement Status</th>
-                  <th>Active Settings</th>
-                  <th>Last Applied</th>
-                  <th>Actions</th>
+                  <th>{t('policy.col_device')}</th>
+                  <th>{t('policy.col_policy_version')}</th>
+                  <th>{t('policy.col_enforcement')}</th>
+                  <th>{t('policy.col_active_settings')}</th>
+                  <th>{t('policy.col_last_applied')}</th>
+                  <th>{t('policy.col_actions')}</th>
                 </tr>
               </thead>
               <tbody>
                 {deviceStates.length === 0 ? (
                   <tr>
                     <td colSpan={6} className="text-center py-6 text-muted">
-                      No device policy states reported yet. Online devices sync when connected or triggered.
+                      {t('policy.empty_states')}
                     </td>
                   </tr>
                 ) : (
@@ -671,13 +676,13 @@ export const SystemPolicyPage: React.FC = () => {
                     // console invented, presented as one it had observed.
                     const applied = s.applied_settings
                     let badge = 'bg-zinc-500/10 text-zinc-400'
-                    let label = 'Awaiting Sync'
+                    let label = t('policy.status_awaiting')
                     if (s.status === 'synced') {
                       badge = 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                      label = 'Enforced (Synced)'
+                      label = t('policy.status_synced')
                     } else if (s.status === 'failed') {
                       badge = 'bg-red-500/10 text-red-400 border border-red-500/20'
-                      label = 'Failed'
+                      label = t('policy.status_failed')
                     }
 
                     return (
@@ -685,12 +690,12 @@ export const SystemPolicyPage: React.FC = () => {
                         <td>
                           <div className="font-semibold text-main">{d ? d.hostname : s.device_id}</div>
                           <div className="text-xs text-muted">
-                            {d ? `${d.os_name} ${d.os_version || ''}` : 'Unknown OS'}
+                            {d ? `${d.os_name} ${d.os_version || ''}` : t('policy.unknown_os')}
                           </div>
                         </td>
                         <td>
                           <span className="font-mono text-xs text-muted">
-                            {s.policy_version || 'none'}
+                            {s.policy_version || t('policy.version_none')}
                           </span>
                         </td>
                         <td>
@@ -706,18 +711,18 @@ export const SystemPolicyPage: React.FC = () => {
                         <td>
                           {applied ? (
                             <div className="text-xs text-muted space-y-0.5">
-                              <div>USB: <span className="text-main font-medium">{applied.usb_storage_mode}</span></div>
-                              <div>Wallpaper: <span className="text-main font-medium">{applied.wallpaper_enabled ? 'Enforced' : 'Off'}</span></div>
-                              <div>Timeout: <span className="text-main font-medium">{applied.inactivity_timeout_minutes ? `${applied.inactivity_timeout_minutes}m` : 'Disabled'}</span></div>
-                              <div>Admin: <span className="text-main font-medium">{applied.admin_account_enabled ? applied.admin_account_username || 'Enforced' : 'Unmanaged'}</span></div>
+                              <div>{t('policy.applied_usb')} <span className="text-main font-medium">{applied.usb_storage_mode}</span></div>
+                              <div>{t('policy.applied_wallpaper')} <span className="text-main font-medium">{applied.wallpaper_enabled ? t('policy.enforced') : t('policy.off')}</span></div>
+                              <div>{t('policy.applied_timeout')} <span className="text-main font-medium">{applied.inactivity_timeout_minutes ? t('policy.timeout_minutes', { minutes: applied.inactivity_timeout_minutes }) : t('policy.disabled')}</span></div>
+                              <div>{t('policy.applied_admin')} <span className="text-main font-medium">{applied.admin_account_enabled ? applied.admin_account_username || t('policy.enforced') : t('policy.unmanaged')}</span></div>
                             </div>
                           ) : (
-                            <span className="text-xs text-muted">Not reported yet</span>
+                            <span className="text-xs text-muted">{t('common.not_reported')}</span>
                           )}
                         </td>
                         <td>
                           <span className="text-xs text-muted">
-                            {s.last_applied_at ? new Date(s.last_applied_at).toLocaleString() : 'Never'}
+                            {s.last_applied_at ? new Date(s.last_applied_at).toLocaleString() : t('policy.never')}
                           </span>
                         </td>
                         <td>
@@ -730,7 +735,7 @@ export const SystemPolicyPage: React.FC = () => {
                                 onClick={() => handleForceSyncDevice(s.device_id)}
                               >
                                 <RefreshCw className={`h-3 w-3 ${syncingDeviceId === s.device_id ? 'spinning' : ''}`} />
-                                <span>Force Sync</span>
+                                <span>{t('policy.force_sync')}</span>
                               </button>
                             )}
                           </div>
@@ -749,7 +754,7 @@ export const SystemPolicyPage: React.FC = () => {
       <Modal
         open={modalOpen}
         onClose={() => setModalOpen(false)}
-        title={editingPolicy ? `Edit Policy: ${editingPolicy.name}` : 'Create New System Policy'}
+        title={editingPolicy ? t('policy.edit_title', { name: editingPolicy.name }) : t('policy.create_title')}
         size="lg"
         footer={
           <div className="flex items-center justify-end gap-2 w-full">
@@ -758,14 +763,14 @@ export const SystemPolicyPage: React.FC = () => {
               className="btn btn-secondary"
               onClick={() => setModalOpen(false)}
             >
-              Cancel
+              {t('common.cancel')}
             </button>
             <button
               type="submit"
               form="policy-form"
               className="btn btn-primary"
             >
-              {editingPolicy ? 'Save Changes' : 'Create Policy'}
+              {editingPolicy ? t('policy.save_changes') : t('policy.create_policy')}
             </button>
           </div>
         }
@@ -778,35 +783,35 @@ export const SystemPolicyPage: React.FC = () => {
               className={`btn btn-sm ${modalTab === 'general' ? 'btn-primary' : 'btn-secondary'}`}
               onClick={() => setModalTab('general')}
             >
-              General &amp; Scope
+              {t('policy.tab_general')}
             </button>
             <button
               type="button"
               className={`btn btn-sm ${modalTab === 'peripherals' ? 'btn-primary' : 'btn-secondary'}`}
               onClick={() => setModalTab('peripherals')}
             >
-              USB &amp; Storage
+              {t('policy.tab_usb')}
             </button>
             <button
               type="button"
               className={`btn btn-sm ${modalTab === 'desktop' ? 'btn-primary' : 'btn-secondary'}`}
               onClick={() => setModalTab('desktop')}
             >
-              Wallpaper
+              {t('policy.tab_wallpaper')}
             </button>
             <button
               type="button"
               className={`btn btn-sm ${modalTab === 'security' ? 'btn-primary' : 'btn-secondary'}`}
               onClick={() => setModalTab('security')}
             >
-              Security Restrictions
+              {t('policy.tab_security')}
             </button>
             <button
               type="button"
               className={`btn btn-sm ${modalTab === 'accounts' ? 'btn-primary' : 'btn-secondary'}`}
               onClick={() => setModalTab('accounts')}
             >
-              Admin Account
+              {t('policy.tab_admin')}
             </button>
           </div>
 
@@ -815,25 +820,25 @@ export const SystemPolicyPage: React.FC = () => {
             {modalTab === 'general' && (
               <div className="space-y-4">
                 <div className="form-group">
-                  <label className="form-label" htmlFor="policy-name">Policy Name *</label>
+                  <label className="form-label" htmlFor="policy-name">{t('policy.name_label')}</label>
                   <input
                     id="policy-name"
                     type="text"
                     required
                     className="form-input"
-                    placeholder="e.g. Finance USB Lockout & Corporate Branding"
+                    placeholder={t('policy.name_placeholder')}
                     value={formName}
                     onChange={(e) => setFormName(e.target.value)}
                   />
                 </div>
 
                 <div className="form-group">
-                  <label className="form-label" htmlFor="policy-desc">Description</label>
+                  <label className="form-label" htmlFor="policy-desc">{t('policy.description_label')}</label>
                   <textarea
                     id="policy-desc"
                     className="form-input"
                     rows={2}
-                    placeholder="Provide context on when and why this GPO is enforced..."
+                    placeholder={t('policy.description_placeholder')}
                     value={formDescription}
                     onChange={(e) => setFormDescription(e.target.value)}
                   />
@@ -854,7 +859,7 @@ export const SystemPolicyPage: React.FC = () => {
                 <div className="grid grid-cols-2 gap-4">
                   <div className="form-group">
                     <label className="form-label" htmlFor="policy-prio">
-                      Priority (Lower = Higher Precedence)
+                      {t('policy.priority_label')}
                     </label>
                     <input
                       id="policy-prio"
@@ -874,7 +879,7 @@ export const SystemPolicyPage: React.FC = () => {
                         checked={formIsEnabled}
                         onChange={(e) => setFormIsEnabled(e.target.checked)}
                       />
-                      <span className="text-sm font-medium text-main">Enable this policy immediately</span>
+                      <span className="text-sm font-medium text-main">{t('policy.enable_immediately')}</span>
                     </label>
                   </div>
                 </div>
@@ -887,11 +892,11 @@ export const SystemPolicyPage: React.FC = () => {
                 <div style={{ padding: '0.75rem', borderRadius: '0.5rem', border: '1px solid var(--border-subtle)', background: 'var(--bg-surface-elevated)' }}>
                   <h4 className="text-sm font-semibold text-main flex items-center gap-2">
                     <HardDrive className="h-4 w-4 text-primary" />
-                    USB Port Storage Restriction Mode
+                    {t('policy.usb_heading')}
                   </h4>
                   <p className="text-xs text-muted mt-1">
-                    Disabling USB storage blocks USB flash drives and external disks exclusively.
-                    <strong> USB mice, keyboards, webcams, and printers use standard HID drivers and remain 100% active.</strong>
+                    {t('policy.usb_intro')}
+                    <strong> {t('policy.usb_intro_strong')}</strong>
                   </p>
                 </div>
 
@@ -908,8 +913,8 @@ export const SystemPolicyPage: React.FC = () => {
                       className="mt-1"
                     />
                     <div>
-                      <div className="text-sm font-medium text-main">Allow All USB Storage (Default)</div>
-                      <div className="text-xs text-muted">Endpoints can read and write to USB flash drives normally.</div>
+                      <div className="text-sm font-medium text-main">{t('policy.usb_allow_title')}</div>
+                      <div className="text-xs text-muted">{t('policy.usb_allow_desc')}</div>
                     </div>
                   </label>
 
@@ -925,9 +930,9 @@ export const SystemPolicyPage: React.FC = () => {
                       className="mt-1"
                     />
                     <div>
-                      <div className="text-sm font-medium text-red-400">Lock &amp; Block USB Storage Devices</div>
+                      <div className="text-sm font-medium text-red-400">{t('policy.usb_block_title')}</div>
                       <div className="text-xs text-muted">
-                        Disables USB mass storage driver (`USBSTOR`) and disk drive policies. Flash drives cannot be mounted. Mouse and keyboard are completely unaffected.
+                        {t('policy.usb_block_desc')}
                       </div>
                     </div>
                   </label>
@@ -944,9 +949,9 @@ export const SystemPolicyPage: React.FC = () => {
                       className="mt-1"
                     />
                     <div>
-                      <div className="text-sm font-medium text-amber-400">Read-Only USB Storage (Write Protect)</div>
+                      <div className="text-sm font-medium text-amber-400">{t('policy.usb_ro_title')}</div>
                       <div className="text-xs text-muted">
-                        Users can view and read files on USB flash drives, but cannot write, copy, or exfiltrate data to the USB drive.
+                        {t('policy.usb_ro_desc')}
                       </div>
                     </div>
                   </label>
@@ -963,9 +968,9 @@ export const SystemPolicyPage: React.FC = () => {
                       }
                     />
                     <div>
-                      <div className="text-sm font-medium text-main">Disable USB &amp; Media Autoplay/Autorun (`NoDriveTypeAutoRun`)</div>
+                      <div className="text-sm font-medium text-main">{t('policy.autoplay_title')}</div>
                       <div className="text-xs text-muted">
-                        Prevents executables or scripts on plugged-in USB storage and optical media from automatically launching.
+                        {t('policy.autoplay_desc')}
                       </div>
                     </div>
                   </label>
@@ -979,10 +984,10 @@ export const SystemPolicyPage: React.FC = () => {
                 <div style={{ padding: '0.75rem', borderRadius: '0.5rem', border: '1px solid var(--border-subtle)', background: 'var(--bg-surface-elevated)' }}>
                   <h4 className="text-sm font-semibold text-main flex items-center gap-2">
                     <ImageIcon className="h-4 w-4 text-primary" />
-                    Corporate Desktop Wallpaper Management
+                    {t('policy.wallpaper_heading')}
                   </h4>
                   <p className="text-xs text-muted mt-1">
-                    Enforces corporate wallpaper across endpoints via Group Policy registry and instantly updates user desktops without requiring logoff or reboot.
+                    {t('policy.wallpaper_intro')}
                   </p>
                 </div>
 
@@ -996,7 +1001,7 @@ export const SystemPolicyPage: React.FC = () => {
                         setFormSettings({ ...formSettings, wallpaper_enabled: e.target.checked })
                       }
                     />
-                    <span className="text-sm font-medium text-main">Enforce corporate wallpaper on target machines</span>
+                    <span className="text-sm font-medium text-main">{t('policy.wallpaper_enforce')}</span>
                   </label>
                 </div>
 
@@ -1004,7 +1009,7 @@ export const SystemPolicyPage: React.FC = () => {
                   <>
                     <div className="form-group">
                       <label className="form-label">
-                        Upload Corporate Wallpaper Image
+                        {t('policy.wallpaper_upload_label')}
                       </label>
                       <div className="flex items-center gap-3">
                         <input
@@ -1022,15 +1027,15 @@ export const SystemPolicyPage: React.FC = () => {
                           onClick={() => wallpaperInputRef.current?.click()}
                         >
                           <Upload className={`h-4 w-4 ${uploadingWallpaper ? 'spinning' : ''}`} />
-                          <span>{uploadingWallpaper ? 'Uploading...' : 'Browse & Upload Image'}</span>
+                          <span>{uploadingWallpaper ? t('policy.uploading') : t('policy.browse_upload')}</span>
                         </button>
-                        <span className="text-xs text-muted">Supports PNG, JPG, BMP up to 10MB</span>
+                        <span className="text-xs text-muted">{t('policy.upload_hint')}</span>
                       </div>
                       {formSettings.wallpaper_url && (
                         <div className="mt-2 flex items-center gap-3" style={{ padding: '0.5rem', borderRadius: '0.375rem', border: '1px solid var(--border-subtle)', background: 'var(--bg-surface)' }}>
                           <img
                             src={formSettings.wallpaper_url}
-                            alt="Wallpaper preview"
+                            alt={t('policy.wallpaper_preview_alt')}
                             className="h-14 w-24 object-cover rounded"
                             style={{ border: '1px solid var(--border-subtle)' }}
                             onError={(e) => {
@@ -1046,27 +1051,27 @@ export const SystemPolicyPage: React.FC = () => {
 
                     <div className="form-group">
                       <label className="form-label" htmlFor="wallpaper-url">
-                        Wallpaper Image URL or File Path *
+                        {t('policy.wallpaper_url_label')}
                       </label>
                       <input
                         id="wallpaper-url"
                         type="text"
                         required={formSettings.wallpaper_enabled}
                         className="form-input"
-                        placeholder="/api/system-policies/wallpapers/... or https://company.corp/assets/branding.jpg"
+                        placeholder={t('policy.wallpaper_url_placeholder')}
                         value={formSettings.wallpaper_url || ''}
                         onChange={(e) =>
                           setFormSettings({ ...formSettings, wallpaper_url: e.target.value })
                         }
                       />
                       <span className="form-hint">
-                        Uploaded image is distributed to all managed endpoints and applied to current desktops.
+                        {t('policy.wallpaper_url_hint')}
                       </span>
                     </div>
 
                     <div className="form-group">
                       <label className="form-label" htmlFor="wallpaper-style">
-                        Wallpaper Fitting Style
+                        {t('policy.wallpaper_style_label')}
                       </label>
                       <select
                         id="wallpaper-style"
@@ -1079,11 +1084,11 @@ export const SystemPolicyPage: React.FC = () => {
                           })
                         }
                       >
-                        <option value="fill">Fill Screen (Recommended)</option>
-                        <option value="fit">Fit Screen (Keep Aspect Ratio)</option>
-                        <option value="stretch">Stretch to Screen</option>
-                        <option value="center">Center Image</option>
-                        <option value="tile">Tile Across Screen</option>
+                        <option value="fill">{t('policy.style_fill')}</option>
+                        <option value="fit">{t('policy.style_fit')}</option>
+                        <option value="stretch">{t('policy.style_stretch')}</option>
+                        <option value="center">{t('policy.style_center')}</option>
+                        <option value="tile">{t('policy.style_tile')}</option>
                       </select>
                     </div>
 
@@ -1100,10 +1105,10 @@ export const SystemPolicyPage: React.FC = () => {
                         <div>
                           <div className="text-sm font-medium text-main flex items-center gap-1.5">
                             <Lock className="h-3.5 w-3.5 text-primary" />
-                            Lock Desktop Wallpaper (`NoChangingWallpaper`)
+                            {t('policy.wallpaper_lock_title')}
                           </div>
                           <div className="text-xs text-muted">
-                            Prevents local users from modifying or replacing the desktop background via Windows Settings or right-click context menu.
+                            {t('policy.wallpaper_lock_desc')}
                           </div>
                         </div>
                       </label>
@@ -1119,10 +1124,10 @@ export const SystemPolicyPage: React.FC = () => {
                 <div style={{ padding: '0.75rem', borderRadius: '0.5rem', border: '1px solid var(--border-subtle)', background: 'var(--bg-surface-elevated)' }}>
                   <h4 className="text-sm font-semibold text-main flex items-center gap-2">
                     <Shield className="h-4 w-4 text-primary" />
-                    OS Hardening &amp; System Security Restrictions
+                    {t('policy.security_heading')}
                   </h4>
                   <p className="text-xs text-muted mt-1">
-                    Enforce Windows Defender, firewall, PowerShell restrictions, and lock down sensitive management tools to prevent tampering.
+                    {t('policy.security_intro')}
                   </p>
                 </div>
 
@@ -1140,10 +1145,10 @@ export const SystemPolicyPage: React.FC = () => {
                     <div>
                       <div className="text-sm font-medium text-main flex items-center gap-1.5">
                         <Flame className="h-3.5 w-3.5 text-orange-400" />
-                        Enforce Windows Defender Firewall
+                        {t('policy.firewall_title')}
                       </div>
                       <div className="text-xs text-muted">
-                        Forces firewall active across Domain, Private, and Public network profiles (`EnableFirewall = 1`).
+                        {t('policy.firewall_desc')}
                       </div>
                     </div>
                   </label>
@@ -1160,10 +1165,10 @@ export const SystemPolicyPage: React.FC = () => {
                     <div>
                       <div className="text-sm font-medium text-main flex items-center gap-1.5">
                         <Shield className="h-3.5 w-3.5 text-emerald-400" />
-                        Enforce Real-Time Antivirus Protection
+                        {t('policy.defender_title')}
                       </div>
                       <div className="text-xs text-muted">
-                        Prevents local users from disabling Windows Defender real-time, behavior, and on-access protection.
+                        {t('policy.defender_desc')}
                       </div>
                     </div>
                   </label>
@@ -1180,10 +1185,10 @@ export const SystemPolicyPage: React.FC = () => {
                     <div>
                       <div className="text-sm font-medium text-main flex items-center gap-1.5">
                         <Terminal className="h-3.5 w-3.5 text-amber-400" />
-                        Restrict PowerShell Script Execution
+                        {t('policy.powershell_title')}
                       </div>
                       <div className="text-xs text-muted">
-                        Sets PowerShell execution policy to `Restricted` to block script execution by unauthorized users.
+                        {t('policy.powershell_desc')}
                       </div>
                     </div>
                   </label>
@@ -1193,7 +1198,7 @@ export const SystemPolicyPage: React.FC = () => {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pb-2" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
                   <div className="form-group">
                     <label className="form-label" htmlFor="inactivity-timeout">
-                      Screen Inactivity Lock Timeout
+                      {t('policy.inactivity_label')}
                     </label>
                     <select
                       id="inactivity-timeout"
@@ -1206,18 +1211,18 @@ export const SystemPolicyPage: React.FC = () => {
                         })
                       }
                     >
-                      <option value={0}>Disabled (No screen lock)</option>
-                      <option value={5}>5 minutes</option>
-                      <option value={10}>10 minutes</option>
-                      <option value={15}>15 minutes (Standard Corporate)</option>
-                      <option value={30}>30 minutes</option>
-                      <option value={60}>60 minutes</option>
+                      <option value={0}>{t('policy.inactivity_disabled')}</option>
+                      <option value={5}>{t('policy.minutes_option', { minutes: 5 })}</option>
+                      <option value={10}>{t('policy.minutes_option', { minutes: 10 })}</option>
+                      <option value={15}>{t('policy.minutes_standard', { minutes: 15 })}</option>
+                      <option value={30}>{t('policy.minutes_option', { minutes: 30 })}</option>
+                      <option value={60}>{t('policy.minutes_option', { minutes: 60 })}</option>
                     </select>
                   </div>
 
                   <div className="form-group">
                     <label className="form-label" htmlFor="screensaver-timeout">
-                      Screen Saver Timeout &amp; Security
+                      {t('policy.screensaver_label')}
                     </label>
                     <select
                       id="screensaver-timeout"
@@ -1230,11 +1235,11 @@ export const SystemPolicyPage: React.FC = () => {
                         })
                       }
                     >
-                      <option value={0}>Disabled</option>
-                      <option value={5}>5 minutes</option>
-                      <option value={10}>10 minutes</option>
-                      <option value={15}>15 minutes</option>
-                      <option value={30}>30 minutes</option>
+                      <option value={0}>{t('policy.disabled')}</option>
+                      <option value={5}>{t('policy.minutes_option', { minutes: 5 })}</option>
+                      <option value={10}>{t('policy.minutes_option', { minutes: 10 })}</option>
+                      <option value={15}>{t('policy.minutes_option', { minutes: 15 })}</option>
+                      <option value={30}>{t('policy.minutes_option', { minutes: 30 })}</option>
                     </select>
                     <label className="flex items-center gap-2 cursor-pointer mt-2">
                       <input
@@ -1248,7 +1253,7 @@ export const SystemPolicyPage: React.FC = () => {
                           })
                         }
                       />
-                      <span className="text-xs text-main font-medium">Require password on resume (`ScreenSaverIsSecure`)</span>
+                      <span className="text-xs text-main font-medium">{t('policy.screensaver_password')}</span>
                     </label>
                   </div>
                 </div>
@@ -1265,8 +1270,8 @@ export const SystemPolicyPage: React.FC = () => {
                       }
                     />
                     <div>
-                      <div className="text-sm font-medium text-main">Disable Task Manager (`DisableTaskMgr`)</div>
-                      <div className="text-xs text-muted">Prevents standard users from terminating security agents or processes.</div>
+                      <div className="text-sm font-medium text-main">{t('policy.taskmgr_title')}</div>
+                      <div className="text-xs text-muted">{t('policy.taskmgr_desc')}</div>
                     </div>
                   </label>
 
@@ -1280,8 +1285,8 @@ export const SystemPolicyPage: React.FC = () => {
                       }
                     />
                     <div>
-                      <div className="text-sm font-medium text-main">Disable Command Prompt (`DisableCMD`)</div>
-                      <div className="text-xs text-muted">Blocks cmd.exe execution for standard users.</div>
+                      <div className="text-sm font-medium text-main">{t('policy.cmd_title')}</div>
+                      <div className="text-xs text-muted">{t('policy.cmd_desc')}</div>
                     </div>
                   </label>
 
@@ -1295,8 +1300,8 @@ export const SystemPolicyPage: React.FC = () => {
                       }
                     />
                     <div>
-                      <div className="text-sm font-medium text-main">Disable Registry Editor (`DisableRegistryTools`)</div>
-                      <div className="text-xs text-muted">Blocks regedit.exe to prevent tampering with local registry keys.</div>
+                      <div className="text-sm font-medium text-main">{t('policy.regedit_title')}</div>
+                      <div className="text-xs text-muted">{t('policy.regedit_desc')}</div>
                     </div>
                   </label>
 
@@ -1310,8 +1315,8 @@ export const SystemPolicyPage: React.FC = () => {
                       }
                     />
                     <div>
-                      <div className="text-sm font-medium text-main">Disable Control Panel &amp; Settings (`NoControlPanel`)</div>
-                      <div className="text-xs text-muted">Prevents access to Windows Settings app and classic Control Panel.</div>
+                      <div className="text-sm font-medium text-main">{t('policy.control_panel_title')}</div>
+                      <div className="text-xs text-muted">{t('policy.control_panel_desc')}</div>
                     </div>
                   </label>
                 </div>
@@ -1319,7 +1324,7 @@ export const SystemPolicyPage: React.FC = () => {
                 {/* Windows Update Mode */}
                 <div className="form-group pt-2">
                   <label className="form-label" htmlFor="wu-mode">
-                    Windows Update Policy (`AUOptions`)
+                    {t('policy.wu_label')}
                   </label>
                   <select
                     id="wu-mode"
@@ -1332,9 +1337,9 @@ export const SystemPolicyPage: React.FC = () => {
                       })
                     }
                   >
-                    <option value="default">Windows Default (Unmanaged)</option>
-                    <option value="auto_install">Enforce Automatic Download &amp; Install</option>
-                    <option value="notify_only">Notify Before Downloading Updates</option>
+                    <option value="default">{t('policy.wu_default')}</option>
+                    <option value="auto_install">{t('policy.wu_auto')}</option>
+                    <option value="notify_only">{t('policy.wu_notify')}</option>
                   </select>
                 </div>
               </div>
@@ -1346,10 +1351,10 @@ export const SystemPolicyPage: React.FC = () => {
                 <div style={{ padding: '0.75rem', borderRadius: '0.5rem', border: '1px solid var(--border-subtle)', background: 'var(--bg-surface-elevated)' }}>
                   <h4 className="text-sm font-semibold text-main flex items-center gap-2">
                     <UserCheck className="h-4 w-4 text-primary" />
-                    Managed Local Administrator Account Provisioning
+                    {t('policy.admin_heading')}
                   </h4>
                   <p className="text-xs text-muted mt-1 leading-relaxed">
-                    Deploy a standardized local administrator account across all target endpoints. Resolves differing admin credentials and guarantees central IT support access during troubleshooting.
+                    {t('policy.admin_intro')}
                   </p>
                 </div>
 
@@ -1364,7 +1369,7 @@ export const SystemPolicyPage: React.FC = () => {
                       }
                     />
                     <span className="text-sm font-medium text-main">
-                      Enforce Managed Local Administrator on Endpoints
+                      {t('policy.admin_enforce')}
                     </span>
                   </label>
                 </div>
@@ -1373,30 +1378,30 @@ export const SystemPolicyPage: React.FC = () => {
                   <div className="space-y-4 p-4 rounded-lg bg-zinc-900/60 border border-zinc-700/60">
                     <div className="grid grid-cols-2 gap-4">
                       <div className="form-group">
-                        <label className="form-label" htmlFor="admin-username">Admin Username *</label>
+                        <label className="form-label" htmlFor="admin-username">{t('policy.admin_username_label')}</label>
                         <input
                           id="admin-username"
                           type="text"
                           required
                           className="form-input"
-                          placeholder="e.g. corpadmin, sysadmin"
+                          placeholder={t('policy.admin_username_placeholder')}
                           value={formSettings.admin_account_username || ''}
                           onChange={(e) =>
                             setFormSettings({ ...formSettings, admin_account_username: e.target.value.trim() })
                           }
                         />
-                        <span className="text-xs text-muted">Created/updated as local admin on target endpoints</span>
+                        <span className="text-xs text-muted">{t('policy.admin_username_hint')}</span>
                       </div>
 
                       <div className="form-group">
-                        <label className="form-label" htmlFor="admin-password">Admin Password *</label>
+                        <label className="form-label" htmlFor="admin-password">{t('policy.admin_password_label')}</label>
                         <div className="relative">
                           <input
                             id="admin-password"
                             type={showAdminPassword ? 'text' : 'password'}
                             required
                             className="form-input pr-14"
-                            placeholder="Unified admin password"
+                            placeholder={t('policy.admin_password_placeholder')}
                             value={formSettings.admin_account_password || ''}
                             onChange={(e) =>
                               setFormSettings({ ...formSettings, admin_account_password: e.target.value })
@@ -1407,21 +1412,21 @@ export const SystemPolicyPage: React.FC = () => {
                             className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-muted hover:text-main px-1.5 py-0.5 rounded"
                             onClick={() => setShowAdminPassword(!showAdminPassword)}
                           >
-                            {showAdminPassword ? 'Hide' : 'Show'}
+                            {showAdminPassword ? t('policy.hide') : t('policy.show')}
                           </button>
                         </div>
-                        <span className="text-xs text-muted">Synchronized across matching endpoints</span>
+                        <span className="text-xs text-muted">{t('policy.admin_password_hint')}</span>
                       </div>
                     </div>
 
                     <div className="grid grid-cols-2 gap-4">
                       <div className="form-group">
-                        <label className="form-label" htmlFor="admin-fullname">Full Name (Display Name)</label>
+                        <label className="form-label" htmlFor="admin-fullname">{t('policy.admin_fullname_label')}</label>
                         <input
                           id="admin-fullname"
                           type="text"
                           className="form-input"
-                          placeholder="e.g. Corporate Support Administrator"
+                          placeholder={t('policy.admin_fullname_placeholder')}
                           value={formSettings.admin_account_full_name || ''}
                           onChange={(e) =>
                             setFormSettings({ ...formSettings, admin_account_full_name: e.target.value })
@@ -1430,12 +1435,12 @@ export const SystemPolicyPage: React.FC = () => {
                       </div>
 
                       <div className="form-group">
-                        <label className="form-label" htmlFor="admin-desc">Account Description</label>
+                        <label className="form-label" htmlFor="admin-desc">{t('policy.admin_desc_label')}</label>
                         <input
                           id="admin-desc"
                           type="text"
                           className="form-input"
-                          placeholder="e.g. Managed Support Administrator Account"
+                          placeholder={t('policy.admin_desc_placeholder')}
                           value={formSettings.admin_account_description || ''}
                           onChange={(e) =>
                             setFormSettings({ ...formSettings, admin_account_description: e.target.value })
@@ -1455,7 +1460,7 @@ export const SystemPolicyPage: React.FC = () => {
                           }
                         />
                         <span className="text-sm text-main">
-                          Password Never Expires (Prevents account lockout on disconnected machines)
+                          {t('policy.admin_never_expires')}
                         </span>
                       </label>
                     </div>
@@ -1475,9 +1480,9 @@ export const SystemPolicyPage: React.FC = () => {
           setPolicyToDelete(null)
         }}
         onConfirm={handleDeletePolicy}
-        title="Delete System Policy"
-        message={`Are you sure you want to delete policy "${policyToDelete?.name}"? Endpoints will revert to lower precedence policy or default settings.`}
-        confirmLabel="Delete Policy"
+        title={t('policy.delete_title')}
+        message={t('policy.delete_message', { name: String(policyToDelete?.name) })}
+        confirmLabel={t('policy.delete_confirm')}
         pending={deletePending}
       />
     </div>

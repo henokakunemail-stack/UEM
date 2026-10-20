@@ -18,16 +18,17 @@ import { DataTable } from '../components/ui/DataTable'
 import { ConfirmDialog } from '../components/ui/ConfirmDialog'
 import { Modal } from '../components/ui/Modal'
 import { useToast } from '../context/ToastContext'
+import { useT } from '../i18n/core'
 import type { DeviceDTO, DeviceFilterStateDTO, DeviceGroupDTO, FilterPolicyDTO, FilterRuleDTO } from '../types/api'
 
 // The agent reports one of five states, and two of them mean the endpoint is NOT
 // enforcing what the console's rule table says it is. A bare token would leave an
 // operator to guess; the label carries the consequence instead.
 const STATUS_LABEL: Record<string, string> = {
-  synced: 'Enforcing',
-  degraded: 'Partial — host file only',
-  pending: 'Awaiting agent',
-  failed: 'Failed',
+  synced: 'filter.status_synced',
+  degraded: 'filter.status_degraded',
+  pending: 'filter.status_pending',
+  failed: 'filter.status_failed',
 }
 
 // 'synced' is rendered plain rather than green: it is the absence of a problem, and
@@ -44,9 +45,9 @@ const STATUS_CLASS: Record<string, string> = {
   failed: 'text-danger',
 }
 
-function renderStatus(s?: DeviceFilterStateDTO) {
+function renderStatus(t: (key: string) => string, s?: DeviceFilterStateDTO) {
   const key = s?.status || 'pending'
-  const label = STATUS_LABEL[key] ?? key
+  const label = STATUS_LABEL[key] ? t(STATUS_LABEL[key]) : key
   // The agent's own explanation of what it could not do, shown on hover. Without
   // it 'Partial' does not tell the operator whether to fix elevation or to fix a
   // typo in a domain name.
@@ -75,11 +76,13 @@ const PolicyScopeFields: React.FC<{
   devices: DeviceDTO[]
   idPrefix: string
   onChange: (next: { target_type: string; target_id: string }) => void
-}> = ({ targetType, targetId, groups, devices, idPrefix, onChange }) => (
+}> = ({ targetType, targetId, groups, devices, idPrefix, onChange }) => {
+  const { t } = useT()
+  return (
   <>
     <div className="form-group">
       <label className="form-label" htmlFor={`${idPrefix}-scope`}>
-        Scope
+        {t('filter.scope_label')}
       </label>
       <select
         id={`${idPrefix}-scope`}
@@ -87,16 +90,16 @@ const PolicyScopeFields: React.FC<{
         value={targetType}
         onChange={(e) => onChange({ target_type: e.target.value, target_id: '' })}
       >
-        <option value="all">Entire Fleet (All Devices)</option>
-        <option value="group">Device Group</option>
-        <option value="device">Single Device</option>
+        <option value="all">{t('filter.scope_all')}</option>
+        <option value="group">{t('filter.scope_group')}</option>
+        <option value="device">{t('filter.scope_device')}</option>
       </select>
     </div>
 
     {targetType === 'group' && (
       <div className="form-group">
         <label className="form-label" htmlFor={`${idPrefix}-group`}>
-          Device Group
+          {t('filter.scope_group')}
         </label>
         <select
           id={`${idPrefix}-group`}
@@ -105,15 +108,15 @@ const PolicyScopeFields: React.FC<{
           value={targetId}
           onChange={(e) => onChange({ target_type: targetType, target_id: e.target.value })}
         >
-          <option value="">-- Select Group --</option>
+          <option value="">{t('filter.select_group_placeholder')}</option>
           {groups.map((g) => (
             <option key={g.id} value={g.id}>
-              {g.name} ({g.member_count} device{g.member_count === 1 ? '' : 's'})
+              {t(g.member_count === 1 ? 'filter.group_option_one' : 'filter.group_option', { name: g.name, count: g.member_count })}
             </option>
           ))}
         </select>
         {groups.length === 0 && (
-          <p className="form-hint">No device groups defined. Create one under Devices first.</p>
+          <p className="form-hint">{t('filter.no_groups')}</p>
         )}
       </div>
     )}
@@ -121,7 +124,7 @@ const PolicyScopeFields: React.FC<{
     {targetType === 'device' && (
       <div className="form-group">
         <label className="form-label" htmlFor={`${idPrefix}-device`}>
-          Device
+          {t('filter.device_label')}
         </label>
         <select
           id={`${idPrefix}-device`}
@@ -130,7 +133,7 @@ const PolicyScopeFields: React.FC<{
           value={targetId}
           onChange={(e) => onChange({ target_type: targetType, target_id: e.target.value })}
         >
-          <option value="">-- Select Device --</option>
+          <option value="">{t('filter.select_device_placeholder')}</option>
           {devices.map((d) => (
             <option key={d.id} value={d.id}>
               {d.hostname} ({d.os_name}, {d.status})
@@ -140,7 +143,8 @@ const PolicyScopeFields: React.FC<{
       </div>
     )}
   </>
-)
+  )
+}
 
 // The server owns the policy model: a policy carries the target scope and
 // holds rules, and enforcement is pushed per device rather than fleet-wide.
@@ -188,6 +192,7 @@ export const NetworkFilterPage: React.FC = () => {
   const [rulePendingDelete, setRulePendingDelete] = useState<{ id: string; pattern: string } | null>(null)
   const [deleting, setDeleting] = useState(false)
   const toast = useToast()
+  const { t } = useT()
 
   const [newPolicy, setNewPolicy] = useState<{
     name: string
@@ -245,7 +250,7 @@ export const NetworkFilterPage: React.FC = () => {
           try {
             return [d.id, await api.getDeviceFilterState(d.id), null] as const
           } catch (err: any) {
-            return [d.id, null, err?.message || 'Failed to read filter state'] as const
+            return [d.id, null, err?.message || t('filter.state_read_failed')] as const
           }
         })
       )
@@ -276,7 +281,7 @@ export const NetworkFilterPage: React.FC = () => {
       const [, devList] = await Promise.all([loadPolicies(), loadDevices(), loadGroups()])
       await loadStates(devList)
     } catch (err: any) {
-      setMsg({ type: 'error', text: err.message || 'Failed to load filter data' })
+      setMsg({ type: 'error', text: err.message || t('filter.load_failed') })
     } finally {
       setLoading(false)
     }
@@ -298,37 +303,37 @@ export const NetworkFilterPage: React.FC = () => {
     if (newPolicy.target_type !== 'all' && !newPolicy.target_id) {
       const text =
         newPolicy.target_type === 'group'
-          ? 'Choose the device group this policy applies to.'
-          : 'Choose the device this policy applies to.'
+          ? t('filter.choose_group')
+          : t('filter.choose_device')
       setMsg({ type: 'error', text })
-      toast.error(text, 'Select a Target')
+      toast.error(text, t('filter.select_target_title'))
       return
     }
     try {
       const created = await api.createFilterPolicy(newPolicy)
-      const text = `Policy '${created.name}' created.`
+      const text = t('filter.policy_created', { name: created.name })
       setMsg({ type: 'success', text })
-      toast.success(text, 'Policy Created')
+      toast.success(text, t('filter.policy_created_title'))
       setIsPolicyModalOpen(false)
       setNewPolicy({ name: '', description: '', mode: 'blacklist', target_type: 'all', target_id: '' })
       await loadPolicies()
       setSelectedId(created.id)
     } catch (err: any) {
-      const text = err.message || 'Failed to create policy'
+      const text = err.message || t('filter.create_failed')
       setMsg({ type: 'error', text })
-      toast.error(text, 'Create Failed')
+      toast.error(text, t('filter.create_failed_title'))
     }
   }
 
   const handleTogglePolicy = async (p: FilterPolicyDTO) => {
     try {
       await api.updateFilterPolicy(p.id, { is_enabled: !p.is_enabled })
-      const text = `Policy '${p.name}' ${p.is_enabled ? 'disabled' : 'enabled'}.`
+      const text = t(p.is_enabled ? 'filter.policy_disabled' : 'filter.policy_enabled', { name: p.name })
       setMsg({ type: 'success', text })
       toast.info(text)
       await loadPolicies()
     } catch (err: any) {
-      const text = err.message || 'Failed to update policy'
+      const text = err.message || t('filter.update_failed')
       setMsg({ type: 'error', text })
       toast.error(text)
     }
@@ -340,13 +345,13 @@ export const NetworkFilterPage: React.FC = () => {
     setDeleting(true)
     try {
       await api.deleteFilterPolicy(id)
-      const text = `Policy '${name}' deleted.`
+      const text = t('filter.policy_deleted', { name })
       setMsg({ type: 'success', text })
       toast.success(text)
       setPolicyPendingDelete(null)
       await loadPolicies()
     } catch (err: any) {
-      const text = err.message || 'Failed to delete policy'
+      const text = err.message || t('filter.delete_failed')
       setMsg({ type: 'error', text })
       toast.error(text)
     } finally {
@@ -365,7 +370,7 @@ export const NetworkFilterPage: React.FC = () => {
         action,
       })
       const isWl = selected.mode === 'whitelist'
-      const text = `${isWl ? 'Allowed domain' : 'Blocked domain'} '${newRule.pattern}' added to '${selected.name}'.`
+      const text = t(isWl ? 'filter.rule_added_allowed' : 'filter.rule_added_blocked', { pattern: newRule.pattern, policy: selected.name })
       setMsg({ type: 'success', text })
       toast.success(text)
       setIsRuleModalOpen(false)
@@ -376,7 +381,7 @@ export const NetworkFilterPage: React.FC = () => {
       await loadRules(selected.id)
       await loadPolicies()
     } catch (err: any) {
-      const text = err.message || 'Failed to create rule'
+      const text = err.message || t('filter.rule_create_failed')
       setMsg({ type: 'error', text })
       toast.error(text)
     }
@@ -398,19 +403,19 @@ export const NetworkFilterPage: React.FC = () => {
       })
       const scope =
         retargetForm.target_type === 'all'
-          ? 'the entire fleet'
+          ? t('filter.scope_entire_fleet')
           : retargetForm.target_type === 'group'
-            ? `group '${groupName(retargetForm.target_id)}'`
+            ? t('filter.scope_group_named', { name: groupName(retargetForm.target_id) })
             : `'${deviceName(retargetForm.target_id)}'`
-      const text = `Policy '${retargeting.name}' now applies to ${scope}. Changes dispatched to online devices.`
+      const text = t('filter.retargeted', { name: retargeting.name, scope })
       setMsg({ type: 'success', text })
-      toast.success(text, 'Policy Re-targeted')
+      toast.success(text, t('filter.retargeted_title'))
       setRetargeting(null)
       await loadPolicies()
     } catch (err: any) {
-      const text = err.message || 'Failed to update the policy target'
+      const text = err.message || t('filter.retarget_failed')
       setMsg({ type: 'error', text })
-      toast.error(text, 'Update Failed')
+      toast.error(text, t('filter.update_failed_title'))
     }
   }
 
@@ -420,14 +425,14 @@ export const NetworkFilterPage: React.FC = () => {
     setDeleting(true)
     try {
       await api.deleteFilterRule(id)
-      const text = `Rule '${pattern}' deleted. Access restored on online devices.`
+      const text = t('filter.rule_deleted', { pattern })
       setMsg({ type: 'success', text })
       toast.info(text)
       setRulePendingDelete(null)
       await loadRules(selectedId)
       await loadPolicies()
     } catch (err: any) {
-      const text = err.message || 'Failed to delete rule'
+      const text = err.message || t('filter.rule_delete_failed')
       setMsg({ type: 'error', text })
       toast.error(text)
     } finally {
@@ -441,13 +446,13 @@ export const NetworkFilterPage: React.FC = () => {
       const res = await api.syncDeviceFilter(d.id)
       const text =
         res.dispatched
-          ? `Pushed ${res.effective_rules} rule(s) to ${d.hostname} (version ${res.policy_version.slice(0, 12)}).`
+          ? t('filter.sync_pushed', { count: res.effective_rules, host: d.hostname, version: res.policy_version.slice(0, 12) })
           : // True now, but previously it was an unbacked claim: the row said 'pending'
             // and nothing re-read it. The server re-sends the policy on reconnect when
             // the device's reported version is not the current one.
-            `${d.hostname} is offline — the policy will be pushed when it reconnects.`
+            t('filter.sync_offline', { host: d.hostname })
       setMsg({ type: 'success', text })
-      toast.success(text, 'Filter Sync')
+      toast.success(text, t('filter.sync_title'))
       setStates((prev) => ({
         ...prev,
         [d.id]: { ...(prev[d.id] || ({} as DeviceFilterStateDTO)), device_id: d.id, policy_version: res.policy_version, status: res.status },
@@ -461,9 +466,9 @@ export const NetworkFilterPage: React.FC = () => {
         return next
       })
     } catch (err: any) {
-      const text = err.message || 'Failed to sync device'
+      const text = err.message || t('filter.sync_failed')
       setMsg({ type: 'error', text })
-      toast.error(text, 'Sync Failed')
+      toast.error(text, t('filter.sync_failed_title'))
     } finally {
       setSyncingId(null)
     }
@@ -476,27 +481,27 @@ export const NetworkFilterPage: React.FC = () => {
   const scopeLabel = (p: FilterPolicyDTO) => {
     if (p.target_type === 'group') return groupName(p.target_id)
     if (p.target_type === 'device') return deviceName(p.target_id)
-    return 'All devices'
+    return t('filter.scope_all_devices')
   }
 
   return (
     <div className="page-container">
       <div className="page-header">
         <div>
-          <h2 className="page-title">Network &amp; Web Security Filter</h2>
+          <h2 className="page-title">{t('filter.title')}</h2>
           <p className="page-subtitle">
-            DNS sinkholing, corporate domain blocking, and per-device policy enforcement
+            {t('filter.subtitle')}
           </p>
         </div>
         <div className="header-controls">
           <button type="button" className="btn btn-secondary" onClick={loadData} disabled={loading}>
             <RefreshCw size={16} className={loading ? 'spinning' : ''} />
-            <span>Refresh</span>
+            <span>{t('filter.refresh')}</span>
           </button>
           {canAdmin && (
             <button type="button" className="btn btn-secondary" onClick={() => setIsPolicyModalOpen(true)}>
               <Layers size={16} />
-              <span>New Policy</span>
+              <span>{t('filter.new_policy')}</span>
             </button>
           )}
           {canAdmin && (
@@ -515,12 +520,12 @@ export const NetworkFilterPage: React.FC = () => {
               disabled={!selected}
               title={
                 selected
-                  ? `Add ${selected.mode === 'whitelist' ? 'an allowed' : 'a blocked'} domain to ${selected.name}`
-                  : 'Create a policy first'
+                  ? t(selected.mode === 'whitelist' ? 'filter.add_title_allowed' : 'filter.add_title_blocked', { name: selected.name })
+                  : t('filter.create_policy_first')
               }
             >
               <Plus size={16} />
-              <span>{selected?.mode === 'whitelist' ? 'Add Allowed Domain' : 'Add Rule'}</span>
+              <span>{selected?.mode === 'whitelist' ? t('filter.add_allowed_domain') : t('filter.add_rule')}</span>
             </button>
           )}
         </div>
@@ -529,7 +534,7 @@ export const NetworkFilterPage: React.FC = () => {
       {msg && (
         <div className={`alert-banner ${msg.type === 'error' ? 'alert-error' : 'alert-success'}`}>
           <span>{msg.text}</span>
-          <button type="button" onClick={() => setMsg(null)} className="close-btn" aria-label="Dismiss message">
+          <button type="button" onClick={() => setMsg(null)} className="close-btn" aria-label={t('filter.dismiss')}>
             <X size={14} />
           </button>
         </div>
@@ -540,30 +545,30 @@ export const NetworkFilterPage: React.FC = () => {
         <div className="card-header-bar">
           <div className="card-title-group">
             <Shield className="text-primary" size={18} />
-            <h3 className="card-title">Filter Policies ({policies.length})</h3>
+            <h3 className="card-title">{t('filter.policies_title', { count: policies.length })}</h3>
           </div>
           <span className="text-sm text-dim">
-            A rule only exists inside a policy — pick one to edit its rules
+            {t('filter.policies_hint')}
           </span>
         </div>
 
-        <DataTable label="Filter policies">
+        <DataTable label={t('filter.policies_table_label')}>
           <table className="data-table">
             <thead>
               <tr>
-                <th>Policy</th>
-                <th>Mode</th>
-                <th>Scope</th>
-                <th>Rules</th>
-                <th>Status</th>
-                <th>Actions</th>
+                <th>{t('filter.col_policy')}</th>
+                <th>{t('filter.col_mode')}</th>
+                <th>{t('filter.scope_label')}</th>
+                <th>{t('filter.col_rules')}</th>
+                <th>{t('filter.col_status')}</th>
+                <th>{t('filter.col_actions')}</th>
               </tr>
             </thead>
             <tbody>
               {policies.length === 0 ? (
                 <tr>
                   <td colSpan={6} className="text-center py-8 text-muted">
-                    No policies yet. Create one to start blocking domains.
+                    {t('filter.empty_policies')}
                   </td>
                 </tr>
               ) : (
@@ -580,19 +585,25 @@ export const NetworkFilterPage: React.FC = () => {
                     </td>
                     <td>
                       {p.mode === 'whitelist' ? (
-                        <span className="status-pill warning" title="Default-Deny: Only whitelisted websites can be opened">
-                          Whitelist
+                        <span className="status-pill warning" title={t('filter.mode_whitelist_title')}>
+                          {t('filter.mode_whitelist')}
                         </span>
                       ) : (
-                        <span className="status-pill offline" title="Blocklist: Listed domains are blocked">
-                          Blacklist
+                        <span className="status-pill offline" title={t('filter.mode_blacklist_title')}>
+                          {t('filter.mode_blacklist')}
                         </span>
                       )}
                     </td>
                     <td>
                       <div className="font-semibold text-main">{scopeLabel(p)}</div>
                       <div className="text-sm text-dim">
-                        {p.target_type === 'all' ? 'Fleet-wide' : p.target_type}
+                        {p.target_type === 'all'
+                          ? t('filter.fleet_wide')
+                          : p.target_type === 'group'
+                            ? t('filter.target_type_group')
+                            : p.target_type === 'device'
+                              ? t('filter.target_type_device')
+                              : p.target_type}
                       </div>
                     </td>
                     <td>
@@ -600,7 +611,7 @@ export const NetworkFilterPage: React.FC = () => {
                     </td>
                     <td>
                       <span className={`status-pill ${p.is_enabled ? 'online' : 'offline'}`}>
-                        {p.is_enabled ? 'Enabled' : 'Disabled'}
+                        {p.is_enabled ? t('filter.enabled') : t('filter.disabled')}
                       </span>
                     </td>
                     <td onClick={(e) => e.stopPropagation()}>
@@ -613,19 +624,19 @@ export const NetworkFilterPage: React.FC = () => {
                               setRetargetForm({ target_type: p.target_type, target_id: p.target_id })
                               setRetargeting(p)
                             }}
-                            title={`Currently targets ${scopeLabel(p)}`}
+                            title={t('filter.currently_targets', { name: scopeLabel(p) })}
                           >
                             <Target size={14} />
-                            <span>Re-target</span>
+                            <span>{t('filter.retarget')}</span>
                           </button>
                           <button
                             type="button"
                             className="btn-action"
                             onClick={() => handleTogglePolicy(p)}
-                            title={p.is_enabled ? 'Disable this policy' : 'Enable this policy'}
+                            title={p.is_enabled ? t('filter.disable_policy') : t('filter.enable_policy')}
                           >
                             <Power size={14} />
-                            <span>{p.is_enabled ? 'Disable' : 'Enable'}</span>
+                            <span>{p.is_enabled ? t('filter.action_disable') : t('filter.action_enable')}</span>
                           </button>
                           <button
                             type="button"
@@ -633,10 +644,10 @@ export const NetworkFilterPage: React.FC = () => {
                             onClick={() =>
                               setPolicyPendingDelete({ id: p.id, name: p.name, rules_count: p.rules_count })
                             }
-                            aria-label={`Delete policy ${p.name}`}
+                            aria-label={t('filter.delete_policy_aria', { name: p.name })}
                           >
                             <Trash2 size={14} />
-                            <span>Delete</span>
+                            <span>{t('common.delete')}</span>
                           </button>
                         </div>
                       )}
@@ -655,41 +666,41 @@ export const NetworkFilterPage: React.FC = () => {
           <div className="card-title-group">
             <Globe className="text-primary" size={18} />
             <h3 className="card-title">
-              {selected?.mode === 'whitelist' ? 'Allowed Domains' : 'Rules'}{' '}
-              {selected ? `in "${selected.name}"` : ''} ({rules.length})
+              {selected?.mode === 'whitelist' ? t('filter.allowed_domains') : t('filter.col_rules')}{' '}
+              {selected ? t('filter.in_policy', { name: selected.name }) : ''} ({rules.length})
             </h3>
           </div>
           {selected && (
             <span className="text-sm text-dim">
               {selected.mode === 'whitelist'
-                ? 'Default-Deny: Only these whitelisted domains (and management server) are permitted. All others are blocked.'
-                : 'Blacklist: Every rule below is sinkholed to 0.0.0.0 and blocked in host firewall on target devices.'}
+                ? t('filter.whitelist_hint')
+                : t('filter.blacklist_hint')}
             </span>
           )}
         </div>
 
-        <DataTable label="Policy rules">
+        <DataTable label={t('filter.rules_table_label')}>
           <table className="data-table">
             <thead>
               <tr>
-                <th>{selected?.mode === 'whitelist' ? 'Allowed Domain / Hostname Pattern' : 'Blocked Domain / Hostname Pattern'}</th>
-                <th>Category</th>
-                <th>Actions</th>
+                <th>{selected?.mode === 'whitelist' ? t('filter.col_allowed_pattern') : t('filter.col_blocked_pattern')}</th>
+                <th>{t('filter.col_category')}</th>
+                <th>{t('filter.col_actions')}</th>
               </tr>
             </thead>
             <tbody>
               {!selected ? (
                 <tr>
                   <td colSpan={3} className="text-center py-8 text-muted">
-                    Select a policy above to see its rules.
+                    {t('filter.select_policy_hint')}
                   </td>
                 </tr>
               ) : rules.length === 0 ? (
                 <tr>
                   <td colSpan={3} className="text-center py-8 text-muted">
                     {selected.mode === 'whitelist'
-                      ? 'This whitelist policy has no allowed domains yet. Use "Add Allowed Domain" to permit access.'
-                      : 'This blacklist policy has no rules yet. Use "Add Rule" to block a domain.'}
+                      ? t('filter.empty_whitelist')
+                      : t('filter.empty_blacklist')}
                   </td>
                 </tr>
               ) : (
@@ -698,17 +709,17 @@ export const NetworkFilterPage: React.FC = () => {
                     <td>
                       <div className="font-mono font-semibold text-main">{r.pattern}</div>
                     </td>
-                    <td>{r.category || 'General'}</td>
+                    <td>{r.category || t('filter.category_general')}</td>
                     <td>
                       {canAdmin && (
                         <button
                           type="button"
                           className="btn-action text-danger"
                           onClick={() => setRulePendingDelete({ id: r.id, pattern: r.pattern })}
-                          aria-label={`Delete rule ${r.pattern}`}
+                          aria-label={t('filter.delete_rule_aria', { pattern: r.pattern })}
                         >
                           <Trash2 size={14} />
-                          <span>Delete</span>
+                          <span>{t('common.delete')}</span>
                         </button>
                       )}
                     </td>
@@ -725,35 +736,35 @@ export const NetworkFilterPage: React.FC = () => {
         <div className="card-header-bar">
           <div className="card-title-group">
             <CheckCircle2 className="text-success" size={18} />
-            <h3 className="card-title">Device Enforcement</h3>
+            <h3 className="card-title">{t('filter.enforcement_title')}</h3>
           </div>
           <span className="text-sm text-dim">
             {statesLoading
-              ? `Reading filter state for ${devices.length} device(s)...`
+              ? t('filter.reading_states', { count: devices.length })
               : Object.keys(stateErrors).length > 0
-                ? `${Object.keys(stateErrors).length} of ${devices.length} device state read(s) failed`
-                : 'Sync compiles every enabled policy that targets the device and pushes it over the live socket'}
+                ? t('filter.read_failures', { failed: Object.keys(stateErrors).length, total: devices.length })
+                : t('filter.enforcement_hint')}
           </span>
         </div>
 
-        <DataTable label="Device enforcement">
+        <DataTable label={t('filter.enforcement_table_label')}>
           <table className="data-table">
             <thead>
               <tr>
-                <th>Device</th>
-                <th>Site</th>
-                <th>Agent Policy Version</th>
-                <th>Rules Applied</th>
-                <th>Status</th>
-                <th>Last Report</th>
-                <th>Actions</th>
+                <th>{t('filter.col_device')}</th>
+                <th>{t('filter.col_site')}</th>
+                <th>{t('filter.col_agent_version')}</th>
+                <th>{t('filter.col_rules_applied')}</th>
+                <th>{t('filter.col_status')}</th>
+                <th>{t('filter.col_last_report')}</th>
+                <th>{t('filter.col_actions')}</th>
               </tr>
             </thead>
             <tbody>
               {devices.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="text-center py-8 text-muted">
-                    No devices enrolled yet.
+                    {t('filter.no_devices')}
                   </td>
                 </tr>
               ) : (
@@ -771,7 +782,7 @@ export const NetworkFilterPage: React.FC = () => {
                           would legitimately show. */}
                       {stateError ? (
                         <td colSpan={4} className="text-sm text-danger">
-                          Filter state unavailable: {stateError}
+                          {t('filter.state_unavailable', { error: stateError })}
                         </td>
                       ) : (
                         <>
@@ -787,7 +798,7 @@ export const NetworkFilterPage: React.FC = () => {
                                 at all; 0 would claim it reported an empty rule set. */}
                             <span className="font-mono">{s?.last_applied_at ? (s.rules_applied ?? 0) : '—'}</span>
                           </td>
-                          <td>{renderStatus(s)}</td>
+                          <td>{renderStatus(t, s)}</td>
                           <td className="text-sm text-muted">
                             {s?.last_applied_at ? new Date(s.last_applied_at).toLocaleString() : '—'}
                           </td>
@@ -800,10 +811,10 @@ export const NetworkFilterPage: React.FC = () => {
                             className="btn-action"
                             onClick={() => handleSync(d)}
                             disabled={syncingId === d.id}
-                            title="Compile and push the effective rule set to this device"
+                            title={t('filter.sync_button_title')}
                           >
                             <CloudUpload size={14} className={syncingId === d.id ? 'spinning' : ''} />
-                            <span>{syncingId === d.id ? 'Syncing...' : 'Sync Now'}</span>
+                            <span>{syncingId === d.id ? t('filter.syncing') : t('filter.sync_now')}</span>
                           </button>
                         )}
                       </td>
@@ -820,7 +831,7 @@ export const NetworkFilterPage: React.FC = () => {
       <Modal
         open={isPolicyModalOpen}
         onClose={() => setIsPolicyModalOpen(false)}
-        title="New Filter Policy"
+        title={t('filter.new_policy_title')}
         size="md"
         footer={
           <>
@@ -829,10 +840,10 @@ export const NetworkFilterPage: React.FC = () => {
               className="btn btn-secondary"
               onClick={() => setIsPolicyModalOpen(false)}
             >
-              Cancel
+              {t('common.cancel')}
             </button>
             <button type="submit" form="filter-policy-form" className="btn btn-primary">
-              Create Policy
+              {t('filter.create_policy')}
             </button>
           </>
         }
@@ -840,21 +851,21 @@ export const NetworkFilterPage: React.FC = () => {
         <form id="filter-policy-form" onSubmit={handleCreatePolicy}>
           <div className="form-group">
             <label className="form-label" htmlFor="filter-policy-name">
-              Policy Name
+              {t('filter.name_label')}
             </label>
             <input
               id="filter-policy-name"
               type="text"
               className="form-input"
               required
-              placeholder="e.g. Corporate Baseline"
+              placeholder={t('filter.name_placeholder')}
               value={newPolicy.name}
               onChange={(e) => setNewPolicy({ ...newPolicy, name: e.target.value })}
             />
           </div>
           <div className="form-group">
             <label className="form-label">
-              Policy Enforcement Mode
+              {t('filter.mode_label')}
             </label>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginTop: '0.25rem' }}>
               <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.6rem', cursor: 'pointer' }}>
@@ -867,9 +878,9 @@ export const NetworkFilterPage: React.FC = () => {
                   style={{ marginTop: '0.2rem' }}
                 />
                 <div>
-                  <div className="font-semibold text-main">Blacklist (Blocklist)</div>
+                  <div className="font-semibold text-main">{t('filter.mode_blacklist_option')}</div>
                   <div className="text-xs text-muted">
-                    Allow all websites, block only specified domains via hosts sinkhole &amp; firewall.
+                    {t('filter.mode_blacklist_desc')}
                   </div>
                 </div>
               </label>
@@ -883,28 +894,28 @@ export const NetworkFilterPage: React.FC = () => {
                   style={{ marginTop: '0.2rem' }}
                 />
                 <div>
-                  <div className="font-semibold text-main">Whitelist (Default-Deny)</div>
+                  <div className="font-semibold text-main">{t('filter.mode_whitelist_option')}</div>
                   <div className="text-xs text-muted">
-                    Block all websites, allow ONLY specified domains via local loopback DNS proxy.
+                    {t('filter.mode_whitelist_desc')}
                   </div>
                 </div>
               </label>
             </div>
             {newPolicy.mode === 'whitelist' && (
               <p className="form-hint" style={{ marginTop: '0.5rem', color: 'var(--color-warning)' }}>
-                Target devices will only be able to open domains added to this whitelist. Management server connection, local intranet, and DHCP remain fully safe.
+                {t('filter.whitelist_warning')}
               </p>
             )}
           </div>
           <div className="form-group">
             <label className="form-label" htmlFor="filter-policy-desc">
-              Description
+              {t('filter.description_label')}
             </label>
             <input
               id="filter-policy-desc"
               type="text"
               className="form-input"
-              placeholder="What this policy is for"
+              placeholder={t('filter.description_placeholder')}
               value={newPolicy.description}
               onChange={(e) => setNewPolicy({ ...newPolicy, description: e.target.value })}
             />
@@ -924,16 +935,16 @@ export const NetworkFilterPage: React.FC = () => {
       <Modal
         open={retargeting !== null}
         onClose={() => setRetargeting(null)}
-        title="Change Policy Scope"
-        description={retargeting ? `"${retargeting.name}" — currently ${scopeLabel(retargeting)}` : undefined}
+        title={t('filter.retarget_title')}
+        description={retargeting ? t('filter.retarget_description', { name: retargeting.name, scope: scopeLabel(retargeting) }) : undefined}
         size="md"
         footer={
           <>
             <button type="button" className="btn btn-secondary" onClick={() => setRetargeting(null)}>
-              Cancel
+              {t('common.cancel')}
             </button>
             <button type="submit" form="filter-retarget-form" className="btn btn-primary">
-              Apply Scope
+              {t('filter.apply_scope')}
             </button>
           </>
         }
@@ -948,8 +959,7 @@ export const NetworkFilterPage: React.FC = () => {
             onChange={(next) => setRetargetForm(next)}
           />
           <p className="form-hint">
-            The policy's rules are kept. Devices keep the rules they already have until their next
-            sync.
+            {t('filter.retarget_hint')}
           </p>
         </form>
       </Modal>
@@ -958,9 +968,9 @@ export const NetworkFilterPage: React.FC = () => {
       <Modal
         open={isRuleModalOpen && selected !== null}
         onClose={() => setIsRuleModalOpen(false)}
-        title={selected?.mode === 'whitelist' ? 'Add Allowed Domain' : 'Add Rule'}
+        title={selected?.mode === 'whitelist' ? t('filter.add_allowed_domain') : t('filter.add_rule')}
         size="md"
-        description={selected ? `to "${selected.name}" (${selected.mode === 'whitelist' ? 'Whitelist Mode' : 'Blacklist Mode'})` : undefined}
+        description={selected ? t(selected.mode === 'whitelist' ? 'filter.rule_modal_description_whitelist' : 'filter.rule_modal_description_blacklist', { name: selected.name }) : undefined}
         footer={
           <>
             <button
@@ -968,10 +978,10 @@ export const NetworkFilterPage: React.FC = () => {
               className="btn btn-secondary"
               onClick={() => setIsRuleModalOpen(false)}
             >
-              Cancel
+              {t('common.cancel')}
             </button>
             <button type="submit" form="filter-rule-form" className="btn btn-primary">
-              {selected?.mode === 'whitelist' ? 'Add Allowed Domain' : 'Add Rule'}
+              {selected?.mode === 'whitelist' ? t('filter.add_allowed_domain') : t('filter.add_rule')}
             </button>
           </>
         }
@@ -979,26 +989,26 @@ export const NetworkFilterPage: React.FC = () => {
         <form id="filter-rule-form" onSubmit={handleCreateRule}>
           <div className="form-group">
             <label className="form-label" htmlFor="filter-rule-pattern">
-              {selected?.mode === 'whitelist' ? 'Allowed Domain or Hostname' : 'Domain or Hostname to Block'}
+              {selected?.mode === 'whitelist' ? t('filter.pattern_label_allowed') : t('filter.pattern_label_blocked')}
             </label>
             <input
               id="filter-rule-pattern"
               type="text"
               className="form-input"
               required
-              placeholder={selected?.mode === 'whitelist' ? 'e.g. google.com or mycompany.com' : 'e.g. gambling-site.com or malware.tracker.net'}
+              placeholder={selected?.mode === 'whitelist' ? t('filter.pattern_placeholder_allowed') : t('filter.pattern_placeholder_blocked')}
               value={newRule.pattern}
               onChange={(e) => setNewRule({ ...newRule, pattern: e.target.value })}
             />
             {selected?.mode === 'whitelist' && (
               <p className="form-hint">
-                Tip: Subdomains are included automatically (e.g. &apos;google.com&apos; allows &apos;mail.google.com&apos; and &apos;www.google.com&apos;).
+                {t('filter.subdomain_tip')}
               </p>
             )}
           </div>
           <div className="form-group">
             <label className="form-label" htmlFor="filter-rule-category">
-              Category
+              {t('filter.col_category')}
             </label>
             <select
               id="filter-rule-category"
@@ -1008,18 +1018,18 @@ export const NetworkFilterPage: React.FC = () => {
             >
               {selected?.mode === 'whitelist' ? (
                 <>
-                  <option value="Business & Productivity">Business &amp; Productivity</option>
-                  <option value="Corporate Portal & Tools">Corporate Portal &amp; Tools</option>
-                  <option value="Educational & Reference">Educational &amp; Reference</option>
-                  <option value="General Whitelist">General Whitelist</option>
+                  <option value="Business & Productivity">{t('filter.cat_business')}</option>
+                  <option value="Corporate Portal & Tools">{t('filter.cat_corporate')}</option>
+                  <option value="Educational & Reference">{t('filter.cat_education')}</option>
+                  <option value="General Whitelist">{t('filter.cat_general_whitelist')}</option>
                 </>
               ) : (
                 <>
-                  <option value="Security & Phishing">Security &amp; Phishing</option>
-                  <option value="Adult & Gambling">Adult &amp; Gambling</option>
-                  <option value="Bandwidth Heavy / Streaming">Bandwidth Heavy / Streaming</option>
-                  <option value="Social Media">Social Media</option>
-                  <option value="Custom Policy">Custom Corporate Policy</option>
+                  <option value="Security & Phishing">{t('filter.cat_security')}</option>
+                  <option value="Adult & Gambling">{t('filter.cat_adult')}</option>
+                  <option value="Bandwidth Heavy / Streaming">{t('filter.cat_streaming')}</option>
+                  <option value="Social Media">{t('filter.cat_social')}</option>
+                  <option value="Custom Policy">{t('filter.cat_custom')}</option>
                 </>
               )}
             </select>
@@ -1029,13 +1039,13 @@ export const NetworkFilterPage: React.FC = () => {
 
       <ConfirmDialog
         open={policyPendingDelete !== null}
-        title="Delete filter policy"
+        title={t('filter.delete_policy_title')}
         message={
           policyPendingDelete
-            ? `Delete policy '${policyPendingDelete.name}' and its ${policyPendingDelete.rules_count} rule(s)? Devices keep their current rule set until their next sync.`
+            ? t('filter.delete_policy_message', { name: policyPendingDelete.name, count: policyPendingDelete.rules_count })
             : ''
         }
-        confirmLabel="Delete"
+        confirmLabel={t('common.delete')}
         pending={deleting}
         onConfirm={handleDeletePolicy}
         onCancel={() => setPolicyPendingDelete(null)}
@@ -1043,13 +1053,13 @@ export const NetworkFilterPage: React.FC = () => {
 
       <ConfirmDialog
         open={rulePendingDelete !== null}
-        title="Delete filter rule"
+        title={t('filter.delete_rule_title')}
         message={
           rulePendingDelete
-            ? `Delete rule '${rulePendingDelete.pattern}'? Devices keep the old list until their next sync.`
+            ? t('filter.delete_rule_message', { pattern: rulePendingDelete.pattern })
             : ''
         }
-        confirmLabel="Delete"
+        confirmLabel={t('common.delete')}
         pending={deleting}
         onConfirm={handleDeleteRule}
         onCancel={() => setRulePendingDelete(null)}

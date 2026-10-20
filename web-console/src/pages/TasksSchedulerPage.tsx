@@ -14,6 +14,9 @@ import { usePermission } from '../hooks/usePermission'
 import { DataTable } from '../components/ui/DataTable'
 import { Modal } from '../components/ui/Modal'
 import type { DeviceRunDTO, ScheduleDTO, ScriptDTO, TaskRunDTO } from '../types/api'
+import { useT, type Vars } from '../i18n/core'
+
+type TFn = (key: string, vars?: Vars) => string
 
 // The server reads an interval trigger as a MINUTE count and multiplies it by
 // time.Minute, so `schedule_expr` holds minutes -- not seconds, which is what
@@ -21,12 +24,30 @@ import type { DeviceRunDTO, ScheduleDTO, ScriptDTO, TaskRunDTO } from '../types/
 // suggest was asking for a task every 2400 hours, and the console rendered the
 // same number back as "Every 1h", so nothing on screen disagreed with anything
 // else and nothing fired on time either.
-function describeInterval(expr: string): string {
+function describeInterval(expr: string, t: TFn): string {
   const mins = Number(expr)
   if (!Number.isFinite(mins) || mins <= 0) return expr || '—'
-  if (mins % 1440 === 0) return `${mins / 1440}d`
-  if (mins % 60 === 0) return `${mins / 60}h`
-  return `${mins}m`
+  if (mins % 1440 === 0) return t('scheduler.interval_days', { n: mins / 1440 })
+  if (mins % 60 === 0) return t('scheduler.interval_hours', { n: mins / 60 })
+  return t('scheduler.interval_minutes', { n: mins })
+}
+
+// Run and target values are server enums. Known ones get a translated label;
+// anything else is shown exactly as the server sent it.
+const STATUS_KEYS: Record<string, string> = {
+  pending: 'scheduler.status_pending',
+  running: 'scheduler.status_running',
+  completed: 'scheduler.status_completed',
+  success: 'scheduler.status_success',
+  failed: 'scheduler.status_failed',
+}
+const TARGET_KEYS: Record<string, string> = {
+  all: 'scheduler.target_all_short',
+  group: 'scheduler.target_group_short',
+  device: 'scheduler.target_device_short',
+}
+function enumLabel(map: Record<string, string>, value: string, t: TFn): string {
+  return map[value] ? t(map[value]) : value
 }
 
 export type SchedulerTab = 'schedules' | 'runs'
@@ -81,6 +102,7 @@ export const TasksSchedulerPage: React.FC<TasksSchedulerPageProps> = ({ activeTa
   })
   const [msg, setMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
   const toast = useToast()
+  const { t } = useT()
 
   const loadData = async () => {
     setLoading(true)
@@ -94,7 +116,7 @@ export const TasksSchedulerPage: React.FC<TasksSchedulerPageProps> = ({ activeTa
       setSchedules(schList)
       setRuns(runList)
     } catch (err: any) {
-      setMsg({ type: 'error', text: err.message || 'Failed to load task scheduler data' })
+      setMsg({ type: 'error', text: err.message || t('scheduler.load_failed') })
     } finally {
       setLoading(false)
     }
@@ -120,9 +142,9 @@ export const TasksSchedulerPage: React.FC<TasksSchedulerPageProps> = ({ activeTa
     e.preventDefault()
     try {
       const created = await api.createScript(newScript)
-      const successText = `Script '${newScript.name}' created.`
+      const successText = t('scheduler.script_created', { name: newScript.name })
       setMsg({ type: 'success', text: successText })
-      toast.success(successText, 'Script Registered')
+      toast.success(successText, t('scheduler.script_registered'))
       setIsScriptModalOpen(false)
       setNewScript({ name: '', description: '', script_type: 'powershell', script_content: '' })
       await loadData()
@@ -131,9 +153,9 @@ export const TasksSchedulerPage: React.FC<TasksSchedulerPageProps> = ({ activeTa
       }
       setIsScheduleModalOpen(true)
     } catch (err: any) {
-      const errorText = err.message || 'Failed to create script'
+      const errorText = err.message || t('scheduler.script_create_failed')
       setMsg({ type: 'error', text: errorText })
-      toast.error(errorText, 'Creation Failed')
+      toast.error(errorText, t('scheduler.creation_failed'))
     }
   }
 
@@ -141,15 +163,15 @@ export const TasksSchedulerPage: React.FC<TasksSchedulerPageProps> = ({ activeTa
     e.preventDefault()
     try {
       await api.createSchedule(newSchedule)
-      const successText = `Schedule '${newSchedule.name}' created and activated.`
+      const successText = t('scheduler.schedule_created', { name: newSchedule.name })
       setMsg({ type: 'success', text: successText })
-      toast.success(successText, 'Schedule Activated')
+      toast.success(successText, t('scheduler.schedule_activated'))
       setIsScheduleModalOpen(false)
       loadData()
     } catch (err: any) {
-      const errorText = err.message || 'Failed to create schedule'
+      const errorText = err.message || t('scheduler.schedule_create_failed')
       setMsg({ type: 'error', text: errorText })
-      toast.error(errorText, 'Schedule Failed')
+      toast.error(errorText, t('scheduler.schedule_failed'))
     }
   }
 
@@ -157,20 +179,20 @@ export const TasksSchedulerPage: React.FC<TasksSchedulerPageProps> = ({ activeTa
     <div className="page-container">
       <div className="page-header">
         <div>
-          <h2 className="page-title">Task Scheduler</h2>
+          <h2 className="page-title">{t('scheduler.title')}</h2>
           <p className="page-subtitle">
-            Automated maintenance schedules, recurring background jobs, and fleet-wide execution history
+            {t('scheduler.subtitle')}
           </p>
         </div>
         <div className="header-controls">
           <button type="button" className="btn btn-secondary" onClick={loadData} disabled={loading}>
             <RefreshCw size={16} className={loading ? 'spinning' : ''} />
-            <span>Refresh</span>
+            <span>{t('scheduler.refresh')}</span>
           </button>
           {canAdmin && subTab === 'schedules' && (
             <button type="button" className="btn btn-primary" onClick={() => setIsScheduleModalOpen(true)}>
               <Plus size={16} />
-              <span>New Schedule</span>
+              <span>{t('scheduler.new_schedule')}</span>
             </button>
           )}
         </div>
@@ -179,7 +201,7 @@ export const TasksSchedulerPage: React.FC<TasksSchedulerPageProps> = ({ activeTa
       {msg && (
         <div className={`alert-banner ${msg.type === 'error' ? 'alert-error' : 'alert-success'}`}>
           <span>{msg.text}</span>
-          <button type="button" onClick={() => setMsg(null)} className="close-btn" aria-label="Dismiss message">
+          <button type="button" onClick={() => setMsg(null)} className="close-btn" aria-label={t('scheduler.dismiss_message')}>
             <X size={14} />
           </button>
         </div>
@@ -193,7 +215,7 @@ export const TasksSchedulerPage: React.FC<TasksSchedulerPageProps> = ({ activeTa
           onClick={() => setSubTab('schedules')}
         >
           <CalendarClock size={16} />
-          <span>Schedules ({schedules.length})</span>
+          <span>{t('scheduler.tab_schedules', { count: schedules.length })}</span>
         </button>
         <button
           type="button"
@@ -201,30 +223,30 @@ export const TasksSchedulerPage: React.FC<TasksSchedulerPageProps> = ({ activeTa
           onClick={() => setSubTab('runs')}
         >
           <History size={16} />
-          <span>Execution History ({runs.length})</span>
+          <span>{t('scheduler.tab_runs', { count: runs.length })}</span>
         </button>
       </div>
 
       {/* Tab 1: Schedules */}
       {subTab === 'schedules' && (
         <div className="table-card">
-          <DataTable label="Schedules">
+          <DataTable label={t('scheduler.schedules_table_label')}>
             <table className="data-table">
               <thead>
                 <tr>
-                  <th>Schedule Name</th>
-                  <th>Script</th>
-                  <th>Target Fleet</th>
-                  <th>Frequency</th>
-                  <th>Status</th>
-                  <th>Next Execution</th>
+                  <th>{t('scheduler.col_schedule_name')}</th>
+                  <th>{t('scheduler.col_script')}</th>
+                  <th>{t('scheduler.col_target')}</th>
+                  <th>{t('scheduler.col_frequency')}</th>
+                  <th>{t('scheduler.col_status')}</th>
+                  <th>{t('scheduler.col_next_run')}</th>
                 </tr>
               </thead>
               <tbody>
                 {schedules.length === 0 ? (
                   <tr>
                     <td colSpan={6} className="text-center py-8 text-muted">
-                      No recurring schedules configured.
+                      {t('scheduler.no_schedules')}
                     </td>
                   </tr>
                 ) : (
@@ -233,7 +255,7 @@ export const TasksSchedulerPage: React.FC<TasksSchedulerPageProps> = ({ activeTa
                       <td className="font-semibold text-main">{sch.name}</td>
                       <td>{sch.script_name || sch.script_id.slice(0, 12)}</td>
                       <td>
-                        <span className="badge-target">{sch.target_type}</span>
+                        <span className="badge-target">{enumLabel(TARGET_KEYS, sch.target_type, t)}</span>
                       </td>
                       <td>
                         {/* A schedule_type the server refuses to create can still
@@ -242,16 +264,16 @@ export const TasksSchedulerPage: React.FC<TasksSchedulerPageProps> = ({ activeTa
                             interval, because describing "0 0 * * *" as an
                             interval tells the operator it is firing. */}
                         {sch.schedule_type === 'interval' ? (
-                          `Every ${describeInterval(sch.schedule_expr)}`
+                          t('scheduler.every', { interval: describeInterval(sch.schedule_expr, t) })
                         ) : (
                           <span className="text-muted">
-                            {sch.schedule_type} is not a trigger this server runs
+                            {t('scheduler.unsupported_trigger', { type: sch.schedule_type })}
                           </span>
                         )}
                       </td>
                       <td>
                         <span className={`status-pill ${sch.is_enabled ? 'online' : 'offline'}`}>
-                          {sch.is_enabled ? 'Active' : 'Paused'}
+                          {sch.is_enabled ? t('scheduler.active') : t('scheduler.paused')}
                         </span>
                       </td>
                       <td className="text-sm text-muted">
@@ -269,24 +291,24 @@ export const TasksSchedulerPage: React.FC<TasksSchedulerPageProps> = ({ activeTa
       {/* Tab 3: Execution History */}
       {subTab === 'runs' && (
         <div className="table-card">
-          <DataTable label="Execution history">
+          <DataTable label={t('scheduler.runs_table_label')}>
             <table className="data-table">
               <thead>
                 <tr>
-                  <th>Run ID</th>
-                  <th>Schedule</th>
-                  <th>Script</th>
-                  <th>Status</th>
-                  <th>Triggered At</th>
-                  <th>Completed At</th>
-                  <th>Actions</th>
+                  <th>{t('scheduler.col_run_id')}</th>
+                  <th>{t('scheduler.col_schedule')}</th>
+                  <th>{t('scheduler.col_script')}</th>
+                  <th>{t('scheduler.col_status')}</th>
+                  <th>{t('scheduler.col_triggered_at')}</th>
+                  <th>{t('scheduler.col_completed_at')}</th>
+                  <th>{t('scheduler.col_actions')}</th>
                 </tr>
               </thead>
               <tbody>
                 {runs.length === 0 ? (
                   <tr>
                     <td colSpan={7} className="text-center py-8 text-muted">
-                      No execution logs recorded yet.
+                      {t('scheduler.no_runs')}
                     </td>
                   </tr>
                 ) : (
@@ -305,7 +327,7 @@ export const TasksSchedulerPage: React.FC<TasksSchedulerPageProps> = ({ activeTa
                                 : 'warning'
                           }`}
                         >
-                          {r.status}
+                          {enumLabel(STATUS_KEYS, r.status, t)}
                         </span>
                       </td>
                       <td className="text-sm text-muted">
@@ -323,7 +345,7 @@ export const TasksSchedulerPage: React.FC<TasksSchedulerPageProps> = ({ activeTa
                           onClick={() => openRunDevices(r)}
                         >
                           <Laptop size={14} />
-                          <span>Per-Device</span>
+                          <span>{t('scheduler.per_device')}</span>
                         </button>
                       </td>
                     </tr>
@@ -339,7 +361,7 @@ export const TasksSchedulerPage: React.FC<TasksSchedulerPageProps> = ({ activeTa
       <Modal
         open={viewRunDevices !== null}
         onClose={() => setViewRunDevices(null)}
-        title="Per-Device Results"
+        title={t('scheduler.per_device_results')}
         size="lg"
         description={
           viewRunDevices
@@ -350,26 +372,26 @@ export const TasksSchedulerPage: React.FC<TasksSchedulerPageProps> = ({ activeTa
         }
         footer={
           <button type="button" className="btn btn-secondary" onClick={() => setViewRunDevices(null)}>
-            Close
+            {t('common.close')}
           </button>
         }
       >
         {devicesLoading ? (
           <div className="py-8 text-center text-muted">
-            <div className="spinner-inline"></div> Loading device results...
+            <div className="spinner-inline"></div> {t('scheduler.loading_device_results')}
           </div>
         ) : runDevices.length === 0 ? (
-          <div className="py-8 text-center text-muted">No device rows for this run yet.</div>
+          <div className="py-8 text-center text-muted">{t('scheduler.no_device_rows')}</div>
         ) : (
-          <DataTable label="Per-device results">
+          <DataTable label={t('scheduler.per_device_table_label')}>
             <table className="data-table">
               <thead>
                 <tr>
-                  <th>Device</th>
-                  <th>Site</th>
-                  <th>Status</th>
-                  <th>Exit Code</th>
-                  <th>Log Output</th>
+                  <th>{t('scheduler.col_device')}</th>
+                  <th>{t('scheduler.col_site')}</th>
+                  <th>{t('scheduler.col_status')}</th>
+                  <th>{t('scheduler.col_exit_code')}</th>
+                  <th>{t('scheduler.col_log')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -391,7 +413,7 @@ export const TasksSchedulerPage: React.FC<TasksSchedulerPageProps> = ({ activeTa
                               : 'warning'
                         }`}
                       >
-                        {d.status}
+                        {enumLabel(STATUS_KEYS, d.status, t)}
                       </span>
                     </td>
                     <td className="font-mono">
@@ -404,7 +426,7 @@ export const TasksSchedulerPage: React.FC<TasksSchedulerPageProps> = ({ activeTa
                         onClick={() => setViewLogRun(d)}
                       >
                         <FileText size={14} />
-                        <span>View Log</span>
+                        <span>{t('scheduler.view_log')}</span>
                       </button>
                     </td>
                   </tr>
@@ -419,15 +441,15 @@ export const TasksSchedulerPage: React.FC<TasksSchedulerPageProps> = ({ activeTa
       <Modal
         open={isScriptModalOpen}
         onClose={() => setIsScriptModalOpen(false)}
-        title="Create Maintenance Script"
+        title={t('scheduler.create_script_title')}
         size="md"
         footer={
           <>
             <button type="button" className="btn btn-secondary" onClick={() => setIsScriptModalOpen(false)}>
-              Cancel
+              {t('common.cancel')}
             </button>
             <button type="submit" form="script-form" className="btn btn-primary">
-              Save Script
+              {t('scheduler.save_script')}
             </button>
           </>
         }
@@ -435,21 +457,21 @@ export const TasksSchedulerPage: React.FC<TasksSchedulerPageProps> = ({ activeTa
         <form id="script-form" onSubmit={handleCreateScript}>
           <div className="form-group">
             <label className="form-label" htmlFor="script-title">
-              Script Title
+              {t('scheduler.script_title')}
             </label>
             <input
               id="script-title"
               type="text"
               className="form-input"
               required
-              placeholder="e.g. Flush DNS & Restart Spooler"
+              placeholder={t('scheduler.script_title_placeholder')}
               value={newScript.name}
               onChange={(e) => setNewScript({ ...newScript, name: e.target.value })}
             />
           </div>
           <div className="form-group">
             <label className="form-label" htmlFor="script-shell">
-              Shell Environment
+              {t('scheduler.shell')}
             </label>
             <select
               id="script-shell"
@@ -458,34 +480,34 @@ export const TasksSchedulerPage: React.FC<TasksSchedulerPageProps> = ({ activeTa
               onChange={(e) => setNewScript({ ...newScript, script_type: e.target.value })}
             >
               <option value="powershell">PowerShell (Windows)</option>
-              <option value="cmd">Command Prompt (CMD)</option>
+              <option value="cmd">{t('scheduler.shell_cmd')}</option>
               <option value="bash">Bash (Linux / macOS)</option>
               <option value="sh">POSIX Shell (/bin/sh)</option>
             </select>
           </div>
           <div className="form-group">
             <label className="form-label" htmlFor="script-description">
-              Description (Optional)
+              {t('scheduler.description_optional')}
             </label>
             <input
               id="script-description"
               type="text"
               className="form-input"
-              placeholder="Purpose of this script"
+              placeholder={t('scheduler.description_placeholder')}
               value={newScript.description}
               onChange={(e) => setNewScript({ ...newScript, description: e.target.value })}
             />
           </div>
           <div className="form-group">
             <label className="form-label" htmlFor="script-body">
-              Script Body
+              {t('scheduler.script_body')}
             </label>
             <textarea
               id="script-body"
               className="form-textarea font-mono"
               rows={8}
               required
-              placeholder="# Enter script commands here..."
+              placeholder={t('scheduler.script_body_placeholder')}
               value={newScript.script_content}
               onChange={(e) => setNewScript({ ...newScript, script_content: e.target.value })}
             />
@@ -497,15 +519,15 @@ export const TasksSchedulerPage: React.FC<TasksSchedulerPageProps> = ({ activeTa
       <Modal
         open={isScheduleModalOpen}
         onClose={() => setIsScheduleModalOpen(false)}
-        title="Schedule Recurring Maintenance"
+        title={t('scheduler.create_schedule_title')}
         size="md"
         footer={
           <>
             <button type="button" className="btn btn-secondary" onClick={() => setIsScheduleModalOpen(false)}>
-              Cancel
+              {t('common.cancel')}
             </button>
             <button type="submit" form="schedule-form" className="btn btn-primary">
-              Activate Schedule
+              {t('scheduler.activate_schedule')}
             </button>
           </>
         }
@@ -513,14 +535,14 @@ export const TasksSchedulerPage: React.FC<TasksSchedulerPageProps> = ({ activeTa
         <form id="schedule-form" onSubmit={handleCreateSchedule}>
           <div className="form-group">
             <label className="form-label" htmlFor="schedule-name">
-              Schedule Name
+              {t('scheduler.col_schedule_name')}
             </label>
             <input
               id="schedule-name"
               type="text"
               className="form-input"
               required
-              placeholder="e.g. Daily Temp File Cleanup"
+              placeholder={t('scheduler.schedule_name_placeholder')}
               value={newSchedule.name}
               onChange={(e) => setNewSchedule({ ...newSchedule, name: e.target.value })}
             />
@@ -528,7 +550,7 @@ export const TasksSchedulerPage: React.FC<TasksSchedulerPageProps> = ({ activeTa
           <div className="form-group">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.25rem' }}>
               <label className="form-label" htmlFor="schedule-script" style={{ marginBottom: 0 }}>
-                Target Script
+                {t('scheduler.target_script')}
               </label>
               {canAdmin && (
                 <button
@@ -541,7 +563,7 @@ export const TasksSchedulerPage: React.FC<TasksSchedulerPageProps> = ({ activeTa
                   }}
                 >
                   <Plus size={12} />
-                  <span>Custom Script</span>
+                  <span>{t('scheduler.custom_script')}</span>
                 </button>
               )}
             </div>
@@ -552,7 +574,7 @@ export const TasksSchedulerPage: React.FC<TasksSchedulerPageProps> = ({ activeTa
               value={newSchedule.script_id}
               onChange={(e) => setNewSchedule({ ...newSchedule, script_id: e.target.value })}
             >
-              <option value="">-- Select Script --</option>
+              <option value="">{t('scheduler.select_script')}</option>
               {scripts.map((s) => (
                 <option key={s.id} value={s.id}>
                   {s.name} ({s.script_type})
@@ -562,7 +584,7 @@ export const TasksSchedulerPage: React.FC<TasksSchedulerPageProps> = ({ activeTa
           </div>
           <div className="form-group">
             <label className="form-label" htmlFor="schedule-target">
-              Target Fleet
+              {t('scheduler.col_target')}
             </label>
             <select
               id="schedule-target"
@@ -570,14 +592,14 @@ export const TasksSchedulerPage: React.FC<TasksSchedulerPageProps> = ({ activeTa
               value={newSchedule.target_type}
               onChange={(e) => setNewSchedule({ ...newSchedule, target_type: e.target.value })}
             >
-              <option value="all">All Enrolled Devices</option>
-              <option value="group">Branch Site / Group</option>
-              <option value="device">Single Device</option>
+              <option value="all">{t('scheduler.target_all')}</option>
+              <option value="group">{t('scheduler.target_group')}</option>
+              <option value="device">{t('scheduler.target_device')}</option>
             </select>
           </div>
           <div className="form-group">
             <label className="form-label" htmlFor="schedule-trigger">
-              Trigger Type
+              {t('scheduler.trigger_type')}
             </label>
             <select
               id="schedule-trigger"
@@ -593,12 +615,12 @@ export const TasksSchedulerPage: React.FC<TasksSchedulerPageProps> = ({ activeTa
                 })
               }
             >
-              <option value="interval">Fixed Interval</option>
+              <option value="interval">{t('scheduler.fixed_interval')}</option>
             </select>
           </div>
           <div className="form-group">
             <label className="form-label" htmlFor="schedule-expr">
-              Interval (minutes)
+              {t('scheduler.interval_label')}
             </label>
             <input
               id="schedule-expr"
@@ -622,17 +644,17 @@ export const TasksSchedulerPage: React.FC<TasksSchedulerPageProps> = ({ activeTa
       <Modal
         open={viewLogRun !== null}
         onClose={() => setViewLogRun(null)}
-        title="Job Execution Output"
+        title={t('scheduler.output_title')}
         size="lg"
         description={viewLogRun?.id}
         footer={
           <button type="button" className="btn btn-secondary" onClick={() => setViewLogRun(null)}>
-            Close
+            {t('common.close')}
           </button>
         }
       >
         <pre className="terminal-log-output">
-          {viewLogRun?.output_log || viewLogRun?.error_message || '(No output recorded)'}
+          {viewLogRun?.output_log || viewLogRun?.error_message || t('scheduler.no_output')}
         </pre>
       </Modal>
     </div>

@@ -7,6 +7,7 @@ import {
   HardDrive,
   WifiOff,
 } from 'lucide-react'
+import { useT, type Vars } from '../i18n/core'
 import type { AlertItem } from '../types/api'
 
 interface AlertsListProps {
@@ -16,18 +17,18 @@ interface AlertsListProps {
   onViewDevice?: (deviceId: string) => void
 }
 
-function formatRelativeTime(dateString: string): string {
+function formatRelativeTime(dateString: string, t: (key: string, vars?: Vars) => string): string {
   const date = new Date(dateString)
   const now = new Date()
   const diffSec = Math.floor((now.getTime() - date.getTime()) / 1000)
 
-  if (diffSec < 60) return 'Just now'
+  if (diffSec < 60) return t('dashboard.just_now')
   const diffMin = Math.floor(diffSec / 60)
-  if (diffMin < 60) return `${diffMin}m ago`
+  if (diffMin < 60) return t('dashboard.minutes_ago', { count: diffMin })
   const diffHour = Math.floor(diffMin / 60)
-  if (diffHour < 24) return `${diffHour}h ago`
+  if (diffHour < 24) return t('dashboard.hours_ago', { count: diffHour })
   const diffDay = Math.floor(diffHour / 24)
-  return `${diffDay}d ago`
+  return t('dashboard.days_ago', { count: diffDay })
 }
 
 const getIcon = (type: string, severity: string) => {
@@ -45,7 +46,12 @@ const getIcon = (type: string, severity: string) => {
 }
 
 export const AlertsList: React.FC<AlertsListProps> = ({ alerts, onViewDevice }) => {
+  const { t } = useT()
   const [filter, setFilter] = useState<'all' | 'critical' | 'warning'>('all')
+  const severityLabel = (severity: string) =>
+    severity === 'critical' || severity === 'warning' || severity === 'info'
+      ? t(`dashboard.severity_${severity}`)
+      : severity.toUpperCase()
 
   const criticalCount = useMemo(
     () => alerts.filter((a) => a.severity === 'critical').length,
@@ -66,10 +72,10 @@ export const AlertsList: React.FC<AlertsListProps> = ({ alerts, onViewDevice }) 
       <div className="card-header">
         <div className="card-title-group">
           <AlertTriangle size={18} className="card-icon warning" />
-          <h3 className="card-title">Operational Alerts & Health Warnings</h3>
+          <h3 className="card-title">{t('dashboard.alerts_title')}</h3>
         </div>
         <span className={`card-badge ${alerts.length > 0 ? 'warning' : 'success'}`}>
-          {alerts.length} Issues Detected
+          {t('dashboard.issues_detected', { count: alerts.length })}
         </span>
       </div>
 
@@ -80,21 +86,21 @@ export const AlertsList: React.FC<AlertsListProps> = ({ alerts, onViewDevice }) 
             className={`alert-filter-btn ${filter === 'all' ? 'active' : ''}`}
             onClick={() => setFilter('all')}
           >
-            All ({alerts.length})
+            {t('dashboard.filter_all', { count: alerts.length })}
           </button>
           <button
             type="button"
             className={`alert-filter-btn critical ${filter === 'critical' ? 'active' : ''}`}
             onClick={() => setFilter('critical')}
           >
-            Critical ({criticalCount})
+            {t('dashboard.filter_critical', { count: criticalCount })}
           </button>
           <button
             type="button"
             className={`alert-filter-btn warning ${filter === 'warning' ? 'active' : ''}`}
             onClick={() => setFilter('warning')}
           >
-            Warning ({warningCount})
+            {t('dashboard.filter_warning', { count: warningCount })}
           </button>
         </div>
       )}
@@ -105,8 +111,8 @@ export const AlertsList: React.FC<AlertsListProps> = ({ alerts, onViewDevice }) 
             <CheckCircle2 size={24} className="icon-success" />
             <span>
               {alerts.length === 0
-                ? 'No alerts in the current telemetry window.'
-                : 'No alerts match the selected severity filter.'}
+                ? t('dashboard.no_alerts_window')
+                : t('dashboard.no_alerts_filter')}
             </span>
           </div>
         ) : (
@@ -122,15 +128,15 @@ export const AlertsList: React.FC<AlertsListProps> = ({ alerts, onViewDevice }) 
                   </div>
                   <div className="alert-item-actions">
                     <span className={`severity-badge ${a.severity}`}>
-                      {a.severity.toUpperCase()}
+                      {severityLabel(a.severity)}
                     </span>
                     {onViewDevice && (
                       <button
                         type="button"
                         className="alert-action-btn"
                         onClick={() => onViewDevice(a.device_id)}
-                        title={`View endpoint ${a.hostname || a.device_id}`}
-                        aria-label={`View endpoint details for ${a.hostname || a.device_id}`}
+                        title={t('dashboard.view_endpoint', { name: a.hostname || a.device_id })}
+                        aria-label={t('dashboard.view_endpoint_details', { name: a.hostname || a.device_id })}
                       >
                         <ExternalLink size={12} />
                       </button>
@@ -140,7 +146,7 @@ export const AlertsList: React.FC<AlertsListProps> = ({ alerts, onViewDevice }) 
                 <p className="alert-message">{a.message}</p>
                 <div className="alert-footer">
                   <span className="alert-time" title={new Date(a.timestamp).toLocaleString()}>
-                    {formatRelativeTime(a.timestamp)}
+                    {formatRelativeTime(a.timestamp, t)}
                   </span>
                 </div>
               </div>

@@ -33,6 +33,7 @@ import type { DeviceStatus } from './devicesQuery'
 import { DeviceGroupsPanel } from './DeviceGroupsPanel'
 import { GroupMembersModal } from './GroupMembersModal'
 import { EnrollTokenModal } from '../components/EnrollTokenModal'
+import { useT } from '../i18n/core'
 import { UninstallTokenModal } from '../components/UninstallTokenModal'
 
 export const DevicesPage: React.FC<{
@@ -68,6 +69,7 @@ export const DevicesPage: React.FC<{
     null
   )
   const toast = useToast()
+  const { t } = useT()
 
   const { status, site, page, q, deviceId, tab, group } = query
   const offset = (page - 1) * pageSize
@@ -108,12 +110,12 @@ export const DevicesPage: React.FC<{
       const res = await api.getDevices(pageSize, offset, status, site, group)
       setData(res)
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Failed to fetch devices'
+      const msg = err instanceof Error ? err.message : t('devices.fetch_failed')
       setActionMsg({ type: 'error', text: msg })
     } finally {
       setLoading(false)
     }
-  }, [group, offset, pageSize, site, status])
+  }, [group, offset, pageSize, site, status, t])
 
   const toggleDevice = (id: string) =>
     setSelected((prev) => {
@@ -137,17 +139,17 @@ export const DevicesPage: React.FC<{
       const added = await api.addGroupMembers(assignTarget.id, [...selected])
       toast.success(
         added === selected.size
-          ? `Added ${added} device(s) to "${assignTarget.name}"`
-          : `Added ${added} of ${selected.size} selected; the rest were already members`,
-        'Devices Added'
+          ? t('devices.added_all', { count: added, group: assignTarget.name })
+          : t('devices.added_partial', { added, selected: selected.size }),
+        t('devices.added_title')
       )
       setSelected(new Set())
       setAssignTarget(null)
       await loadGroups()
     } catch (err: unknown) {
       toast.error(
-        err instanceof Error ? err.message : 'Failed to add devices to group',
-        'Add Failed'
+        err instanceof Error ? err.message : t('devices.add_failed'),
+        t('devices.add_failed_title')
       )
     } finally {
       setAssigning(false)
@@ -183,14 +185,14 @@ export const DevicesPage: React.FC<{
         if (!active) return
         // Let a retry through: the fetch failed, so this id is not "opened".
         openedDeviceId.current = null
-        const msg = err instanceof Error ? err.message : 'Failed to load device'
-        setActionMsg({ type: 'error', text: `Could not open device: ${msg}` })
-        toast.error(msg, 'Device Not Found')
+        const msg = err instanceof Error ? err.message : t('devices.load_failed')
+        setActionMsg({ type: 'error', text: t('devices.open_failed', { error: msg }) })
+        toast.error(msg, t('devices.not_found_title'))
       })
     return () => {
       active = false
     }
-  }, [deviceId, toast])
+  }, [deviceId, toast, t])
 
   // Server-side filtered. q is deliberately NOT in here — the server has no
   // search parameter, so q narrows the rows already on this page only, and
@@ -218,15 +220,15 @@ export const DevicesPage: React.FC<{
     setRetiring(true)
     try {
       await api.retireDevice(retireTarget.id)
-      const successText = `Device ${retireTarget.hostname} retired successfully.`
+      const successText = t('devices.retired_success', { hostname: retireTarget.hostname })
       setActionMsg({ type: 'success', text: successText })
-      toast.success(successText, 'Device Retired')
+      toast.success(successText, t('devices.retired_title'))
       setRetireTarget(null)
       fetchDevices()
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Retire failed'
+      const msg = err instanceof Error ? err.message : t('devices.retire_failed')
       setActionMsg({ type: 'error', text: msg })
-      toast.error(msg, 'Retire Failed')
+      toast.error(msg, t('devices.retire_failed_title'))
     } finally {
       setRetiring(false)
     }
@@ -237,15 +239,15 @@ export const DevicesPage: React.FC<{
     setDeleting(true)
     try {
       await api.deleteDevice(deleteTarget.id)
-      const successText = `Device "${deleteTarget.hostname}" (${deleteTarget.id.slice(0, 8)}) was permanently deleted.`
+      const successText = t('devices.deleted_success', { hostname: deleteTarget.hostname, id: deleteTarget.id.slice(0, 8) })
       setActionMsg({ type: 'success', text: successText })
-      toast.success(successText, 'Device Deleted')
+      toast.success(successText, t('devices.deleted_title'))
       setDeleteTarget(null)
       fetchDevices()
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Delete failed'
+      const msg = err instanceof Error ? err.message : t('devices.delete_failed')
       setActionMsg({ type: 'error', text: msg })
-      toast.error(msg, 'Delete Failed')
+      toast.error(msg, t('devices.delete_failed_title'))
     } finally {
       setDeleting(false)
     }
@@ -264,16 +266,16 @@ export const DevicesPage: React.FC<{
           // ignore failures for non-retired or already deleted items
         }
       }
-      const successText = `Permanently deleted ${deleted} retired device(s).`
+      const successText = t('devices.bulk_deleted', { count: deleted })
       setActionMsg({ type: 'success', text: successText })
-      toast.success(successText, 'Bulk Delete Finished')
+      toast.success(successText, t('devices.bulk_deleted_title'))
       setSelected(new Set())
       setBulkDeleteConfirmOpen(false)
       fetchDevices()
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Bulk delete failed'
+      const msg = err instanceof Error ? err.message : t('devices.bulk_delete_failed')
       setActionMsg({ type: 'error', text: msg })
-      toast.error(msg, 'Bulk Delete Error')
+      toast.error(msg, t('devices.bulk_delete_failed_title'))
     } finally {
       setBulkDeleting(false)
     }
@@ -282,14 +284,14 @@ export const DevicesPage: React.FC<{
   const handleRestore = async (device: DeviceDTO) => {
     try {
       await api.restoreDevice(device.id)
-      const successText = `Restored "${device.hostname}". Re-enroll with a new token to resume telemetry.`
+      const successText = t('devices.restored', { hostname: device.hostname })
       setActionMsg({ type: 'success', text: successText })
-      toast.success(successText, 'Device Restored')
+      toast.success(successText, t('devices.restored_title'))
       fetchDevices()
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Restore failed'
+      const msg = err instanceof Error ? err.message : t('devices.restore_failed')
       setActionMsg({ type: 'error', text: msg })
-      toast.error(msg, 'Restore Failed')
+      toast.error(msg, t('devices.restore_failed_title'))
     }
   }
 
@@ -310,13 +312,13 @@ export const DevicesPage: React.FC<{
   const handlePing = async (device: DeviceDTO) => {
     try {
       const res = await api.pingDevice(device.id)
-      const successText = `Ping sent to ${device.hostname} (Command: ${res.command_id})`
+      const successText = t('devices.ping_sent', { hostname: device.hostname, command_id: res.command_id })
       setActionMsg({ type: 'success', text: successText })
-      toast.info(successText, 'Ping Dispatched')
+      toast.info(successText, t('devices.ping_sent_title'))
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Ping failed'
+      const msg = err instanceof Error ? err.message : t('devices.ping_failed')
       setActionMsg({ type: 'error', text: msg })
-      toast.error(msg, 'Ping Failed')
+      toast.error(msg, t('devices.ping_failed_title'))
     }
   }
 
@@ -324,9 +326,9 @@ export const DevicesPage: React.FC<{
     <div className="page-container devices-page">
       <div className="page-header">
         <div>
-          <h1 className="page-title">Fleet Endpoint Inventory</h1>
+          <h1 className="page-title">{t('devices.title')}</h1>
           <p className="page-subtitle">
-            Manage enrolled workstations, servers, and telemetry data
+            {t('devices.subtitle')}
           </p>
         </div>
         <div className="header-controls">
@@ -337,7 +339,7 @@ export const DevicesPage: React.FC<{
               onClick={() => setEnrollOpen(true)}
             >
               <KeyRound size={16} />
-              <span>Generate Enrollment Token</span>
+              <span>{t('devices.generate_enroll')}</span>
             </button>
           )}
           <button
@@ -347,14 +349,14 @@ export const DevicesPage: React.FC<{
             disabled={loading}
           >
             <RefreshCw size={16} className={loading ? 'spinning' : ''} />
-            <span>Refresh</span>
+            <span>{t('devices.refresh')}</span>
           </button>
         </div>
       </div>
 
       {/* Devices / Groups. The tab lives in the URL so a group view is a
           shareable link and the browser back button steps between them. */}
-      <div className="btn-group" role="tablist" aria-label="Devices sections">
+      <div className="btn-group" role="tablist" aria-label={t('devices.tabs_label')}>
         <button
           type="button"
           role="tab"
@@ -363,7 +365,7 @@ export const DevicesPage: React.FC<{
           onClick={() => setQuery({ tab: 'devices', group: '' })}
         >
           <Laptop size={16} />
-          <span>Devices</span>
+          <span>{t('devices.tab_devices')}</span>
         </button>
         <button
           type="button"
@@ -373,7 +375,7 @@ export const DevicesPage: React.FC<{
           onClick={() => setQuery({ tab: 'groups', group: '' })}
         >
           <Layers size={16} />
-          <span>Groups</span>
+          <span>{t('devices.tab_groups')}</span>
         </button>
       </div>
 
@@ -385,7 +387,7 @@ export const DevicesPage: React.FC<{
             type="button"
             className="banner-dismiss"
             onClick={() => setActionMsg(null)}
-            aria-label="Dismiss notification"
+            aria-label={t('devices.dismiss')}
           >
             &times;
           </button>
@@ -412,8 +414,8 @@ export const DevicesPage: React.FC<{
           <input
             type="text"
             className="search-input"
-            placeholder="Filter this page by hostname, device ID, OS, or site…"
-            aria-label="Filter the endpoints on this page"
+            placeholder={t('devices.search_placeholder')}
+            aria-label={t('devices.search_label')}
             value={q}
             onChange={(e) => setQuery({ q: e.target.value })}
           />
@@ -425,33 +427,33 @@ export const DevicesPage: React.FC<{
             value={status}
             onChange={(e) => setQuery({ status: e.target.value as DeviceStatus, page: 1 })}
             className="select-input"
-            aria-label="Filter by status"
+            aria-label={t('devices.filter_status')}
           >
-            <option value="">All Statuses</option>
-            <option value="online">Online Only</option>
-            <option value="offline">Offline Only</option>
-            <option value="retired">Retired Only</option>
+            <option value="">{t('devices.status_all')}</option>
+            <option value="online">{t('devices.status_online')}</option>
+            <option value="offline">{t('devices.status_offline')}</option>
+            <option value="retired">{t('devices.status_retired')}</option>
           </select>
 
           <select
             value={site}
             onChange={(e) => setQuery({ site: e.target.value, page: 1 })}
             className="select-input"
-            aria-label="Filter by site"
+            aria-label={t('devices.filter_site')}
           >
-            <option value="">All Sites</option>
-            <option value="hq">Headquarters (HQ)</option>
-            <option value="branch-a">Branch A</option>
-            <option value="branch-b">Branch B</option>
+            <option value="">{t('devices.site_all')}</option>
+            <option value="hq">{t('devices.site_hq')}</option>
+            <option value="branch-a">{t('devices.site_branch_a')}</option>
+            <option value="branch-b">{t('devices.site_branch_b')}</option>
           </select>
 
           <select
             value={group}
             onChange={(e) => setQuery({ group: e.target.value, page: 1 })}
             className="select-input"
-            aria-label="Filter by group"
+            aria-label={t('devices.filter_group')}
           >
-            <option value="">All Groups</option>
+            <option value="">{t('devices.group_all')}</option>
             {groups.map((g) => (
               <option key={g.id} value={g.id}>
                 {g.name} ({g.member_count})
@@ -466,11 +468,11 @@ export const DevicesPage: React.FC<{
               setQuery({ page: 1 })
             }}
             className="select-input"
-            aria-label="Endpoints per page"
+            aria-label={t('devices.page_size_label')}
           >
             {PAGE_SIZES.map((n) => (
               <option key={n} value={n}>
-                {n} / page
+                {t('devices.per_page', { count: n })}
               </option>
             ))}
           </select>
@@ -480,9 +482,9 @@ export const DevicesPage: React.FC<{
       {/* Selection bar. Only rendered when something is checked, so the page is
           unchanged for the common case of reading the fleet without editing it. */}
       {canRetire && selected.size > 0 && (
-        <div className="filter-bar" role="region" aria-label="Selection actions">
+        <div className="filter-bar" role="region" aria-label={t('devices.selection_actions')}>
           <span className="filter-hint" style={{ margin: 0 }}>
-            {selected.size} endpoint{selected.size === 1 ? '' : 's'} selected
+            {t(selected.size === 1 ? 'devices.selected_one' : 'devices.selected_many', { count: selected.size })}
           </span>
           <div className="filter-group">
             <Layers size={16} className="filter-icon" aria-hidden="true" />
@@ -493,9 +495,9 @@ export const DevicesPage: React.FC<{
                 const g = groups.find((x) => x.id === e.target.value)
                 setAssignTarget(g ?? null)
               }}
-              aria-label="Target group for the selection"
+              aria-label={t('devices.assign_target_label')}
             >
-              <option value="">Choose a group...</option>
+              <option value="">{t('devices.choose_group')}</option>
               {groups.map((g) => (
                 <option key={g.id} value={g.id}>
                   {g.name} ({g.member_count})
@@ -513,7 +515,7 @@ export const DevicesPage: React.FC<{
               ) : (
                 <Users size={16} />
               )}
-              <span>{assigning ? 'Adding...' : 'Add to group'}</span>
+              <span>{assigning ? t('devices.adding') : t('devices.add_to_group')}</span>
             </button>
             {canRetire && selectedRetiredCount > 0 && (
               <button
@@ -521,14 +523,14 @@ export const DevicesPage: React.FC<{
                 className="btn btn-danger"
                 onClick={() => setBulkDeleteConfirmOpen(true)}
                 disabled={bulkDeleting}
-                title="Permanently delete selected retired devices from database"
+                title={t('devices.bulk_delete_hint')}
               >
                 {bulkDeleting ? (
                   <RefreshCw size={16} className="spinning" />
                 ) : (
                   <Trash2 size={16} />
                 )}
-                <span>Delete Retired ({selectedRetiredCount})</span>
+                <span>{t('devices.delete_retired', { count: selectedRetiredCount })}</span>
               </button>
             )}
             <button
@@ -539,7 +541,7 @@ export const DevicesPage: React.FC<{
                 setAssignTarget(null)
               }}
             >
-              <span>Clear</span>
+              <span>{t('devices.clear')}</span>
             </button>
           </div>
         </div>
@@ -547,8 +549,7 @@ export const DevicesPage: React.FC<{
 
       {groups.length === 0 && canRetire && tab === 'devices' && (
         <p className="filter-hint">
-          No groups exist yet. Create one on the Groups tab to target a set of devices with a
-          single run.
+          {t('devices.no_groups_hint')}
         </p>
       )}
 
@@ -556,24 +557,28 @@ export const DevicesPage: React.FC<{
           search endpoint, so this narrows 10–50 rows, not the fleet. */}
       {q && (
         <p className="filter-hint">
-          Showing {filteredItems.length} of {(data.devices || []).length} endpoints on this page
-          matching “{q}”. Clear the box to see all {data.total}.
+          {t('devices.filter_hint', {
+            shown: filteredItems.length,
+            page_count: (data.devices || []).length,
+            q,
+            total: data.total,
+          })}
         </p>
       )}
 
       {/* Table */}
       <div className="table-card">
-        <DataTable label="Fleet endpoints">
+        <DataTable label={t('devices.table_label')}>
           <thead>
             <tr>
-              {canRetire && <th style={{ width: 36 }}>Select</th>}
-              <th>Status</th>
-              <th>Hostname &amp; Identity</th>
-              <th>Operating System</th>
-              <th>Site</th>
-              <th>Agent</th>
-              <th>Last Heartbeat</th>
-              <th className="text-right">Actions</th>
+              {canRetire && <th style={{ width: 36 }}>{t('devices.col_select')}</th>}
+              <th>{t('devices.col_status')}</th>
+              <th>{t('devices.col_hostname')}</th>
+              <th>{t('devices.col_os')}</th>
+              <th>{t('devices.col_site')}</th>
+              <th>{t('devices.col_agent')}</th>
+              <th>{t('devices.col_heartbeat')}</th>
+              <th className="text-right">{t('devices.col_actions')}</th>
             </tr>
           </thead>
           <tbody>
@@ -582,7 +587,7 @@ export const DevicesPage: React.FC<{
                 <td colSpan={canRetire ? 8 : 7} className="text-center py-8">
                   <div className="table-loader">
                     <RefreshCw size={24} className="spinning" />
-                    <span>Loading fleet records...</span>
+                    <span>{t('devices.loading_records')}</span>
                   </div>
                 </td>
               </tr>
@@ -593,8 +598,8 @@ export const DevicesPage: React.FC<{
                     <Laptop size={32} />
                     <p>
                       {group
-                        ? 'No endpoints in this group match the current filters'
-                        : 'No endpoints match the current filters'}
+                        ? t('devices.empty_group')
+                        : t('devices.empty')}
                     </p>
                   </div>
                 </td>
@@ -606,29 +611,29 @@ export const DevicesPage: React.FC<{
                 return (
                   <tr key={d.id} className="device-row">
                     {canRetire && (
-                      <td data-label="Select">
+                      <td data-label={t('devices.col_select')}>
                         <input
                           type="checkbox"
                           checked={selected.has(d.id)}
                           onChange={() => toggleDevice(d.id)}
-                          aria-label={`Select ${d.hostname}`}
+                          aria-label={t('devices.select_device', { hostname: d.hostname })}
                         />
                       </td>
                     )}
-                    <td data-label="Status">
+                    <td data-label={t('devices.col_status')}>
                       <span className={`status-pill ${isRetired ? 'retired' : isPending ? 'pending' : d.status}`}>
                         <span className="dot"></span>
-                        {isRetired ? 'RETIRED' : isPending ? 'PENDING' : d.status.toUpperCase()}
+                        {isRetired ? t('devices.pill_retired') : isPending ? t('devices.pill_pending') : d.status.toUpperCase()}
                       </span>
                     </td>
-                    <td data-label="Hostname & Identity">
+                    <td data-label={t('devices.col_hostname')}>
                       {/* A cell that opens a modal is a button, not a div with
                           an onClick. */}
                       <button
                         type="button"
                         className="device-identity-cell"
                         onClick={() => setSelectedDevice(d)}
-                        title="View hardware specs & software"
+                        title={t('devices.view_specs')}
                       >
                         <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                           <strong className="device-name">{d.hostname}</strong>
@@ -636,50 +641,50 @@ export const DevicesPage: React.FC<{
                             <span
                               className="badge-severity warning"
                               style={{ display: 'inline-flex', alignItems: 'center', gap: 3, padding: '1px 6px', fontSize: 10, borderRadius: 4, textTransform: 'none' }}
-                              title={`Duplicate hostname detected (${d.hostname}). Isolated by unique Device ID: ${d.id}`}
+                              title={t('devices.duplicate_title', { hostname: d.hostname, id: d.id })}
                             >
                               <AlertTriangle size={10} />
-                              Duplicate ({d.id.slice(0, 8)})
+                              {t('devices.duplicate', { id: d.id.slice(0, 8) })}
                             </span>
                           )}
                         </div>
                         <span className="device-id font-mono">{d.id.substring(0, 16)}...</span>
                       </button>
                     </td>
-                    <td data-label="Operating System">
+                    <td data-label={t('devices.col_os')}>
                       <div className="os-cell">
                         <span className="os-name">{d.os_name}</span>
                         <span className="os-version">{d.os_version}</span>
                       </div>
                     </td>
-                    <td data-label="Site">
+                    <td data-label={t('devices.col_site')}>
                       <span className="site-badge">{d.site || 'HQ'}</span>
                     </td>
-                    <td data-label="Agent">
+                    <td data-label={t('devices.col_agent')}>
                       <span className="font-mono text-sm">{d.agent_version || '—'}</span>
                     </td>
-                    <td data-label="Last Heartbeat">
+                    <td data-label={t('devices.col_heartbeat')}>
                       <span className="timestamp-cell">
-                        {d.last_seen_at ? new Date(d.last_seen_at).toLocaleTimeString() : 'Never'}
+                        {d.last_seen_at ? new Date(d.last_seen_at).toLocaleTimeString() : t('devices.never')}
                       </span>
                     </td>
-                    <td className="text-right" data-label="Actions">
+                    <td className="text-right" data-label={t('devices.col_actions')}>
                       <div className="row-actions">
                         <button
                           type="button"
                           className="btn btn-sm btn-secondary"
                           onClick={() => setSelectedDevice(d)}
-                          title="View Hardware, Disks & Software"
+                          title={t('devices.specs_title')}
                         >
-                          Specs
+                          {t('devices.specs')}
                         </button>
                         {d.status === 'online' && !isRetired && canManage && (
                           <button
                             type="button"
                             className="btn btn-sm btn-primary"
                             onClick={() => onOpenExec?.(d)}
-                            title="Run Remote Command"
-                            aria-label={`Run remote command on ${d.hostname}`}
+                            title={t('devices.run_command_title')}
+                            aria-label={t('devices.run_command_label', { hostname: d.hostname })}
                           >
                             <TerminalSquare size={12} />
                           </button>
@@ -694,8 +699,8 @@ export const DevicesPage: React.FC<{
                                 d.os_name === 'windows' ? 'powershell' : 'bash'
                               )
                             }
-                            title="Open Interactive Terminal"
-                            aria-label={`Open interactive terminal on ${d.hostname}`}
+                            title={t('devices.terminal_title')}
+                            aria-label={t('devices.terminal_label', { hostname: d.hostname })}
                           >
                             <Terminal size={12} />
                           </button>
@@ -705,8 +710,8 @@ export const DevicesPage: React.FC<{
                             type="button"
                             className="btn btn-sm btn-primary"
                             onClick={() => onOpenRemoteControl?.(d)}
-                            title="Open Remote Desktop Screen & Control"
-                            aria-label={`Open remote desktop control for ${d.hostname}`}
+                            title={t('devices.remote_title')}
+                            aria-label={t('devices.remote_label', { hostname: d.hostname })}
                           >
                             <Monitor size={12} />
                           </button>
@@ -716,8 +721,8 @@ export const DevicesPage: React.FC<{
                             type="button"
                             className="btn btn-sm btn-secondary"
                             onClick={() => handlePing(d)}
-                            title="Send Ping"
-                            aria-label={`Send ping to ${d.hostname}`}
+                            title={t('devices.ping_title')}
+                            aria-label={t('devices.ping_label', { hostname: d.hostname })}
                           >
                             <Activity size={12} />
                           </button>
@@ -727,8 +732,8 @@ export const DevicesPage: React.FC<{
                             type="button"
                             className="btn btn-sm btn-secondary"
                             onClick={() => setUninstallTokenDevice(d)}
-                            title="Generate Uninstall Verification Token"
-                            aria-label={`Generate uninstall token for ${d.hostname}`}
+                            title={t('devices.uninstall_title')}
+                            aria-label={t('devices.uninstall_label', { hostname: d.hostname })}
                           >
                             <KeyRound size={12} />
                           </button>
@@ -738,8 +743,8 @@ export const DevicesPage: React.FC<{
                             type="button"
                             className="btn btn-sm btn-danger-outline"
                             onClick={() => setRetireTarget(d)}
-                            title="Retire Device"
-                            aria-label={`Retire ${d.hostname}`}
+                            title={t('devices.retire_title')}
+                            aria-label={t('devices.retire_label', { hostname: d.hostname })}
                           >
                             <Archive size={12} />
                           </button>
@@ -750,8 +755,8 @@ export const DevicesPage: React.FC<{
                               type="button"
                               className="btn btn-sm btn-secondary"
                               onClick={() => handleRestore(d)}
-                              title="Restore Device to Active Fleet"
-                              aria-label={`Restore ${d.hostname}`}
+                              title={t('devices.restore_title')}
+                              aria-label={t('devices.restore_label', { hostname: d.hostname })}
                             >
                               <RotateCcw size={12} />
                             </button>
@@ -759,8 +764,8 @@ export const DevicesPage: React.FC<{
                               type="button"
                               className="btn btn-sm btn-danger"
                               onClick={() => setDeleteTarget(d)}
-                              title="Permanently Delete Retired Device"
-                              aria-label={`Delete ${d.hostname}`}
+                              title={t('devices.delete_title')}
+                              aria-label={t('devices.delete_label', { hostname: d.hostname })}
                             >
                               <Trash2 size={12} />
                             </button>
@@ -778,8 +783,11 @@ export const DevicesPage: React.FC<{
         {/* Pagination Bar */}
         <div className="pagination-bar">
           <div className="pagination-info">
-            Showing {data.total > 0 ? offset + 1 : 0} to{' '}
-            {Math.min(offset + (data.devices || []).length, data.total)} of {data.total} endpoints
+            {t('devices.pagination', {
+              from: data.total > 0 ? offset + 1 : 0,
+              to: Math.min(offset + (data.devices || []).length, data.total),
+              total: data.total,
+            })}
           </div>
           <div className="pagination-controls">
             <button
@@ -789,10 +797,10 @@ export const DevicesPage: React.FC<{
               disabled={page <= 1}
             >
               <ChevronLeft size={16} />
-              <span>Previous</span>
+              <span>{t('devices.previous')}</span>
             </button>
             <span className="page-indicator">
-              Page {page} of {totalPages}
+              {t('devices.page_of', { page, total: totalPages })}
             </span>
             <button
               type="button"
@@ -800,7 +808,7 @@ export const DevicesPage: React.FC<{
               onClick={() => setQuery({ page: page + 1 })}
               disabled={page >= totalPages}
             >
-              <span>Next</span>
+              <span>{t('devices.next')}</span>
               <ChevronRight size={16} />
             </button>
           </div>
@@ -811,13 +819,13 @@ export const DevicesPage: React.FC<{
 
       <ConfirmDialog
         open={Boolean(retireTarget)}
-        title="Retire endpoint"
+        title={t('devices.retire_dialog_title')}
         message={
           retireTarget
-            ? `Retire "${retireTarget.hostname}"? It stops reporting telemetry and is excluded from fleet health. This can be reversed with Restore.`
+            ? t('devices.retire_dialog_message', { hostname: retireTarget.hostname })
             : ''
         }
-        confirmLabel="Retire device"
+        confirmLabel={t('devices.retire_confirm')}
         pending={retiring}
         onConfirm={handleRetire}
         onCancel={() => setRetireTarget(null)}
@@ -825,13 +833,13 @@ export const DevicesPage: React.FC<{
 
       <ConfirmDialog
         open={Boolean(deleteTarget)}
-        title="Permanently Delete Retired Endpoint"
+        title={t('devices.delete_dialog_title')}
         message={
           deleteTarget
-            ? `Permanently delete "${deleteTarget.hostname}" (${deleteTarget.id.slice(0, 8)}) from the database? All associated inventory, logs, and deployment histories will be permanently deleted. This action CANNOT be undone.`
+            ? t('devices.delete_dialog_message', { hostname: deleteTarget.hostname, id: deleteTarget.id.slice(0, 8) })
             : ''
         }
-        confirmLabel="Delete permanently"
+        confirmLabel={t('devices.delete_confirm')}
         pending={deleting}
         onConfirm={handleDelete}
         onCancel={() => setDeleteTarget(null)}
@@ -839,9 +847,9 @@ export const DevicesPage: React.FC<{
 
       <ConfirmDialog
         open={bulkDeleteConfirmOpen}
-        title="Bulk Delete Retired Endpoints"
-        message={`Permanently delete ${selectedRetiredCount} retired endpoint(s) from the database? This action CANNOT be undone.`}
-        confirmLabel={`Delete ${selectedRetiredCount} endpoint(s)`}
+        title={t('devices.bulk_dialog_title')}
+        message={t('devices.bulk_dialog_message', { count: selectedRetiredCount })}
+        confirmLabel={t('devices.bulk_confirm', { count: selectedRetiredCount })}
         pending={bulkDeleting}
         onConfirm={handleBulkDelete}
         onCancel={() => setBulkDeleteConfirmOpen(false)}

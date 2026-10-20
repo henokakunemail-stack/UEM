@@ -5,6 +5,7 @@ import { Modal } from './ui/Modal'
 import { useToast } from '../context/ToastContext'
 import { api } from '../services/api'
 import type { EnrollmentTokenDTO } from '../types/api'
+import { useT } from '../i18n/core'
 
 interface EnrollTokenModalProps {
   open: boolean
@@ -39,6 +40,7 @@ export const EnrollTokenModal: React.FC<EnrollTokenModalProps> = ({
   onEnrolled,
 }) => {
   const toast = useToast()
+  const { t } = useT()
   const [isMultiUse, setIsMultiUse] = useState(true)
   const [tokenName, setTokenName] = useState('')
   const [hostname, setHostname] = useState('')
@@ -90,15 +92,17 @@ export const EnrollTokenModal: React.FC<EnrollTokenModalProps> = ({
       setIssued(res)
       toast.success(
         isMultiUse
-          ? `Reusable token created (${maxUses === 0 ? 'Unlimited devices' : `Max ${maxUses} devices`})`
+          ? maxUses === 0
+            ? t('enroll.created_multi_unlimited')
+            : t('enroll.created_multi_max', { count: maxUses })
           : trimmedHost
-          ? `Pre-registered ${trimmedHost}`
-          : 'Single-use token created',
-        'Enrollment Token Created'
+          ? t('enroll.pre_registered', { hostname: trimmedHost })
+          : t('enroll.created_single'),
+        t('enroll.created_title')
       )
       onEnrolled?.()
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Could not create the token')
+      setError(err instanceof Error ? err.message : t('enroll.create_failed'))
     } finally {
       setPending(false)
     }
@@ -126,9 +130,9 @@ export const EnrollTokenModal: React.FC<EnrollTokenModalProps> = ({
     try {
       await navigator.clipboard.writeText(text)
       setCopied(label)
-      toast.success('Copied to clipboard', 'Copied')
+      toast.success(t('enroll.copied'), t('enroll.copied_title'))
     } catch {
-      toast.error('Clipboard is unavailable in this browser', 'Copy Failed')
+      toast.error(t('enroll.clipboard_unavailable'), t('enroll.copy_failed_title'))
     }
   }
 
@@ -136,11 +140,11 @@ export const EnrollTokenModal: React.FC<EnrollTokenModalProps> = ({
     <Modal
       open={open}
       onClose={handleClose}
-      title="Generate Enrollment Token"
+      title={t('enroll.title')}
       description={
         issued
-          ? 'Copy the command now — this token is not shown again.'
-          : 'Pre-register a device and hand it a one-time token to exchange for its secret.'
+          ? t('enroll.description_issued')
+          : t('enroll.description')
       }
       size="lg"
       // While a request is in flight, Escape and the backdrop must not close the
@@ -150,7 +154,7 @@ export const EnrollTokenModal: React.FC<EnrollTokenModalProps> = ({
       footer={
         issued ? (
           <button type="button" className="btn btn-secondary" onClick={handleClose}>
-            Done — I've copied it
+            {t('enroll.done')}
           </button>
         ) : (
           <>
@@ -160,7 +164,7 @@ export const EnrollTokenModal: React.FC<EnrollTokenModalProps> = ({
               onClick={handleClose}
               disabled={pending}
             >
-              Cancel
+              {t('common.cancel')}
             </button>
             <button
               type="button"
@@ -169,7 +173,7 @@ export const EnrollTokenModal: React.FC<EnrollTokenModalProps> = ({
               disabled={pending}
             >
               <KeyRound size={16} />
-              <span>{pending ? 'Generating…' : 'Generate Token'}</span>
+              <span>{pending ? t('enroll.generating') : t('enroll.generate')}</span>
             </button>
           </>
         )
@@ -179,7 +183,7 @@ export const EnrollTokenModal: React.FC<EnrollTokenModalProps> = ({
         <>
           {/* Mode Selector */}
           <div className="form-field" style={{ marginBottom: '1rem' }}>
-            <label className="form-label">Enrollment Type</label>
+            <label className="form-label">{t('enroll.type_label')}</label>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
               <button
                 type="button"
@@ -194,9 +198,9 @@ export const EnrollTokenModal: React.FC<EnrollTokenModalProps> = ({
                   color: 'inherit',
                 }}
               >
-                <div style={{ fontWeight: 600, fontSize: '0.875rem' }}>Multi-Device / Batch</div>
+                <div style={{ fontWeight: 600, fontSize: '0.875rem' }}>{t('enroll.multi_title')}</div>
                 <div style={{ fontSize: '0.75rem', color: 'var(--text-muted, #a1a1aa)', marginTop: '0.25rem' }}>
-                  1 token registers multiple devices. Recommended for GPO, mass deployment, or scripts.
+                  {t('enroll.multi_desc')}
                 </div>
               </button>
 
@@ -213,9 +217,9 @@ export const EnrollTokenModal: React.FC<EnrollTokenModalProps> = ({
                   color: 'inherit',
                 }}
               >
-                <div style={{ fontWeight: 600, fontSize: '0.875rem' }}>Single Device</div>
+                <div style={{ fontWeight: 600, fontSize: '0.875rem' }}>{t('enroll.single_title')}</div>
                 <div style={{ fontSize: '0.75rem', color: 'var(--text-muted, #a1a1aa)', marginTop: '0.25rem' }}>
-                  One-time token bound to a single endpoint. Token is spent immediately upon enrollment.
+                  {t('enroll.single_desc')}
                 </div>
               </button>
             </div>
@@ -225,21 +229,21 @@ export const EnrollTokenModal: React.FC<EnrollTokenModalProps> = ({
             <div className="form-row">
               <div className="form-field">
                 <label className="form-label" htmlFor="enroll-token-name">
-                  Token Name / Label
+                  {t('enroll.token_name')}
                 </label>
                 <input
                   id="enroll-token-name"
                   className="form-input"
                   value={tokenName}
                   onChange={(e) => setTokenName(e.target.value)}
-                  placeholder="e.g. Active Directory GPO Batch"
+                  placeholder={t('enroll.token_name_placeholder')}
                   autoComplete="off"
                   disabled={pending}
                 />
               </div>
               <div className="form-field">
                 <label className="form-label" htmlFor="enroll-max-uses">
-                  Device Limit
+                  {t('enroll.device_limit')}
                 </label>
                 <select
                   id="enroll-max-uses"
@@ -248,12 +252,12 @@ export const EnrollTokenModal: React.FC<EnrollTokenModalProps> = ({
                   onChange={(e) => setMaxUses(Number(e.target.value))}
                   disabled={pending}
                 >
-                  <option value={0}>Unlimited Devices (0)</option>
-                  <option value={10}>Max 10 Devices</option>
-                  <option value={25}>Max 25 Devices</option>
-                  <option value={50}>Max 50 Devices</option>
-                  <option value={100}>Max 100 Devices</option>
-                  <option value={250}>Max 250 Devices</option>
+                  <option value={0}>{t('enroll.unlimited_option')}</option>
+                  <option value={10}>{t('enroll.max_option', { count: 10 })}</option>
+                  <option value={25}>{t('enroll.max_option', { count: 25 })}</option>
+                  <option value={50}>{t('enroll.max_option', { count: 50 })}</option>
+                  <option value={100}>{t('enroll.max_option', { count: 100 })}</option>
+                  <option value={250}>{t('enroll.max_option', { count: 250 })}</option>
                 </select>
               </div>
             </div>
@@ -261,7 +265,7 @@ export const EnrollTokenModal: React.FC<EnrollTokenModalProps> = ({
             <div className="form-row">
               <div className="form-field">
                 <label className="form-label" htmlFor="enroll-hostname">
-                  Hostname <span className="text-muted text-xs font-normal">(Optional — auto-detected on connect)</span>
+                  {t('enroll.hostname')} <span className="text-muted text-xs font-normal">{t('enroll.hostname_optional')}</span>
                 </label>
                 <input
                   id="enroll-hostname"
@@ -271,14 +275,14 @@ export const EnrollTokenModal: React.FC<EnrollTokenModalProps> = ({
                     setHostname(e.target.value)
                     if (error) setError(null)
                   }}
-                  placeholder="Leave blank to auto-detect from device"
+                  placeholder={t('enroll.hostname_placeholder')}
                   autoComplete="off"
                   disabled={pending}
                 />
               </div>
               <div className="form-field">
                 <label className="form-label" htmlFor="enroll-os">
-                  Operating System
+                  {t('enroll.os')}
                 </label>
                 <select
                   id="enroll-os"
@@ -298,7 +302,7 @@ export const EnrollTokenModal: React.FC<EnrollTokenModalProps> = ({
           <div className="form-row">
             <div className="form-field">
               <label className="form-label" htmlFor="enroll-expiry">
-                Expiration Duration
+                {t('enroll.expiry')}
               </label>
               <select
                 id="enroll-expiry"
@@ -307,23 +311,23 @@ export const EnrollTokenModal: React.FC<EnrollTokenModalProps> = ({
                 onChange={(e) => setExpiryHours(Number(e.target.value))}
                 disabled={pending}
               >
-                <option value={1}>1 Hour (Quick testing)</option>
-                <option value={24}>24 Hours (1 Day — Standard)</option>
-                <option value={168}>7 Days (1 Week deployment window)</option>
-                <option value={720}>30 Days (1 Month rollout)</option>
-                <option value={2160}>90 Days (Quarterly window)</option>
+                <option value={1}>{t('enroll.expiry_1h')}</option>
+                <option value={24}>{t('enroll.expiry_24h')}</option>
+                <option value={168}>{t('enroll.expiry_7d')}</option>
+                <option value={720}>{t('enroll.expiry_30d')}</option>
+                <option value={2160}>{t('enroll.expiry_90d')}</option>
               </select>
             </div>
             <div className="form-field">
               <label className="form-label" htmlFor="enroll-site">
-                Target Site (Optional)
+                {t('enroll.site')}
               </label>
               <input
                 id="enroll-site"
                 className="form-input"
                 value={site}
                 onChange={(e) => setSite(e.target.value)}
-                placeholder="e.g. Jakarta-HQ"
+                placeholder={t('enroll.site_placeholder')}
                 autoComplete="off"
                 disabled={pending}
               />
@@ -338,8 +342,8 @@ export const EnrollTokenModal: React.FC<EnrollTokenModalProps> = ({
 
           <p className="form-hint" style={{ marginTop: '1rem' }}>
             {isMultiUse
-              ? 'This reusable token can enroll multiple endpoints. Each connecting device automatically creates its own independent identity and unique cryptographic secret.'
-              : 'This single-use token will be consumed immediately upon the first device enrollment.'}
+              ? t('enroll.hint_multi')
+              : t('enroll.hint_single')}
           </p>
         </>
       ) : (
@@ -347,15 +351,13 @@ export const EnrollTokenModal: React.FC<EnrollTokenModalProps> = ({
           <div className="alert-banner alert-warning">
             <AlertTriangle size={16} style={{ flexShrink: 0, marginTop: 2 }} />
             <span>
-              This token is shown once. Closing this dialog discards it, and the server keeps
-              only a hash — it cannot show you the token again. If you lose it, generate a new
-              one.
+              {t('enroll.shown_once')}
             </span>
           </div>
 
           <div className="form-field" style={{ marginTop: '1rem' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.25rem' }}>
-              <span className="form-label" style={{ margin: 0 }}>Enrollment Token</span>
+              <span className="form-label" style={{ margin: 0 }}>{t('enroll.token_label')}</span>
               <span
                 style={{
                   fontSize: '0.6875rem',
@@ -368,8 +370,10 @@ export const EnrollTokenModal: React.FC<EnrollTokenModalProps> = ({
                 }}
               >
                 {issued.is_multi_use
-                  ? `Multi-Device (${issued.max_uses === 0 ? 'Unlimited' : `Max ${issued.max_uses}`})`
-                  : 'Single Device'}
+                  ? issued.max_uses === 0
+                    ? t('enroll.badge_multi_unlimited')
+                    : t('enroll.badge_multi_max', { count: String(issued.max_uses) })
+                  : t('enroll.badge_single')}
               </span>
             </div>
             <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'stretch' }}>
@@ -391,7 +395,7 @@ export const EnrollTokenModal: React.FC<EnrollTokenModalProps> = ({
                 type="button"
                 className="btn btn-secondary"
                 onClick={() => copy('token', issued.enrollment_token)}
-                title="Copy token"
+                title={t('enroll.copy_token')}
               >
                 {copied === 'token' ? <Check size={16} /> : <Copy size={16} />}
               </button>
@@ -400,12 +404,12 @@ export const EnrollTokenModal: React.FC<EnrollTokenModalProps> = ({
 
           {issued.expires_at && (
             <p className="form-hint" style={{ marginTop: '0.5rem' }}>
-              Expires {new Date(issued.expires_at).toLocaleString()}
+              {t('enroll.expires', { time: new Date(issued.expires_at).toLocaleString() })}
             </p>
           )}
 
           <div style={{ marginTop: '1.25rem' }}>
-            <span className="form-label">Run this on the device</span>
+            <span className="form-label">{t('enroll.run_on_device')}</span>
             {commands.map((c) => (
               <div key={c.os} className="form-field" style={{ marginBottom: '0.75rem' }}>
                 <label className="form-label" htmlFor={`enroll-cmd-${c.os}`}>
@@ -431,7 +435,7 @@ export const EnrollTokenModal: React.FC<EnrollTokenModalProps> = ({
                     type="button"
                     className="btn btn-secondary"
                     onClick={() => copy(c.os, c.text)}
-                    title={`Copy ${c.os} command`}
+                    title={t('enroll.copy_command', { os: c.os })}
                   >
                     {copied === c.os ? <Check size={16} /> : <Copy size={16} />}
                   </button>
@@ -441,7 +445,11 @@ export const EnrollTokenModal: React.FC<EnrollTokenModalProps> = ({
 
             {issued.is_multi_use && (
               <p className="form-hint" style={{ marginTop: '0.75rem', lineHeight: '1.4' }}>
-                <strong>Tip Multi-Cabang:</strong> Saat instalasi via GUI (<code>EndpointAgent-Setup.exe</code>), staf cabang dapat langsung mengetik nama cabang pada kolom <em>Site / Lokasi</em>. Jika via command line / skrip, sesuaikan argumen <code>-site &quot;&lt;Nama-Cabang&gt;&quot;</code> (contoh: <code>-site &quot;Medan-Branch&quot;</code>).
+                <strong>{t('enroll.tip_title')}</strong> {t('enroll.tip_gui')}
+                <code>EndpointAgent-Setup.exe</code>
+                {t('enroll.tip_field')} <em>Site / Lokasi</em>
+                {t('enroll.tip_cli')} <code>-site &quot;&lt;Nama-Cabang&gt;&quot;</code>{' '}
+                {t('enroll.tip_example')} <code>-site &quot;Medan-Branch&quot;</code>).
               </p>
             )}
           </div>

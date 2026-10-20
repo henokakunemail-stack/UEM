@@ -1,4 +1,5 @@
 import React from 'react'
+import { useT } from '../i18n/core'
 
 interface ErrorBoundaryProps {
   children: React.ReactNode
@@ -8,6 +9,30 @@ interface ErrorBoundaryProps {
 
 interface ErrorBoundaryState {
   error: Error | null
+}
+
+/** The fallback is a function component so it can read the current language;
+ *  the boundary itself has to stay a class. */
+function ErrorFallback({ label, message, onRetry }: { label?: string; message: string; onRetry: () => void }) {
+  const { t } = useT()
+  return (
+    <div className="empty-state" role="alert">
+      <h1>{t('ui.page_failed', { page: label ?? t('ui.this_page') })}</h1>
+      <p>{message}</p>
+      <button type="button" className="btn btn-secondary" onClick={onRetry}>
+        {t('ui.try_again')}
+      </button>
+      <button
+        type="button"
+        className="btn btn-secondary"
+        onClick={() => {
+          window.location.href = '/dashboard'
+        }}
+      >
+        {t('ui.return_to_dashboard')}
+      </button>
+    </div>
+  )
 }
 
 /**
@@ -34,22 +59,11 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
   render() {
     if (!this.state.error) return this.props.children
     return (
-      <div className="empty-state" role="alert">
-        <h1>{this.props.label ?? 'This page'} failed to load</h1>
-        <p>{this.state.error.message}</p>
-        <button type="button" className="btn btn-secondary" onClick={() => this.setState({ error: null })}>
-          Try again
-        </button>
-        <button
-          type="button"
-          className="btn btn-secondary"
-          onClick={() => {
-            window.location.href = '/dashboard'
-          }}
-        >
-          Return to dashboard
-        </button>
-      </div>
+      <ErrorFallback
+        label={this.props.label}
+        message={this.state.error.message}
+        onRetry={() => this.setState({ error: null })}
+      />
     )
   }
 }

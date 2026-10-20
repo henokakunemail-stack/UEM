@@ -1,0 +1,17 @@
+{
+  "load_failed": "Gagal memuat jejak audit",
+  "title": "Jejak Audit Keamanan & Operasional",
+  "subtitle": "Log tambah-saja berisi tindakan administratif, peristiwa siklus hidup perangkat, dan pengiriman perintah ke agen",
+  "refresh": "Muat ulang",
+  "search_placeholder": "Filter jejak yang dimuat menurut tindakan, operator, atau target…",
+  "search_aria": "Filter catatan audit yang dimuat",
+  "table_label": "Catatan audit",
+  "col_timestamp": "Waktu",
+  "col_actor": "Operator / Pelaku",
+  "col_action": "Tindakan",
+  "col_target": "Perangkat / Entitas Target",
+  "col_details": "Detail",
+  "reading": "Membaca catatan audit...",
+  "no_records": "Tidak ada catatan jejak audit",
+  "no_match": "Tidak ada catatan yang cocok dengan filter saat ini"
+}

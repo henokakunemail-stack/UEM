@@ -17,6 +17,7 @@ import {
 import { api } from '../services/api'
 import { useToast } from '../context/ToastContext'
 import { usePermission } from '../hooks/usePermission'
+import { useT } from '../i18n/core'
 import { DataTable } from '../components/ui/DataTable'
 import { ConfirmDialog } from '../components/ui/ConfirmDialog'
 import { Modal } from '../components/ui/Modal'
@@ -38,6 +39,16 @@ const ASSET_STATUSES: HardwareAssetDTO['status'][] = [
   'retired',
   'disposed',
 ]
+
+// Display label key per status value. The value itself is what the server
+// stores; only the label is translated, at render.
+const ASSET_STATUS_KEYS: Record<string, string> = {
+  in_use: 'assets.status_in_use',
+  in_stock: 'assets.status_in_stock',
+  in_repair: 'assets.status_in_repair',
+  retired: 'assets.status_retired',
+  disposed: 'assets.status_disposed',
+}
 
 // Every field the table stores, so the create form cannot silently drop one
 // again. The previous initial state listed ten keys but the form only rendered
@@ -70,6 +81,7 @@ interface AssetLicensePageProps {
 }
 
 export const AssetLicensePage: React.FC<AssetLicensePageProps> = ({ activeTab: subTab, onTabChange: setSubTab }) => {
+  const { t } = useT()
   // The server's gates differ per action here, so mirror them exactly rather
   // than using one blanket "can edit" flag: registering an asset needs
   // technician, but licences and deletions are admin-only.
@@ -121,6 +133,8 @@ export const AssetLicensePage: React.FC<AssetLicensePageProps> = ({ activeTab: s
   })
   const [newLicense, setNewLicense] = useState<Partial<SoftwareLicenseDTO>>(emptyLicenseForm())
 
+  const statusLabel = (s: string) => (ASSET_STATUS_KEYS[s] ? t(ASSET_STATUS_KEYS[s]) : s)
+
   // This also runs after every create/update/delete, so it outlives the mount it
   // started on. `alive` is false once the page is gone, and every setState below
   // is behind that check — setting state on an unmounted component is a wasted
@@ -142,7 +156,7 @@ export const AssetLicensePage: React.FC<AssetLicensePageProps> = ({ activeTab: s
       setCompliance(compData.compliance || [])
     } catch (err: any) {
       if (!alive.current) return
-      setMsg({ type: 'error', text: err.message || 'Failed to load asset & license data' })
+      setMsg({ type: 'error', text: err.message || t('assets.load_failed') })
     } finally {
       if (alive.current) setLoading(false)
     }
@@ -274,21 +288,21 @@ export const AssetLicensePage: React.FC<AssetLicensePageProps> = ({ activeTab: s
     try {
       if (isEdit) {
         await api.updateAsset(editingAsset.id, newAsset)
-        const infoText = `Hardware Asset '${newAsset.asset_tag}' updated.`
+        const infoText = t('assets.asset_updated', { tag: newAsset.asset_tag ?? '' })
         setMsg({ type: 'success', text: infoText })
-        toast.success(infoText, 'Asset Updated')
+        toast.success(infoText, t('assets.toast_asset_updated'))
       } else {
         await api.createAsset(newAsset)
-        const successText = `Hardware Asset '${newAsset.asset_tag}' registered successfully.`
+        const successText = t('assets.asset_registered', { tag: newAsset.asset_tag ?? '' })
         setMsg({ type: 'success', text: successText })
-        toast.success(successText, 'Asset Registered')
+        toast.success(successText, t('assets.toast_asset_registered'))
       }
       closeAssetModal()
       loadData()
     } catch (err: any) {
-      const errorText = err.message || (isEdit ? 'Failed to update asset' : 'Failed to register asset')
+      const errorText = err.message || (isEdit ? t('assets.update_failed') : t('assets.register_failed'))
       setMsg({ type: 'error', text: errorText })
-      toast.error(errorText, isEdit ? 'Update Failed' : 'Registration Failed')
+      toast.error(errorText, isEdit ? t('assets.toast_update_failed') : t('assets.toast_register_failed'))
     }
   }
 
@@ -299,15 +313,15 @@ export const AssetLicensePage: React.FC<AssetLicensePageProps> = ({ activeTab: s
     setMsg(null)
     try {
       await api.deleteAsset(id)
-      const infoText = `Asset '${tag}' removed from inventory.`
+      const infoText = t('assets.asset_removed', { tag })
       setMsg({ type: 'success', text: infoText })
-      toast.info(infoText, 'Asset Removed')
+      toast.info(infoText, t('assets.toast_asset_removed'))
       setAssetPendingDelete(null)
       loadData()
     } catch (err: any) {
-      const errorText = err.message || 'Failed to delete asset'
+      const errorText = err.message || t('assets.delete_failed')
       setMsg({ type: 'error', text: errorText })
-      toast.error(errorText, 'Deletion Failed')
+      toast.error(errorText, t('assets.toast_delete_failed'))
     } finally {
       setDeletingAsset(false)
     }
@@ -318,15 +332,15 @@ export const AssetLicensePage: React.FC<AssetLicensePageProps> = ({ activeTab: s
     setMsg(null)
     try {
       await api.createLicense(newLicense)
-      const successText = `License '${newLicense.software_name}' created.`
+      const successText = t('assets.license_created', { name: newLicense.software_name ?? '' })
       setMsg({ type: 'success', text: successText })
-      toast.success(successText, 'License Created')
+      toast.success(successText, t('assets.toast_license_created'))
       setIsLicenseModalOpen(false)
       loadData()
     } catch (err: any) {
-      const errorText = err.message || 'Failed to create license'
+      const errorText = err.message || t('assets.license_create_failed')
       setMsg({ type: 'error', text: errorText })
-      toast.error(errorText, 'Creation Failed')
+      toast.error(errorText, t('assets.toast_create_failed'))
     }
   }
 
@@ -342,26 +356,26 @@ export const AssetLicensePage: React.FC<AssetLicensePageProps> = ({ activeTab: s
     <div className="page-container">
       <div className="page-header">
         <div>
-          <h2 className="page-title">IT Asset & Software License Management</h2>
+          <h2 className="page-title">{t('assets.title')}</h2>
           <p className="page-subtitle">
-            Enterprise Hardware Asset Management (HAM) and live Software License Reconciliation (SAM)
+            {t('assets.subtitle')}
           </p>
         </div>
         <div className="header-controls">
           <button type="button" className="btn btn-secondary" onClick={loadData} disabled={loading}>
             <RefreshCw size={16} className={loading ? 'spinning' : ''} />
-            <span>Refresh</span>
+            <span>{t('assets.refresh')}</span>
           </button>
           {subTab === 'hardware' && canRegister && (
             <button type="button" className="btn btn-primary" onClick={openCreateAsset}>
               <Plus size={16} />
-              <span>Register Hardware Asset</span>
+              <span>{t('assets.register_hardware')}</span>
             </button>
           )}
           {subTab === 'licenses' && canAdmin && (
             <button type="button" className="btn btn-primary" onClick={openCreateLicense}>
               <Plus size={16} />
-              <span>Add Software License</span>
+              <span>{t('assets.add_license')}</span>
             </button>
           )}
         </div>
@@ -370,7 +384,7 @@ export const AssetLicensePage: React.FC<AssetLicensePageProps> = ({ activeTab: s
       {msg && (
         <div className={`alert-banner ${msg.type === 'error' ? 'alert-error' : 'alert-success'}`}>
           <span>{msg.text}</span>
-          <button type="button" onClick={() => setMsg(null)} className="close-btn" aria-label="Dismiss message">
+          <button type="button" onClick={() => setMsg(null)} className="close-btn" aria-label={t('assets.dismiss_message')}>
             <X size={14} />
           </button>
         </div>
@@ -381,38 +395,38 @@ export const AssetLicensePage: React.FC<AssetLicensePageProps> = ({ activeTab: s
         <div className="kpi-grid">
           <div className="kpi-card">
             <div className="kpi-header">
-              <span className="kpi-label">Total Fleet Valuation</span>
+              <span className="kpi-label">{t('assets.kpi_valuation')}</span>
               <DollarSign className="kpi-icon text-success" size={20} />
             </div>
             <div className="kpi-value text-success">{formatCurrency(summary.total_valuation)}</div>
-            <span className="kpi-hint">Capitalized hardware asset value</span>
+            <span className="kpi-hint">{t('assets.kpi_valuation_hint')}</span>
           </div>
 
           <div className="kpi-card">
             <div className="kpi-header">
-              <span className="kpi-label">Active Hardware</span>
+              <span className="kpi-label">{t('assets.kpi_active_hardware')}</span>
               <Laptop className="kpi-icon text-primary" size={20} />
             </div>
             <div className="kpi-value">{summary.active_assets} / {summary.total_assets}</div>
-            <span className="kpi-hint">Physical machines assigned and deployed</span>
+            <span className="kpi-hint">{t('assets.kpi_active_hardware_hint')}</span>
           </div>
 
           <div className="kpi-card">
             <div className="kpi-header">
-              <span className="kpi-label">Warranty Expiring (&lt;30d)</span>
+              <span className="kpi-label">{t('assets.kpi_warranty_expiring')}</span>
               <AlertTriangle className="kpi-icon text-warning" size={20} />
             </div>
             <div className="kpi-value text-warning">{summary.warranty_expiring_count}</div>
-            <span className="kpi-hint">Approaching vendor support renewal</span>
+            <span className="kpi-hint">{t('assets.kpi_warranty_expiring_hint')}</span>
           </div>
 
           <div className="kpi-card">
             <div className="kpi-header">
-              <span className="kpi-label">Software Contracts</span>
+              <span className="kpi-label">{t('assets.kpi_contracts')}</span>
               <Award className="kpi-icon text-dim" size={20} />
             </div>
             <div className="kpi-value">{licenses.length}</div>
-            <span className="kpi-hint">Under active compliance audit</span>
+            <span className="kpi-hint">{t('assets.kpi_contracts_hint')}</span>
           </div>
         </div>
       )}
@@ -425,7 +439,7 @@ export const AssetLicensePage: React.FC<AssetLicensePageProps> = ({ activeTab: s
           onClick={() => setSubTab('hardware')}
         >
           <Cpu size={16} />
-          <span>Hardware Assets (HAM)</span>
+          <span>{t('assets.tab_hardware')}</span>
         </button>
         <button
           type="button"
@@ -433,39 +447,39 @@ export const AssetLicensePage: React.FC<AssetLicensePageProps> = ({ activeTab: s
           onClick={() => setSubTab('licenses')}
         >
           <Key size={16} />
-          <span>Software License Compliance (SAM)</span>
+          <span>{t('assets.tab_licenses')}</span>
         </button>
       </div>
 
       {/* Tab 1: Hardware Assets */}
       {subTab === 'hardware' && (
         <div className="table-card">
-          <DataTable label="Hardware assets">
+          <DataTable label={t('assets.table_hardware_label')}>
             <table className="data-table">
               <thead>
                 <tr>
-                  <th>Asset Tag</th>
-                  <th>Linked Device</th>
-                  <th>Model & Vendor</th>
-                  <th>Serial Number</th>
-                  <th>Department & Site</th>
-                  <th>PIC</th>
-                  <th>Valuation</th>
-                  <th>Status</th>
-                  <th>Actions</th>
+                  <th>{t('assets.col_asset_tag')}</th>
+                  <th>{t('assets.col_linked_device')}</th>
+                  <th>{t('assets.col_model_vendor')}</th>
+                  <th>{t('assets.col_serial')}</th>
+                  <th>{t('assets.col_department_site')}</th>
+                  <th>{t('assets.col_pic')}</th>
+                  <th>{t('assets.col_valuation')}</th>
+                  <th>{t('assets.col_status')}</th>
+                  <th>{t('assets.col_actions')}</th>
                 </tr>
               </thead>
               <tbody>
                 {loading ? (
                   <tr>
                     <td colSpan={9} className="text-center py-8 text-muted">
-                      Loading hardware assets…
+                      {t('assets.loading_hardware')}
                     </td>
                   </tr>
                 ) : assets.length === 0 ? (
                   <tr>
                     <td colSpan={9} className="text-center py-8 text-muted">
-                      No hardware assets registered yet.
+                      {t('assets.empty_hardware')}
                     </td>
                   </tr>
                 ) : (
@@ -478,7 +492,7 @@ export const AssetLicensePage: React.FC<AssetLicensePageProps> = ({ activeTab: s
                         {a.device_hostname ? (
                           <span className="font-mono text-sm">{a.device_hostname}</span>
                         ) : (
-                          <span className="text-sm text-dim">Not linked</span>
+                          <span className="text-sm text-dim">{t('assets.not_linked')}</span>
                         )}
                       </td>
                       <td>
@@ -489,11 +503,11 @@ export const AssetLicensePage: React.FC<AssetLicensePageProps> = ({ activeTab: s
                       </td>
                       <td className="font-mono text-sm">{a.serial_number || '—'}</td>
                       <td>{a.department} ({a.site})</td>
-                      <td>{a.assigned_user || 'Unassigned'}</td>
+                      <td>{a.assigned_user || t('assets.unassigned')}</td>
                       <td>{formatCurrency(a.purchase_cost)}</td>
                       <td>
                         <span className={`status-pill ${a.status === 'in_use' ? 'online' : a.status === 'in_repair' ? 'warning' : 'offline'}`}>
-                          {a.status}
+                          {statusLabel(a.status)}
                         </span>
                       </td>
                       <td>
@@ -503,10 +517,10 @@ export const AssetLicensePage: React.FC<AssetLicensePageProps> = ({ activeTab: s
                               type="button"
                               className="btn-action"
                               onClick={() => openEditAsset(a)}
-                              title="Edit this asset"
+                              title={t('assets.edit_title')}
                             >
                               <Pencil size={14} />
-                              <span>Edit</span>
+                              <span>{t('assets.edit')}</span>
                             </button>
                           )}
                           {canAdmin && (
@@ -514,10 +528,10 @@ export const AssetLicensePage: React.FC<AssetLicensePageProps> = ({ activeTab: s
                               type="button"
                               className="btn-action text-danger"
                               onClick={() => setAssetPendingDelete({ id: a.id, tag: a.asset_tag })}
-                              title="Delete asset record"
+                              title={t('assets.delete_title')}
                             >
                               <Trash2 size={14} />
-                              <span>Delete</span>
+                              <span>{t('common.delete')}</span>
                             </button>
                           )}
                         </div>
@@ -537,36 +551,36 @@ export const AssetLicensePage: React.FC<AssetLicensePageProps> = ({ activeTab: s
           <div className="card-header">
             <div className="card-title-group">
               <ShieldCheck size={18} className="card-icon" />
-              <h3 className="card-title">Live License Seat Reconciliation</h3>
+              <h3 className="card-title">{t('assets.license_card_title')}</h3>
             </div>
             <span className="text-sm text-dim">
-              Cross-checked in real-time against agent software inventory
+              {t('assets.license_card_hint')}
             </span>
           </div>
-          <DataTable label="Software license compliance">
+          <DataTable label={t('assets.table_license_label')}>
             <table className="data-table">
               <thead>
                 <tr>
-                  <th>Software Title</th>
-                  <th>Publisher</th>
-                  <th>License Type</th>
-                  <th>Purchased Seats</th>
-                  <th>Allocated Seats</th>
-                  <th>Installed (Detected)</th>
-                  <th>Compliance Status</th>
+                  <th>{t('assets.col_software_title')}</th>
+                  <th>{t('assets.col_publisher')}</th>
+                  <th>{t('assets.col_license_type')}</th>
+                  <th>{t('assets.col_purchased_seats')}</th>
+                  <th>{t('assets.col_allocated_seats')}</th>
+                  <th>{t('assets.col_installed')}</th>
+                  <th>{t('assets.col_compliance_status')}</th>
                 </tr>
               </thead>
               <tbody>
                 {loading ? (
                   <tr>
                     <td colSpan={7} className="text-center py-8 text-muted">
-                      Loading license compliance…
+                      {t('assets.loading_licenses')}
                     </td>
                   </tr>
                 ) : compliance.length === 0 ? (
                   <tr>
                     <td colSpan={7} className="text-center py-8 text-muted">
-                      No software license records to reconcile.
+                      {t('assets.empty_licenses')}
                     </td>
                   </tr>
                 ) : (
@@ -581,23 +595,23 @@ export const AssetLicensePage: React.FC<AssetLicensePageProps> = ({ activeTab: s
                       <td>{c.allocated_seats}</td>
                       <td>
                         <span className={`font-semibold ${c.installed_detected > c.total_seats ? 'text-danger' : 'text-main'}`}>
-                          {c.installed_detected} devices
+                          {t('assets.installed_devices', { count: c.installed_detected })}
                         </span>
                       </td>
                       <td>
                         {c.status === 'compliant' && (
                           <span className="status-pill online">
-                            <ShieldCheck size={13} /> Compliant
+                            <ShieldCheck size={13} /> {t('assets.compliance_compliant')}
                           </span>
                         )}
                         {c.status === 'over_allocated' && (
-                          <span className="status-pill danger" title="Installation count exceeds purchased seats!">
-                            <ShieldAlert size={13} /> Over Allocated (Deficit!)
+                          <span className="status-pill danger" title={t('assets.compliance_over_allocated_title')}>
+                            <ShieldAlert size={13} /> {t('assets.compliance_over_allocated')}
                           </span>
                         )}
                         {c.status === 'expiring_soon' && (
                           <span className="status-pill warning">
-                            <AlertTriangle size={13} /> Expiring Soon
+                            <AlertTriangle size={13} /> {t('assets.compliance_expiring_soon')}
                           </span>
                         )}
                         {/* The server sets 'expired' once now() is past expires_at.
@@ -605,7 +619,7 @@ export const AssetLicensePage: React.FC<AssetLicensePageProps> = ({ activeTab: s
                             state that most needs to be visible. */}
                         {c.status === 'expired' && (
                           <span className="status-pill danger">
-                            <AlertTriangle size={13} /> Expired
+                            <AlertTriangle size={13} /> {t('assets.compliance_expired')}
                           </span>
                         )}
                       </td>
@@ -622,15 +636,15 @@ export const AssetLicensePage: React.FC<AssetLicensePageProps> = ({ activeTab: s
       <Modal
         open={isAssetModalOpen}
         onClose={closeAssetModal}
-        title={editingAsset ? `Edit Asset ${editingAsset.asset_tag}` : 'Register Physical Hardware Asset'}
+        title={editingAsset ? t('assets.modal_edit_title', { tag: editingAsset.asset_tag }) : t('assets.modal_register_title')}
         size="md"
         footer={
           <>
             <button type="button" className="btn btn-secondary" onClick={closeAssetModal}>
-              Cancel
+              {t('common.cancel')}
             </button>
             <button type="submit" form="asset-form" className="btn btn-primary">
-              {editingAsset ? 'Save Changes' : 'Save Asset'}
+              {editingAsset ? t('assets.save_changes') : t('assets.save_asset')}
             </button>
           </>
         }
@@ -638,7 +652,7 @@ export const AssetLicensePage: React.FC<AssetLicensePageProps> = ({ activeTab: s
         <form id="asset-form" onSubmit={handleSaveAsset}>
           <div className="form-group">
             <label className="form-label" htmlFor="asset-device">
-              Linked Device (registered agent)
+              {t('assets.field_linked_device')}
             </label>
             <select
               id="asset-device"
@@ -646,7 +660,7 @@ export const AssetLicensePage: React.FC<AssetLicensePageProps> = ({ activeTab: s
               value={newAsset.device_id || ''}
               onChange={(e) => handleDeviceChange(e.target.value)}
             >
-              <option value="">Not linked</option>
+              <option value="">{t('assets.not_linked')}</option>
               {devices.map((d) => (
                 <option key={d.id} value={d.id}>
                   {d.hostname} — {d.os_name}
@@ -656,20 +670,20 @@ export const AssetLicensePage: React.FC<AssetLicensePageProps> = ({ activeTab: s
             </select>
             <span className="form-hint">
               {prefilling
-                ? 'Reading the device inventory…'
-                : 'Vendor, model and serial fill themselves in from the agent inventory.'}
+                ? t('assets.prefilling')
+                : t('assets.prefill_hint')}
             </span>
           </div>
           <div className="form-group">
             <label className="form-label" htmlFor="asset-tag">
-              Asset Tag (Barcode / Sticker ID)
+              {t('assets.field_asset_tag')}
             </label>
             <input
               id="asset-tag"
               type="text"
               className="form-input"
               required
-              placeholder="e.g. AST-JKT-2026-001"
+              placeholder={t('assets.placeholder_asset_tag')}
               value={newAsset.asset_tag}
               onChange={(e) => setNewAsset({ ...newAsset, asset_tag: e.target.value })}
             />
@@ -677,27 +691,27 @@ export const AssetLicensePage: React.FC<AssetLicensePageProps> = ({ activeTab: s
           <div className="form-row">
             <div className="form-field">
               <label className="form-label" htmlFor="asset-vendor">
-                Vendor
+                {t('assets.field_vendor')}
               </label>
               <input
                 id="asset-vendor"
                 type="text"
                 className="form-input"
-                placeholder="e.g. Dell Inc."
+                placeholder={t('assets.placeholder_vendor')}
                 value={newAsset.vendor}
                 onChange={(e) => setNewAsset({ ...newAsset, vendor: e.target.value })}
               />
             </div>
             <div className="form-field">
               <label className="form-label" htmlFor="asset-model">
-                Model Name
+                {t('assets.field_model')}
               </label>
               <input
                 id="asset-model"
                 type="text"
                 className="form-input"
                 required
-                placeholder="e.g. Dell Latitude 3420"
+                placeholder={t('assets.placeholder_model')}
                 value={newAsset.model_name}
                 onChange={(e) => setNewAsset({ ...newAsset, model_name: e.target.value })}
               />
@@ -705,13 +719,13 @@ export const AssetLicensePage: React.FC<AssetLicensePageProps> = ({ activeTab: s
           </div>
           <div className="form-group">
             <label className="form-label" htmlFor="asset-serial">
-              Serial Number
+              {t('assets.field_serial')}
             </label>
             <input
               id="asset-serial"
               type="text"
               className="form-input"
-              placeholder="e.g. SN-DELL-99213"
+              placeholder={t('assets.placeholder_serial')}
               value={newAsset.serial_number}
               onChange={(e) => setNewAsset({ ...newAsset, serial_number: e.target.value })}
             />
@@ -719,7 +733,7 @@ export const AssetLicensePage: React.FC<AssetLicensePageProps> = ({ activeTab: s
           <div className="form-row">
             <div className="form-field">
               <label className="form-label" htmlFor="asset-pic">
-                PIC (Person in Charge)
+                {t('assets.field_pic')}
               </label>
               {contacts.length > 0 ? (
                 <select
@@ -728,7 +742,7 @@ export const AssetLicensePage: React.FC<AssetLicensePageProps> = ({ activeTab: s
                   value={newAsset.assigned_user}
                   onChange={(e) => setNewAsset({ ...newAsset, assigned_user: e.target.value })}
                 >
-                  <option value="">Unassigned</option>
+                  <option value="">{t('assets.unassigned')}</option>
                   {contacts.map((c) => (
                     <option key={c.id} value={c.display_name}>
                       {c.display_name}
@@ -737,7 +751,7 @@ export const AssetLicensePage: React.FC<AssetLicensePageProps> = ({ activeTab: s
                   ))}
                   {unmatchedPic && (
                     <option value={unmatchedPic}>
-                      {unmatchedPic} — not in the synced directory
+                      {t('assets.pic_not_in_directory', { name: unmatchedPic })}
                     </option>
                   )}
                 </select>
@@ -746,7 +760,7 @@ export const AssetLicensePage: React.FC<AssetLicensePageProps> = ({ activeTab: s
                   id="asset-pic"
                   type="text"
                   className="form-input"
-                  placeholder="No directory synced yet — type a name"
+                  placeholder={t('assets.placeholder_pic')}
                   value={newAsset.assigned_user}
                   onChange={(e) => setNewAsset({ ...newAsset, assigned_user: e.target.value })}
                 />
@@ -754,13 +768,13 @@ export const AssetLicensePage: React.FC<AssetLicensePageProps> = ({ activeTab: s
             </div>
             <div className="form-field">
               <label className="form-label" htmlFor="asset-dept">
-                Department
+                {t('assets.field_department')}
               </label>
               <input
                 id="asset-dept"
                 type="text"
                 className="form-input"
-                placeholder="Department"
+                placeholder={t('assets.field_department')}
                 value={newAsset.department}
                 onChange={(e) => setNewAsset({ ...newAsset, department: e.target.value })}
               />
@@ -769,20 +783,20 @@ export const AssetLicensePage: React.FC<AssetLicensePageProps> = ({ activeTab: s
           <div className="form-row">
             <div className="form-field">
               <label className="form-label" htmlFor="asset-site">
-                Site
+                {t('assets.field_site')}
               </label>
               <input
                 id="asset-site"
                 type="text"
                 className="form-input"
-                placeholder="e.g. Kantor Pusat"
+                placeholder={t('assets.placeholder_site')}
                 value={newAsset.site}
                 onChange={(e) => setNewAsset({ ...newAsset, site: e.target.value })}
               />
             </div>
             <div className="form-field">
               <label className="form-label" htmlFor="asset-status">
-                Status
+                {t('assets.col_status')}
               </label>
               <select
                 id="asset-status"
@@ -792,7 +806,7 @@ export const AssetLicensePage: React.FC<AssetLicensePageProps> = ({ activeTab: s
               >
                 {ASSET_STATUSES.map((s) => (
                   <option key={s} value={s}>
-                    {s}
+                    {statusLabel(s)}
                   </option>
                 ))}
               </select>
@@ -801,7 +815,7 @@ export const AssetLicensePage: React.FC<AssetLicensePageProps> = ({ activeTab: s
           <div className="form-row">
             <div className="form-field">
               <label className="form-label" htmlFor="asset-purchased">
-                Purchase Date
+                {t('assets.field_purchase_date')}
               </label>
               <input
                 id="asset-purchased"
@@ -813,7 +827,7 @@ export const AssetLicensePage: React.FC<AssetLicensePageProps> = ({ activeTab: s
             </div>
             <div className="form-field">
               <label className="form-label" htmlFor="asset-warranty">
-                Warranty Expires
+                {t('assets.field_warranty_expires')}
               </label>
               <input
                 id="asset-warranty"
@@ -826,7 +840,7 @@ export const AssetLicensePage: React.FC<AssetLicensePageProps> = ({ activeTab: s
           </div>
           <div className="form-group">
             <label className="form-label" htmlFor="asset-cost">
-              Purchase Valuation (IDR)
+              {t('assets.field_purchase_valuation')}
             </label>
             <input
               id="asset-cost"
@@ -839,13 +853,13 @@ export const AssetLicensePage: React.FC<AssetLicensePageProps> = ({ activeTab: s
           </div>
           <div className="form-group">
             <label className="form-label" htmlFor="asset-notes">
-              Notes
+              {t('assets.field_notes')}
             </label>
             <textarea
               id="asset-notes"
               className="form-textarea"
               rows={2}
-              placeholder="Anything worth recording about this asset"
+              placeholder={t('assets.placeholder_notes')}
               value={newAsset.notes}
               onChange={(e) => setNewAsset({ ...newAsset, notes: e.target.value })}
             />
@@ -857,15 +871,15 @@ export const AssetLicensePage: React.FC<AssetLicensePageProps> = ({ activeTab: s
       <Modal
         open={isLicenseModalOpen}
         onClose={() => setIsLicenseModalOpen(false)}
-        title="Record Software License Contract"
+        title={t('assets.license_modal_title')}
         size="md"
         footer={
           <>
             <button type="button" className="btn btn-secondary" onClick={() => setIsLicenseModalOpen(false)}>
-              Cancel
+              {t('common.cancel')}
             </button>
             <button type="submit" form="license-form" className="btn btn-primary">
-              Save License
+              {t('assets.save_license')}
             </button>
           </>
         }
@@ -873,34 +887,34 @@ export const AssetLicensePage: React.FC<AssetLicensePageProps> = ({ activeTab: s
         <form id="license-form" onSubmit={handleCreateLicense}>
           <div className="form-group">
             <label className="form-label" htmlFor="license-title">
-              Software Title
+              {t('assets.col_software_title')}
             </label>
             <input
               id="license-title"
               type="text"
               className="form-input"
               required
-              placeholder="e.g. Endpoint Security Suite"
+              placeholder={t('assets.placeholder_software_title')}
               value={newLicense.software_name}
               onChange={(e) => setNewLicense({ ...newLicense, software_name: e.target.value })}
             />
           </div>
           <div className="form-group">
             <label className="form-label" htmlFor="license-publisher">
-              Publisher / Vendor
+              {t('assets.field_publisher')}
             </label>
             <input
               id="license-publisher"
               type="text"
               className="form-input"
-              placeholder="e.g. Microsoft Corporation"
+              placeholder={t('assets.placeholder_publisher')}
               value={newLicense.publisher}
               onChange={(e) => setNewLicense({ ...newLicense, publisher: e.target.value })}
             />
           </div>
           <div className="form-group">
             <label className="form-label" htmlFor="license-seats">
-              Total Purchased Seats
+              {t('assets.field_total_seats')}
             </label>
             <input
               id="license-seats"
@@ -917,13 +931,13 @@ export const AssetLicensePage: React.FC<AssetLicensePageProps> = ({ activeTab: s
 
       <ConfirmDialog
         open={assetPendingDelete !== null}
-        title="Delete hardware asset"
+        title={t('assets.delete_dialog_title')}
         message={
           assetPendingDelete
-            ? `Delete hardware asset '${assetPendingDelete.tag}'? This removes it from inventory and cannot be undone.`
+            ? t('assets.delete_dialog_message', { tag: assetPendingDelete.tag })
             : ''
         }
-        confirmLabel="Delete"
+        confirmLabel={t('common.delete')}
         pending={deletingAsset}
         onConfirm={handleDeleteAsset}
         onCancel={() => setAssetPendingDelete(null)}

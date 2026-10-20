@@ -1,5 +1,6 @@
 import React from 'react'
 import { Building2, ChevronRight } from 'lucide-react'
+import { useT } from '../i18n/core'
 import type { SiteMetric } from '../types/api'
 
 interface SiteDistributionProps {
@@ -8,27 +9,29 @@ interface SiteDistributionProps {
 }
 
 const getHealthStatus = (pct: number) => {
-  if (pct >= 85) return { label: 'Healthy', level: 'healthy' }
-  if (pct >= 60) return { label: 'Degraded', level: 'degraded' }
-  return { label: 'Critical', level: 'critical' }
+  if (pct >= 85) return { labelKey: 'dashboard.badge_healthy', level: 'healthy' }
+  if (pct >= 60) return { labelKey: 'dashboard.badge_degraded', level: 'degraded' }
+  return { labelKey: 'dashboard.site_critical', level: 'critical' }
 }
 
 export const SiteDistribution: React.FC<SiteDistributionProps> = ({
   sites,
   onSelectSite,
-}) => (
+}) => {
+  const { t } = useT()
+  return (
   <div className="dash-card">
     <div className="card-header">
       <div className="card-title-group">
         <Building2 size={18} className="card-icon" />
-        <h3 className="card-title">Multi-Branch Health</h3>
+        <h3 className="card-title">{t('dashboard.sites_title')}</h3>
       </div>
-      <span className="card-badge">{sites.length} Active Sites</span>
+      <span className="card-badge">{t('dashboard.active_sites_count', { count: sites.length })}</span>
     </div>
 
     <div className="site-list">
       {sites.length === 0 ? (
-        <div className="empty-state">No site telemetry available</div>
+        <div className="empty-state">{t('dashboard.no_site_telemetry')}</div>
       ) : (
         sites.map((s) => {
           const status = getHealthStatus(s.online_pct)
@@ -38,7 +41,7 @@ export const SiteDistribution: React.FC<SiteDistributionProps> = ({
                 <div className="site-meta-left">
                   <span className="site-name">{s.site.toUpperCase()}</span>
                   <span className={`site-health-pill ${status.level}`}>
-                    {status.label}
+                    {t(status.labelKey)}
                   </span>
                 </div>
                 <div className="site-meta-right">
@@ -81,4 +84,5 @@ export const SiteDistribution: React.FC<SiteDistributionProps> = ({
       )}
     </div>
   </div>
-)
+  )
+}

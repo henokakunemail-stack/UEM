@@ -15,7 +15,15 @@ import { DataTable } from '../components/ui/DataTable'
 import { usePermission } from '../hooks/usePermission'
 import { useToast } from '../context/ToastContext'
 import { api } from '../services/api'
+import { useT } from '../i18n/core'
 import type { DeviceDTO, DeviceListResponse, RemoteControlSessionDTO } from '../types/api'
+
+// Display label key per session status; the status value comes from the server.
+const SESSION_STATUS_KEYS: Record<string, string> = {
+  active: 'remote_control.status_active',
+  ended: 'remote_control.status_ended',
+  rejected: 'remote_control.status_rejected',
+}
 
 /**
  * Remote control landing page. The live desktop itself lives in
@@ -33,6 +41,7 @@ export const RemoteControlPage: React.FC<{
   onOpenSession?: (device: DeviceDTO) => void
   onOpenTerminal?: (device: DeviceDTO, shell: string) => void
 }> = ({ onOpenSession, onOpenTerminal }) => {
+  const { t } = useT()
   const { can } = usePermission()
   const canOperate = can('technician')
   const toast = useToast()
@@ -67,9 +76,9 @@ export const RemoteControlPage: React.FC<{
       const res: DeviceListResponse = await api.getDevices(50, 0, 'online')
       setDevices(res.devices || [])
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Failed to load endpoints'
+      const msg = err instanceof Error ? err.message : t('remote_control.load_failed')
       setDeviceError(msg)
-      toast.error(msg, 'Endpoints Unavailable')
+      toast.error(msg, t('remote_control.toast_endpoints_unavailable'))
     } finally {
       setDevicesLoading(false)
     }
@@ -127,8 +136,8 @@ export const RemoteControlPage: React.FC<{
     <div className="page-container remote-control-page">
       <div className="page-header">
         <div>
-          <h1 className="page-title">Remote Control</h1>
-          <p className="page-subtitle">Live interactive desktop sessions on online endpoints</p>
+          <h1 className="page-title">{t('remote_control.title')}</h1>
+          <p className="page-subtitle">{t('remote_control.subtitle')}</p>
         </div>
         <div className="header-controls">
           <button
@@ -138,7 +147,7 @@ export const RemoteControlPage: React.FC<{
             disabled={devicesLoading}
           >
             <Monitor size={16} />
-            <span>Refresh</span>
+            <span>{t('remote_control.refresh')}</span>
           </button>
         </div>
       </div>
@@ -147,8 +156,7 @@ export const RemoteControlPage: React.FC<{
         <div className="notification-banner" role="status">
           <Eye size={18} />
           <span>
-            You are signed in with view-only access. You can watch session history, but starting a
-            desktop session requires the technician role.
+            {t('remote_control.view_only_notice')}
           </span>
         </div>
       )}
@@ -165,12 +173,14 @@ export const RemoteControlPage: React.FC<{
           <div className="card-header">
             <div>
               <h2 className="card-title">
-                <Monitor size={16} /> Online endpoints
+                <Monitor size={16} /> {t('remote_control.online_endpoints')}
               </h2>
               <p className="card-subtitle">
                 {devicesLoading
-                  ? 'Loading endpoints...'
-                  : `${filtered.length} online endpoint${filtered.length === 1 ? '' : 's'}`}
+                  ? t('remote_control.loading_endpoints')
+                  : filtered.length === 1
+                    ? t('remote_control.online_count_one')
+                    : t('remote_control.online_count', { count: filtered.length })}
               </p>
             </div>
             <div className="search-wrap">
@@ -178,22 +188,22 @@ export const RemoteControlPage: React.FC<{
               <input
                 type="text"
                 className="search-input"
-                placeholder="Filter by hostname, ID, or site"
-                aria-label="Filter online endpoints"
+                placeholder={t('remote_control.filter_placeholder')}
+                aria-label={t('remote_control.filter_label')}
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
               />
             </div>
           </div>
 
-          <DataTable label="Online endpoints">
+          <DataTable label={t('remote_control.online_endpoints')}>
             <thead>
               <tr>
-                <th>Endpoint</th>
-                <th>OS</th>
-                <th>Site</th>
-                <th>Last heartbeat</th>
-                <th className="text-right">Session</th>
+                <th>{t('remote_control.col_endpoint')}</th>
+                <th>{t('remote_control.col_os')}</th>
+                <th>{t('remote_control.col_site')}</th>
+                <th>{t('remote_control.col_last_heartbeat')}</th>
+                <th className="text-right">{t('remote_control.col_session')}</th>
               </tr>
             </thead>
             <tbody>
@@ -210,8 +220,8 @@ export const RemoteControlPage: React.FC<{
                       <Monitor size={28} />
                       <p>
                         {devices.length === 0
-                          ? 'No endpoints are online. Remote control needs a live agent connection.'
-                          : 'No endpoints match this filter.'}
+                          ? t('remote_control.empty_online')
+                          : t('remote_control.empty_filter')}
                       </p>
                     </div>
                   </td>
@@ -223,7 +233,7 @@ export const RemoteControlPage: React.FC<{
                     className={selected?.id === d.id ? 'row-selected' : undefined}
                     onClick={() => setSelected(d)}
                   >
-                    <td data-label="Endpoint">
+                    <td data-label={t('remote_control.col_endpoint')}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem', flexWrap: 'wrap' }}>
                         <strong className="device-name">{d.hostname}</strong>
                         {(hostnameCounts.get((d.hostname || '').toLowerCase()) || 0) > 1 && (
@@ -237,15 +247,15 @@ export const RemoteControlPage: React.FC<{
                               alignItems: 'center',
                               gap: '0.25rem',
                             }}
-                            title="Multiple devices share this hostname. Identified uniquely by Device ID."
+                            title={t('remote_control.duplicate_hostname_title')}
                           >
-                            Duplicate Hostname ({d.id.slice(0, 8)})
+                            {t('remote_control.duplicate_hostname', { id: d.id.slice(0, 8) })}
                           </span>
                         )}
                       </div>
                       <span className="device-id font-mono">{d.id.substring(0, 16)}...</span>
                     </td>
-                    <td data-label="OS">
+                    <td data-label={t('remote_control.col_os')}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem', flexWrap: 'wrap' }}>
                         <span className="os-name">{d.os_name}</span>
                         {isWindows(d.os_name) ? (
@@ -259,9 +269,9 @@ export const RemoteControlPage: React.FC<{
                               border: '1px solid rgba(59, 130, 246, 0.3)',
                               fontWeight: 500,
                             }}
-                            title="Desktop GUI screen capture supported"
+                            title={t('remote_control.badge_desktop_title')}
                           >
-                            Desktop
+                            {t('remote_control.badge_desktop')}
                           </span>
                         ) : (
                           <span
@@ -274,22 +284,22 @@ export const RemoteControlPage: React.FC<{
                               border: '1px solid rgba(245, 158, 11, 0.3)',
                               fontWeight: 500,
                             }}
-                            title="Desktop GUI capture Windows-only. Remote Terminal supported."
+                            title={t('remote_control.badge_terminal_only_title')}
                           >
-                            Terminal Only
+                            {t('remote_control.badge_terminal_only')}
                           </span>
                         )}
                       </div>
                     </td>
-                    <td data-label="Site">
+                    <td data-label={t('remote_control.col_site')}>
                       <span className="site-badge">{d.site || 'HQ'}</span>
                     </td>
-                    <td data-label="Last heartbeat">
+                    <td data-label={t('remote_control.col_last_heartbeat')}>
                       <span className="timestamp-cell">
-                        {d.last_seen_at ? new Date(d.last_seen_at).toLocaleTimeString() : 'Never'}
+                        {d.last_seen_at ? new Date(d.last_seen_at).toLocaleTimeString() : t('remote_control.never')}
                       </span>
                     </td>
-                    <td className="text-right" data-label="Session">
+                    <td className="text-right" data-label={t('remote_control.col_session')}>
                       {isWindows(d.os_name) ? (
                         <button
                           type="button"
@@ -301,13 +311,13 @@ export const RemoteControlPage: React.FC<{
                           disabled={!canOperate}
                           title={
                             canOperate
-                              ? 'Open a live remote desktop session'
-                              : 'Starting a session requires the technician role'
+                              ? t('remote_control.start_title')
+                              : t('remote_control.start_requires_technician')
                           }
-                          aria-label={`Start remote desktop session on ${d.hostname}`}
+                          aria-label={t('remote_control.start_label', { hostname: d.hostname })}
                         >
                           <Play size={12} />
-                          <span>Start</span>
+                          <span>{t('remote_control.start')}</span>
                         </button>
                       ) : (
                         <button
@@ -319,15 +329,15 @@ export const RemoteControlPage: React.FC<{
                               const isMac = (d.os_name || '').toLowerCase().includes('darwin') || (d.os_name || '').toLowerCase().includes('mac')
                               onOpenTerminal(d, isMac ? 'zsh' : 'bash')
                             } else {
-                              toast.info('Desktop GUI capture is Windows-only. Use Interactive Terminal from Devices page.', 'Terminal Available')
+                              toast.info(t('remote_control.terminal_hint'), t('remote_control.toast_terminal_available'))
                             }
                           }}
                           disabled={!canOperate}
-                          title="Desktop GUI is Windows-only. Click to open Remote Terminal."
-                          aria-label={`Open interactive terminal on ${d.hostname}`}
+                          title={t('remote_control.terminal_title')}
+                          aria-label={t('remote_control.terminal_label', { hostname: d.hostname })}
                         >
                           <Terminal size={12} />
-                          <span>Terminal</span>
+                          <span>{t('remote_control.terminal')}</span>
                         </button>
                       )}
                     </td>
@@ -342,12 +352,14 @@ export const RemoteControlPage: React.FC<{
           <div className="card-header">
             <div>
               <h2 className="card-title">
-                <History size={16} /> Session history
+                <History size={16} /> {t('remote_control.session_history')}
               </h2>
               <p className="card-subtitle">
                 {selected
-                  ? `${selected.hostname} — last ${sessions.length} session${sessions.length === 1 ? '' : 's'}`
-                  : 'Select an endpoint to see its sessions'}
+                  ? sessions.length === 1
+                    ? t('remote_control.history_count_one', { hostname: selected.hostname })
+                    : t('remote_control.history_count', { hostname: selected.hostname, count: sessions.length })
+                  : t('remote_control.select_endpoint_sessions')}
               </p>
             </div>
           </div>
@@ -355,17 +367,17 @@ export const RemoteControlPage: React.FC<{
           {!selected ? (
             <div className="empty-state">
               <HardDrive size={28} />
-              <p>Select an endpoint to load its remote control history.</p>
+              <p>{t('remote_control.select_endpoint_history')}</p>
             </div>
           ) : (
-            <DataTable label="Remote control session history">
+            <DataTable label={t('remote_control.history_table_label')}>
               <thead>
                 <tr>
-                  <th>Started</th>
-                  <th>Operator</th>
-                  <th>Mode</th>
-                  <th>Frames</th>
-                  <th>Status</th>
+                  <th>{t('remote_control.col_started')}</th>
+                  <th>{t('remote_control.col_operator')}</th>
+                  <th>{t('remote_control.col_mode')}</th>
+                  <th>{t('remote_control.col_frames')}</th>
+                  <th>{t('remote_control.col_status')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -380,31 +392,31 @@ export const RemoteControlPage: React.FC<{
                     <td colSpan={5} className="text-center py-8">
                       <div className="empty-state">
                         <History size={28} />
-                        <p>No remote control sessions recorded for this endpoint.</p>
+                        <p>{t('remote_control.empty_history')}</p>
                       </div>
                     </td>
                   </tr>
                 ) : (
                   sessions.map((s) => (
                     <tr key={s.id}>
-                      <td data-label="Started">
+                      <td data-label={t('remote_control.col_started')}>
                         <span className="timestamp-cell">
                           {new Date(s.started_at).toLocaleString()}
                         </span>
                       </td>
-                      <td data-label="Operator">{s.operator_name || s.operator_id}</td>
-                      <td data-label="Mode">
+                      <td data-label={t('remote_control.col_operator')}>{s.operator_name || s.operator_id}</td>
+                      <td data-label={t('remote_control.col_mode')}>
                         <span className={`site-badge ${s.session_mode === 'full_control' ? 'control' : ''}`}>
-                          {s.session_mode === 'full_control' ? 'Control' : 'View only'}
+                          {s.session_mode === 'full_control' ? t('remote_control.mode_control') : t('remote_control.mode_view_only')}
                         </span>
                       </td>
-                      <td data-label="Frames">
+                      <td data-label={t('remote_control.col_frames')}>
                         <span className="font-mono text-sm">{s.frames_transmitted}</span>
                       </td>
-                      <td data-label="Status">
+                      <td data-label={t('remote_control.col_status')}>
                         <span className={`status-pill ${s.status === 'active' ? 'online' : 'offline'}`}>
                           <span className="dot"></span>
-                          {s.status.toUpperCase()}
+                          {(SESSION_STATUS_KEYS[s.status] ? t(SESSION_STATUS_KEYS[s.status]) : s.status).toUpperCase()}
                         </span>
                       </td>
                     </tr>
@@ -417,9 +429,7 @@ export const RemoteControlPage: React.FC<{
       </div>
 
       <p className="filter-hint">
-        <MousePointer size={12} /> A session sends this operator's mouse and keyboard to the
-        endpoint in real time. Every session is recorded in the audit trail with its operator and
-        frame count.
+        <MousePointer size={12} /> {t('remote_control.footer_hint')}
       </p>
     </div>
   )

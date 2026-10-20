@@ -7,6 +7,7 @@ import { usePermission } from '../hooks/usePermission'
 import { useToast } from '../context/ToastContext'
 import { api } from '../services/api'
 import type { DeviceGroupDTO } from '../types/api'
+import { useT } from '../i18n/core'
 
 /**
  * The Groups panel of the Devices page.
@@ -28,6 +29,7 @@ export const DeviceGroupsPanel: React.FC<{
 }> = ({ onViewDevices, onManageMembers }) => {
   const { can } = usePermission()
   const toast = useToast()
+  const { t } = useT()
 
   const [groups, setGroups] = useState<DeviceGroupDTO[]>([])
   const [loading, setLoading] = useState(true)
@@ -46,11 +48,11 @@ export const DeviceGroupsPanel: React.FC<{
     try {
       setGroups(await api.getDeviceGroups())
     } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : 'Failed to load groups', 'Groups Unavailable')
+      toast.error(err instanceof Error ? err.message : t('groups.load_failed'), t('groups.unavailable_title'))
     } finally {
       setLoading(false)
     }
-  }, [toast])
+  }, [toast, t])
 
   useEffect(() => {
     load()
@@ -66,20 +68,20 @@ export const DeviceGroupsPanel: React.FC<{
   const save = async () => {
     const trimmed = name.trim()
     if (!trimmed) {
-      setFormError('Group name is required')
+      setFormError(t('groups.name_required'))
       return
     }
     setSaving(true)
     setFormError(null)
     try {
       await api.createDeviceGroup(trimmed, description.trim())
-      toast.success(`Group "${trimmed}" created`, 'Group Created')
+      toast.success(t('groups.created', { name: trimmed }), t('groups.created_title'))
       setEditorOpen(false)
       await load()
     } catch (err: unknown) {
       // 409 carries the server's own wording ("a group named X already exists"),
       // which beats anything invented here.
-      setFormError(err instanceof Error ? err.message : 'Failed to create group')
+      setFormError(err instanceof Error ? err.message : t('groups.create_failed'))
     } finally {
       setSaving(false)
     }
@@ -90,13 +92,13 @@ export const DeviceGroupsPanel: React.FC<{
     setDeleting(true)
     try {
       await api.deleteDeviceGroup(deleteTarget.id)
-      toast.success(`Group "${deleteTarget.name}" deleted`, 'Group Deleted')
+      toast.success(t('groups.deleted', { name: deleteTarget.name }), t('groups.deleted_title'))
       setDeleteTarget(null)
       await load()
     } catch (err: unknown) {
       // 409 from the in-use guard names the feature still pointing at the
       // group, so the operator knows what to retarget before retrying.
-      toast.error(err instanceof Error ? err.message : 'Failed to delete group', 'Cannot Delete Group')
+      toast.error(err instanceof Error ? err.message : t('groups.delete_failed'), t('groups.delete_failed_title'))
       setDeleteTarget(null)
     } finally {
       setDeleting(false)
@@ -107,8 +109,7 @@ export const DeviceGroupsPanel: React.FC<{
     <>
       <div className="filter-bar">
         <p className="filter-hint" style={{ margin: 0 }}>
-          Groups are deployment targets. A software deployment, scheduled task, filter policy,
-          update campaign or maintenance job can target a whole group at once.
+          {t('groups.intro')}
         </p>
         <div className="btn-group">
           <button
@@ -116,29 +117,29 @@ export const DeviceGroupsPanel: React.FC<{
             className="btn btn-secondary"
             onClick={load}
             disabled={loading}
-            aria-label="Reload groups"
+            aria-label={t('groups.reload')}
           >
             <RefreshCw size={16} className={loading ? 'spinning' : ''} />
-            <span>Refresh</span>
+            <span>{t('groups.refresh')}</span>
           </button>
           {can('admin') && (
             <button type="button" className="btn btn-primary" onClick={openCreate}>
               <FolderPlus size={16} />
-              <span>New group</span>
+              <span>{t('groups.new_group')}</span>
             </button>
           )}
         </div>
       </div>
 
       <div className="table-card">
-        <DataTable label="Device groups">
+        <DataTable label={t('groups.table_label')}>
           <thead>
             <tr>
-              <th>Group</th>
-              <th>Description</th>
-              <th>Devices</th>
-              <th>Created</th>
-              <th className="text-right">Actions</th>
+              <th>{t('groups.col_group')}</th>
+              <th>{t('groups.col_description')}</th>
+              <th>{t('groups.col_devices')}</th>
+              <th>{t('groups.col_created')}</th>
+              <th className="text-right">{t('groups.col_actions')}</th>
             </tr>
           </thead>
           <tbody>
@@ -147,14 +148,14 @@ export const DeviceGroupsPanel: React.FC<{
                 <td colSpan={5} className="text-center py-8">
                   <div className="table-loader">
                     <RefreshCw size={24} className="spinning" />
-                    <span>Loading groups...</span>
+                    <span>{t('groups.loading')}</span>
                   </div>
                 </td>
               </tr>
             ) : groups.length === 0 ? (
               <tr>
                 <td colSpan={5} className="text-center py-8">
-                  No groups yet. Create one to target a set of devices with a single run.
+                  {t('groups.empty')}
                 </td>
               </tr>
             ) : (
@@ -176,21 +177,21 @@ export const DeviceGroupsPanel: React.FC<{
                         onClick={() => onManageMembers(g.id)}
                       >
                         <Users size={14} />
-                        <span>Members</span>
+                        <span>{t('groups.members')}</span>
                       </button>
                       <button
                         type="button"
                         className="btn btn-secondary btn-sm"
                         onClick={() => onViewDevices(g.id)}
                       >
-                        <span>View devices</span>
+                        <span>{t('groups.view_devices')}</span>
                       </button>
                       {can('admin') && (
                         <button
                           type="button"
                           className="btn btn-sm btn-danger-outline"
                           onClick={() => setDeleteTarget(g)}
-                          aria-label={`Delete group ${g.name}`}
+                          aria-label={t('groups.delete_label', { name: g.name })}
                         >
                           <Trash2 size={14} />
                         </button>
@@ -207,7 +208,7 @@ export const DeviceGroupsPanel: React.FC<{
       <Modal
         open={editorOpen}
         onClose={() => setEditorOpen(false)}
-        title="New device group"
+        title={t('groups.editor_title')}
         size="sm"
         dismissible={!saving}
         footer={
@@ -218,37 +219,37 @@ export const DeviceGroupsPanel: React.FC<{
               onClick={() => setEditorOpen(false)}
               disabled={saving}
             >
-              Cancel
+              {t('common.cancel')}
             </button>
             <button type="button" className="btn btn-primary" onClick={save} disabled={saving}>
               {saving && <RefreshCw size={14} className="spinning" />}
-              <span>{saving ? 'Creating...' : 'Create group'}</span>
+              <span>{saving ? t('groups.creating') : t('groups.create')}</span>
             </button>
           </>
         }
       >
         <div className="form-group">
-          <label htmlFor="group-name">Name</label>
+          <label htmlFor="group-name">{t('groups.name')}</label>
           <input
             id="group-name"
             type="text"
             className="text-input"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="e.g. Branch A Workstations"
+            placeholder={t('groups.name_placeholder')}
             maxLength={128}
             disabled={saving}
           />
         </div>
         <div className="form-group">
-          <label htmlFor="group-description">Description</label>
+          <label htmlFor="group-description">{t('groups.description')}</label>
           <input
             id="group-description"
             type="text"
             className="text-input"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            placeholder="What this group is for"
+            placeholder={t('groups.description_placeholder')}
             maxLength={256}
             disabled={saving}
           />
@@ -262,13 +263,13 @@ export const DeviceGroupsPanel: React.FC<{
 
       <ConfirmDialog
         open={deleteTarget !== null}
-        title="Delete group"
+        title={t('groups.delete_title')}
         message={
           deleteTarget
-            ? `Delete "${deleteTarget.name}"? Its ${deleteTarget.member_count} device(s) stay enrolled — only the group and its memberships are removed.`
+            ? t('groups.delete_message', { name: deleteTarget.name, count: deleteTarget.member_count })
             : ''
         }
-        confirmLabel="Delete group"
+        confirmLabel={t('groups.delete_confirm')}
         pending={deleting}
         onConfirm={confirmDelete}
         onCancel={() => setDeleteTarget(null)}

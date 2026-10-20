@@ -4,6 +4,7 @@ import { Modal } from './ui/Modal'
 import { useToast } from '../context/ToastContext'
 import { api } from '../services/api'
 import type { DeviceDTO, UninstallTokenResp } from '../types/api'
+import { useT } from '../i18n/core'
 
 interface UninstallTokenModalProps {
   device: DeviceDTO | null
@@ -17,6 +18,7 @@ export const UninstallTokenModal: React.FC<UninstallTokenModalProps> = ({
   onClose,
 }) => {
   const toast = useToast()
+  const { t } = useT()
   const [pending, setPending] = useState(false)
   const [tokenData, setTokenData] = useState<UninstallTokenResp | null>(null)
   const [copied, setCopied] = useState(false)
@@ -38,9 +40,9 @@ export const UninstallTokenModal: React.FC<UninstallTokenModalProps> = ({
     try {
       const res = await api.createUninstallToken(device.id)
       setTokenData(res)
-      toast.success('Uninstall verification token generated', 'Dual-Verification Active')
+      toast.success(t('uninstall.generated'), t('uninstall.generated_title'))
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to generate token')
+      toast.error(err instanceof Error ? err.message : t('uninstall.generate_failed'))
     } finally {
       setPending(false)
     }
@@ -51,9 +53,9 @@ export const UninstallTokenModal: React.FC<UninstallTokenModalProps> = ({
       await navigator.clipboard.writeText(text)
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
-      toast.info('Copied token to clipboard')
+      toast.info(t('uninstall.copied'))
     } catch {
-      toast.error('Failed to copy to clipboard')
+      toast.error(t('uninstall.copy_failed'))
     }
   }
 
@@ -65,12 +67,12 @@ export const UninstallTokenModal: React.FC<UninstallTokenModalProps> = ({
       const res = await api.verifyUninstallToken(device.id, verifyInput.trim())
       setVerifyStatus(res.valid)
       if (res.valid) {
-        toast.success('Token is valid and active')
+        toast.success(t('uninstall.valid_toast'))
       } else {
-        toast.error('Token is invalid or expired')
+        toast.error(t('uninstall.invalid_toast'))
       }
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Verification check failed')
+      toast.error(err instanceof Error ? err.message : t('uninstall.verify_failed'))
     } finally {
       setVerifying(false)
     }
@@ -82,12 +84,12 @@ export const UninstallTokenModal: React.FC<UninstallTokenModalProps> = ({
     <Modal
       open={open}
       onClose={handleClose}
-      title="Agent Uninstallation Verification"
+      title={t('uninstall.title')}
       size="md"
       footer={
         <div className="flex justify-end w-full">
           <button type="button" className="btn btn-secondary" onClick={handleClose}>
-            Close
+            {t('common.close')}
           </button>
         </div>
       }
@@ -108,14 +110,14 @@ export const UninstallTokenModal: React.FC<UninstallTokenModalProps> = ({
         <div className="alert-banner alert-warning" style={{ margin: 0 }}>
           <ShieldAlert className="h-4 w-4 shrink-0" />
           <div>
-            <strong>2-Step Dual-Verification Protection:</strong> Local endpoint users cannot uninstall or stop the agent without an administrator-generated verification token.
+            <strong>{t('uninstall.protection_title')}</strong> {t('uninstall.protection_body')}
           </div>
         </div>
 
         {!tokenData ? (
           <div className="text-center py-4 space-y-3">
             <p className="text-xs text-muted">
-              Generate a time-limited (2-hour) authorization token to permit uninstallation on this device.
+              {t('uninstall.intro')}
             </p>
             <button
               type="button"
@@ -124,13 +126,13 @@ export const UninstallTokenModal: React.FC<UninstallTokenModalProps> = ({
               disabled={pending}
             >
               <KeyRound size={16} />
-              <span>{pending ? 'Generating Token...' : 'Generate Uninstall Token'}</span>
+              <span>{pending ? t('uninstall.generating') : t('uninstall.generate')}</span>
             </button>
           </div>
         ) : (
           <div className="space-y-3">
             <div className="form-group">
-              <label className="form-label text-xs">Uninstall Verification Token</label>
+              <label className="form-label text-xs">{t('uninstall.token_label')}</label>
               <div className="flex items-center gap-2">
                 <input
                   type="text"
@@ -142,31 +144,37 @@ export const UninstallTokenModal: React.FC<UninstallTokenModalProps> = ({
                   type="button"
                   className="btn btn-secondary shrink-0"
                   onClick={() => handleCopy(tokenData.uninstall_token)}
-                  title="Copy token"
+                  title={t('uninstall.copy_token')}
                 >
                   {copied ? <Check size={16} className="text-emerald-400" /> : <Copy size={16} />}
                 </button>
               </div>
               <span className="text-xs text-muted mt-1 block">
-                Expires at {new Date(tokenData.expires_at).toLocaleTimeString()} ({new Date(tokenData.expires_at).toLocaleDateString()})
+                {t('uninstall.expires_at', {
+                  time: new Date(tokenData.expires_at).toLocaleTimeString(),
+                  date: new Date(tokenData.expires_at).toLocaleDateString(),
+                })}
               </span>
             </div>
 
             {/* Platform Instructions */}
             <div className="text-xs space-y-2" style={{ padding: '0.75rem', borderRadius: '0.5rem', border: '1px solid var(--border-subtle)', background: 'var(--bg-surface)' }}>
-              <div className="font-semibold text-main">How to use on endpoint:</div>
+              <div className="font-semibold text-main">{t('uninstall.how_to')}</div>
               {device.os_name === 'windows' ? (
                 <div className="space-y-1 text-muted">
-                  <p>1. Run <strong>EndpointAgent-Uninstall.exe</strong> on the target machine.</p>
-                  <p>2. Paste this token into the verification prompt when requested.</p>
-                  <p>Or via administrator command line:</p>
+                  <p>
+                    {t('uninstall.win_step1_before')} <strong>EndpointAgent-Uninstall.exe</strong>{' '}
+                    {t('uninstall.win_step1_after')}
+                  </p>
+                  <p>{t('uninstall.win_step2')}</p>
+                  <p>{t('uninstall.win_cli')}</p>
                   <code className="block p-1.5 rounded font-mono text-zinc-300 overflow-x-auto" style={{ background: 'var(--bg-surface-elevated)' }}>
                     endpoint-agent.exe -service uninstall -uninstall-token {tokenData.uninstall_token}
                   </code>
                 </div>
               ) : (
                 <div className="space-y-1 text-muted">
-                  <p>Run the uninstaller script with the token:</p>
+                  <p>{t('uninstall.unix_step')}</p>
                   <code className="block p-1.5 rounded font-mono text-zinc-300 overflow-x-auto" style={{ background: 'var(--bg-surface-elevated)' }}>
                     sudo ./uninstall-agent.sh false {tokenData.uninstall_token}
                   </code>
@@ -176,12 +184,12 @@ export const UninstallTokenModal: React.FC<UninstallTokenModalProps> = ({
 
             {/* Quick check verification */}
             <div className="pt-2" style={{ borderTop: '1px solid var(--border-subtle)' }}>
-              <label className="form-label text-xs">Verify Token Status</label>
+              <label className="form-label text-xs">{t('uninstall.verify_label')}</label>
               <div className="flex items-center gap-2">
                 <input
                   type="text"
                   className="form-input text-xs font-mono"
-                  placeholder="Paste token to test validity..."
+                  placeholder={t('uninstall.verify_placeholder')}
                   value={verifyInput}
                   onChange={(e) => setVerifyInput(e.target.value)}
                 />
@@ -191,18 +199,18 @@ export const UninstallTokenModal: React.FC<UninstallTokenModalProps> = ({
                   onClick={handleVerify}
                   disabled={verifying || !verifyInput.trim()}
                 >
-                  {verifying ? 'Checking...' : 'Check'}
+                  {verifying ? t('uninstall.checking') : t('uninstall.check')}
                 </button>
               </div>
               {verifyStatus !== null && (
                 <div className="mt-1 text-xs flex items-center gap-1">
                   {verifyStatus ? (
                     <span className="text-emerald-400 flex items-center gap-1">
-                      <Check size={14} /> Token is valid and ready for consumption.
+                      <Check size={14} /> {t('uninstall.valid')}
                     </span>
                   ) : (
                     <span className="text-red-400 flex items-center gap-1">
-                      <AlertCircle size={14} /> Token is invalid, expired, or already consumed.
+                      <AlertCircle size={14} /> {t('uninstall.invalid')}
                     </span>
                   )}
                 </div>

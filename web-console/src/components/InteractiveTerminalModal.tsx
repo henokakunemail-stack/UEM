@@ -3,6 +3,7 @@ import { AlertCircle, Terminal } from 'lucide-react'
 import { api } from '../services/api'
 import { Modal } from './ui'
 import type { DeviceDTO } from '../types/api'
+import { useT } from '../i18n/core'
 
 interface InteractiveTerminalModalProps {
   device: DeviceDTO | null
@@ -28,6 +29,7 @@ export const InteractiveTerminalModal: React.FC<InteractiveTerminalModalProps> =
   const outputRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const bufferRef = useRef<string>('')
+  const { t } = useT()
 
   useEffect(() => {
     if (!device) return
@@ -48,7 +50,7 @@ export const InteractiveTerminalModal: React.FC<InteractiveTerminalModalProps> =
         if (cancelled) return
         setStatus('error')
         setErrorMessage(
-          err instanceof Error ? err.message : 'Failed to obtain a connection ticket.'
+          err instanceof Error ? err.message : t('terminal.ticket_failed')
         )
         return
       }
@@ -63,7 +65,7 @@ export const InteractiveTerminalModal: React.FC<InteractiveTerminalModalProps> =
         ws = new WebSocket(wsUrl)
       } catch {
         setStatus('error')
-        setErrorMessage('Failed to open terminal connection.')
+        setErrorMessage(t('terminal.open_failed'))
         return
       }
       wsRef.current = ws
@@ -84,7 +86,7 @@ export const InteractiveTerminalModal: React.FC<InteractiveTerminalModalProps> =
             appendOutput(msg.data)
           } else if (msg.type === 'term.close') {
             setStatus('closed')
-            appendOutput('\r\n*** Remote shell session terminated ***\r\n', 'system')
+            appendOutput('\r\n' + t('terminal.session_terminated') + '\r\n', 'system')
           }
         } catch {
           // Ignore malformed frames
@@ -93,7 +95,7 @@ export const InteractiveTerminalModal: React.FC<InteractiveTerminalModalProps> =
 
       ws.onerror = () => {
         setStatus('error')
-        setErrorMessage('Terminal connection error. The endpoint may be offline.')
+        setErrorMessage(t('terminal.connection_error'))
       }
 
       ws.onclose = () => {
@@ -177,19 +179,19 @@ export const InteractiveTerminalModal: React.FC<InteractiveTerminalModalProps> =
       dismissible={false}
       title={
         <span className="modal-title-group">
-          <Terminal size={20} /> Live Interactive Terminal
+          <Terminal size={20} /> {t('terminal.title')}
         </span>
       }
       description={
         <>
-          {device.hostname} · {shell} shell ·{' '}
+          {device.hostname} · {t('terminal.shell_suffix', { shell })} ·{' '}
           <span className="font-mono">{device.id.substring(0, 16)}</span>
         </>
       }
     >
       <div className="modal-body">
         <div className="terminal-status-group">
-          <span className={`status-pill ${statusClass}`}>{status.toUpperCase()}</span>
+          <span className={`status-pill ${statusClass}`}>{t(`terminal.status_${status}`)}</span>
         </div>
 
         {status === 'error' && (
@@ -209,9 +211,9 @@ export const InteractiveTerminalModal: React.FC<InteractiveTerminalModalProps> =
               ref={inputRef}
               type="text"
               className="terminal-input"
-              aria-label="Remote shell input"
+              aria-label={t('terminal.input_label')}
               placeholder={
-                status === 'active' ? 'Type a command and press Enter...' : 'Terminal not active'
+                status === 'active' ? t('terminal.input_placeholder') : t('terminal.not_active')
               }
               disabled={status !== 'active'}
               onKeyDown={handleSendInput}
@@ -222,8 +224,7 @@ export const InteractiveTerminalModal: React.FC<InteractiveTerminalModalProps> =
         </div>
 
         <p className="form-hint">
-          Interactive session streams bidirectionally over the agent's outbound WebSocket.
-          Closing this window terminates the shell process on the endpoint.
+          {t('terminal.hint')}
         </p>
       </div>
     </Modal>

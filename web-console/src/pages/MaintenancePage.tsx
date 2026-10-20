@@ -18,6 +18,7 @@ import { DataTable } from '../components/ui/DataTable'
 import { ConfirmDialog } from '../components/ui/ConfirmDialog'
 import { Modal } from '../components/ui/Modal'
 import { useToast } from '../context/ToastContext'
+import { useT } from '../i18n/core'
 import type {
   DeviceGroupDTO,
   DeviceDTO,
@@ -72,6 +73,30 @@ const isRunningStatus = (s: string) => s === 'running' || s === 'pending' || s =
 const isJobStatus = (s: string): s is MaintenanceJobDTO['status'] =>
   s === 'running' || s === 'completed' || s === 'partial' || s === 'failed'
 
+// Job and task statuses, and target types, arrive as bare server tokens. The
+// token is what the server and the pill colour logic use; only the text shown
+// goes through t(). An unknown token is shown as-is.
+const STATUS_KEYS: Record<string, string> = {
+  running: 'maintenance.status_running',
+  completed: 'maintenance.status_completed',
+  partial: 'maintenance.status_partial',
+  failed: 'maintenance.status_failed',
+  pending: 'maintenance.status_pending',
+  dispatched: 'maintenance.status_dispatched',
+  skipped: 'maintenance.status_skipped',
+}
+
+const TARGET_KEYS: Record<string, string> = {
+  all: 'maintenance.target_all',
+  group: 'maintenance.target_group',
+  device: 'maintenance.target_device',
+}
+
+type TFn = (key: string, vars?: Record<string, string | number>) => string
+
+const statusLabel = (t: TFn, s: string) => (STATUS_KEYS[s] ? t(STATUS_KEYS[s]) : s)
+const targetLabel = (t: TFn, s: string) => (TARGET_KEYS[s] ? t(TARGET_KEYS[s]) : s)
+
 export const MaintenancePage: React.FC = () => {
   // Dispatching a maintenance task to endpoints is RoleTechnician server-side
   // (mirrors PatchesPage's scan/install gate). A viewer can read job history
@@ -86,6 +111,7 @@ export const MaintenancePage: React.FC = () => {
   const [loading, setLoading] = useState(true)
   const [msg, setMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
   const toast = useToast()
+  const { t } = useT()
 
   // Job detail
   const [detailJob, setDetailJob] = useState<MaintenanceJobDTO | null>(null)
@@ -159,10 +185,10 @@ export const MaintenancePage: React.FC = () => {
       // succeeds. Only stop the loop if the job is genuinely gone.
       if (err?.message?.includes('404') || err?.message?.includes('not found')) {
         stopPolling()
-        toast.error(err.message, 'Job Vanished')
+        toast.error(err.message, t('maintenance.job_vanished_title'))
       }
     }
-  }, [stopPolling, toast])
+  }, [stopPolling, toast, t])
 
   // Deliberately not a useCallback. The effect below owns no cleanup through
   // it, and ToastContext builds its context value as a bare object literal with
@@ -184,9 +210,9 @@ export const MaintenancePage: React.FC = () => {
       setGroups(groupList)
       setDevices(deviceList.devices || [])
     } catch (err: any) {
-      const errMsg = err.message || 'Failed to load maintenance data'
+      const errMsg = err.message || t('maintenance.load_failed')
       setMsg({ type: 'error', text: errMsg })
-      toast.error(errMsg, 'Load Failed')
+      toast.error(errMsg, t('maintenance.load_failed_title'))
     } finally {
       setLoading(false)
     }
@@ -224,9 +250,9 @@ export const MaintenancePage: React.FC = () => {
       }
     } catch (err: any) {
       if (req !== detailReqRef.current) return
-      const errMsg = err.message || 'Failed to load job detail'
+      const errMsg = err.message || t('maintenance.detail_failed')
       setMsg({ type: 'error', text: errMsg })
-      toast.error(errMsg, 'Job Detail Failed')
+      toast.error(errMsg, t('maintenance.detail_failed_title'))
     } finally {
       // Only the newest request owns the spinner; an abandoned one must not
       // clear it while the current fetch is still in flight.
@@ -275,11 +301,11 @@ export const MaintenancePage: React.FC = () => {
         target_type: newRun.target_type as 'device' | 'group' | 'all',
         target_id: newRun.target_type === 'all' ? '' : newRun.target_id,
       })
-      const doneText = `Job dispatched: ${res.dispatched_live} of ${res.total_targets} devices live`
-        + (res.skipped > 0 ? `, ${res.skipped} skipped as offline` : '')
-        + '.'
+      const doneText = res.skipped > 0
+        ? t('maintenance.dispatched_with_skipped', { live: res.dispatched_live, total: res.total_targets, skipped: res.skipped })
+        : t('maintenance.dispatched', { live: res.dispatched_live, total: res.total_targets })
       setMsg({ type: 'success', text: doneText })
-      toast.success(doneText, 'Maintenance Started')
+      toast.success(doneText, t('maintenance.started_title'))
       setDisruptivePending(false)
       setIsRunModalOpen(false)
       await loadData()
@@ -287,9 +313,9 @@ export const MaintenancePage: React.FC = () => {
       // running, and how far along".
       await openDetail(res.job)
     } catch (err: any) {
-      const errMsg = err.message || 'Failed to start maintenance job'
+      const errMsg = err.message || t('maintenance.start_failed')
       setMsg({ type: 'error', text: errMsg })
-      toast.error(errMsg, 'Dispatch Failed')
+      toast.error(errMsg, t('maintenance.dispatch_failed_title'))
     } finally {
       setSubmitting(false)
     }
@@ -298,13 +324,16 @@ export const MaintenancePage: React.FC = () => {
   const handleRun = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!newRun.task_type) {
-      toast.error('Pick a maintenance task first', 'Nothing To Run')
+      toast.error(t('maintenance.pick_task'), t('maintenance.nothing_to_run'))
       return
     }
     // The server ignores target_id for 'all' but a group or device target
     // without one resolves to zero devices and dispatches nothing.
     if (newRun.target_type !== 'all' && !newRun.target_id) {
-      toast.error(`Select a ${newRun.target_type} to target`, 'Nothing To Run')
+      toast.error(
+        t(newRun.target_type === 'group' ? 'maintenance.select_group_target' : 'maintenance.select_device_target'),
+        t('maintenance.nothing_to_run'),
+      )
       return
     }
     // The catalog is the source of truth for disruption, so the confirmation is
@@ -328,15 +357,15 @@ export const MaintenancePage: React.FC = () => {
     <div className="page-container">
       <div className="page-header">
         <div>
-          <h2 className="page-title">Device Maintenance</h2>
+          <h2 className="page-title">{t('maintenance.title')}</h2>
           <p className="page-subtitle">
-            Fleet-wide disk cleanup, memory hygiene, log maintenance and health scans
+            {t('maintenance.subtitle')}
           </p>
         </div>
         <div className="header-controls">
           <button type="button" className="btn btn-secondary" onClick={loadData} disabled={loading}>
             <RefreshCw size={16} className={loading ? 'spinning' : ''} />
-            <span>Refresh</span>
+            <span>{t('maintenance.refresh')}</span>
           </button>
           {canAct && (
             <button
@@ -346,7 +375,7 @@ export const MaintenancePage: React.FC = () => {
               disabled={catalog.length === 0}
             >
               <Plus size={16} />
-              <span>New Maintenance Job</span>
+              <span>{t('maintenance.new_job')}</span>
             </button>
           )}
         </div>
@@ -355,7 +384,7 @@ export const MaintenancePage: React.FC = () => {
       {msg && (
         <div className={`alert-banner ${msg.type === 'error' ? 'alert-error' : 'alert-success'}`}>
           <span>{msg.text}</span>
-          <button type="button" onClick={() => setMsg(null)} className="close-btn" aria-label="Dismiss message">
+          <button type="button" onClick={() => setMsg(null)} className="close-btn" aria-label={t('maintenance.dismiss')}>
             <X size={14} />
           </button>
         </div>
@@ -364,69 +393,69 @@ export const MaintenancePage: React.FC = () => {
       <div className="kpi-grid">
         <div className="kpi-card">
           <div className="kpi-header">
-            <span className="kpi-label">Total Jobs</span>
+            <span className="kpi-label">{t('maintenance.kpi_total')}</span>
             <ListChecks className="kpi-icon text-primary" size={20} />
           </div>
           <div className="kpi-value">{jobs.length}</div>
-          <span className="kpi-hint">Most recent 50 maintenance runs</span>
+          <span className="kpi-hint">{t('maintenance.kpi_total_hint')}</span>
         </div>
         <div className="kpi-card">
           <div className="kpi-header">
-            <span className="kpi-label">Running Now</span>
+            <span className="kpi-label">{t('maintenance.kpi_running')}</span>
             <Activity className="kpi-icon text-warning" size={20} />
           </div>
           <div className="kpi-value text-warning">{jobs.filter((j) => j.status === 'running').length}</div>
-          <span className="kpi-hint">Jobs with devices still reporting</span>
+          <span className="kpi-hint">{t('maintenance.kpi_running_hint')}</span>
         </div>
         <div className="kpi-card">
           <div className="kpi-header">
-            <span className="kpi-label">Task Types</span>
+            <span className="kpi-label">{t('maintenance.kpi_task_types')}</span>
             <Wrench className="kpi-icon text-primary" size={20} />
           </div>
           <div className="kpi-value">{catalog.length}</div>
-          <span className="kpi-hint">Served by the server, not hardcoded</span>
+          <span className="kpi-hint">{t('maintenance.kpi_task_types_hint')}</span>
         </div>
         <div className="kpi-card">
           <div className="kpi-header">
-            <span className="kpi-label">Fleet Failed</span>
+            <span className="kpi-label">{t('maintenance.kpi_failed')}</span>
             <AlertTriangle className="kpi-icon text-danger" size={20} />
           </div>
           <div className="kpi-value text-danger">{jobs.reduce((a, j) => a + (j.failed || 0), 0)}</div>
-          <span className="kpi-hint">Per-device task failures across these jobs</span>
+          <span className="kpi-hint">{t('maintenance.kpi_failed_hint')}</span>
         </div>
       </div>
 
       {/* Job history */}
       <div className="table-card">
         <div className="table-toolbar">
-          <h3 className="section-title">Maintenance Job History</h3>
-          <span className="last-sync">{jobs.length} job(s)</span>
+          <h3 className="section-title">{t('maintenance.history_title')}</h3>
+          <span className="last-sync">{t('maintenance.job_count', { count: jobs.length })}</span>
         </div>
-        <DataTable label="Maintenance job history">
+        <DataTable label={t('maintenance.history_table_label')}>
           <table className="data-table">
             <thead>
               <tr>
-                <th>Job</th>
-                <th>Task</th>
-                <th>Target</th>
-                <th>Progress</th>
-                <th>Bytes Freed</th>
-                <th>Status</th>
-                <th>Started</th>
-                <th>Actions</th>
+                <th>{t('maintenance.col_job')}</th>
+                <th>{t('maintenance.col_task')}</th>
+                <th>{t('maintenance.col_target')}</th>
+                <th>{t('maintenance.col_progress')}</th>
+                <th>{t('maintenance.col_bytes_freed')}</th>
+                <th>{t('maintenance.col_status')}</th>
+                <th>{t('maintenance.col_started')}</th>
+                <th>{t('maintenance.col_actions')}</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
                 <tr>
                   <td colSpan={8} className="text-center py-8 text-muted">
-                    <span className="spinner-inline"></span> Loading maintenance history...
+                    <span className="spinner-inline"></span> {t('maintenance.loading_history')}
                   </td>
                 </tr>
               ) : jobs.length === 0 ? (
                 <tr>
                   <td colSpan={8} className="text-center py-8 text-muted">
-                    No maintenance jobs recorded yet.
+                    {t('maintenance.empty_history')}
                   </td>
                 </tr>
               ) : (
@@ -437,17 +466,17 @@ export const MaintenancePage: React.FC = () => {
                   return (
                     <tr key={j.id}>
                       <td>
-                        <div className="font-semibold text-main">{j.name || 'Untitled job'}</div>
-                        <div className="text-sm text-dim">by {j.created_by}</div>
+                        <div className="font-semibold text-main">{j.name || t('maintenance.untitled_job')}</div>
+                        <div className="text-sm text-dim">{t('maintenance.created_by', { user: j.created_by })}</div>
                       </td>
                       <td>
                         <span className="os-badge">{catalog.find((c) => c.id === j.task_type)?.label || j.task_type}</span>
                       </td>
                       <td>
-                        <span className="badge-target">{j.target_type}</span>
+                        <span className="badge-target">{targetLabel(t, j.target_type)}</span>
                       </td>
                       <td>
-                        <div className="progress-bar-bg" title={`${finished} of ${j.total_tasks} done`}>
+                        <div className="progress-bar-bg" title={t('maintenance.progress_title', { finished, total: j.total_tasks })}>
                           <div
                             className={`progress-bar-fill ${
                               j.failed > 0 ? 'danger' : running ? 'warning' : ''
@@ -456,12 +485,12 @@ export const MaintenancePage: React.FC = () => {
                           ></div>
                         </div>
                         <div className="text-sm text-dim">
-                          {j.completed} ok / {j.failed} failed / {j.skipped} skipped
+                          {t('maintenance.progress_summary', { ok: j.completed, failed: j.failed, skipped: j.skipped })}
                         </div>
                       </td>
-                      <td className="text-sm text-muted">per-task in detail</td>
+                      <td className="text-sm text-muted">{t('maintenance.bytes_per_task')}</td>
                       <td>
-                        <span className={`status-pill ${jobPill(j.status)}`}>{j.status}</span>
+                        <span className={`status-pill ${jobPill(j.status)}`}>{statusLabel(t, j.status)}</span>
                       </td>
                       <td className="timestamp-cell">{formatTime(j.started_at)}</td>
                       <td>
@@ -470,10 +499,10 @@ export const MaintenancePage: React.FC = () => {
                             type="button"
                             className="btn-action"
                             onClick={() => openDetail(j)}
-                            title="Per-device task detail"
+                            title={t('maintenance.detail_title_attr')}
                           >
                             <Laptop size={14} />
-                            <span>Detail</span>
+                            <span>{t('maintenance.detail')}</span>
                           </button>
                         </div>
                       </td>
@@ -490,18 +519,20 @@ export const MaintenancePage: React.FC = () => {
       <Modal
         open={detailJob !== null}
         onClose={closeDetail}
-        title={detailJob?.name || 'Maintenance Job'}
+        title={detailJob?.name || t('maintenance.job_fallback_title')}
         size="lg"
         description={
           detailJob
-            ? `${detailJob.task_type} · target ${detailJob.target_type} · started ${formatTime(
-                detailJob.started_at,
-              )}`
+            ? t('maintenance.detail_description', {
+                task: detailJob.task_type,
+                target: targetLabel(t, detailJob.target_type),
+                started: formatTime(detailJob.started_at),
+              })
             : undefined
         }
         footer={
           <button type="button" className="btn btn-secondary" onClick={closeDetail}>
-            Close
+            {t('common.close')}
           </button>
         }
       >
@@ -510,47 +541,47 @@ export const MaintenancePage: React.FC = () => {
             not in a `detailJob!` assertion. */}
         {detailLoading ? (
           <div className="py-8 text-center text-muted">
-            <span className="spinner-inline"></span> Loading per-device tasks...
+            <span className="spinner-inline"></span> {t('maintenance.loading_tasks')}
           </div>
         ) : !detailJob ? null : (
           <>
             <div className="form-row">
               <div className="form-field">
-                <span className="form-label">Status</span>
+                <span className="form-label">{t('maintenance.col_status')}</span>
                 <span className={`status-pill ${jobPill(detailJob.status)}`}>
-                  {progress?.status || detailJob.status}
+                  {statusLabel(t, progress?.status || detailJob.status)}
                 </span>
               </div>
               <div className="form-field">
-                <span className="form-label">Completed</span>
+                <span className="form-label">{t('maintenance.field_completed')}</span>
                 <span className="text-main">
                   {progress ? `${progress.completed} / ${progress.total_tasks}` : '—'}
                 </span>
               </div>
               <div className="form-field">
-                <span className="form-label">Failed</span>
+                <span className="form-label">{t('maintenance.field_failed')}</span>
                 <span className={progress && progress.failed > 0 ? 'text-danger' : 'text-main'}>
                   {progress ? progress.failed : '—'}
                 </span>
               </div>
               <div className="form-field">
-                <span className="form-label">Skipped (offline)</span>
+                <span className="form-label">{t('maintenance.field_skipped')}</span>
                 <span className="text-muted">{progress ? progress.skipped : '—'}</span>
               </div>
               <div className="form-field">
-                <span className="form-label">Bytes Freed</span>
+                <span className="form-label">{t('maintenance.col_bytes_freed')}</span>
                 <span className="text-success">{formatBytes(jobBytesFreed)}</span>
               </div>
               <div className="form-field">
-                <span className="form-label">Reboot Required</span>
+                <span className="form-label">{t('maintenance.field_reboot')}</span>
                 <span className={progress && progress.reboot_required > 0 ? 'text-warning' : 'text-muted'}>
-                  {progress ? `${progress.reboot_required} device(s)` : '—'}
+                  {progress ? t('maintenance.reboot_devices', { count: progress.reboot_required }) : '—'}
                 </span>
               </div>
             </div>
 
             <div className="form-field">
-              <span className="form-label">Overall Progress — {jobPercent.toFixed(1)}%</span>
+              <span className="form-label">{t('maintenance.overall_progress', { percent: jobPercent.toFixed(1) })}</span>
               <div className="progress-bar-bg">
                 <div
                   className={`progress-bar-fill ${
@@ -561,51 +592,51 @@ export const MaintenancePage: React.FC = () => {
               </div>
             </div>
 
-            <DataTable label="Per-device tasks">
+            <DataTable label={t('maintenance.tasks_table_label')}>
               <table className="data-table">
                 <thead>
                   <tr>
-                    <th>Device</th>
-                    <th>Status</th>
-                    <th>Step</th>
-                    <th>Exit</th>
-                    <th>Bytes Freed</th>
-                    <th>Reboot</th>
-                    <th>Log</th>
+                    <th>{t('maintenance.col_device')}</th>
+                    <th>{t('maintenance.col_status')}</th>
+                    <th>{t('maintenance.col_step')}</th>
+                    <th>{t('maintenance.col_exit')}</th>
+                    <th>{t('maintenance.col_bytes_freed')}</th>
+                    <th>{t('maintenance.col_reboot')}</th>
+                    <th>{t('maintenance.col_log')}</th>
                   </tr>
                 </thead>
                 <tbody>
                   {detailTasks.length === 0 ? (
                     <tr>
                       <td colSpan={7} className="text-center py-8 text-muted">
-                        No task rows for this job yet.
+                        {t('maintenance.empty_tasks')}
                       </td>
                     </tr>
                   ) : (
-                    detailTasks.map((t) => (
-                      <tr key={t.id}>
+                    detailTasks.map((task) => (
+                      <tr key={task.id}>
                         <td>
                           <span className="font-semibold text-main">
-                            {t.hostname || t.device_id.slice(0, 12)}
+                            {task.hostname || task.device_id.slice(0, 12)}
                           </span>
                         </td>
                         <td>
-                          <span className={`status-pill ${taskPill(t.status)}`}>{t.status}</span>
+                          <span className={`status-pill ${taskPill(task.status)}`}>{statusLabel(t, task.status)}</span>
                         </td>
-                        <td className="text-sm text-muted">{t.step || '—'}</td>
+                        <td className="text-sm text-muted">{task.step || '—'}</td>
                         <td>
-                          {t.exit_code === null || t.exit_code === undefined ? (
+                          {task.exit_code === null || task.exit_code === undefined ? (
                             <span className="text-dim">—</span>
                           ) : (
-                            <span className="exit-code-badge">{t.exit_code}</span>
+                            <span className="exit-code-badge">{task.exit_code}</span>
                           )}
                         </td>
                         <td className="text-sm text-success">
-                          {t.bytes_freed > 0 ? formatBytes(t.bytes_freed) : '—'}
+                          {task.bytes_freed > 0 ? formatBytes(task.bytes_freed) : '—'}
                         </td>
                         <td>
-                          {t.reboot_required ? (
-                            <span className="status-pill warning">reboot</span>
+                          {task.reboot_required ? (
+                            <span className="status-pill warning">{t('maintenance.reboot_badge')}</span>
                           ) : (
                             <span className="text-dim">—</span>
                           )}
@@ -614,11 +645,11 @@ export const MaintenancePage: React.FC = () => {
                           <button
                             type="button"
                             className="btn-action"
-                            onClick={() => setLogTask(t)}
-                            disabled={!t.output_log && !t.error_message}
+                            onClick={() => setLogTask(task)}
+                            disabled={!task.output_log && !task.error_message}
                           >
                             <FileText size={14} />
-                            <span>Log</span>
+                            <span>{t('maintenance.col_log')}</span>
                           </button>
                         </td>
                       </tr>
@@ -635,23 +666,26 @@ export const MaintenancePage: React.FC = () => {
       <Modal
         open={logTask !== null}
         onClose={() => setLogTask(null)}
-        title="Task Output"
+        title={t('maintenance.output_title')}
         size="lg"
         description={
           logTask
-            ? `${logTask.hostname || logTask.device_id} · ${logTask.task_type} · ${logTask.status}${
-                logTask.step ? ` · step: ${logTask.step}` : ''
-              }`
+            ? t(logTask.step ? 'maintenance.log_description_step' : 'maintenance.log_description', {
+                host: logTask.hostname || logTask.device_id,
+                task: logTask.task_type,
+                status: statusLabel(t, logTask.status),
+                step: logTask.step || '',
+              })
             : undefined
         }
         footer={
           <button type="button" className="btn btn-secondary" onClick={() => setLogTask(null)}>
-            Close
+            {t('common.close')}
           </button>
         }
       >
         <pre className="terminal-log-output">
-          {logTask?.output_log || logTask?.error_message || '(No output recorded)'}
+          {logTask?.output_log || logTask?.error_message || t('maintenance.no_output')}
         </pre>
       </Modal>
 
@@ -659,7 +693,7 @@ export const MaintenancePage: React.FC = () => {
       <Modal
         open={isRunModalOpen}
         onClose={() => !submitting && setIsRunModalOpen(false)}
-        title="New Maintenance Job"
+        title={t('maintenance.new_job')}
         size="md"
         dismissible={!submitting}
         footer={
@@ -670,7 +704,7 @@ export const MaintenancePage: React.FC = () => {
               onClick={() => setIsRunModalOpen(false)}
               disabled={submitting}
             >
-              Cancel
+              {t('common.cancel')}
             </button>
             <button
               type="submit"
@@ -678,7 +712,7 @@ export const MaintenancePage: React.FC = () => {
               className="btn btn-primary"
               disabled={submitting || catalog.length === 0}
             >
-              {submitting ? <span className="btn-loading">Dispatching...</span> : 'Run Maintenance'}
+              {submitting ? <span className="btn-loading">{t('maintenance.dispatching')}</span> : t('maintenance.run')}
             </button>
           </>
         }
@@ -686,13 +720,13 @@ export const MaintenancePage: React.FC = () => {
         <form id="maintenance-run-form" onSubmit={handleRun}>
           <div className="form-group">
             <label className="form-label" htmlFor="maint-name">
-              Job Name
+              {t('maintenance.job_name_label')}
             </label>
             <input
               id="maint-name"
               type="text"
               className="form-input"
-              placeholder={selectedTask?.label || 'e.g. Nightly Temp Cleanup'}
+              placeholder={selectedTask?.label || t('maintenance.job_name_placeholder')}
               value={newRun.name}
               onChange={(e) => setNewRun({ ...newRun, name: e.target.value })}
             />
@@ -700,7 +734,7 @@ export const MaintenancePage: React.FC = () => {
 
           <div className="form-group">
             <label className="form-label" htmlFor="maint-task">
-              Maintenance Task
+              {t('maintenance.task_label')}
             </label>
             <select
               id="maint-task"
@@ -722,11 +756,10 @@ export const MaintenancePage: React.FC = () => {
                 })
               }}
             >
-              {catalog.length === 0 && <option value="">Loading task catalog...</option>}
+              {catalog.length === 0 && <option value="">{t('maintenance.loading_catalog')}</option>}
               {catalog.map((c) => (
                 <option key={c.id} value={c.id}>
-                  {c.label}
-                  {c.disruptive ? ' (disruptive)' : ''}
+                  {c.disruptive ? t('maintenance.disruptive_option', { label: c.label }) : c.label}
                 </option>
               ))}
             </select>
@@ -735,20 +768,21 @@ export const MaintenancePage: React.FC = () => {
                 console change. */}
             {selectedTask && (
               <p className="form-hint">
-                {selectedTask.disruptive ? 'Disruptive: ' : ''}
-                {selectedTask.description}
+                {selectedTask.disruptive
+                  ? t('maintenance.disruptive_hint', { description: selectedTask.description })
+                  : selectedTask.description}
               </p>
             )}
             {catalog.length === 0 && (
               <p className="form-hint">
-                The server served an empty task catalog, so no maintenance task can be run.
+                {t('maintenance.empty_catalog')}
               </p>
             )}
           </div>
 
           <div className="form-group">
             <label className="form-label" htmlFor="maint-scope">
-              Target Scope
+              {t('maintenance.scope_label')}
             </label>
             <select
               id="maint-scope"
@@ -756,16 +790,16 @@ export const MaintenancePage: React.FC = () => {
               value={newRun.target_type}
               onChange={(e) => setNewRun({ ...newRun, target_type: e.target.value, target_id: '' })}
             >
-              <option value="all">All Enrolled Devices</option>
-              <option value="group">Device Group</option>
-              <option value="device">Single Device</option>
+              <option value="all">{t('maintenance.scope_all')}</option>
+              <option value="group">{t('maintenance.scope_group')}</option>
+              <option value="device">{t('maintenance.scope_device')}</option>
             </select>
           </div>
 
           {newRun.target_type === 'group' && (
             <div className="form-group">
               <label className="form-label" htmlFor="maint-group">
-                Group
+                {t('maintenance.group_label')}
               </label>
               <select
                 id="maint-group"
@@ -774,15 +808,15 @@ export const MaintenancePage: React.FC = () => {
                 value={newRun.target_id}
                 onChange={(e) => setNewRun({ ...newRun, target_id: e.target.value })}
               >
-                <option value="">-- Select Group --</option>
+                <option value="">{t('maintenance.select_group_placeholder')}</option>
                 {groups.map((g) => (
                   <option key={g.id} value={g.id}>
-                    {g.name} ({g.member_count} device{g.member_count === 1 ? '' : 's'})
+                    {t(g.member_count === 1 ? 'maintenance.group_option_one' : 'maintenance.group_option', { name: g.name, count: g.member_count })}
                   </option>
                 ))}
               </select>
               {groups.length === 0 && (
-                <p className="form-hint">No device groups defined. Create one under Devices first.</p>
+                <p className="form-hint">{t('maintenance.no_groups')}</p>
               )}
             </div>
           )}
@@ -790,7 +824,7 @@ export const MaintenancePage: React.FC = () => {
           {newRun.target_type === 'device' && (
             <div className="form-group">
               <label className="form-label" htmlFor="maint-device">
-                Device
+                {t('maintenance.col_device')}
               </label>
               <select
                 id="maint-device"
@@ -799,7 +833,7 @@ export const MaintenancePage: React.FC = () => {
                 value={newRun.target_id}
                 onChange={(e) => setNewRun({ ...newRun, target_id: e.target.value })}
               >
-                <option value="">-- Select Device --</option>
+                <option value="">{t('maintenance.select_device_placeholder')}</option>
                 {devices.map((d) => (
                   <option key={d.id} value={d.id}>
                     {d.hostname} ({d.os_name}, {d.status})
@@ -812,7 +846,7 @@ export const MaintenancePage: React.FC = () => {
           {selectedTask?.disruptive && (
             <div className="security-notice">
               <AlertTriangle size={14} />
-              <span>The server marks this task disruptive. You will be asked to confirm before it runs.</span>
+              <span>{t('maintenance.disruptive_notice')}</span>
             </div>
           )}
         </form>
@@ -820,19 +854,22 @@ export const MaintenancePage: React.FC = () => {
 
       <ConfirmDialog
         open={disruptivePending}
-        title="Run disruptive maintenance task?"
+        title={t('maintenance.confirm_title')}
         message={
           selectedTask
-            ? `"${selectedTask.label}" is flagged disruptive by the server and may interrupt users on every targeted device.\n\n${selectedTask.description}\n\nContinue with target "${
-                newRun.target_type === 'all'
-                  ? 'all devices'
-                  : newRun.target_type === 'group'
-                  ? groups.find((g) => g.id === newRun.target_id)?.name || newRun.target_id
-                  : devices.find((d) => d.id === newRun.target_id)?.hostname || newRun.target_id
-              }"?`
+            ? t('maintenance.confirm_message', {
+                label: selectedTask.label,
+                description: selectedTask.description,
+                target:
+                  newRun.target_type === 'all'
+                    ? t('maintenance.all_devices')
+                    : newRun.target_type === 'group'
+                    ? groups.find((g) => g.id === newRun.target_id)?.name || newRun.target_id
+                    : devices.find((d) => d.id === newRun.target_id)?.hostname || newRun.target_id,
+              })
             : ''
         }
-        confirmLabel="Run anyway"
+        confirmLabel={t('maintenance.run_anyway')}
         pending={submitting}
         onConfirm={dispatchRun}
         onCancel={() => setDisruptivePending(false)}
@@ -842,9 +879,9 @@ export const MaintenancePage: React.FC = () => {
           way: an offline target is not a failure, and the poll cadence. */}
       <div className="last-sync">
         <HardDrive size={12} />
-        <span>Offline targets are recorded as skipped, not failed.</span>
+        <span>{t('maintenance.footer_offline')}</span>
         <Clock size={12} />
-        <span>Running jobs refresh every 3 seconds.</span>
+        <span>{t('maintenance.footer_refresh')}</span>
       </div>
     </div>
   )

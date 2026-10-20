@@ -17,6 +17,7 @@ import {
 } from 'lucide-react'
 import { api } from '../services/api'
 import { useToast } from '../context/ToastContext'
+import { useT } from '../i18n/core'
 import { ConfirmDialog } from '../components/ui/ConfirmDialog'
 import { Modal } from '../components/ui/Modal'
 import type {
@@ -61,12 +62,23 @@ const formatDateTime = (iso: string) => {
   }
 }
 
+// Splits a translated sentence on its {name} placeholders and drops the matching
+// React node in, so markup such as <code> or <strong> can sit inside text whose
+// word order differs per language.
+function withNodes(text: string, nodes: Record<string, React.ReactNode>): React.ReactNode {
+  return text.split(/(\{\w+\})/g).map((part, i) => {
+    const m = /^\{(\w+)\}$/.exec(part)
+    return m && m[1] in nodes ? <React.Fragment key={i}>{nodes[m[1]]}</React.Fragment> : part
+  })
+}
+
 export interface SettingsPageProps {
   activeTab?: 'directory' | 'backup'
   onTabChange?: (tab: 'directory' | 'backup') => void
 }
 
 export function SettingsPage({ activeTab = 'directory', onTabChange }: SettingsPageProps) {
+  const { t } = useT()
   // Directory Tab State
   const [config, setConfig] = useState<DirectoryConfigDTO>(emptyConfig())
   const [loadingDir, setLoadingDir] = useState(true)
@@ -102,7 +114,7 @@ export function SettingsPage({ activeTab = 'directory', onTabChange }: SettingsP
     api.getDirectoryConfig()
       .then((saved) => { if (!stopped) setConfig(saved) })
       .catch((err: any) => {
-        if (!stopped) toast.error(err.message || 'Failed to load directory settings', 'Load Failed')
+        if (!stopped) toast.error(err.message || t('settings.dir_load_failed'), t('settings.toast_load_failed'))
       })
       .finally(() => { if (!stopped) setLoadingDir(false) })
     return () => { stopped = true }
@@ -115,7 +127,7 @@ export function SettingsPage({ activeTab = 'directory', onTabChange }: SettingsP
       const list = await api.getBackups()
       setBackups(list || [])
     } catch (err: any) {
-      toast.error(err.message || 'Failed to load backup files', 'Load Failed')
+      toast.error(err.message || t('settings.backups_load_failed'), t('settings.toast_load_failed'))
     } finally {
       setLoadingBackups(false)
     }
@@ -138,7 +150,7 @@ export function SettingsPage({ activeTab = 'directory', onTabChange }: SettingsP
         const res = await fetch('/healthz')
         if (res.ok && !stopped) {
           clearInterval(timer)
-          toast.success('Server is back online with restored database.', 'Restore Complete')
+          toast.success(t('settings.restore_back_online'), t('settings.toast_restore_complete'))
           setTimeout(() => {
             window.location.reload()
           }, 1200)
@@ -165,7 +177,7 @@ export function SettingsPage({ activeTab = 'directory', onTabChange }: SettingsP
     try {
       setConfig(await api.getDirectoryConfig())
     } catch (err: any) {
-      toast.error(err.message || 'Failed to load directory settings', 'Load Failed')
+      toast.error(err.message || t('settings.dir_load_failed'), t('settings.toast_load_failed'))
     } finally {
       setLoadingDir(false)
     }
@@ -177,9 +189,9 @@ export function SettingsPage({ activeTab = 'directory', onTabChange }: SettingsP
     try {
       const saved = await api.updateDirectoryConfig(config)
       setConfig(saved)
-      toast.success('Directory settings saved.', 'Settings Saved')
+      toast.success(t('settings.dir_saved'), t('settings.toast_settings_saved'))
     } catch (err: any) {
-      toast.error(err.message || 'Failed to save directory settings', 'Save Failed')
+      toast.error(err.message || t('settings.dir_save_failed'), t('settings.toast_save_failed'))
     } finally {
       setSavingDir(false)
     }
@@ -190,10 +202,10 @@ export function SettingsPage({ activeTab = 'directory', onTabChange }: SettingsP
     setTestResult(null)
     try {
       const res = await api.testDirectoryConnection()
-      setTestResult({ ok: res.ok, message: `${res.message} ${res.entries_seen} entries matched the filter.` })
-      if (res.ok) toast.success(`Directory reachable — ${res.entries_seen} entries.`, 'Connection OK')
+      setTestResult({ ok: res.ok, message: t('settings.test_entries_matched', { message: res.message, count: res.entries_seen }) })
+      if (res.ok) toast.success(t('settings.test_reachable', { count: res.entries_seen }), t('settings.toast_connection_ok'))
     } catch (err: any) {
-      setTestResult({ ok: false, message: err.message || 'Could not reach the directory' })
+      setTestResult({ ok: false, message: err.message || t('settings.test_unreachable') })
     } finally {
       setTestingDir(false)
     }
@@ -206,10 +218,10 @@ export function SettingsPage({ activeTab = 'directory', onTabChange }: SettingsP
       const p = await api.previewDirectorySync()
       setPlan(p)
       if (p.total_in_directory === 0) {
-        toast.error('The directory answered but matched nothing — check the base DN and the search filter.', 'Nothing Matched')
+        toast.error(t('settings.preview_nothing_matched'), t('settings.toast_nothing_matched'))
       }
     } catch (err: any) {
-      toast.error(err.message || 'Preview failed', 'Preview Failed')
+      toast.error(err.message || t('settings.preview_failed'), t('settings.toast_preview_failed'))
     } finally {
       setSyncingDir(false)
     }
@@ -223,15 +235,19 @@ export function SettingsPage({ activeTab = 'directory', onTabChange }: SettingsP
       setConfirmApply(false)
       const total = applied.adds.length + applied.updates.length + applied.deactivations.length
       if (total === 0) {
-        toast.success('Already up to date — no changes.', 'Sync Complete')
+        toast.success(t('settings.sync_up_to_date'), t('settings.toast_sync_complete'))
       } else {
         toast.success(
-          `${applied.adds.length} added, ${applied.updates.length} updated, ${applied.deactivations.length} deactivated.`,
-          'Sync Complete'
+          t('settings.sync_result', {
+            added: applied.adds.length,
+            updated: applied.updates.length,
+            deactivated: applied.deactivations.length,
+          }),
+          t('settings.toast_sync_complete')
         )
       }
     } catch (err: any) {
-      toast.error(err.message || 'Sync failed', 'Sync Failed')
+      toast.error(err.message || t('settings.sync_failed'), t('settings.toast_sync_failed'))
     } finally {
       setApplyingSync(false)
     }
@@ -253,10 +269,10 @@ export function SettingsPage({ activeTab = 'directory', onTabChange }: SettingsP
     setCreatingBackup(true)
     try {
       const created = await api.createBackup()
-      toast.success(`Created manual snapshot: ${created.filename}`, 'Snapshot Created')
+      toast.success(t('settings.snapshot_created', { filename: created.filename }), t('settings.toast_snapshot_created'))
       await loadBackups()
     } catch (err: any) {
-      toast.error(err.message || 'Failed to create snapshot', 'Backup Failed')
+      toast.error(err.message || t('settings.snapshot_create_failed'), t('settings.toast_backup_failed'))
     } finally {
       setCreatingBackup(false)
     }
@@ -268,9 +284,9 @@ export function SettingsPage({ activeTab = 'directory', onTabChange }: SettingsP
       const blob = await api.downloadActiveBackup()
       const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
       triggerBlobDownload(blob, `endpoint-mgmt-live-${stamp}.db`)
-      toast.success(`Live database snapshot downloaded (${formatBytes(blob.size)}).`, 'Download Complete')
+      toast.success(t('settings.live_downloaded', { size: formatBytes(blob.size) }), t('settings.toast_download_complete'))
     } catch (err: any) {
-      toast.error(err.message || 'Failed to download live database', 'Download Failed')
+      toast.error(err.message || t('settings.live_download_failed'), t('settings.toast_download_failed'))
     } finally {
       setDownloadingActive(false)
     }
@@ -281,9 +297,9 @@ export function SettingsPage({ activeTab = 'directory', onTabChange }: SettingsP
     try {
       const blob = await api.downloadBackup(filename)
       triggerBlobDownload(blob, filename)
-      toast.success(`Downloaded ${filename} (${formatBytes(blob.size)}).`, 'Download Complete')
+      toast.success(t('settings.file_downloaded', { filename, size: formatBytes(blob.size) }), t('settings.toast_download_complete'))
     } catch (err: any) {
-      toast.error(err.message || 'Failed to download backup file', 'Download Failed')
+      toast.error(err.message || t('settings.file_download_failed'), t('settings.toast_download_failed'))
     } finally {
       setDownloadingFile(null)
     }
@@ -294,11 +310,11 @@ export function SettingsPage({ activeTab = 'directory', onTabChange }: SettingsP
     setDeleting(true)
     try {
       await api.deleteBackup(deleteTarget.filename)
-      toast.success(`Deleted snapshot: ${deleteTarget.filename}`, 'Snapshot Deleted')
+      toast.success(t('settings.snapshot_deleted', { filename: deleteTarget.filename }), t('settings.toast_snapshot_deleted'))
       setDeleteTarget(null)
       await loadBackups()
     } catch (err: any) {
-      toast.error(err.message || 'Failed to delete snapshot', 'Delete Failed')
+      toast.error(err.message || t('settings.snapshot_delete_failed'), t('settings.toast_delete_failed'))
     } finally {
       setDeleting(false)
     }
@@ -309,11 +325,11 @@ export function SettingsPage({ activeTab = 'directory', onTabChange }: SettingsP
     setRestoring(true)
     try {
       const res = await api.restoreBackup(restoreTarget.filename)
-      toast.info(res.message || 'Restore verified. Server is restarting...', 'Restoring Database')
+      toast.info(res.message || t('settings.restore_verified'), t('settings.toast_restoring'))
       setRestoreTarget(null)
       setReconnecting(true)
     } catch (err: any) {
-      toast.error(err.message || 'Restore verification failed', 'Restore Failed')
+      toast.error(err.message || t('settings.restore_verify_failed'), t('settings.toast_restore_failed'))
       setRestoring(false)
     }
   }
@@ -323,27 +339,27 @@ export function SettingsPage({ activeTab = 'directory', onTabChange }: SettingsP
     setRestoring(true)
     try {
       const res = await api.uploadAndRestoreBackup(uploadFile)
-      toast.info(res.message || 'Uploaded backup verified. Server restarting...', 'Restoring Database')
+      toast.info(res.message || t('settings.upload_verified'), t('settings.toast_restoring'))
       setConfirmUploadRestore(false)
       setUploadFile(null)
       setReconnecting(true)
     } catch (err: any) {
-      toast.error(err.message || 'Upload & restore failed', 'Restore Failed')
+      toast.error(err.message || t('settings.upload_restore_failed'), t('settings.toast_restore_failed'))
       setRestoring(false)
     }
   }
 
   const getBackupTypeBadge = (b: BackupFileDTO) => {
     if (b.filename.includes('pre-restore')) {
-      return <span className="status-pill warning"><span className="dot" />Safety Snapshot</span>
+      return <span className="status-pill warning"><span className="dot" />{t('settings.badge_safety')}</span>
     }
     if (b.is_auto) {
-      return <span className="status-pill online"><span className="dot" />Automatic (Daily)</span>
+      return <span className="status-pill online"><span className="dot" />{t('settings.badge_auto')}</span>
     }
     if (b.filename.includes('uploaded')) {
-      return <span className="status-pill primary"><span className="dot" />Uploaded .db</span>
+      return <span className="status-pill primary"><span className="dot" />{t('settings.badge_uploaded')}</span>
     }
-    return <span className="status-pill primary"><span className="dot" />Manual Snapshot</span>
+    return <span className="status-pill primary"><span className="dot" />{t('settings.badge_manual')}</span>
   }
 
   const pending = plan ? plan.adds.length + plan.updates.length + plan.deactivations.length : 0
@@ -355,18 +371,18 @@ export function SettingsPage({ activeTab = 'directory', onTabChange }: SettingsP
       {/* Top Header */}
       <div className="page-header">
         <div>
-          <h1 className="page-title">Settings</h1>
+          <h1 className="page-title">{t('settings.title')}</h1>
           <p className="page-subtitle">
             {activeTab === 'directory'
-              ? 'Directory (LDAP / Active Directory) synchronization and account mapping'
-              : 'Enterprise SQLite hot snapshot backup, file download, and point-in-time disaster recovery'}
+              ? t('settings.subtitle_directory')
+              : t('settings.subtitle_backup')}
           </p>
         </div>
         <div className="header-controls">
           {activeTab === 'directory' ? (
             <button type="button" className="btn btn-secondary" onClick={reloadDir} disabled={loadingDir}>
               <RefreshCw size={16} className={loadingDir ? 'spinning' : ''} />
-              <span>Reload</span>
+              <span>{t('settings.reload')}</span>
             </button>
           ) : (
             <>
@@ -377,7 +393,7 @@ export function SettingsPage({ activeTab = 'directory', onTabChange }: SettingsP
                 disabled={creatingBackup || downloadingActive}
               >
                 <Save size={16} className={creatingBackup ? 'spinning' : ''} />
-                <span>{creatingBackup ? 'Creating Snapshot…' : 'Create Snapshot'}</span>
+                <span>{creatingBackup ? t('settings.creating_snapshot') : t('settings.create_snapshot')}</span>
               </button>
               <button
                 type="button"
@@ -386,7 +402,7 @@ export function SettingsPage({ activeTab = 'directory', onTabChange }: SettingsP
                 disabled={downloadingActive || creatingBackup}
               >
                 <Download size={16} className={downloadingActive ? 'spinning' : ''} />
-                <span>{downloadingActive ? 'Streaming Live .db…' : 'Download Live Database'}</span>
+                <span>{downloadingActive ? t('settings.streaming_live') : t('settings.download_live')}</span>
               </button>
               <button
                 type="button"
@@ -395,7 +411,7 @@ export function SettingsPage({ activeTab = 'directory', onTabChange }: SettingsP
                 disabled={loadingBackups}
               >
                 <RefreshCw size={16} className={loadingBackups ? 'spinning' : ''} />
-                <span>Reload</span>
+                <span>{t('settings.reload')}</span>
               </button>
             </>
           )}
@@ -411,7 +427,7 @@ export function SettingsPage({ activeTab = 'directory', onTabChange }: SettingsP
             onClick={() => onTabChange?.('directory')}
           >
             <Users size={16} />
-            <span>Directory sync</span>
+            <span>{t('settings.tab_directory')}</span>
           </button>
           <button
             type="button"
@@ -419,7 +435,7 @@ export function SettingsPage({ activeTab = 'directory', onTabChange }: SettingsP
             onClick={() => onTabChange?.('backup')}
           >
             <Database size={16} />
-            <span>Backup &amp; restore ({backups.length})</span>
+            <span>{t('settings.tab_backup', { count: backups.length })}</span>
           </button>
         </div>
       </div>
@@ -430,8 +446,7 @@ export function SettingsPage({ activeTab = 'directory', onTabChange }: SettingsP
           <div className="security-notice">
             <PlugZap size={16} />
             <div>
-              <strong>Synced people are not console accounts.</strong> They have no password and cannot log
-              in here. Their only use is as the list a hardware asset's PIC is chosen from.
+              <strong>{t('settings.notice_not_accounts_title')}</strong> {t('settings.notice_not_accounts_body')}
             </div>
           </div>
 
@@ -440,9 +455,9 @@ export function SettingsPage({ activeTab = 'directory', onTabChange }: SettingsP
               <div className="card-title-group">
                 <span className="card-icon"><PlugZap size={18} /></span>
                 <div>
-                  <h2 className="card-title">Connection</h2>
+                  <h2 className="card-title">{t('settings.connection_title')}</h2>
                   <span className="text-muted text-sm">
-                    Use a read-only service account, never your own login.
+                    {t('settings.connection_hint')}
                   </span>
                 </div>
               </div>
@@ -450,7 +465,7 @@ export function SettingsPage({ activeTab = 'directory', onTabChange }: SettingsP
 
             <div className="table-responsive">
               <div className="form-group">
-                <label className="form-label" htmlFor="dir-host">Host</label>
+                <label className="form-label" htmlFor="dir-host">{t('settings.field_host')}</label>
                 <input
                   id="dir-host"
                   className="form-input"
@@ -463,7 +478,7 @@ export function SettingsPage({ activeTab = 'directory', onTabChange }: SettingsP
 
               <div className="form-row">
                 <div className="form-field">
-                  <label className="form-label" htmlFor="dir-port">Port</label>
+                  <label className="form-label" htmlFor="dir-port">{t('settings.field_port')}</label>
                   <input
                     id="dir-port"
                     className="form-input"
@@ -474,10 +489,10 @@ export function SettingsPage({ activeTab = 'directory', onTabChange }: SettingsP
                     value={config.port}
                     onChange={(e) => updateConfig({ port: Number(e.target.value) })}
                   />
-                  <span className="form-hint">636 is LDAPS; 389 with TLS on is StartTLS.</span>
+                  <span className="form-hint">{t('settings.port_hint')}</span>
                 </div>
                 <div className="form-field">
-                  <label className="form-label" htmlFor="dir-tls">Transport</label>
+                  <label className="form-label" htmlFor="dir-tls">{t('settings.field_transport')}</label>
                   <select
                     id="dir-tls"
                     className="form-select"
@@ -485,16 +500,16 @@ export function SettingsPage({ activeTab = 'directory', onTabChange }: SettingsP
                     onChange={(e) => updateConfig({ use_tls: e.target.value === '1' })}
                   >
                     <option value="1">TLS</option>
-                    <option value="0">Plain</option>
+                    <option value="0">{t('settings.transport_plain')}</option>
                   </select>
                   <span className="form-hint">
-                    Plain sends the bind password in the clear. Only for a tunnel you control.
+                    {t('settings.transport_hint')}
                   </span>
                 </div>
               </div>
 
               <div className="form-group">
-                <label className="form-label" htmlFor="dir-basedn">Base DN</label>
+                <label className="form-label" htmlFor="dir-basedn">{t('settings.field_base_dn')}</label>
                 <input
                   id="dir-basedn"
                   className="form-input"
@@ -502,12 +517,12 @@ export function SettingsPage({ activeTab = 'directory', onTabChange }: SettingsP
                   value={config.base_dn}
                   onChange={(e) => updateConfig({ base_dn: e.target.value })}
                 />
-                <span className="form-hint">The subtree to search. Everything under it is read.</span>
+                <span className="form-hint">{t('settings.base_dn_hint')}</span>
               </div>
 
               <div className="form-row">
                 <div className="form-field">
-                  <label className="form-label" htmlFor="dir-binddn">Bind DN</label>
+                  <label className="form-label" htmlFor="dir-binddn">{t('settings.field_bind_dn')}</label>
                   <input
                     id="dir-binddn"
                     className="form-input"
@@ -518,7 +533,7 @@ export function SettingsPage({ activeTab = 'directory', onTabChange }: SettingsP
                   />
                 </div>
                 <div className="form-field">
-                  <label className="form-label" htmlFor="dir-filter">Search filter</label>
+                  <label className="form-label" htmlFor="dir-filter">{t('settings.field_search_filter')}</label>
                   <input
                     id="dir-filter"
                     className="form-input"
@@ -529,18 +544,18 @@ export function SettingsPage({ activeTab = 'directory', onTabChange }: SettingsP
               </div>
 
               <div className="form-group">
-                <span className="form-label">Bind password</span>
+                <span className="form-label">{t('settings.field_bind_password')}</span>
                 <p className="text-muted text-sm">
                   {config.bind_password_configured
-                    ? 'Set in the LDAP_BIND_PASSWORD environment variable. It is never shown, never stored in the database, and cannot be changed from here.'
-                    : 'Not set. Export LDAP_BIND_PASSWORD and restart the server before syncing.'}
+                    ? t('settings.bind_password_set')
+                    : t('settings.bind_password_unset')}
                 </p>
               </div>
 
               <div className="row-actions">
                 <button type="submit" className="btn btn-primary" disabled={savingDir || loadingDir}>
                   <Save size={16} />
-                  <span>{savingDir ? 'Saving…' : 'Save settings'}</span>
+                  <span>{savingDir ? t('settings.saving') : t('settings.save_settings')}</span>
                 </button>
                 <button
                   type="button"
@@ -549,7 +564,7 @@ export function SettingsPage({ activeTab = 'directory', onTabChange }: SettingsP
                   disabled={testingDir || loadingDir || syncingDir}
                 >
                   <PlugZap size={16} />
-                  <span>{testingDir ? 'Testing…' : 'Test connection'}</span>
+                  <span>{testingDir ? t('settings.testing') : t('settings.test_connection')}</span>
                 </button>
               </div>
 
@@ -567,9 +582,9 @@ export function SettingsPage({ activeTab = 'directory', onTabChange }: SettingsP
               <div className="card-title-group">
                 <span className="card-icon"><Users size={18} /></span>
                 <div>
-                  <h2 className="card-title">Sync</h2>
+                  <h2 className="card-title">{t('settings.sync_title')}</h2>
                   <span className="text-muted text-sm">
-                    Preview shows what would change. Nothing is written until Apply.
+                    {t('settings.sync_hint')}
                   </span>
                 </div>
               </div>
@@ -584,7 +599,7 @@ export function SettingsPage({ activeTab = 'directory', onTabChange }: SettingsP
                   disabled={busyDir || loadingDir}
                 >
                   <RefreshCw size={16} className={syncingDir ? 'spinning' : ''} />
-                  <span>Preview sync</span>
+                  <span>{t('settings.preview_sync')}</span>
                 </button>
                 <button
                   type="button"
@@ -593,13 +608,13 @@ export function SettingsPage({ activeTab = 'directory', onTabChange }: SettingsP
                   disabled={busyDir || loadingDir || plan === null || pending === 0}
                 >
                   <Save size={16} />
-                  <span>Apply</span>
+                  <span>{t('settings.apply')}</span>
                 </button>
               </div>
 
               {!plan && (
                 <p className="text-muted">
-                  Run a preview to see what a sync would do. Nothing has been read from the directory yet.
+                  {t('settings.no_preview_yet')}
                 </p>
               )}
 
@@ -607,9 +622,7 @@ export function SettingsPage({ activeTab = 'directory', onTabChange }: SettingsP
                 <div className="error-banner">
                   <XCircle size={16} />
                   <span>
-                    The directory answered but returned no entries. A base DN that matches nothing looks
-                    exactly like an up-to-date directory, so check the base DN and filter before trusting
-                    a zero here.
+                    {t('settings.preview_empty_warning')}
                   </span>
                 </div>
               )}
@@ -618,16 +631,16 @@ export function SettingsPage({ activeTab = 'directory', onTabChange }: SettingsP
                 <div className="alert-banner">
                   <CheckCircle2 size={16} />
                   <span>
-                    Nothing to do. {plan.unchanged} of {plan.total_in_directory} entries already match.
+                    {t('settings.nothing_to_do', { unchanged: plan.unchanged, total: plan.total_in_directory })}
                   </span>
                 </div>
               )}
 
               {plan && pending > 0 && (
                 <>
-                  <PlanTable title="To add" rows={plan.adds} />
-                  <PlanTable title="To update" rows={plan.updates} />
-                  <PlanTable title="To deactivate" rows={plan.deactivations} />
+                  <PlanTable title={t('settings.plan_add')} rows={plan.adds} />
+                  <PlanTable title={t('settings.plan_update')} rows={plan.updates} />
+                  <PlanTable title={t('settings.plan_deactivate')} rows={plan.deactivations} />
                 </>
               )}
             </div>
@@ -635,15 +648,17 @@ export function SettingsPage({ activeTab = 'directory', onTabChange }: SettingsP
 
           <ConfirmDialog
             open={confirmApply}
-            title="Apply directory sync"
+            title={t('settings.apply_dialog_title')}
             message={
               plan
-                ? `Write ${plan.adds.length} new, ${plan.updates.length} updated and ${plan.deactivations.length} deactivated contacts? ` +
-                  'Deactivated contacts drop out of every PIC dropdown and cannot come back without another sync. ' +
-                  'The server re-reads the directory on confirm, so these numbers can shift if it changed in the meantime.'
+                ? t('settings.apply_dialog_message', {
+                    added: plan.adds.length,
+                    updated: plan.updates.length,
+                    deactivated: plan.deactivations.length,
+                  })
                 : ''
             }
-            confirmLabel="Apply sync"
+            confirmLabel={t('settings.apply_sync')}
             pending={applyingSync}
             onConfirm={applySync}
             onCancel={() => setConfirmApply(false)}
@@ -657,10 +672,12 @@ export function SettingsPage({ activeTab = 'directory', onTabChange }: SettingsP
           <div className="security-notice">
             <Shield size={16} />
             <div>
-              <strong>Enterprise Disaster Recovery:</strong> Live database hot snapshots use SQLite{' '}
-              <code>VACUUM INTO</code> for non-blocking, defragmented snapshots. Before any restore, an
-              automated pre-restore safety snapshot (<code>endpoint-mgmt-pre-restore-*.db</code>) is
-              captured, and all incoming backup files are verified via <code>PRAGMA quick_check</code>.
+              <strong>{t('settings.dr_notice_title')}</strong>{' '}
+              {withNodes(t('settings.dr_notice_body'), {
+                vacuum: <code>VACUUM INTO</code>,
+                pattern: <code>endpoint-mgmt-pre-restore-*.db</code>,
+                check: <code>PRAGMA quick_check</code>,
+              })}
             </div>
           </div>
 
@@ -668,32 +685,32 @@ export function SettingsPage({ activeTab = 'directory', onTabChange }: SettingsP
           <div className="kpi-grid">
             <div className="kpi-card">
               <div className="kpi-header">
-                <span className="kpi-label">Available Snapshots</span>
+                <span className="kpi-label">{t('settings.kpi_snapshots')}</span>
                 <span className="kpi-icon"><Database size={16} /></span>
               </div>
               <div className="kpi-value">{backups.length}</div>
-              <div className="kpi-hint">Historical files in server backup storage</div>
+              <div className="kpi-hint">{t('settings.kpi_snapshots_hint')}</div>
             </div>
 
             <div className="kpi-card">
               <div className="kpi-header">
-                <span className="kpi-label">Total Backup Storage</span>
+                <span className="kpi-label">{t('settings.kpi_storage')}</span>
                 <span className="kpi-icon"><HardDrive size={16} /></span>
               </div>
               <div className="kpi-value">{formatBytes(totalBackupBytes)}</div>
-              <div className="kpi-hint">Retained database snapshots size</div>
+              <div className="kpi-hint">{t('settings.kpi_storage_hint')}</div>
             </div>
 
             <div className="kpi-card">
               <div className="kpi-header">
-                <span className="kpi-label">Latest Snapshot</span>
+                <span className="kpi-label">{t('settings.kpi_latest')}</span>
                 <span className="kpi-icon"><CheckCircle2 size={16} /></span>
               </div>
               <div className="kpi-value text-base font-semibold">
-                {backups.length > 0 ? formatDateTime(backups[0].created_at) : 'None'}
+                {backups.length > 0 ? formatDateTime(backups[0].created_at) : t('settings.none')}
               </div>
               <div className="kpi-hint">
-                {backups.length > 0 ? backups[0].filename : 'No snapshots taken yet'}
+                {backups.length > 0 ? backups[0].filename : t('settings.no_snapshots_yet')}
               </div>
             </div>
           </div>
@@ -704,9 +721,9 @@ export function SettingsPage({ activeTab = 'directory', onTabChange }: SettingsP
               <div className="card-title-group">
                 <span className="card-icon"><UploadCloud size={18} /></span>
                 <div>
-                  <h2 className="card-title">Upload &amp; Restore External Backup</h2>
+                  <h2 className="card-title">{t('settings.upload_title')}</h2>
                   <span className="text-muted text-sm">
-                    Upload a <code>.db</code> file from another host or offline storage. Verified with quick_check prior to restore.
+                    {withNodes(t('settings.upload_hint'), { ext: <code>.db</code> })}
                   </span>
                 </div>
               </div>
@@ -715,7 +732,7 @@ export function SettingsPage({ activeTab = 'directory', onTabChange }: SettingsP
             <div className="table-responsive">
               <div className="form-row" style={{ alignItems: 'flex-end', gap: '1rem' }}>
                 <div className="form-field" style={{ flex: 1 }}>
-                  <label className="form-label" htmlFor="upload-backup-file">Select SQLite Database File (*.db)</label>
+                  <label className="form-label" htmlFor="upload-backup-file">{t('settings.upload_select_label')}</label>
                   <input
                     id="upload-backup-file"
                     className="form-input"
@@ -728,7 +745,10 @@ export function SettingsPage({ activeTab = 'directory', onTabChange }: SettingsP
                   />
                   {uploadFile && (
                     <span className="form-hint">
-                      Selected: <strong>{uploadFile.name}</strong> ({formatBytes(uploadFile.size)})
+                      {withNodes(t('settings.upload_selected'), {
+                        name: <strong>{uploadFile.name}</strong>,
+                        size: formatBytes(uploadFile.size),
+                      })}
                     </span>
                   )}
                 </div>
@@ -740,7 +760,7 @@ export function SettingsPage({ activeTab = 'directory', onTabChange }: SettingsP
                     onClick={() => setConfirmUploadRestore(true)}
                   >
                     <RotateCcw size={16} className={restoring ? 'spinning' : ''} />
-                    <span>Upload &amp; Restore</span>
+                    <span>{t('settings.upload_restore')}</span>
                   </button>
                 </div>
               </div>
@@ -753,9 +773,9 @@ export function SettingsPage({ activeTab = 'directory', onTabChange }: SettingsP
               <div className="card-title-group">
                 <span className="card-icon"><Database size={18} /></span>
                 <div>
-                  <h2 className="card-title">Server Backup Snapshots</h2>
+                  <h2 className="card-title">{t('settings.server_snapshots_title')}</h2>
                   <span className="text-muted text-sm">
-                    Snapshots stored in the server backup directory. Select a file to download, restore, or delete.
+                    {t('settings.server_snapshots_hint')}
                   </span>
                 </div>
               </div>
@@ -765,24 +785,24 @@ export function SettingsPage({ activeTab = 'directory', onTabChange }: SettingsP
               <table className="data-table">
                 <thead>
                   <tr>
-                    <th>Filename</th>
-                    <th>Type</th>
-                    <th>Size</th>
-                    <th>Created At</th>
-                    <th style={{ textAlign: 'right' }}>Actions</th>
+                    <th>{t('settings.col_filename')}</th>
+                    <th>{t('settings.col_type')}</th>
+                    <th>{t('settings.col_size')}</th>
+                    <th>{t('settings.col_created_at')}</th>
+                    <th style={{ textAlign: 'right' }}>{t('settings.col_actions')}</th>
                   </tr>
                 </thead>
                 <tbody>
                   {loadingBackups ? (
                     <tr>
                       <td colSpan={5} className="text-center py-8 text-muted">
-                        Loading backup files…
+                        {t('settings.loading_backups')}
                       </td>
                     </tr>
                   ) : backups.length === 0 ? (
                     <tr>
                       <td colSpan={5} className="text-center py-8 text-muted">
-                        No backup files found. Click &quot;Create Snapshot&quot; above to take a manual hot snapshot.
+                        {t('settings.empty_backups')}
                       </td>
                     </tr>
                   ) : (
@@ -804,29 +824,29 @@ export function SettingsPage({ activeTab = 'directory', onTabChange }: SettingsP
                               className="btn btn-secondary btn-sm"
                               onClick={() => handleDownloadFile(b.filename)}
                               disabled={downloadingFile === b.filename}
-                              title="Download backup file"
+                              title={t('settings.download_title')}
                             >
                               <Download size={14} className={downloadingFile === b.filename ? 'spinning' : ''} />
-                              <span>Download</span>
+                              <span>{t('settings.download')}</span>
                             </button>
                             <button
                               type="button"
                               className="btn btn-secondary btn-sm"
                               style={{ borderColor: 'rgba(239, 68, 68, 0.4)', color: '#f87171' }}
                               onClick={() => setRestoreTarget(b)}
-                              title="Restore system from this backup"
+                              title={t('settings.restore_title')}
                             >
                               <RotateCcw size={14} />
-                              <span>Restore</span>
+                              <span>{t('settings.restore')}</span>
                             </button>
                             <button
                               type="button"
                               className="btn btn-secondary btn-sm"
                               onClick={() => setDeleteTarget(b)}
-                              title="Delete backup snapshot"
+                              title={t('settings.delete_title')}
                             >
                               <Trash2 size={14} />
-                              <span>Delete</span>
+                              <span>{t('common.delete')}</span>
                             </button>
                           </div>
                         </td>
@@ -841,25 +861,27 @@ export function SettingsPage({ activeTab = 'directory', onTabChange }: SettingsP
           {/* Confirm Restore Dialog */}
           <ConfirmDialog
             open={restoreTarget !== null}
-            title="Restore Database from Snapshot"
+            title={t('settings.restore_dialog_title')}
             message={
               restoreTarget ? (
                 <div>
                   <p style={{ marginBottom: '0.75rem' }}>
-                    Are you sure you want to restore the database from{' '}
-                    <strong>{restoreTarget.filename}</strong>?
+                    {withNodes(t('settings.restore_dialog_question'), {
+                      file: <strong>{restoreTarget.filename}</strong>,
+                    })}
                   </p>
                   <div className="alert-banner" style={{ borderColor: 'rgba(234, 179, 8, 0.4)', color: '#fde047' }}>
                     <AlertTriangle size={18} />
                     <span>
-                      An automatic safety backup (<code>endpoint-mgmt-pre-restore-*.db</code>) will be created immediately before restore.
-                      The server service will restart to reload the new database.
+                      {withNodes(t('settings.restore_dialog_warning'), {
+                        pattern: <code>endpoint-mgmt-pre-restore-*.db</code>,
+                      })}
                     </span>
                   </div>
                 </div>
               ) : ''
             }
-            confirmLabel={restoring ? 'Verifying & Restoring…' : 'Verify & Restore'}
+            confirmLabel={restoring ? t('settings.verifying_restoring') : t('settings.verify_restore')}
             pending={restoring}
             onConfirm={handleConfirmRestore}
             onCancel={() => setRestoreTarget(null)}
@@ -868,25 +890,28 @@ export function SettingsPage({ activeTab = 'directory', onTabChange }: SettingsP
           {/* Confirm Upload & Restore Dialog */}
           <ConfirmDialog
             open={confirmUploadRestore}
-            title="Restore from Uploaded Database"
+            title={t('settings.upload_dialog_title')}
             message={
               uploadFile ? (
                 <div>
                   <p style={{ marginBottom: '0.75rem' }}>
-                    Are you sure you want to upload and restore from{' '}
-                    <strong>{uploadFile.name}</strong> ({formatBytes(uploadFile.size)})?
+                    {withNodes(t('settings.upload_dialog_question'), {
+                      file: <strong>{uploadFile.name}</strong>,
+                      size: formatBytes(uploadFile.size),
+                    })}
                   </p>
                   <div className="alert-banner" style={{ borderColor: 'rgba(234, 179, 8, 0.4)', color: '#fde047' }}>
                     <AlertTriangle size={18} />
                     <span>
-                      The uploaded file will be verified using <code>PRAGMA quick_check</code>.
-                      An automatic safety snapshot will be taken before the active database is replaced.
+                      {withNodes(t('settings.upload_dialog_warning'), {
+                        check: <code>PRAGMA quick_check</code>,
+                      })}
                     </span>
                   </div>
                 </div>
               ) : ''
             }
-            confirmLabel={restoring ? 'Uploading & Restoring…' : 'Upload & Restore'}
+            confirmLabel={restoring ? t('settings.uploading_restoring') : t('settings.upload_restore')}
             pending={restoring}
             onConfirm={handleConfirmUploadRestore}
             onCancel={() => setConfirmUploadRestore(false)}
@@ -895,13 +920,16 @@ export function SettingsPage({ activeTab = 'directory', onTabChange }: SettingsP
           {/* Confirm Delete Dialog */}
           <ConfirmDialog
             open={deleteTarget !== null}
-            title="Delete Backup Snapshot"
+            title={t('settings.delete_dialog_title')}
             message={
               deleteTarget
-                ? `Are you sure you want to delete "${deleteTarget.filename}" (${formatBytes(deleteTarget.size)})? This cannot be undone.`
+                ? t('settings.delete_dialog_message', {
+                    filename: deleteTarget.filename,
+                    size: formatBytes(deleteTarget.size),
+                  })
                 : ''
             }
-            confirmLabel={deleting ? 'Deleting…' : 'Delete Snapshot'}
+            confirmLabel={deleting ? t('settings.deleting') : t('settings.delete_snapshot')}
             pending={deleting}
             onConfirm={handleConfirmDelete}
             onCancel={() => setDeleteTarget(null)}
@@ -911,18 +939,18 @@ export function SettingsPage({ activeTab = 'directory', onTabChange }: SettingsP
           <Modal
             open={reconnecting}
             onClose={() => {}}
-            title="Restoring Database…"
+            title={t('settings.restoring_title')}
             size="sm"
             dismissible={false}
           >
             <div style={{ textAlign: 'center', padding: '1.5rem 0' }}>
               <RefreshCw size={36} className="spinning text-primary" style={{ margin: '0 auto 1rem', display: 'block' }} />
-              <h3 style={{ marginBottom: '0.5rem', fontWeight: 600 }}>Applying Database Snapshot</h3>
+              <h3 style={{ marginBottom: '0.5rem', fontWeight: 600 }}>{t('settings.applying_snapshot')}</h3>
               <p className="text-muted text-sm">
-                The database has been replaced and the server service is restarting.
+                {t('settings.restarting_hint')}
               </p>
               <p className="text-muted text-xs" style={{ marginTop: '0.5rem' }}>
-                Polling server health (/healthz): {reconnectCount * 2}s elapsed…
+                {t('settings.polling_health', { seconds: reconnectCount * 2 })}
               </p>
             </div>
           </Modal>
@@ -933,6 +961,7 @@ export function SettingsPage({ activeTab = 'directory', onTabChange }: SettingsP
 }
 
 function PlanTable({ title, rows }: { title: string; rows: DirectoryContactDTO[] }) {
+  const { t } = useT()
   if (rows.length === 0) return null
   return (
     <>
@@ -941,10 +970,10 @@ function PlanTable({ title, rows }: { title: string; rows: DirectoryContactDTO[]
         <table className="data-table">
           <thead>
             <tr>
-              <th>Name</th>
-              <th>Username</th>
-              <th>Email</th>
-              <th>Department</th>
+              <th>{t('settings.plan_col_name')}</th>
+              <th>{t('settings.plan_col_username')}</th>
+              <th>{t('settings.plan_col_email')}</th>
+              <th>{t('settings.plan_col_department')}</th>
             </tr>
           </thead>
           <tbody>

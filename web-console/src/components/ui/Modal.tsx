@@ -1,5 +1,6 @@
 import React, { useEffect, useId, useRef } from 'react'
 import { X } from 'lucide-react'
+import { useT } from '../../i18n/core'
 
 export type ModalSize = 'sm' | 'md' | 'lg' | 'xl' | 'full'
 
@@ -33,6 +34,7 @@ export const Modal: React.FC<ModalProps> = ({
   description,
   dismissible = true,
 }) => {
+  const { t } = useT()
   const dialogRef = useRef<HTMLDialogElement>(null)
   const titleId = useId()
   const descriptionId = useId()
@@ -88,7 +90,7 @@ export const Modal: React.FC<ModalProps> = ({
             type="button"
             className="btn btn-icon ui-modal-close"
             onClick={onClose}
-            aria-label="Close dialog"
+            aria-label={t('ui.close_dialog')}
           >
             <X size={18} />
           </button>

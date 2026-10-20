@@ -16,6 +16,7 @@ import {
 import { api } from '../services/api'
 import { Modal } from './ui'
 import { useToast } from '../context/ToastContext'
+import { useT } from '../i18n/core'
 import type {
   DeviceDTO,
   RemoteControlCapabilities,
@@ -81,15 +82,17 @@ const UPLOAD_HIGH_WATER_BYTES = 1024 * 1024
 
 /** Combinations the browser or the operator's own OS takes before the page
  *  sees them, so they can only be sent by name. Names match keyCombos in
- *  agent/shared/remotecontrol/features.go. */
-const KEY_COMBOS: { combo: string; label: string }[] = [
-  { combo: 'ctrl_shift_esc', label: 'Ctrl+Shift+Esc (Task Manager)' },
-  { combo: 'alt_tab', label: 'Alt+Tab' },
-  { combo: 'win', label: 'Windows key' },
-  { combo: 'win_r', label: 'Win+R (Run)' },
-  { combo: 'win_e', label: 'Win+E (Explorer)' },
-  { combo: 'win_d', label: 'Win+D (Desktop)' },
-  { combo: 'print_screen', label: 'Print Screen' },
+ *  agent/shared/remotecontrol/features.go. `keys` is the key names, shown as
+ *  they are; `descKey` is the dictionary key of the translated description,
+ *  looked up at render. */
+const KEY_COMBOS: { combo: string; keys: string | null; descKey: string | null }[] = [
+  { combo: 'ctrl_shift_esc', keys: 'Ctrl+Shift+Esc', descKey: 'remote_control.combo_task_manager' },
+  { combo: 'alt_tab', keys: 'Alt+Tab', descKey: null },
+  { combo: 'win', keys: null, descKey: 'remote_control.combo_windows_key' },
+  { combo: 'win_r', keys: 'Win+R', descKey: 'remote_control.combo_run' },
+  { combo: 'win_e', keys: 'Win+E', descKey: 'remote_control.combo_explorer' },
+  { combo: 'win_d', keys: 'Win+D', descKey: 'remote_control.combo_desktop' },
+  { combo: 'print_screen', keys: 'Print Screen', descKey: null },
 ]
 
 interface FileTransfer {
@@ -148,6 +151,7 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
   initialMode = 'full_control',
   onClose,
 }) => {
+  const { t } = useT()
   // Mode is deliberately NOT in the session effect's dependencies. It used to
   // be, so switching Control/View tore down the WebSocket, POSTed a brand new
   // session and dropped the live desktop — the toggle that exists to hand
@@ -286,7 +290,7 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
             setAwaitingFirstFrame(false)
             setStatus('error')
             setErrorMessage(
-              `The endpoint sent screen layout version ${version}, but this console speaks version ${FRAME_VERSION}. The agent and the console are different builds.`
+              t('remote_control.frame_version_mismatch', { version, expected: FRAME_VERSION })
             )
             ws.close()
             return
@@ -403,7 +407,7 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
           if (isCancelled) return
           setStatus('error')
           setErrorMessage(
-            'Lost the connection to the remote control relay. The endpoint or the network may have dropped.'
+            t('remote_control.relay_lost')
           )
         }
 
@@ -417,12 +421,12 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
       } catch (err: unknown) {
         if (isCancelled) return
         setStatus('error')
-        const rawMsg = err instanceof Error ? err.message : 'Unknown initialization error'
+        const rawMsg = err instanceof Error ? err.message : t('remote_control.init_error_unknown')
         let displayMsg = rawMsg
         if (rawMsg.includes('409') || rawMsg.toLowerCase().includes('offline')) {
-          displayMsg = 'Endpoint is offline or disconnected from central hub. Remote control requires an active agent connection.'
+          displayMsg = t('remote_control.endpoint_offline')
         } else if (rawMsg.toLowerCase().includes('session 0') || rawMsg.toLowerCase().includes('no active console')) {
-          displayMsg = 'No interactive user session logged into Windows desktop (Session 0 lock). Remote desktop capture requires an active logged-on user session.'
+          displayMsg = t('remote_control.no_interactive_session')
         }
         setErrorMessage(displayMsg)
       }
@@ -478,10 +482,10 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
             return { ...t, status: 'failed', error: msg.reason }
           })
         )
-        if (msg.type === 'file_saved') toast.success(`Saved on the endpoint as ${msg.path}`, 'File sent')
-        if (msg.type === 'file_failed') toast.error(msg.reason || 'The endpoint refused the file', 'File not sent')
+        if (msg.type === 'file_saved') toast.success(t('remote_control.file_saved', { path: msg.path ?? '' }), t('remote_control.toast_file_sent'))
+        if (msg.type === 'file_failed') toast.error(msg.reason || t('remote_control.file_refused'), t('remote_control.toast_file_not_sent'))
       } else if (msg.type === 'clipboard_failed' || msg.type === 'monitor_failed') {
-        toast.error(msg.reason || 'The endpoint refused the request', 'Remote control')
+        toast.error(msg.reason || t('remote_control.request_refused'), t('remote_control.toast_remote_control'))
       } else if (msg.type === 'capture_failed' && lastFrameAtRef.current > 0) {
         // The desktop was already streaming, so this is the agent saying a few
         // grabs in a row failed -- a UAC prompt, the lock screen, a display
@@ -491,15 +495,15 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
         // desktop the operator was looking at.
         setStatus((prev) => (prev === 'ended' || prev === 'error' ? prev : 'stalled'))
         setErrorMessage(
-          `The endpoint stopped sending its screen (${msg.reason || 'capture failed'}). Showing the last frame; it resumes on its own when capture recovers.`
+          t('remote_control.capture_stopped', { reason: msg.reason || t('remote_control.capture_failed_reason') })
         )
       } else if (msg.type === 'unsupported' || msg.type === 'connect_failed' || msg.type === 'capture_failed') {
         setAwaitingFirstFrame(false)
         setCapabilities({ capture: false, mouse: false, keyboard: false, reason: msg.reason ?? '' })
         setStatus('error')
-        let reason = msg.reason || 'This endpoint cannot stream a desktop. Remote control needs a platform capture backend.'
+        let reason = msg.reason || t('remote_control.cannot_stream_default')
         if (isSession0OrLocked(reason)) {
-          reason = `${reason} (Note: Windows services run in Session 0; ensure an interactive user is logged into the physical desktop and the screen is unlocked).`
+          reason = t('remote_control.session0_note', { reason })
         }
         setErrorMessage(reason)
       }
@@ -545,7 +549,7 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
       if (hasPaintedRef.current || statusRef.current === 'error') return
       setStatus('stalled')
       setErrorMessage(
-        'Connected to the relay, but the endpoint sent no screen frames. If the endpoint recently reconnected from offline, ensure an interactive user desktop is logged on (Windows lock screen restricts remote screen capture).'
+        t('remote_control.no_frames')
       )
     }, STALL_AFTER_MS)
     return () => window.clearTimeout(timer)
@@ -616,9 +620,9 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
     (text: string) => {
       send({ type: 'clipboard', text })
       setClipboardDraft(null)
-      toast.info('Clipboard text sent to the endpoint. Paste it there with Ctrl+V.', 'Clipboard')
+      toast.info(t('remote_control.clipboard_sent'), t('remote_control.toast_clipboard'))
     },
-    [send, toast]
+    [send, toast, t]
   )
 
   // Reading the operator's clipboard needs permission; when the browser
@@ -641,12 +645,12 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
     if (remoteClipboard === null) return
     try {
       await navigator.clipboard.writeText(remoteClipboard)
-      toast.success('The endpoint clipboard is now on your clipboard.', 'Clipboard')
+      toast.success(t('remote_control.clipboard_copied'), t('remote_control.toast_clipboard'))
     } catch {
       setClipboardDirection('receive')
       setClipboardDraft(remoteClipboard)
     }
-  }, [remoteClipboard, toast])
+  }, [remoteClipboard, toast, t])
 
   // Upload in chunks over the session socket, waiting whenever the socket's
   // send queue is past the high-water mark, so a large file never queues up
@@ -657,7 +661,10 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
       if (!ws || ws.readyState !== WebSocket.OPEN || modeRef.current === 'view_only') return
       const limit = capabilities?.max_file_bytes ?? 0
       if (limit > 0 && file.size > limit) {
-        toast.error(`${file.name} is ${formatBytes(file.size)}; the endpoint accepts up to ${formatBytes(limit)}.`, 'File too large')
+        toast.error(
+          t('remote_control.file_too_large', { name: file.name, size: formatBytes(file.size), limit: formatBytes(limit) }),
+          t('remote_control.toast_file_too_large')
+        )
         return
       }
       const id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
@@ -675,7 +682,7 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
           await new Promise((r) => window.setTimeout(r, 25))
         }
         if (ws.readyState !== WebSocket.OPEN) {
-          fail('The session closed during the upload.')
+          fail(t('remote_control.upload_session_closed'))
           return
         }
         const data = toBase64(await file.slice(offset, offset + FILE_CHUNK_BYTES).arrayBuffer())
@@ -686,7 +693,7 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
       }
       ws.send(JSON.stringify({ type: 'file_end', id }))
     },
-    [capabilities, toast]
+    [capabilities, toast, t]
   )
 
   const getCanvasCoords = (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -829,16 +836,23 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
 
   const statusLabel =
     status === 'active'
-      ? 'Live Stream'
+      ? t('remote_control.status_live')
       : status === 'stalled'
-        ? 'No Signal'
+        ? t('remote_control.status_no_signal')
         : status === 'connecting'
-          ? 'Connecting'
+          ? t('remote_control.status_connecting')
           : status === 'initiating'
-            ? 'Starting'
+            ? t('remote_control.status_starting')
             : status === 'ended'
-              ? 'Ended'
-              : 'Failed'
+              ? t('remote_control.status_ended')
+              : t('remote_control.status_failed')
+
+  const comboLabel = (k: (typeof KEY_COMBOS)[number]) =>
+    !k.descKey
+      ? k.keys
+      : k.keys
+        ? t('remote_control.combo_label', { keys: k.keys, desc: t(k.descKey) })
+        : t(k.descKey)
 
   // A platform that cannot capture will never paint. Say so in the toolbar
   // rather than leaving the operator waiting on a black rectangle.
@@ -863,15 +877,15 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
       dismissible={false}
       title={
         <span className="modal-title-group">
-          <Monitor className="modal-icon" /> Remote Desktop
+          <Monitor className="modal-icon" /> {t('remote_control.modal_title')}
         </span>
       }
       description={
         <span className="remote-session-meta">
-          <span className="site-badge">{device.site || 'Default'}</span>
+          <span className="site-badge">{device.site || t('remote_control.default_site')}</span>
           <span className={`status-pill ${statusClass}`}>{statusLabel}</span>
           {sessionId && <span className="remote-session-id">#{sessionId.substring(0, 8)}</span>}
-          {mode === 'view_only' && <span className="site-badge">View only</span>}
+          {mode === 'view_only' && <span className="site-badge">{t('remote_control.mode_view_only')}</span>}
         </span>
       }
     >
@@ -883,11 +897,11 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
                 {resolution.width}x{resolution.height}
               </span>
             )}
-            <span title="Screen updates per second. An update carries only the rectangles that changed, so a still desktop sends none — that is the point, not a stall.">
-              {fps} upd/s
+            <span title={t('remote_control.fps_title')}>
+              {t('remote_control.fps', { fps })}
             </span>
             {stats && (
-              <span title="Image quality the endpoint is encoding at, adapted to how fast this link drains, and the rate it is sending.">
+              <span title={t('remote_control.stats_title')}>
                 Q{stats.quality} · {stats.kbps} kbps
               </span>
             )}
@@ -895,11 +909,11 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
             {capabilities && (
               <span
                 className="remote-telemetry-caps"
-                title={capabilities.reason || 'Agent-reported capabilities'}
+                title={capabilities.reason || t('remote_control.caps_title')}
               >
-                {capabilities.capture ? 'capture' : 'no capture'} ·{' '}
-                {capabilities.mouse ? 'mouse' : 'no mouse'} ·{' '}
-                {capabilities.keyboard ? 'keyboard' : 'no keyboard'}
+                {capabilities.capture ? t('remote_control.cap_capture') : t('remote_control.cap_no_capture')} ·{' '}
+                {capabilities.mouse ? t('remote_control.cap_mouse') : t('remote_control.cap_no_mouse')} ·{' '}
+                {capabilities.keyboard ? t('remote_control.cap_keyboard') : t('remote_control.cap_no_keyboard')}
               </span>
             )}
           </div>
@@ -908,18 +922,20 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
             {monitors.length > 1 && (
               <select
                 className="select-input remote-monitor-select"
-                aria-label="Endpoint monitor"
+                aria-label={t('remote_control.monitor_select_label')}
                 value={monitorIndex ?? ''}
                 disabled={!live}
                 onChange={(e) => selectMonitor(Number(e.target.value))}
               >
                 {monitors.map((m) => (
                   <option key={m.index} value={m.index}>
-                    Monitor {m.index + 1}
-                    {m.primary ? ' (primary)' : ''} · {m.width}×{m.height}
+                    {m.primary
+                      ? t('remote_control.monitor_option_primary', { n: m.index + 1 })
+                      : t('remote_control.monitor_option', { n: m.index + 1 })}{' '}
+                    · {m.width}×{m.height}
                   </option>
                 ))}
-                <option value={-1}>All monitors</option>
+                <option value={-1}>{t('remote_control.all_monitors')}</option>
               </select>
             )}
 
@@ -931,10 +947,10 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
                 disabled={!live || viewOnly}
                 aria-expanded={keysOpen}
                 aria-haspopup="menu"
-                title="Send a key combination your browser cannot pass through"
+                title={t('remote_control.keys_title')}
               >
                 <Command size={14} />
-                <span>Keys</span>
+                <span>{t('remote_control.keys')}</span>
               </button>
               {keysOpen && (
                 <div className="remote-menu-list" role="menu">
@@ -946,7 +962,7 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
                       className="remote-menu-item"
                       onClick={() => sendKeys(k.combo)}
                     >
-                      {k.label}
+                      {comboLabel(k)}
                     </button>
                   ))}
                 </div>
@@ -960,20 +976,20 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
                   className="btn btn-sm btn-secondary"
                   onClick={pasteToRemote}
                   disabled={!live || viewOnly}
-                  title="Send your clipboard text to the endpoint's clipboard"
+                  title={t('remote_control.send_clipboard_title')}
                 >
                   <ClipboardPaste size={14} />
-                  <span>Send clipboard</span>
+                  <span>{t('remote_control.send_clipboard')}</span>
                 </button>
                 {remoteClipboard !== null && (
                   <button
                     type="button"
                     className="btn btn-sm btn-secondary"
                     onClick={copyFromRemote}
-                    title="Copy the text last copied on the endpoint"
+                    title={t('remote_control.copy_remote_title')}
                   >
                     <ClipboardCopy size={14} />
-                    <span>Copy remote</span>
+                    <span>{t('remote_control.copy_remote')}</span>
                   </button>
                 )}
               </>
@@ -986,10 +1002,10 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
                   className="btn btn-sm btn-secondary"
                   onClick={() => fileInputRef.current?.click()}
                   disabled={!live || viewOnly}
-                  title="Send a file to the endpoint's Downloads\Remote Transfers folder"
+                  title={t('remote_control.send_file_title')}
                 >
                   <Upload size={14} />
-                  <span>Send file</span>
+                  <span>{t('remote_control.send_file')}</span>
                 </button>
                 <input
                   ref={fileInputRef}
@@ -1004,7 +1020,7 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
               </>
             )}
 
-            <div className="remote-mode-switch" role="group" aria-label="Remote input mode">
+            <div className="remote-mode-switch" role="group" aria-label={t('remote_control.input_mode_label')}>
               <button
                 type="button"
                 onClick={() => sendMode('full_control')}
@@ -1014,21 +1030,21 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
                 title={
                   captureUnavailable
                     ? capabilities?.reason
-                    : 'Take control of the endpoint: mouse and keyboard are forwarded'
+                    : t('remote_control.control_title')
                 }
               >
                 <MousePointer size={14} />
-                <span>Control</span>
+                <span>{t('remote_control.mode_control')}</span>
               </button>
               <button
                 type="button"
                 onClick={() => sendMode('view_only')}
                 aria-pressed={mode === 'view_only'}
                 className={`btn btn-sm ${mode === 'view_only' ? 'btn-primary' : 'btn-secondary'}`}
-                title="Watch without sending input to the endpoint"
+                title={t('remote_control.view_title')}
               >
                 <Eye size={14} />
-                <span>View</span>
+                <span>{t('remote_control.mode_view')}</span>
               </button>
             </div>
 
@@ -1036,8 +1052,8 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
               type="button"
               onClick={toggleFullscreen}
               className="btn btn-icon"
-              title={isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}
-              aria-label={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
+              title={isFullscreen ? t('remote_control.exit_fullscreen') : t('remote_control.fullscreen')}
+              aria-label={isFullscreen ? t('remote_control.exit_fullscreen') : t('remote_control.enter_fullscreen')}
             >
               {isFullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
             </button>
@@ -1048,8 +1064,8 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
           <div className="remote-clipboard-panel">
             <label className="form-label" htmlFor="remote-clipboard-text">
               {clipboardDirection === 'send'
-                ? 'Your browser did not allow reading your clipboard. Paste the text here to send it.'
-                : 'Your browser did not allow writing to your clipboard. Copy the endpoint text from here (Ctrl+C).'}
+                ? t('remote_control.clipboard_read_blocked')
+                : t('remote_control.clipboard_write_blocked')}
             </label>
             <textarea
               id="remote-clipboard-text"
@@ -1065,7 +1081,7 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
             />
             <div className="remote-clipboard-actions">
               <button type="button" className="btn btn-sm btn-secondary" onClick={() => setClipboardDraft(null)}>
-                Close
+                {t('common.close')}
               </button>
               {clipboardDirection === 'send' && (
                 <button
@@ -1074,7 +1090,7 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
                   disabled={!clipboardDraft || viewOnly}
                   onClick={() => sendClipboardText(clipboardDraft)}
                 >
-                  Send to endpoint
+                  {t('remote_control.send_to_endpoint')}
                 </button>
               )}
             </div>
@@ -1082,22 +1098,22 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
         )}
 
         {transfers.length > 0 && (
-          <ul className="remote-transfers" aria-label="File transfers">
-            {transfers.map((t) => {
-              const done = t.status === 'saved' ? t.size : Math.max(t.sent, t.received)
-              const pct = t.size > 0 ? Math.round((done / t.size) * 100) : 100
+          <ul className="remote-transfers" aria-label={t('remote_control.file_transfers_label')}>
+            {transfers.map((tr) => {
+              const done = tr.status === 'saved' ? tr.size : Math.max(tr.sent, tr.received)
+              const pct = tr.size > 0 ? Math.round((done / tr.size) * 100) : 100
               return (
-                <li key={t.id} className="remote-transfer">
-                  <span className="remote-transfer-name" title={t.path || t.name}>
-                    {t.name}
+                <li key={tr.id} className="remote-transfer">
+                  <span className="remote-transfer-name" title={tr.path || tr.name}>
+                    {tr.name}
                   </span>
                   <progress className="remote-transfer-bar" max={100} value={pct} />
                   <span className="remote-transfer-state">
-                    {t.status === 'saved'
-                      ? 'Saved'
-                      : t.status === 'failed'
-                        ? t.error || 'Failed'
-                        : `${pct}% of ${formatBytes(t.size)}`}
+                    {tr.status === 'saved'
+                      ? t('remote_control.transfer_saved')
+                      : tr.status === 'failed'
+                        ? tr.error || t('remote_control.transfer_failed')
+                        : t('remote_control.transfer_progress', { pct, size: formatBytes(tr.size) })}
                   </span>
                 </li>
               )
@@ -1117,7 +1133,7 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
           onBlur={handleBlur}
           className="remote-viewport"
           role="application"
-          aria-label={`Remote desktop for ${device.hostname}. Keyboard input is forwarded to the endpoint. Click the desktop to focus it, then type.`}
+          aria-label={t('remote_control.viewport_label', { hostname: device.hostname })}
         >
           {status !== 'error' && status !== 'ended' && (
             <canvas
@@ -1149,12 +1165,11 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
               <RefreshCw className="remote-placeholder-icon spinning" />
               <p className="remote-placeholder-text">
                 {status === 'initiating'
-                  ? 'Requesting desktop tunnel...'
-                  : 'Waiting for the endpoint to attach and send its first frame...'}
+                  ? t('remote_control.requesting_tunnel')
+                  : t('remote_control.waiting_first_frame')}
               </p>
               <p className="remote-hint">
-                <Keyboard size={12} /> Click the desktop to focus it, then type. Keys are forwarded to{' '}
-                {device.hostname}.
+                <Keyboard size={12} /> {t('remote_control.focus_hint', { hostname: device.hostname })}
               </p>
             </div>
           )}
@@ -1164,7 +1179,7 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
               <AlertCircle size={28} />
               <p className="remote-overlay-text">{errorMessage}</p>
               <button type="button" className="btn btn-secondary" onClick={onClose}>
-                Close session
+                {t('remote_control.close_session')}
               </button>
             </div>
           )}
@@ -1172,20 +1187,19 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
           {status === 'error' && (
             <div className="remote-placeholder">
               <Monitor className="remote-placeholder-icon" />
-              <h3 className="remote-placeholder-title">Cannot Stream This Desktop</h3>
+              <h3 className="remote-placeholder-title">{t('remote_control.cannot_stream_title')}</h3>
               <p className="remote-placeholder-text">{errorMessage}</p>
               {isSession0OrLocked(errorMessage) ? (
                 <p className="remote-placeholder-text">
-                  Remote control needs a person logged in at the endpoint so the agent has a
-                  desktop to attach to. Ask them to sign in, then start a new session.
+                  {t('remote_control.needs_logged_in_user')}
                 </p>
               ) : (
                 <p className="remote-placeholder-text">
-                  Remote desktop capture failed. Verify endpoint agent logs and screen capture prerequisites, then retry.
+                  {t('remote_control.capture_failed_hint')}
                 </p>
               )}
               <button type="button" className="btn btn-secondary" onClick={onClose}>
-                Close Window
+                {t('remote_control.close_window')}
               </button>
             </div>
           )}
@@ -1193,12 +1207,12 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
           {status === 'ended' && (
             <div className="remote-placeholder">
               <Monitor className="remote-placeholder-icon" />
-              <h3 className="remote-placeholder-title">Remote Session Ended</h3>
+              <h3 className="remote-placeholder-title">{t('remote_control.session_ended_title')}</h3>
               <p className="remote-placeholder-text">
-                The desktop streaming session was closed by the operator or endpoint.
+                {t('remote_control.session_ended_text')}
               </p>
               <button type="button" className="btn btn-primary" onClick={onClose}>
-                Close Window
+                {t('remote_control.close_window')}
               </button>
             </div>
           )}

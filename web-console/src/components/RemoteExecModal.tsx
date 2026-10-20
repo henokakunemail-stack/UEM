@@ -10,6 +10,16 @@ import {
 import { api } from '../services/api'
 import { DataTable, Modal } from './ui'
 import type { DeviceDTO, RemoteExecutionDTO } from '../types/api'
+import { useT } from '../i18n/core'
+
+// Statuses the server reports. An unlisted one is shown as sent.
+const STATUS_KEYS: Record<string, string> = {
+  completed: 'remote_exec.status_completed',
+  failed: 'remote_exec.status_failed',
+  timeout: 'remote_exec.status_timeout',
+  running: 'remote_exec.status_running',
+  pending: 'remote_exec.status_pending',
+}
 
 interface RemoteExecModalProps {
   device: DeviceDTO | null
@@ -25,12 +35,13 @@ export const RemoteExecModal: React.FC<RemoteExecModalProps> = ({ device, onClos
   const [selectedExec, setSelectedExec] = useState<RemoteExecutionDTO | null>(null)
   const [error, setError] = useState<string | null>(null)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const { t } = useT()
 
   const availableShells =
     device?.os_name === 'windows'
       ? [
           { value: 'powershell', label: 'PowerShell' },
-          { value: 'cmd', label: 'Command Prompt' },
+          { value: 'cmd', label: t('remote_exec.shell_cmd') },
         ]
       : device?.os_name === 'macos'
         ? [
@@ -88,7 +99,7 @@ export const RemoteExecModal: React.FC<RemoteExecModalProps> = ({ device, onClos
 
   const handleRun = async () => {
     if (!command.trim()) {
-      setError('Command cannot be empty.')
+      setError(t('remote_exec.empty_command'))
       return
     }
     setRunning(true)
@@ -98,7 +109,7 @@ export const RemoteExecModal: React.FC<RemoteExecModalProps> = ({ device, onClos
       setSelectedExec(res.execution)
       await fetchHistory()
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Failed to dispatch command'
+      const msg = err instanceof Error ? err.message : t('remote_exec.dispatch_failed')
       setError(msg)
     } finally {
       setRunning(false)
@@ -119,7 +130,11 @@ export const RemoteExecModal: React.FC<RemoteExecModalProps> = ({ device, onClos
         : status === 'failed' || status === 'timeout'
           ? 'status-failed'
           : 'status-running'
-    return <span className={`status-pill ${cls}`}>{status.toUpperCase()}</span>
+    return (
+      <span className={`status-pill ${cls}`}>
+        {STATUS_KEYS[status] ? t(STATUS_KEYS[status]) : status.toUpperCase()}
+      </span>
+    )
   }
 
   return (
@@ -129,7 +144,7 @@ export const RemoteExecModal: React.FC<RemoteExecModalProps> = ({ device, onClos
       size="xl"
       title={
         <span className="modal-title-group">
-          <Terminal size={20} /> Remote Command Execution
+          <Terminal size={20} /> {t('remote_exec.title')}
         </span>
       }
       description={
@@ -154,7 +169,7 @@ export const RemoteExecModal: React.FC<RemoteExecModalProps> = ({ device, onClos
           <div className="form-row">
             <div className="form-field">
               <label className="form-label" htmlFor="exec-shell">
-                Shell Runtime
+                {t('remote_exec.shell_runtime')}
               </label>
               <select
                 id="exec-shell"
@@ -172,7 +187,7 @@ export const RemoteExecModal: React.FC<RemoteExecModalProps> = ({ device, onClos
             <div className="form-field" style={{ maxWidth: '180px' }}>
               <label className="form-label" htmlFor="exec-timeout">
                 <Clock size={12} style={{ display: 'inline', marginRight: 4 }} />
-                Timeout (s)
+                {t('remote_exec.timeout')}
               </label>
               <input
                 id="exec-timeout"
@@ -188,7 +203,7 @@ export const RemoteExecModal: React.FC<RemoteExecModalProps> = ({ device, onClos
 
           <div className="form-field">
             <label className="form-label" htmlFor="exec-command">
-              Command Payload
+              {t('remote_exec.command_payload')}
             </label>
             <textarea
               id="exec-command"
@@ -204,7 +219,7 @@ export const RemoteExecModal: React.FC<RemoteExecModalProps> = ({ device, onClos
               onKeyDown={handleKeyDown}
               spellCheck={false}
             />
-            <span className="form-hint">Ctrl + Enter to execute</span>
+            <span className="form-hint">{t('remote_exec.ctrl_enter')}</span>
           </div>
 
           <button
@@ -214,17 +229,19 @@ export const RemoteExecModal: React.FC<RemoteExecModalProps> = ({ device, onClos
             disabled={running || !command.trim()}
           >
             {running ? <RefreshCw size={16} className="spinning" /> : <Play size={16} />}
-            <span>{running ? 'Dispatching...' : 'Run Command'}</span>
+            <span>{running ? t('remote_exec.dispatching') : t('remote_exec.run')}</span>
           </button>
         </div>
 
         {selectedExec && (
           <div className="exec-output-section">
             <div className="exec-output-header">
-              <h3 className="section-title">Execution Output</h3>
+              <h3 className="section-title">{t('remote_exec.output_title')}</h3>
               {statusBadge(selectedExec.status)}
               {selectedExec.exit_code !== null && selectedExec.exit_code !== undefined && (
-                <span className="exit-code-badge">Exit Code: {selectedExec.exit_code}</span>
+                <span className="exit-code-badge">
+                  {t('remote_exec.exit_code', { code: selectedExec.exit_code })}
+                </span>
               )}
             </div>
             <div className="exec-output-terminal" aria-live="polite">
@@ -232,7 +249,7 @@ export const RemoteExecModal: React.FC<RemoteExecModalProps> = ({ device, onClos
                 <pre className="terminal-pre">{selectedExec.output}</pre>
               ) : (
                 <span className="terminal-placeholder">
-                  No output captured. {selectedExec.error_message || ''}
+                  {t('remote_exec.no_output')} {selectedExec.error_message || ''}
                 </span>
               )}
               {selectedExec.error_message && selectedExec.output && (
@@ -244,30 +261,30 @@ export const RemoteExecModal: React.FC<RemoteExecModalProps> = ({ device, onClos
 
         <div className="exec-history-section">
           <div className="exec-history-header">
-            <h3 className="section-title">Execution History</h3>
+            <h3 className="section-title">{t('remote_exec.history_title')}</h3>
             <button type="button" className="btn btn-sm btn-secondary" onClick={fetchHistory}>
               <RefreshCw size={14} />
-              <span>Refresh</span>
+              <span>{t('remote_exec.refresh')}</span>
             </button>
           </div>
           {history.length === 0 ? (
             <div className="empty-state">
               <Terminal size={28} />
-              <p>No remote commands executed on this endpoint yet.</p>
+              <p>{t('remote_exec.no_history')}</p>
             </div>
           ) : (
-            <DataTable label="Remote command execution history">
+            <DataTable label={t('remote_exec.history_table')}>
               <table>
                 <thead>
                   <tr>
-                    <th>Status</th>
-                    <th>Command</th>
-                    <th>Shell</th>
-                    <th>Operator</th>
-                    <th>Exit</th>
-                    <th>Started</th>
+                    <th>{t('remote_exec.col_status')}</th>
+                    <th>{t('remote_exec.col_command')}</th>
+                    <th>{t('remote_exec.col_shell')}</th>
+                    <th>{t('remote_exec.col_operator')}</th>
+                    <th>{t('remote_exec.col_exit')}</th>
+                    <th>{t('remote_exec.col_started')}</th>
                     <th>
-                      <span className="form-hint">Output</span>
+                      <span className="form-hint">{t('remote_exec.col_output')}</span>
                     </th>
                   </tr>
                 </thead>
@@ -303,8 +320,8 @@ export const RemoteExecModal: React.FC<RemoteExecModalProps> = ({ device, onClos
                           type="button"
                           className="btn btn-sm btn-secondary"
                           onClick={() => setSelectedExec(h)}
-                          title="View Output"
-                          aria-label={`View output for ${h.command_text}`}
+                          title={t('remote_exec.view_output')}
+                          aria-label={t('remote_exec.view_output_label', { command: h.command_text })}
                         >
                           <ChevronRight size={12} />
                         </button>

@@ -73,11 +73,13 @@ const decorateBody = (body: React.ReactNode, labels: string[]): React.ReactNode 
         // it gets no label and the row is flagged for the card layout.
         if (rest.colSpan && rest.colSpan > 1) {
           column += rest.colSpan
-          return <td {...rest} role="cell">{children}</td>
+          return <td key={cell.key} {...rest} role="cell">{children}</td>
         }
         const dataLabel = labels[column] || undefined
         column += 1
-        return <td {...rest} data-label={dataLabel} role="cell">{children}</td>
+        // The key Children.toArray gave the original cell, so React can match
+        // rebuilt cells across renders instead of remounting every one.
+        return <td key={cell.key} {...rest} data-label={dataLabel} role="cell">{children}</td>
       }),
     ])
   })

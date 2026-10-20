@@ -20,6 +20,28 @@ import { usePermission } from '../hooks/usePermission'
 import { DataTable } from '../components/ui/DataTable'
 import { Modal } from '../components/ui/Modal'
 import type { AgentReleaseDTO, UpdateCampaignDTO, CampaignTaskDetail, CampaignLogItem } from '../types/api'
+import { useT } from '../i18n/core'
+
+// Campaign, task and target values are server enums. Known ones get a
+// translated label; anything else is shown exactly as the server sent it.
+const STATUS_KEYS: Record<string, string> = {
+  draft: 'updates.status_draft',
+  pending: 'updates.status_pending',
+  in_progress: 'updates.status_in_progress',
+  completed: 'updates.status_completed',
+  cancelled: 'updates.status_cancelled',
+  dispatched: 'updates.status_dispatched',
+  downloading: 'updates.status_downloading',
+  verifying: 'updates.status_verifying',
+  swapping: 'updates.status_swapping',
+  success: 'updates.status_success',
+  failed: 'updates.status_failed',
+  rollback: 'updates.status_rollback',
+}
+const TARGET_KEYS: Record<string, string> = {
+  all: 'updates.target_all_short',
+  group: 'updates.target_group_short',
+}
 
 export type UpdatesTab = 'releases' | 'campaigns'
 
@@ -49,6 +71,8 @@ export const AgentUpdatesPage: React.FC<AgentUpdatesPageProps> = ({ activeTab: s
 
   const [msg, setMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
   const toast = useToast()
+  const { t } = useT()
+  const statusLabel = (s: string) => (STATUS_KEYS[s] ? t(STATUS_KEYS[s]) : s)
 
   // Upload Release Form
   const [relVersion, setRelVersion] = useState('')
@@ -78,7 +102,7 @@ export const AgentUpdatesPage: React.FC<AgentUpdatesPageProps> = ({ activeTab: s
       setReleases(rList)
       setCampaigns(cList)
     } catch (err: any) {
-      setMsg({ type: 'error', text: err.message || 'Failed to load update catalog' })
+      setMsg({ type: 'error', text: err.message || t('updates.load_failed') })
     } finally {
       setLoading(false)
     }
@@ -132,7 +156,7 @@ export const AgentUpdatesPage: React.FC<AgentUpdatesPageProps> = ({ activeTab: s
       setCampaignTasks(tasks)
       setCampaignLogs(logs)
     } catch (err: any) {
-      toast.error(err.message || 'Failed to load campaign details', 'Error')
+      toast.error(err.message || t('updates.details_load_failed'), t('updates.error'))
     } finally {
       setDetailsLoading(false)
     }
@@ -147,7 +171,7 @@ export const AgentUpdatesPage: React.FC<AgentUpdatesPageProps> = ({ activeTab: s
   const handleUploadRelease = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!selectedFile) {
-      setMsg({ type: 'error', text: 'Please select an agent binary file to upload' })
+      setMsg({ type: 'error', text: t('updates.select_file') })
       return
     }
 
@@ -161,18 +185,18 @@ export const AgentUpdatesPage: React.FC<AgentUpdatesPageProps> = ({ activeTab: s
       fd.append('changelog', relChangelog)
 
       await api.uploadAgentRelease(fd)
-      const successText = `Release v${relVersion} (${relOS}/${relArch}) uploaded and registered.`
+      const successText = t('updates.release_uploaded', { version: relVersion, os: relOS, arch: relArch })
       setMsg({ type: 'success', text: successText })
-      toast.success(successText, 'Release Uploaded')
+      toast.success(successText, t('updates.release_uploaded_title'))
       setIsReleaseModalOpen(false)
       setSelectedFile(null)
       setRelVersion('')
       setRelChangelog('')
       loadData()
     } catch (err: any) {
-      const errorText = err.message || 'Failed to upload release binary'
+      const errorText = err.message || t('updates.upload_failed')
       setMsg({ type: 'error', text: errorText })
-      toast.error(errorText, 'Upload Failed')
+      toast.error(errorText, t('updates.upload_failed_title'))
     } finally {
       setUploading(false)
     }
@@ -182,48 +206,48 @@ export const AgentUpdatesPage: React.FC<AgentUpdatesPageProps> = ({ activeTab: s
     e.preventDefault()
     try {
       await api.createUpdateCampaign(newCampaign)
-      const successText = `Update campaign '${newCampaign.name}' launched successfully.`
+      const successText = t('updates.campaign_launched', { name: newCampaign.name })
       setMsg({ type: 'success', text: successText })
-      toast.success(successText, 'Campaign Launched')
+      toast.success(successText, t('updates.campaign_launched_title'))
       setIsCampaignModalOpen(false)
       loadData()
     } catch (err: any) {
-      const errorText = err.message || 'Failed to launch update campaign'
+      const errorText = err.message || t('updates.launch_failed')
       setMsg({ type: 'error', text: errorText })
-      toast.error(errorText, 'Launch Failed')
+      toast.error(errorText, t('updates.launch_failed_title'))
     }
   }
 
   const handleStartCampaign = async (id: string, name: string) => {
     try {
       const res = await api.startUpdateCampaign(id)
-      const successText = res.message || `Campaign '${name}' started: ${res.dispatched_live} of ${res.total_targets} targets dispatched live.`
+      const successText = res.message || t('updates.campaign_started', { name, live: res.dispatched_live, total: res.total_targets })
       setMsg({ type: 'success', text: successText })
-      toast.success(successText, 'Rollout Started')
+      toast.success(successText, t('updates.rollout_started'))
       loadData()
       if (selectedCampaign?.id === id) {
         fetchCampaignDetails(id)
       }
     } catch (err: any) {
-      const errorText = err.message || 'Failed to start campaign'
+      const errorText = err.message || t('updates.start_failed')
       setMsg({ type: 'error', text: errorText })
-      toast.error(errorText, 'Start Failed')
+      toast.error(errorText, t('updates.start_failed_title'))
     }
   }
 
   const handleCancelCampaign = async (id: string, name: string) => {
-    if (!window.confirm(`Batalkan update campaign '${name}'? Task yang belum selesai akan dihentikan.`)) {
+    if (!window.confirm(t('updates.cancel_confirm', { name }))) {
       return
     }
     try {
       await api.cancelUpdateCampaign(id)
-      toast.success(`Campaign '${name}' telah dibatalkan.`, 'Campaign Cancelled')
+      toast.success(t('updates.campaign_cancelled', { name }), t('updates.campaign_cancelled_title'))
       loadData()
       if (selectedCampaign?.id === id) {
         fetchCampaignDetails(id)
       }
     } catch (err: any) {
-      toast.error(err.message || 'Gagal membatalkan campaign', 'Cancel Failed')
+      toast.error(err.message || t('updates.cancel_failed'), t('updates.cancel_failed_title'))
     }
   }
 
@@ -257,26 +281,26 @@ export const AgentUpdatesPage: React.FC<AgentUpdatesPageProps> = ({ activeTab: s
     <div className="page-container">
       <div className="page-header">
         <div>
-          <h2 className="page-title">Agent Self-Update & Rollout Campaigns</h2>
+          <h2 className="page-title">{t('updates.title')}</h2>
           <p className="page-subtitle">
-            Autonomous in-place binary upgrades, SHA-256 verification, and phased canary deployments
+            {t('updates.subtitle')}
           </p>
         </div>
         <div className="header-controls">
           <button type="button" className="btn btn-secondary" onClick={loadData} disabled={loading}>
             <RefreshCw size={16} className={loading ? 'spinning' : ''} />
-            <span>Refresh</span>
+            <span>{t('updates.refresh')}</span>
           </button>
           {canAdmin && subTab === 'releases' && (
             <button type="button" className="btn btn-primary" onClick={() => setIsReleaseModalOpen(true)}>
               <UploadCloud size={16} />
-              <span>Publish Release Binary</span>
+              <span>{t('updates.publish_release_binary')}</span>
             </button>
           )}
           {canAdmin && subTab === 'campaigns' && (
             <button type="button" className="btn btn-primary" onClick={() => setIsCampaignModalOpen(true)}>
               <Play size={16} />
-              <span>Launch Update Campaign</span>
+              <span>{t('updates.launch_campaign')}</span>
             </button>
           )}
         </div>
@@ -285,7 +309,7 @@ export const AgentUpdatesPage: React.FC<AgentUpdatesPageProps> = ({ activeTab: s
       {msg && (
         <div className={`alert-banner ${msg.type === 'error' ? 'alert-error' : 'alert-success'}`}>
           <span>{msg.text}</span>
-          <button type="button" onClick={() => setMsg(null)} className="close-btn" aria-label="Dismiss message">
+          <button type="button" onClick={() => setMsg(null)} className="close-btn" aria-label={t('updates.dismiss_message')}>
             <X size={14} />
           </button>
         </div>
@@ -295,31 +319,31 @@ export const AgentUpdatesPage: React.FC<AgentUpdatesPageProps> = ({ activeTab: s
       <div className="kpi-grid">
         <div className="kpi-card">
           <div className="kpi-header">
-            <span className="kpi-label">Available Releases</span>
+            <span className="kpi-label">{t('updates.kpi_releases')}</span>
             <ArrowUpCircle className="kpi-icon text-primary" size={20} />
           </div>
           <div className="kpi-value">{releases.length}</div>
-          <span className="kpi-hint">Binaries across OS & CPU architectures</span>
+          <span className="kpi-hint">{t('updates.kpi_releases_hint')}</span>
         </div>
 
         <div className="kpi-card">
           <div className="kpi-header">
-            <span className="kpi-label">Active Campaigns</span>
+            <span className="kpi-label">{t('updates.kpi_active')}</span>
             <Layers className="kpi-icon text-warning" size={20} />
           </div>
           <div className="kpi-value text-warning">
             {campaigns.filter((c) => c.status === 'in_progress').length}
           </div>
-          <span className="kpi-hint">Fleet rollout waves underway</span>
+          <span className="kpi-hint">{t('updates.kpi_active_hint')}</span>
         </div>
 
         <div className="kpi-card">
           <div className="kpi-header">
-            <span className="kpi-label">Integrity Enforced</span>
+            <span className="kpi-label">{t('updates.kpi_integrity')}</span>
             <ShieldCheck className="kpi-icon text-success" size={20} />
           </div>
           <div className="kpi-value text-success">100%</div>
-          <span className="kpi-hint">Pre-execution SHA-256 validation</span>
+          <span className="kpi-hint">{t('updates.kpi_integrity_hint')}</span>
         </div>
       </div>
 
@@ -331,7 +355,7 @@ export const AgentUpdatesPage: React.FC<AgentUpdatesPageProps> = ({ activeTab: s
           onClick={() => setSubTab('releases')}
         >
           <FolderArchive size={16} />
-          <span>Release Catalog ({releases.length})</span>
+          <span>{t('updates.tab_releases', { count: releases.length })}</span>
         </button>
         <button
           type="button"
@@ -339,32 +363,32 @@ export const AgentUpdatesPage: React.FC<AgentUpdatesPageProps> = ({ activeTab: s
           onClick={() => setSubTab('campaigns')}
         >
           <Layers size={16} />
-          <span>Rollout Campaigns ({campaigns.length})</span>
+          <span>{t('updates.tab_campaigns', { count: campaigns.length })}</span>
         </button>
       </div>
 
       {/* Tab 1: Releases Catalog */}
       {subTab === 'releases' && (
         <div className="table-card">
-          <DataTable label="Agent releases">
+          <DataTable label={t('updates.releases_table_label')}>
             <table className="data-table">
               <thead>
                 <tr>
-                  <th>Version</th>
-                  <th>Platform & Arch</th>
-                  <th>Filename</th>
-                  <th>Size</th>
-                  <th>SHA-256 Checksum</th>
-                  <th>Uploaded By</th>
-                  <th>Published Date</th>
-                  <th>Status</th>
+                  <th>{t('updates.col_version')}</th>
+                  <th>{t('updates.col_platform')}</th>
+                  <th>{t('updates.col_filename')}</th>
+                  <th>{t('updates.col_size')}</th>
+                  <th>{t('updates.col_checksum')}</th>
+                  <th>{t('updates.col_uploaded_by')}</th>
+                  <th>{t('updates.col_published')}</th>
+                  <th>{t('updates.col_status')}</th>
                 </tr>
               </thead>
               <tbody>
                 {releases.length === 0 ? (
                   <tr>
                     <td colSpan={8} className="text-center py-8 text-muted">
-                      No agent releases published yet. Click "Publish Release Binary" to upload an agent executable.
+                      {t('updates.no_releases')}
                     </td>
                   </tr>
                 ) : (
@@ -387,7 +411,7 @@ export const AgentUpdatesPage: React.FC<AgentUpdatesPageProps> = ({ activeTab: s
                       <td className="text-sm text-muted">{new Date(r.created_at).toLocaleString()}</td>
                       <td>
                         <span className={`status-pill ${r.is_active ? 'online' : 'offline'}`}>
-                          {r.is_active ? 'Active' : 'Archived'}
+                          {r.is_active ? t('updates.active') : t('updates.archived')}
                         </span>
                       </td>
                     </tr>
@@ -402,25 +426,25 @@ export const AgentUpdatesPage: React.FC<AgentUpdatesPageProps> = ({ activeTab: s
       {/* Tab 2: Campaigns */}
       {subTab === 'campaigns' && (
         <div className="table-card">
-          <DataTable label="Update campaigns">
+          <DataTable label={t('updates.campaigns_table_label')}>
             <table className="data-table">
               <thead>
                 <tr>
-                  <th>Campaign Name</th>
-                  <th>Target Version</th>
-                  <th>Scope</th>
-                  <th>Batch / Stagger</th>
-                  <th>Progress & Impact</th>
-                  <th>Status</th>
-                  <th>Created At</th>
-                  <th>Actions</th>
+                  <th>{t('updates.col_campaign_name')}</th>
+                  <th>{t('updates.col_target_version')}</th>
+                  <th>{t('updates.col_scope')}</th>
+                  <th>{t('updates.col_batch_stagger')}</th>
+                  <th>{t('updates.col_progress')}</th>
+                  <th>{t('updates.col_status')}</th>
+                  <th>{t('updates.col_created_at')}</th>
+                  <th>{t('updates.col_actions')}</th>
                 </tr>
               </thead>
               <tbody>
                 {campaigns.length === 0 ? (
                   <tr>
                     <td colSpan={8} className="text-center py-8 text-muted">
-                      No rollout campaigns created yet. Click "Launch Update Campaign" to roll out an upgrade.
+                      {t('updates.no_campaigns')}
                     </td>
                   </tr>
                 ) : (
@@ -438,10 +462,10 @@ export const AgentUpdatesPage: React.FC<AgentUpdatesPageProps> = ({ activeTab: s
                           <span className="font-semibold text-primary">v{c.target_version}</span>
                         </td>
                         <td>
-                          <span className="badge-target">{c.target_type}</span>
+                          <span className="badge-target">{TARGET_KEYS[c.target_type] ? t(TARGET_KEYS[c.target_type]) : c.target_type}</span>
                         </td>
                         <td className="text-sm">
-                          {c.batch_size} devs / {c.stagger_interval_sec}s
+                          {t('updates.batch_stagger', { batch: c.batch_size, stagger: c.stagger_interval_sec })}
                         </td>
                         <td>
                           {total > 0 ? (
@@ -449,9 +473,9 @@ export const AgentUpdatesPage: React.FC<AgentUpdatesPageProps> = ({ activeTab: s
                               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', marginBottom: 3 }}>
                                 <span className="font-semibold">{succ}/{total} ({percent}%)</span>
                                 <span>
-                                  <span className="text-success" title="Succeeded">✓{succ}</span>{' '}
-                                  {fail > 0 && <span className="text-danger" title="Failed">✗{fail} </span>}
-                                  {pend > 0 && <span className="text-warning" title="Pending">⧖{pend}</span>}
+                                  <span className="text-success" title={t('updates.succeeded')}>✓{succ}</span>{' '}
+                                  {fail > 0 && <span className="text-danger" title={t('updates.failed')}>✗{fail} </span>}
+                                  {pend > 0 && <span className="text-warning" title={t('updates.pending')}>⧖{pend}</span>}
                                 </span>
                               </div>
                               <div style={{ width: '100%', height: 6, background: 'var(--border-color, #e2e8f0)', borderRadius: 3, overflow: 'hidden' }}>
@@ -468,13 +492,13 @@ export const AgentUpdatesPage: React.FC<AgentUpdatesPageProps> = ({ activeTab: s
                             </div>
                           ) : (
                             <span className="text-sm text-muted">
-                              {c.status === 'completed' ? `Already v${c.target_version}` : '—'}
+                              {c.status === 'completed' ? t('updates.already_on', { version: c.target_version }) : '—'}
                             </span>
                           )}
                         </td>
                         <td>
                           <span className={`status-pill ${formatStatusPill(c.status)}`}>
-                            {c.status}
+                            {statusLabel(c.status)}
                           </span>
                         </td>
                         <td className="text-sm text-muted">{new Date(c.created_at).toLocaleString()}</td>
@@ -484,10 +508,10 @@ export const AgentUpdatesPage: React.FC<AgentUpdatesPageProps> = ({ activeTab: s
                               type="button"
                               className="btn-action"
                               onClick={() => handleOpenDetails(c)}
-                              title="Lihat rincian agen terdampak dan riwayat log real-time"
+                              title={t('updates.logs_impact_title')}
                             >
                               <FileText size={14} />
-                              <span>Logs & Impact</span>
+                              <span>{t('updates.logs_impact')}</span>
                             </button>
 
                             {canAdmin && (c.status === 'draft' || c.status === 'pending') && (
@@ -495,10 +519,10 @@ export const AgentUpdatesPage: React.FC<AgentUpdatesPageProps> = ({ activeTab: s
                                 type="button"
                                 className="btn-action"
                                 onClick={() => handleStartCampaign(c.id, c.name)}
-                                title="Dispatch update tasks to resolved target devices"
+                                title={t('updates.start_title')}
                               >
                                 <Play size={14} />
-                                <span>Start</span>
+                                <span>{t('updates.start')}</span>
                               </button>
                             )}
 
@@ -507,10 +531,10 @@ export const AgentUpdatesPage: React.FC<AgentUpdatesPageProps> = ({ activeTab: s
                                 type="button"
                                 className="btn-action text-danger"
                                 onClick={() => handleCancelCampaign(c.id, c.name)}
-                                title="Batalkan eksekusi campaign ini"
+                                title={t('updates.cancel_title')}
                               >
                                 <XCircle size={14} />
-                                <span>Cancel</span>
+                                <span>{t('common.cancel')}</span>
                               </button>
                             )}
                           </div>
@@ -530,7 +554,7 @@ export const AgentUpdatesPage: React.FC<AgentUpdatesPageProps> = ({ activeTab: s
         <Modal
           open={isDetailsModalOpen}
           onClose={() => setIsDetailsModalOpen(false)}
-          title={`Campaign: ${selectedCampaign.name}`}
+          title={t('updates.campaign_title', { name: selectedCampaign.name })}
           size="lg"
           footer={
             <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center' }}>
@@ -538,10 +562,10 @@ export const AgentUpdatesPage: React.FC<AgentUpdatesPageProps> = ({ activeTab: s
                 {selectedCampaign.status === 'in_progress' ? (
                   <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                     <RefreshCw size={14} className="spinning text-primary" />
-                    <span>Auto-refreshing real-time progress every 3s...</span>
+                    <span>{t('updates.auto_refreshing')}</span>
                   </span>
                 ) : (
-                  <span>Finished on {new Date(selectedCampaign.updated_at).toLocaleString()}</span>
+                  <span>{t('updates.finished_on', { date: new Date(selectedCampaign.updated_at).toLocaleString() })}</span>
                 )}
               </div>
               <div style={{ display: 'flex', gap: 8 }}>
@@ -552,7 +576,7 @@ export const AgentUpdatesPage: React.FC<AgentUpdatesPageProps> = ({ activeTab: s
                   disabled={detailsLoading}
                 >
                   <RefreshCw size={14} className={detailsLoading ? 'spinning' : ''} />
-                  <span>Refresh</span>
+                  <span>{t('updates.refresh')}</span>
                 </button>
                 {canAdmin && selectedCampaign.status === 'in_progress' && (
                   <button
@@ -561,11 +585,11 @@ export const AgentUpdatesPage: React.FC<AgentUpdatesPageProps> = ({ activeTab: s
                     onClick={() => handleCancelCampaign(selectedCampaign.id, selectedCampaign.name)}
                   >
                     <XCircle size={14} />
-                    <span>Cancel Rollout</span>
+                    <span>{t('updates.cancel_rollout')}</span>
                   </button>
                 )}
                 <button type="button" className="btn btn-secondary" onClick={() => setIsDetailsModalOpen(false)}>
-                  Close
+                  {t('common.close')}
                 </button>
               </div>
             </div>
@@ -586,35 +610,35 @@ export const AgentUpdatesPage: React.FC<AgentUpdatesPageProps> = ({ activeTab: s
               }}
             >
               <div>
-                <span className="form-label" style={{ marginBottom: 2 }}>Target Version</span>
+                <span className="form-label" style={{ marginBottom: 2 }}>{t('updates.col_target_version')}</span>
                 <span className="font-semibold text-primary" style={{ fontSize: '1.1rem' }}>v{selectedCampaign.target_version}</span>
               </div>
               <div>
-                <span className="form-label" style={{ marginBottom: 2 }}>Campaign Status</span>
+                <span className="form-label" style={{ marginBottom: 2 }}>{t('updates.campaign_status')}</span>
                 <span className={`status-pill ${formatStatusPill(selectedCampaign.status)}`}>
-                  {selectedCampaign.status}
+                  {statusLabel(selectedCampaign.status)}
                 </span>
               </div>
               <div>
-                <span className="form-label" style={{ marginBottom: 2 }}>Total Impacted</span>
-                <span className="font-semibold" style={{ fontSize: '1.1rem' }}>{campaignTasks.length} Devices</span>
+                <span className="form-label" style={{ marginBottom: 2 }}>{t('updates.total_impacted')}</span>
+                <span className="font-semibold" style={{ fontSize: '1.1rem' }}>{t('updates.devices_count', { count: campaignTasks.length })}</span>
               </div>
               <div>
-                <span className="form-label" style={{ marginBottom: 2 }}>Succeeded</span>
+                <span className="form-label" style={{ marginBottom: 2 }}>{t('updates.succeeded')}</span>
                 <span className="font-semibold text-success" style={{ fontSize: '1.1rem' }}>
-                  {campaignTasks.filter((t) => t.status === 'success').length}
+                  {campaignTasks.filter((task) => task.status === 'success').length}
                 </span>
               </div>
               <div>
-                <span className="form-label" style={{ marginBottom: 2 }}>In-Progress / Queued</span>
+                <span className="form-label" style={{ marginBottom: 2 }}>{t('updates.in_progress_queued')}</span>
                 <span className="font-semibold text-warning" style={{ fontSize: '1.1rem' }}>
-                  {campaignTasks.filter((t) => ['pending', 'dispatched', 'downloading', 'verifying', 'swapping'].includes(t.status)).length}
+                  {campaignTasks.filter((task) => ['pending', 'dispatched', 'downloading', 'verifying', 'swapping'].includes(task.status)).length}
                 </span>
               </div>
               <div>
-                <span className="form-label" style={{ marginBottom: 2 }}>Failed / Reverted</span>
+                <span className="form-label" style={{ marginBottom: 2 }}>{t('updates.failed_reverted')}</span>
                 <span className="font-semibold text-danger" style={{ fontSize: '1.1rem' }}>
-                  {campaignTasks.filter((t) => ['failed', 'rollback'].includes(t.status)).length}
+                  {campaignTasks.filter((task) => ['failed', 'rollback'].includes(task.status)).length}
                 </span>
               </div>
             </div>
@@ -627,7 +651,7 @@ export const AgentUpdatesPage: React.FC<AgentUpdatesPageProps> = ({ activeTab: s
                 onClick={() => setDetailSubTab('tasks')}
               >
                 <Monitor size={15} />
-                <span>Impacted Agents ({campaignTasks.length})</span>
+                <span>{t('updates.tab_impacted', { count: campaignTasks.length })}</span>
               </button>
               <button
                 type="button"
@@ -635,7 +659,7 @@ export const AgentUpdatesPage: React.FC<AgentUpdatesPageProps> = ({ activeTab: s
                 onClick={() => setDetailSubTab('logs')}
               >
                 <Terminal size={15} />
-                <span>Rollout Activity Logs ({campaignLogs.length})</span>
+                <span>{t('updates.tab_logs', { count: campaignLogs.length })}</span>
               </button>
             </div>
 
@@ -644,18 +668,18 @@ export const AgentUpdatesPage: React.FC<AgentUpdatesPageProps> = ({ activeTab: s
               <div>
                 {detailsLoading && campaignTasks.length === 0 ? (
                   <div className="py-8 text-center text-muted">
-                    <RefreshCw size={20} className="spinning inline-block" /> Memuat data perangkat terdampak...
+                    <RefreshCw size={20} className="spinning inline-block" /> {t('updates.loading_impacted')}
                   </div>
                 ) : campaignTasks.length === 0 ? (
                   <div className="py-8 text-center text-muted">
                     {selectedCampaign.status === 'completed' ? (
                       <div>
                         <CheckCircle2 size={32} className="text-success inline-block mb-2" />
-                        <p className="font-semibold">Semua perangkat target telah menggunakan Agent v{selectedCampaign.target_version}.</p>
-                        <p className="text-sm">Tidak ada task yang perlu dieksekusi.</p>
+                        <p className="font-semibold">{t('updates.all_on_version', { version: selectedCampaign.target_version })}</p>
+                        <p className="text-sm">{t('updates.no_tasks_needed')}</p>
                       </div>
                     ) : (
-                      <p>Belum ada task pembaruan yang dibuat untuk campaign ini. Tekan tombol "Start" untuk mendistribusikan.</p>
+                      <p>{t('updates.no_tasks_yet')}</p>
                     )}
                   </div>
                 ) : (
@@ -663,17 +687,17 @@ export const AgentUpdatesPage: React.FC<AgentUpdatesPageProps> = ({ activeTab: s
                     <table className="data-table">
                       <thead>
                         <tr>
-                          <th>Hostname & Device</th>
-                          <th>Platform</th>
-                          <th>Version Shift</th>
-                          <th>Update Status</th>
-                          <th>Catatan / Diagnostic</th>
-                          <th>Completed At</th>
+                          <th>{t('updates.col_hostname_device')}</th>
+                          <th>{t('updates.col_platform_short')}</th>
+                          <th>{t('updates.col_version_shift')}</th>
+                          <th>{t('updates.col_update_status')}</th>
+                          <th>{t('updates.col_notes')}</th>
+                          <th>{t('updates.col_completed_at')}</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {campaignTasks.map((t) => (
-                          <tr key={t.id}>
+                        {campaignTasks.map((task) => (
+                          <tr key={task.id}>
                             <td>
                               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                                 <span
@@ -681,61 +705,61 @@ export const AgentUpdatesPage: React.FC<AgentUpdatesPageProps> = ({ activeTab: s
                                     width: 8,
                                     height: 8,
                                     borderRadius: '50%',
-                                    background: t.device_online_status === 'online' ? '#10b981' : '#94a3b8',
+                                    background: task.device_online_status === 'online' ? '#10b981' : '#94a3b8',
                                     display: 'inline-block',
                                   }}
-                                  title={t.device_online_status === 'online' ? 'Online' : 'Offline'}
+                                  title={task.device_online_status === 'online' ? t('updates.online') : t('updates.offline')}
                                 />
-                                <span className="font-semibold text-main">{t.hostname || t.device_id}</span>
+                                <span className="font-semibold text-main">{task.hostname || task.device_id}</span>
                               </div>
-                              <span className="font-mono text-dim" style={{ fontSize: '0.75rem' }}>{t.device_id.slice(0, 12)}...</span>
+                              <span className="font-mono text-dim" style={{ fontSize: '0.75rem' }}>{task.device_id.slice(0, 12)}...</span>
                             </td>
                             <td>
-                              <span className="os-badge">{t.os_name || 'windows'}</span>
+                              <span className="os-badge">{task.os_name || 'windows'}</span>
                             </td>
                             <td>
-                              <span className="text-muted" style={{ fontSize: '0.85rem' }}>v{t.from_version}</span>
+                              <span className="text-muted" style={{ fontSize: '0.85rem' }}>v{task.from_version}</span>
                               <span style={{ margin: '0 4px' }}>→</span>
-                              <span className="font-semibold text-primary" style={{ fontSize: '0.85rem' }}>v{t.target_version}</span>
+                              <span className="font-semibold text-primary" style={{ fontSize: '0.85rem' }}>v{task.target_version}</span>
                             </td>
                             <td>
-                              <span className={`status-pill ${formatStatusPill(t.status)}`}>
-                                {t.status}
+                              <span className={`status-pill ${formatStatusPill(task.status)}`}>
+                                {statusLabel(task.status)}
                               </span>
                             </td>
                             <td style={{ maxWidth: 220 }}>
-                              {t.error_message ? (
+                              {task.error_message ? (
                                 <span className="text-danger" style={{ fontSize: '0.8rem', wordBreak: 'break-word' }}>
-                                  {t.error_message}
+                                  {task.error_message}
                                 </span>
-                              ) : t.status === 'success' ? (
+                              ) : task.status === 'success' ? (
                                 <span className="text-success" style={{ fontSize: '0.8rem' }}>
-                                  Berhasil terupdate ke v{t.target_version}
+                                  {t('updates.note_success', { version: task.target_version })}
                                 </span>
-                              ) : t.status === 'swapping' ? (
+                              ) : task.status === 'swapping' ? (
                                 <span className="text-warning" style={{ fontSize: '0.8rem' }}>
-                                  Mengganti biner dan me-restart agent
+                                  {t('updates.note_swapping')}
                                 </span>
-                              ) : t.status === 'downloading' ? (
+                              ) : task.status === 'downloading' ? (
                                 <span className="text-warning" style={{ fontSize: '0.8rem' }}>
-                                  Sedang mengunduh file biner...
+                                  {t('updates.note_downloading')}
                                 </span>
-                              ) : t.status === 'verifying' ? (
+                              ) : task.status === 'verifying' ? (
                                 <span className="text-warning" style={{ fontSize: '0.8rem' }}>
-                                  Verifikasi checksum & digital signature
+                                  {t('updates.note_verifying')}
                                 </span>
-                              ) : t.status === 'dispatched' ? (
+                              ) : task.status === 'dispatched' ? (
                                 <span className="text-muted" style={{ fontSize: '0.8rem' }}>
-                                  Terkirim via websocket ke agent
+                                  {t('updates.note_dispatched')}
                                 </span>
                               ) : (
                                 <span className="text-muted" style={{ fontSize: '0.8rem' }}>
-                                  Antrean pending (menunggu agent online)
+                                  {t('updates.note_pending')}
                                 </span>
                               )}
                             </td>
                             <td className="text-sm text-muted">
-                              {t.completed_at ? new Date(t.completed_at).toLocaleTimeString() : t.dispatched_at ? new Date(t.dispatched_at).toLocaleTimeString() : '—'}
+                              {task.completed_at ? new Date(task.completed_at).toLocaleTimeString() : task.dispatched_at ? new Date(task.dispatched_at).toLocaleTimeString() : '—'}
                             </td>
                           </tr>
                         ))}
@@ -751,7 +775,7 @@ export const AgentUpdatesPage: React.FC<AgentUpdatesPageProps> = ({ activeTab: s
               <div>
                 {campaignLogs.length === 0 ? (
                   <div className="py-8 text-center text-muted">
-                    Belum ada rekaman audit log untuk campaign ini.
+                    {t('updates.no_logs')}
                   </div>
                 ) : (
                   <div
@@ -807,10 +831,10 @@ export const AgentUpdatesPage: React.FC<AgentUpdatesPageProps> = ({ activeTab: s
                             {typeof parsedDetails === 'object' && parsedDetails !== null ? (
                               <span>
                                 {parsedDetails.reason && <span>{parsedDetails.reason} </span>}
-                                {parsedDetails.status && <span>Status: {parsedDetails.status} </span>}
-                                {parsedDetails.error && <span style={{ color: '#f87171' }}>Error: {parsedDetails.error} </span>}
-                                {parsedDetails.version && <span>Target: v{parsedDetails.version} </span>}
-                                {parsedDetails.task_id && <span style={{ color: '#94a3b8' }}>(task: {parsedDetails.task_id.slice(0, 8)})</span>}
+                                {parsedDetails.status && <span>{t('updates.log_status', { status: parsedDetails.status })} </span>}
+                                {parsedDetails.error && <span style={{ color: '#f87171' }}>{t('updates.log_error', { error: parsedDetails.error })} </span>}
+                                {parsedDetails.version && <span>{t('updates.log_target', { version: parsedDetails.version })} </span>}
+                                {parsedDetails.task_id && <span style={{ color: '#94a3b8' }}>{t('updates.log_task', { id: parsedDetails.task_id.slice(0, 8) })}</span>}
                               </span>
                             ) : (
                               String(log.details)
@@ -831,15 +855,15 @@ export const AgentUpdatesPage: React.FC<AgentUpdatesPageProps> = ({ activeTab: s
       <Modal
         open={isReleaseModalOpen}
         onClose={() => setIsReleaseModalOpen(false)}
-        title="Publish Agent Binary Release"
+        title={t('updates.publish_modal_title')}
         size="md"
         footer={
           <>
             <button type="button" className="btn btn-secondary" onClick={() => setIsReleaseModalOpen(false)}>
-              Cancel
+              {t('common.cancel')}
             </button>
             <button type="submit" form="agent-release-form" className="btn btn-primary" disabled={uploading}>
-              {uploading ? 'Uploading & Hashing...' : 'Publish Release'}
+              {uploading ? t('updates.uploading') : t('updates.publish_release')}
             </button>
           </>
         }
@@ -847,14 +871,14 @@ export const AgentUpdatesPage: React.FC<AgentUpdatesPageProps> = ({ activeTab: s
         <form id="agent-release-form" onSubmit={handleUploadRelease}>
           <div className="form-group">
             <label className="form-label" htmlFor="rel-version">
-              Version Number
+              {t('updates.version_number')}
             </label>
             <input
               id="rel-version"
               type="text"
               className="form-input"
               required
-              placeholder="e.g. 1.2.0"
+              placeholder={t('updates.version_placeholder')}
               value={relVersion}
               onChange={(e) => setRelVersion(e.target.value)}
             />
@@ -862,7 +886,7 @@ export const AgentUpdatesPage: React.FC<AgentUpdatesPageProps> = ({ activeTab: s
           <div className="form-row">
             <div className="form-field">
               <label className="form-label" htmlFor="rel-os">
-                Target OS
+                {t('updates.target_os')}
               </label>
               <select id="rel-os" className="form-select" value={relOS} onChange={(e) => setRelOS(e.target.value)}>
                 <option value="windows">Windows</option>
@@ -872,7 +896,7 @@ export const AgentUpdatesPage: React.FC<AgentUpdatesPageProps> = ({ activeTab: s
             </div>
             <div className="form-field">
               <label className="form-label" htmlFor="rel-arch">
-                Architecture
+                {t('updates.architecture')}
               </label>
               <select id="rel-arch" className="form-select" value={relArch} onChange={(e) => setRelArch(e.target.value)}>
                 <option value="amd64">x86_64 (amd64)</option>
@@ -882,7 +906,7 @@ export const AgentUpdatesPage: React.FC<AgentUpdatesPageProps> = ({ activeTab: s
           </div>
           <div className="form-group">
             <label className="form-label" htmlFor="rel-file">
-              Executable Binary File
+              {t('updates.binary_file')}
             </label>
             <input
               id="rel-file"
@@ -895,17 +919,17 @@ export const AgentUpdatesPage: React.FC<AgentUpdatesPageProps> = ({ activeTab: s
                 }
               }}
             />
-            <span className="form-hint">Server will calculate and verify SHA-256 checksum automatically.</span>
+            <span className="form-hint">{t('updates.binary_hint')}</span>
           </div>
           <div className="form-group">
             <label className="form-label" htmlFor="rel-changelog">
-              Changelog / Release Notes
+              {t('updates.changelog')}
             </label>
             <textarea
               id="rel-changelog"
               className="form-textarea"
               rows={3}
-              placeholder="Summary of bug fixes, enhancements, or security patches..."
+              placeholder={t('updates.changelog_placeholder')}
               value={relChangelog}
               onChange={(e) => setRelChangelog(e.target.value)}
             />
@@ -917,15 +941,15 @@ export const AgentUpdatesPage: React.FC<AgentUpdatesPageProps> = ({ activeTab: s
       <Modal
         open={isCampaignModalOpen}
         onClose={() => setIsCampaignModalOpen(false)}
-        title="Launch Phased Rollout Campaign"
+        title={t('updates.launch_modal_title')}
         size="md"
         footer={
           <>
             <button type="button" className="btn btn-secondary" onClick={() => setIsCampaignModalOpen(false)}>
-              Cancel
+              {t('common.cancel')}
             </button>
             <button type="submit" form="update-campaign-form" className="btn btn-primary">
-              Start Campaign
+              {t('updates.start_campaign')}
             </button>
           </>
         }
@@ -933,21 +957,21 @@ export const AgentUpdatesPage: React.FC<AgentUpdatesPageProps> = ({ activeTab: s
         <form id="update-campaign-form" onSubmit={handleCreateCampaign}>
           <div className="form-group">
             <label className="form-label" htmlFor="campaign-name">
-              Campaign Name
+              {t('updates.col_campaign_name')}
             </label>
             <input
               id="campaign-name"
               type="text"
               className="form-input"
               required
-              placeholder="e.g. Q4 2026 Fleet Upgrade to v1.2.0"
+              placeholder={t('updates.campaign_name_placeholder')}
               value={newCampaign.name}
               onChange={(e) => setNewCampaign({ ...newCampaign, name: e.target.value })}
             />
           </div>
           <div className="form-group">
             <label className="form-label" htmlFor="campaign-version">
-              Target Release Version
+              {t('updates.target_release_version')}
             </label>
             <select
               id="campaign-version"
@@ -956,7 +980,7 @@ export const AgentUpdatesPage: React.FC<AgentUpdatesPageProps> = ({ activeTab: s
               value={newCampaign.target_version}
               onChange={(e) => setNewCampaign({ ...newCampaign, target_version: e.target.value })}
             >
-              <option value="">-- Select Release Version --</option>
+              <option value="">{t('updates.select_version')}</option>
               {Array.from(new Set(releases.map((r) => r.version))).map((v) => (
                 <option key={v} value={v}>
                   v{v}
@@ -966,7 +990,7 @@ export const AgentUpdatesPage: React.FC<AgentUpdatesPageProps> = ({ activeTab: s
           </div>
           <div className="form-group">
             <label className="form-label" htmlFor="campaign-scope">
-              Rollout Scope
+              {t('updates.rollout_scope')}
             </label>
             <select
               id="campaign-scope"
@@ -974,14 +998,14 @@ export const AgentUpdatesPage: React.FC<AgentUpdatesPageProps> = ({ activeTab: s
               value={newCampaign.target_type}
               onChange={(e) => setNewCampaign({ ...newCampaign, target_type: e.target.value })}
             >
-              <option value="all">Entire Fleet (All Connected Agents)</option>
-              <option value="group">Branch Site / Device Group</option>
+              <option value="all">{t('updates.scope_all')}</option>
+              <option value="group">{t('updates.scope_group')}</option>
             </select>
           </div>
           <div className="form-row">
             <div className="form-field">
               <label className="form-label" htmlFor="campaign-batch">
-                Batch Size (Devices / Wave)
+                {t('updates.batch_size')}
               </label>
               <input
                 id="campaign-batch"
@@ -994,7 +1018,7 @@ export const AgentUpdatesPage: React.FC<AgentUpdatesPageProps> = ({ activeTab: s
             </div>
             <div className="form-field">
               <label className="form-label" htmlFor="campaign-stagger">
-                Stagger Interval (Seconds)
+                {t('updates.stagger_interval')}
               </label>
               <input
                 id="campaign-stagger"

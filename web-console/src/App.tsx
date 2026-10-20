@@ -9,6 +9,7 @@ import { AuthProvider, useAuth } from './context/AuthContext'
 import { ThemeProvider } from './context/ThemeContext'
 import { ToastProvider } from './context/ToastContext'
 import { I18nProvider } from './i18n/I18nContext'
+import { useT } from './i18n/core'
 import { usePermission } from './hooks/usePermission'
 import { LoginPage } from './pages/LoginPage'
 import type { DeviceDTO } from './types/api'
@@ -34,31 +35,35 @@ const UsersPage = lazy(() => import('./pages/UsersPage').then(m => ({ default: m
 
 function Restricted({ role, children }: { role: 'technician' | 'admin'; children: ReactNode }) {
   const { can } = usePermission()
-  return can(role) ? children : <div className="empty-state" role="alert"><h1>Access restricted</h1><p>This page requires {role} access.</p><Link to="/dashboard">Return to dashboard</Link></div>
+  const { t } = useT()
+  return can(role) ? children : <div className="empty-state" role="alert"><h1>{t('app.access_restricted')}</h1><p>{t('app.requires_role', { role: t(`app.role_${role}`) })}</p><Link to="/dashboard">{t('app.return_to_dashboard')}</Link></div>
 }
 
 /** Human name for the error boundary's headline, keyed off the first path segment. */
-const PAGE_LABELS: Record<string, string> = {
-  dashboard: 'Dashboard',
-  devices: 'Devices',
-  software: 'Software',
-  scheduler: 'Scheduler',
-  assets: 'Assets & licenses',
-  updates: 'Agent updates',
-  patches: 'Patch management',
-  maintenance: 'Maintenance',
-  remotecontrol: 'Remote control',
-  filter: 'Network filter',
-  'system-policy': 'Group policy',
-  alerts: 'Alerts',
-  reports: 'Reports',
-  users: 'User management',
-  audit: 'Audit trail',
-  log: 'Server log',
-  settings: 'Settings',
+const PAGE_LABEL_KEYS: Record<string, string> = {
+  dashboard: 'app.page_dashboard',
+  devices: 'app.page_devices',
+  software: 'app.page_software',
+  scheduler: 'app.page_scheduler',
+  assets: 'app.page_assets',
+  updates: 'app.page_updates',
+  patches: 'app.page_patches',
+  maintenance: 'app.page_maintenance',
+  remotecontrol: 'app.page_remotecontrol',
+  filter: 'app.page_filter',
+  'system-policy': 'app.page_system_policy',
+  alerts: 'app.page_alerts',
+  reports: 'app.page_reports',
+  users: 'app.page_users',
+  audit: 'app.page_audit',
+  log: 'app.page_log',
+  settings: 'app.page_settings',
 }
 
-const pageLabel = (pathname: string) => PAGE_LABELS[pathname.split('/')[1]] ?? 'This page'
+const pageLabel = (pathname: string, t: (key: string) => string) => {
+  const key = PAGE_LABEL_KEYS[pathname.split('/')[1]]
+  return key ? t(key) : t('app.page_this')
+}
 
 function SubtabPage({ section }: { section: 'software' | 'scheduler' | 'assets' | 'updates' | 'settings' }) {
   const { tab } = useParams()
@@ -90,8 +95,9 @@ function ConsoleRoot() {
   const [termDevice, setTermDevice] = useState<DeviceDTO | null>(null)
   const [termShell, setTermShell] = useState('powershell')
   const [rcDevice, setRcDevice] = useState<DeviceDTO | null>(null)
+  const { t } = useT()
 
-  if (loading) return <div className="app-loading-screen" role="status"><div className="app-loading-spinner" /><p>Opening workspace…</p></div>
+  if (loading) return <div className="app-loading-screen" role="status"><div className="app-loading-spinner" /><p>{t('app.opening_workspace')}</p></div>
   if (!isAuthenticated) return location.pathname === '/login'
     ? <LoginPage /> : <Navigate to="/login" replace state={{ from: location.pathname + location.search }} />
   if (location.pathname === '/login') {
@@ -102,8 +108,8 @@ function ConsoleRoot() {
   return <ConsoleShell>
     {/* Inside the shell, not around it: a page that throws must not take the
         sidebar and topbar with it. */}
-    <ErrorBoundary label={pageLabel(location.pathname)}>
-      <Suspense fallback={<div className="page-loader" role="status"><div className="app-loading-spinner" /><p className="text-sm text-slate-500 mt-2">Loading...</p></div>}>
+    <ErrorBoundary label={pageLabel(location.pathname, t)}>
+      <Suspense fallback={<div className="page-loader" role="status"><div className="app-loading-spinner" /><p className="text-sm text-slate-500 mt-2">{t('common.loading')}</p></div>}>
         <Routes>
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
           <Route path="/dashboard" element={<DashboardPage />} />
@@ -123,7 +129,7 @@ function ConsoleRoot() {
           <Route path="/audit" element={<Restricted role="technician"><AuditPage /></Restricted>} />
           <Route path="/log" element={<Restricted role="admin"><LogPage /></Restricted>} />
           <Route path="/settings/:tab?" element={<Restricted role="admin"><SubtabPage section="settings" /></Restricted>} />
-          <Route path="*" element={<div className="empty-state"><h1>Page not found</h1><Link to="/dashboard">Return to dashboard</Link></div>} />
+          <Route path="*" element={<div className="empty-state"><h1>{t('app.page_not_found')}</h1><Link to="/dashboard">{t('app.return_to_dashboard')}</Link></div>} />
         </Routes>
       </Suspense>
     </ErrorBoundary>

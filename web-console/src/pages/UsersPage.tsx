@@ -15,11 +15,21 @@ import { Modal } from '../components/ui/Modal'
 import { usePermission } from '../hooks/usePermission'
 import { api } from '../services/api'
 import { useToast } from '../context/ToastContext'
+import { useT } from '../i18n/core'
 import type { UserDTO } from '../types/api'
 
 type Role = 'admin' | 'technician' | 'viewer'
 
+// Display label key per role value. The value is what the API stores; only the
+// label is translated, at render.
+const ROLE_KEYS: Record<string, string> = {
+  admin: 'users.role_admin',
+  technician: 'users.role_technician',
+  viewer: 'users.role_viewer',
+}
+
 export const UsersPage: React.FC = () => {
+  const { t } = useT()
   const { can } = usePermission()
   // Every /api/users route except the self-service password change is admin
   // only, so a technician gets an explanation rather than a 403 on load.
@@ -52,6 +62,8 @@ export const UsersPage: React.FC = () => {
   const [resetPassword, setResetPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
 
+  const roleLabel = (role: string) => (ROLE_KEYS[role] ? t(ROLE_KEYS[role]) : role)
+
   const loadUsers = useCallback(async () => {
     setLoading(true)
     try {
@@ -59,7 +71,7 @@ export const UsersPage: React.FC = () => {
     } catch (err: unknown) {
       setMsg({
         type: 'error',
-        text: err instanceof Error ? err.message : 'Failed to load user accounts',
+        text: err instanceof Error ? err.message : t('users.load_failed'),
       })
     } finally {
       setLoading(false)
@@ -81,18 +93,18 @@ export const UsersPage: React.FC = () => {
         password: newPassword,
         role: newRole,
       })
-      const successText = `User account '${newUsername}' created successfully.`
+      const successText = t('users.created', { username: newUsername })
       setMsg({ type: 'success', text: successText })
-      toast.success(successText, 'User Created')
+      toast.success(successText, t('users.toast_created'))
       setIsCreateModalOpen(false)
       setNewUsername('')
       setNewDisplayName('')
       setNewPassword('')
       loadUsers()
     } catch (err: unknown) {
-      const errorText = err instanceof Error ? err.message : 'Failed to create user'
+      const errorText = err instanceof Error ? err.message : t('users.create_failed')
       setMsg({ type: 'error', text: errorText })
-      toast.error(errorText, 'Creation Failed')
+      toast.error(errorText, t('users.toast_create_failed'))
     } finally {
       setSaving(false)
     }
@@ -116,15 +128,15 @@ export const UsersPage: React.FC = () => {
         display_name: editDisplayName,
         role: editRole,
       })
-      const successText = `User '${selectedUser.username}' updated.`
+      const successText = t('users.updated', { username: selectedUser.username })
       setMsg({ type: 'success', text: successText })
-      toast.success(successText, 'User Updated')
+      toast.success(successText, t('users.toast_updated'))
       setIsEditModalOpen(false)
       loadUsers()
     } catch (err: unknown) {
-      const errorText = err instanceof Error ? err.message : 'Failed to update user'
+      const errorText = err instanceof Error ? err.message : t('users.update_failed')
       setMsg({ type: 'error', text: errorText })
-      toast.error(errorText, 'Update Failed')
+      toast.error(errorText, t('users.toast_update_failed'))
     } finally {
       setSaving(false)
     }
@@ -141,27 +153,27 @@ export const UsersPage: React.FC = () => {
     e.preventDefault()
     if (!selectedUser) return
     if (resetPassword !== confirmPassword) {
-      setMsg({ type: 'error', text: 'Passwords do not match!' })
-      toast.warning('Passwords do not match', 'Validation Error')
+      setMsg({ type: 'error', text: t('users.passwords_mismatch_banner') })
+      toast.warning(t('users.passwords_mismatch'), t('users.toast_validation_error'))
       return
     }
     if (resetPassword.length < 8) {
-      setMsg({ type: 'error', text: 'Password must be at least 8 characters long.' })
-      toast.warning('Password must be at least 8 characters long.', 'Validation Error')
+      setMsg({ type: 'error', text: t('users.password_too_short') })
+      toast.warning(t('users.password_too_short'), t('users.toast_validation_error'))
       return
     }
 
     setSaving(true)
     try {
       await api.adminResetPassword(selectedUser.id, resetPassword)
-      const successText = `Password for '${selectedUser.username}' updated successfully.`
+      const successText = t('users.password_updated', { username: selectedUser.username })
       setMsg({ type: 'success', text: successText })
-      toast.success(successText, 'Password Reset')
+      toast.success(successText, t('users.toast_password_reset'))
       setIsPasswordModalOpen(false)
     } catch (err: unknown) {
-      const errorText = err instanceof Error ? err.message : 'Failed to reset password'
+      const errorText = err instanceof Error ? err.message : t('users.password_reset_failed')
       setMsg({ type: 'error', text: errorText })
-      toast.error(errorText, 'Reset Failed')
+      toast.error(errorText, t('users.toast_reset_failed'))
     } finally {
       setSaving(false)
     }
@@ -172,15 +184,15 @@ export const UsersPage: React.FC = () => {
     setDeactivating(true)
     try {
       await api.deactivateUser(deactivateTarget.id)
-      const infoText = `User '${deactivateTarget.username}' deactivated.`
+      const infoText = t('users.deactivated', { username: deactivateTarget.username })
       setMsg({ type: 'success', text: infoText })
-      toast.info(infoText, 'Account Deactivated')
+      toast.info(infoText, t('users.toast_deactivated'))
       setDeactivateTarget(null)
       loadUsers()
     } catch (err: unknown) {
-      const errorText = err instanceof Error ? err.message : 'Failed to deactivate user'
+      const errorText = err instanceof Error ? err.message : t('users.deactivate_failed')
       setMsg({ type: 'error', text: errorText })
-      toast.error(errorText, 'Deactivation Failed')
+      toast.error(errorText, t('users.toast_deactivate_failed'))
     } finally {
       setDeactivating(false)
     }
@@ -191,18 +203,16 @@ export const UsersPage: React.FC = () => {
       <div className="page-container">
         <div className="page-header">
           <div>
-            <h2 className="page-title">User Accounts &amp; RBAC Permissions</h2>
+            <h2 className="page-title">{t('users.title')}</h2>
             <p className="page-subtitle">
-              Enterprise role-based access control, operator identity management, and credential
-              provisioning
+              {t('users.subtitle')}
             </p>
           </div>
         </div>
         <div className="alert-banner alert-error" role="status">
           <ShieldAlert size={18} />
           <span>
-            Operator accounts are administrator-only. Your role can read the audit trail, not
-            manage users.
+            {t('users.admin_only')}
           </span>
         </div>
       </div>
@@ -213,10 +223,9 @@ export const UsersPage: React.FC = () => {
     <div className="page-container">
       <div className="page-header">
         <div>
-          <h2 className="page-title">User Accounts &amp; RBAC Permissions</h2>
+          <h2 className="page-title">{t('users.title')}</h2>
           <p className="page-subtitle">
-            Enterprise role-based access control, operator identity management, and credential
-            provisioning
+            {t('users.subtitle')}
           </p>
         </div>
         <div className="header-controls">
@@ -227,7 +236,7 @@ export const UsersPage: React.FC = () => {
             disabled={loading}
           >
             <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
-            <span>Refresh</span>
+            <span>{t('users.refresh')}</span>
           </button>
           <button
             type="button"
@@ -235,7 +244,7 @@ export const UsersPage: React.FC = () => {
             onClick={() => setIsCreateModalOpen(true)}
           >
             <UserPlus size={16} />
-            <span>Create User</span>
+            <span>{t('users.create_user')}</span>
           </button>
         </div>
       </div>
@@ -250,7 +259,7 @@ export const UsersPage: React.FC = () => {
             type="button"
             onClick={() => setMsg(null)}
             className="close-btn"
-            aria-label="Dismiss notification"
+            aria-label={t('users.dismiss_notification')}
           >
             <X size={14} />
           </button>
@@ -259,41 +268,41 @@ export const UsersPage: React.FC = () => {
 
       {/* Users Table */}
       <div className="table-card">
-        <DataTable label="Console operator accounts">
+        <DataTable label={t('users.table_label')}>
           <thead>
             <tr>
-              <th>Username</th>
-              <th>Display Name</th>
-              <th>Assigned Role</th>
-              <th>Account Status</th>
-              <th>Last Login</th>
-              <th>Actions</th>
+              <th>{t('users.col_username')}</th>
+              <th>{t('users.col_display_name')}</th>
+              <th>{t('users.col_role')}</th>
+              <th>{t('users.col_status')}</th>
+              <th>{t('users.col_last_login')}</th>
+              <th>{t('users.col_actions')}</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
               <tr>
                 <td colSpan={6} className="text-center py-8 text-muted">
-                  Loading accounts…
+                  {t('users.loading')}
                 </td>
               </tr>
             ) : users.length === 0 ? (
               <tr>
                 <td colSpan={6} className="text-center py-8 text-muted">
-                  No users found.
+                  {t('users.empty')}
                 </td>
               </tr>
             ) : (
               users.map((u) => (
                 <tr key={u.id}>
-                  <td data-label="Username">
+                  <td data-label={t('users.col_username')}>
                     <div className="font-semibold text-main flex items-center gap-2">
                       <Users size={16} className="text-primary" />
                       <span>{u.username}</span>
                     </div>
                   </td>
-                  <td data-label="Display Name">{u.display_name || '—'}</td>
-                  <td data-label="Assigned Role">
+                  <td data-label={t('users.col_display_name')}>{u.display_name || '—'}</td>
+                  <td data-label={t('users.col_role')}>
                     <span
                       className={`badge-role ${
                         u.role === 'admin'
@@ -303,48 +312,48 @@ export const UsersPage: React.FC = () => {
                             : 'role-viewer'
                       }`}
                     >
-                      {u.role.toUpperCase()}
+                      {roleLabel(u.role).toUpperCase()}
                     </span>
                   </td>
-                  <td data-label="Account Status">
+                  <td data-label={t('users.col_status')}>
                     <span className={`status-pill ${u.is_active ? 'online' : 'offline'}`}>
-                      {u.is_active ? 'active' : 'deactivated'}
+                      {u.is_active ? t('users.status_active') : t('users.status_deactivated')}
                     </span>
                   </td>
-                  <td data-label="Last Login" className="text-sm text-muted">
+                  <td data-label={t('users.col_last_login')} className="text-sm text-muted">
                     {u.last_login_at
                       ? new Date(u.last_login_at).toLocaleString()
-                      : 'Never signed in'}
+                      : t('users.never_signed_in')}
                   </td>
-                  <td data-label="Actions">
+                  <td data-label={t('users.col_actions')}>
                     <div className="action-buttons">
                       <button
                         type="button"
                         className="btn-action"
                         onClick={() => handleOpenEdit(u)}
-                        title="Edit role / name"
+                        title={t('users.edit_title')}
                       >
                         <Edit2 size={14} />
-                        <span>Edit</span>
+                        <span>{t('users.edit')}</span>
                       </button>
                       <button
                         type="button"
                         className="btn-action text-warning"
                         onClick={() => handleOpenPasswordReset(u)}
-                        title="Reset password"
+                        title={t('users.reset_password_title')}
                       >
                         <Key size={14} />
-                        <span>Password</span>
+                        <span>{t('users.password')}</span>
                       </button>
                       {u.is_active && u.username !== 'admin' && (
                         <button
                           type="button"
                           className="btn-action text-danger"
                           onClick={() => setDeactivateTarget(u)}
-                          title="Deactivate account"
+                          title={t('users.deactivate_title')}
                         >
                           <UserX size={14} />
-                          <span>Deactivate</span>
+                          <span>{t('users.deactivate')}</span>
                         </button>
                       )}
                     </div>
@@ -360,7 +369,7 @@ export const UsersPage: React.FC = () => {
       <Modal
         open={isCreateModalOpen}
         onClose={() => setIsCreateModalOpen(false)}
-        title="Create Console Operator Account"
+        title={t('users.create_modal_title')}
         size="md"
         footer={
           <>
@@ -369,7 +378,7 @@ export const UsersPage: React.FC = () => {
               className="btn btn-secondary"
               onClick={() => setIsCreateModalOpen(false)}
             >
-              Cancel
+              {t('common.cancel')}
             </button>
             <button
               type="submit"
@@ -377,7 +386,7 @@ export const UsersPage: React.FC = () => {
               className="btn btn-primary"
               disabled={saving}
             >
-              {saving ? 'Creating…' : 'Create User'}
+              {saving ? t('users.creating') : t('users.create_user')}
             </button>
           </>
         }
@@ -387,35 +396,35 @@ export const UsersPage: React.FC = () => {
         <form id="create-user-form" onSubmit={handleCreateUser} className="space-y-4">
           <div className="form-group">
             <label className="form-label" htmlFor="new-username">
-              Username
+              {t('users.col_username')}
             </label>
             <input
               id="new-username"
               type="text"
               className="form-input"
               required
-              placeholder="e.g. jdoe"
+              placeholder={t('users.placeholder_username')}
               value={newUsername}
               onChange={(e) => setNewUsername(e.target.value)}
             />
           </div>
           <div className="form-group">
             <label className="form-label" htmlFor="new-display-name">
-              Display Name
+              {t('users.col_display_name')}
             </label>
             <input
               id="new-display-name"
               type="text"
               className="form-input"
               required
-              placeholder="e.g. John Doe"
+              placeholder={t('users.placeholder_display_name')}
               value={newDisplayName}
               onChange={(e) => setNewDisplayName(e.target.value)}
             />
           </div>
           <div className="form-group">
             <label className="form-label" htmlFor="new-password">
-              Temporary Password
+              {t('users.temporary_password')}
             </label>
             <input
               id="new-password"
@@ -423,14 +432,14 @@ export const UsersPage: React.FC = () => {
               className="form-input"
               required
               minLength={8}
-              placeholder="Min 8 characters"
+              placeholder={t('users.placeholder_min_chars')}
               value={newPassword}
               onChange={(e) => setNewPassword(e.target.value)}
             />
           </div>
           <div className="form-group">
             <label className="form-label" htmlFor="new-role">
-              RBAC Role
+              {t('users.rbac_role')}
             </label>
             <select
               id="new-role"
@@ -438,9 +447,9 @@ export const UsersPage: React.FC = () => {
               value={newRole}
               onChange={(e) => setNewRole(e.target.value as Role)}
             >
-              <option value="technician">Technician / Operator (Deploy, Exec, Patches)</option>
-              <option value="admin">Administrator (Full Access &amp; User Mgmt)</option>
-              <option value="viewer">Viewer (Read-only)</option>
+              <option value="technician">{t('users.option_technician_long')}</option>
+              <option value="admin">{t('users.option_admin_long')}</option>
+              <option value="viewer">{t('users.option_viewer')}</option>
             </select>
           </div>
         </form>
@@ -450,7 +459,7 @@ export const UsersPage: React.FC = () => {
       <Modal
         open={isEditModalOpen && Boolean(selectedUser)}
         onClose={() => setIsEditModalOpen(false)}
-        title={selectedUser ? `Edit User: ${selectedUser.username}` : ''}
+        title={selectedUser ? t('users.edit_modal_title', { username: selectedUser.username }) : ''}
         size="md"
         footer={
           <>
@@ -459,7 +468,7 @@ export const UsersPage: React.FC = () => {
               className="btn btn-secondary"
               onClick={() => setIsEditModalOpen(false)}
             >
-              Cancel
+              {t('common.cancel')}
             </button>
             <button
               type="submit"
@@ -467,7 +476,7 @@ export const UsersPage: React.FC = () => {
               className="btn btn-primary"
               disabled={saving}
             >
-              {saving ? 'Saving…' : 'Save Changes'}
+              {saving ? t('users.saving') : t('users.save_changes')}
             </button>
           </>
         }
@@ -475,7 +484,7 @@ export const UsersPage: React.FC = () => {
         <form id="edit-user-form" onSubmit={handleSaveEdit} className="space-y-4">
           <div className="form-group">
             <label className="form-label" htmlFor="edit-display-name">
-              Display Name
+              {t('users.col_display_name')}
             </label>
             <input
               id="edit-display-name"
@@ -488,7 +497,7 @@ export const UsersPage: React.FC = () => {
           </div>
           <div className="form-group">
             <label className="form-label" htmlFor="edit-role">
-              Role
+              {t('users.role')}
             </label>
             <select
               id="edit-role"
@@ -496,9 +505,9 @@ export const UsersPage: React.FC = () => {
               value={editRole}
               onChange={(e) => setEditRole(e.target.value as Role)}
             >
-              <option value="technician">Technician / Operator</option>
-              <option value="admin">Administrator</option>
-              <option value="viewer">Viewer (Read-only)</option>
+              <option value="technician">{t('users.option_technician')}</option>
+              <option value="admin">{t('users.option_admin')}</option>
+              <option value="viewer">{t('users.option_viewer')}</option>
             </select>
           </div>
         </form>
@@ -508,7 +517,7 @@ export const UsersPage: React.FC = () => {
       <Modal
         open={isPasswordModalOpen && Boolean(selectedUser)}
         onClose={() => setIsPasswordModalOpen(false)}
-        title={selectedUser ? `Reset Password: ${selectedUser.username}` : ''}
+        title={selectedUser ? t('users.reset_modal_title', { username: selectedUser.username }) : ''}
         size="md"
         footer={
           <>
@@ -517,7 +526,7 @@ export const UsersPage: React.FC = () => {
               className="btn btn-secondary"
               onClick={() => setIsPasswordModalOpen(false)}
             >
-              Cancel
+              {t('common.cancel')}
             </button>
             <button
               type="submit"
@@ -525,7 +534,7 @@ export const UsersPage: React.FC = () => {
               className="btn btn-primary"
               disabled={saving}
             >
-              {saving ? 'Updating…' : 'Update Password'}
+              {saving ? t('users.updating') : t('users.update_password')}
             </button>
           </>
         }
@@ -533,7 +542,7 @@ export const UsersPage: React.FC = () => {
         <form id="reset-password-form" onSubmit={handleSavePassword} className="space-y-4">
           <div className="form-group">
             <label className="form-label" htmlFor="reset-password">
-              New Password
+              {t('users.new_password')}
             </label>
             <input
               id="reset-password"
@@ -541,21 +550,21 @@ export const UsersPage: React.FC = () => {
               className="form-input"
               required
               minLength={8}
-              placeholder="Enter new password"
+              placeholder={t('users.placeholder_new_password')}
               value={resetPassword}
               onChange={(e) => setResetPassword(e.target.value)}
             />
           </div>
           <div className="form-group">
             <label className="form-label" htmlFor="confirm-password">
-              Confirm New Password
+              {t('users.confirm_new_password')}
             </label>
             <input
               id="confirm-password"
               type="password"
               className="form-input"
               required
-              placeholder="Re-type new password"
+              placeholder={t('users.placeholder_confirm_password')}
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}
             />
@@ -565,13 +574,13 @@ export const UsersPage: React.FC = () => {
 
       <ConfirmDialog
         open={Boolean(deactivateTarget)}
-        title="Deactivate account"
+        title={t('users.deactivate_dialog_title')}
         message={
           deactivateTarget
-            ? `Deactivate '${deactivateTarget.username}'? They will be signed out and unable to sign in again. The audit trail of their past actions is kept.`
+            ? t('users.deactivate_dialog_message', { username: deactivateTarget.username })
             : ''
         }
-        confirmLabel="Deactivate"
+        confirmLabel={t('users.deactivate')}
         pending={deactivating}
         onConfirm={handleDeactivate}
         onCancel={() => setDeactivateTarget(null)}

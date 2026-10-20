@@ -1,4 +1,4 @@
-import { LANGS, useT } from './I18nContext'
+import { LANGS, useT } from './core'
 
 /** EN / ID switch in the top bar. The choice is remembered per browser. */
 export function LanguageToggle() {

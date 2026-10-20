@@ -12,6 +12,7 @@ import {
 import { usePermission } from '../hooks/usePermission'
 import { api, fetchRaw } from '../services/api'
 import { useToast } from '../context/ToastContext'
+import { useT } from '../i18n/core'
 
 type ReportType = 'inventory' | 'patches' | 'deployments' | 'audit'
 
@@ -30,6 +31,7 @@ const ReportCard: React.FC<ReportCardProps> = ({
   reportType,
   icon,
 }) => {
+  const { t } = useT()
   const [busyFormat, setBusyFormat] = useState<'csv' | 'json' | null>(null)
   const toast = useToast()
 
@@ -46,7 +48,7 @@ const ReportCard: React.FC<ReportCardProps> = ({
       if (!res.ok) {
         // These handlers use http.Error, so the body is text/plain, not JSON.
         const detail = await res.text().catch(() => '')
-        throw new Error(detail.trim() || `Export failed with HTTP ${res.status}`)
+        throw new Error(detail.trim() || t('reports.export_failed_http', { status: res.status }))
       }
       const blob = await res.blob()
       objectUrl = URL.createObjectURL(blob)
@@ -59,12 +61,12 @@ const ReportCard: React.FC<ReportCardProps> = ({
       // "Started", not "Complete": once the click is dispatched the browser
       // owns the transfer and we cannot know how it finished.
       toast.success(
-        `${title} (${format.toUpperCase()}) — download started, ${formatBytes(blob.size)}.`,
-        'Export Started'
+        t('reports.download_started', { title, format: format.toUpperCase(), size: formatBytes(blob.size) }),
+        t('reports.export_started_title')
       )
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Export request failed'
-      toast.error(msg, 'Export Failed')
+      const msg = err instanceof Error ? err.message : t('reports.export_request_failed')
+      toast.error(msg, t('reports.export_failed_title'))
     } finally {
       // Revoked on the next tick, not immediately: revoking synchronously
       // after click() cancels the download in some browsers.
@@ -91,20 +93,20 @@ const ReportCard: React.FC<ReportCardProps> = ({
           className="btn btn-secondary btn-sm"
           onClick={() => handleDownload('csv')}
           disabled={busyFormat !== null}
-          title="Download as CSV spreadsheet"
+          title={t('reports.download_csv')}
         >
           <FileSpreadsheet size={15} className="text-success" />
-          <span>{busyFormat === 'csv' ? 'Preparing…' : 'Export CSV'}</span>
+          <span>{busyFormat === 'csv' ? t('reports.preparing') : t('reports.export_csv')}</span>
         </button>
         <button
           type="button"
           className="btn btn-secondary btn-sm"
           onClick={() => handleDownload('json')}
           disabled={busyFormat !== null}
-          title="Download as structured JSON"
+          title={t('reports.download_json')}
         >
           <FileText size={15} className="text-primary" />
-          <span>{busyFormat === 'json' ? 'Preparing…' : 'Export JSON'}</span>
+          <span>{busyFormat === 'json' ? t('reports.preparing') : t('reports.export_json')}</span>
         </button>
       </div>
     </div>
@@ -119,6 +121,7 @@ function formatBytes(bytes: number): string {
 
 export const ReportsPage: React.FC = () => {
   const { can } = usePermission()
+  const { t } = useT()
   // The server mounts /api/reports/audit behind RequireRole(admin), so a
   // technician clicking it would get a 403 and an empty file.
   const canExportAudit = can('admin')
@@ -127,10 +130,9 @@ export const ReportsPage: React.FC = () => {
     <div className="page-container">
       <div className="page-header">
         <div>
-          <h2 className="page-title">Compliance Reports &amp; Data Exports</h2>
+          <h2 className="page-title">{t('reports.title')}</h2>
           <p className="page-subtitle">
-            Generate on-demand audit logs, hardware inventories, patch compliance manifests, and
-            deployment statistics
+            {t('reports.subtitle')}
           </p>
         </div>
       </div>
@@ -139,10 +141,9 @@ export const ReportsPage: React.FC = () => {
       <div className="alert-banner alert-success mb-6">
         <ShieldCheck size={18} />
         <div>
-          <span className="font-semibold block">Streaming Exports</span>
+          <span className="font-semibold block">{t('reports.streaming_title')}</span>
           <span className="text-xs text-dim">
-            Report endpoints read straight from the database and stream rows as they are produced,
-            so a large fleet export does not have to be buffered in memory first.
+            {t('reports.streaming_desc')}
           </span>
         </div>
       </div>
@@ -150,34 +151,34 @@ export const ReportsPage: React.FC = () => {
       {/* Report Cards Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <ReportCard
-          title="Hardware & System Inventory"
-          category="Asset Management"
-          description="Complete inventory of all enrolled branch endpoints, including CPU, RAM, disk partitions, network interfaces, serial numbers, and OS versions."
+          title={t('reports.inventory_title')}
+          category={t('reports.inventory_category')}
+          description={t('reports.inventory_desc')}
           reportType="inventory"
           icon={<HardDrive size={22} className="text-primary" />}
         />
 
         <ReportCard
-          title="Fleet Patch & Vulnerability Report"
-          category="Security & Compliance"
-          description="Detailed manifest of installed and missing security updates, pending CVE hotfixes, reboot requirements, and overall fleet patch compliance rates."
+          title={t('reports.patches_title')}
+          category={t('reports.patches_category')}
+          description={t('reports.patches_desc')}
           reportType="patches"
           icon={<Shield size={22} className="text-warning" />}
         />
 
         <ReportCard
-          title="Software Deployment History"
-          category="Operations"
-          description="Full deployment lifecycle records, silent installer rollouts, target branch groups, return exit codes, and package distribution success rates."
+          title={t('reports.deployments_title')}
+          category={t('reports.deployments_category')}
+          description={t('reports.deployments_desc')}
           reportType="deployments"
           icon={<Layers size={22} className="text-success" />}
         />
 
         {canExportAudit ? (
           <ReportCard
-            title="Security & System Audit Trail"
-            category="Governance & Audit"
-            description="Append-only security audit trail recording administrator actions, remote command dispatches, credential changes, and system modifications."
+            title={t('reports.audit_title')}
+            category={t('reports.audit_category')}
+            description={t('reports.audit_desc')}
             reportType="audit"
             icon={<History size={22} className="text-danger" />}
           />
@@ -188,13 +189,12 @@ export const ReportsPage: React.FC = () => {
                 <History size={22} className="text-dim" />
               </div>
               <div className="report-header-info">
-                <span className="report-badge">Governance &amp; Audit</span>
-                <h3 className="report-title">Security &amp; System Audit Trail</h3>
+                <span className="report-badge">{t('reports.audit_category')}</span>
+                <h3 className="report-title">{t('reports.audit_title')}</h3>
               </div>
             </div>
             <p className="report-description">
-              The forensic audit export is restricted to administrators. The Audit tab still shows
-              you the live trail at technician level and above.
+              {t('reports.audit_restricted')}
             </p>
           </div>
         )}
@@ -204,14 +204,10 @@ export const ReportsPage: React.FC = () => {
       <div className="table-card mt-8 p-6">
         <div className="flex items-center gap-3 mb-3">
           <Database className="text-primary" size={20} />
-          <h3 className="font-semibold text-main text-base">Export Provenance</h3>
+          <h3 className="font-semibold text-main text-base">{t('reports.provenance_title')}</h3>
         </div>
         <p className="text-sm text-muted leading-relaxed">
-          Every export is generated from the live database at the moment you request it, and each
-          row carries its own record identifiers and RFC 3339 timestamps. Whether a given export
-          satisfies your organisation&rsquo;s audit standard — ISO 27001, SOC 2 or an internal
-          policy — is a judgement for whoever owns that standard; this console does not certify
-          against any of them.
+          {t('reports.provenance_desc')}
         </p>
       </div>
     </div>

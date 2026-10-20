@@ -1,0 +1,17 @@
+{
+  "load_failed": "Failed to load the audit trail",
+  "title": "Security & Operations Audit Trail",
+  "subtitle": "Append-only log of administrative actions, device lifecycle events, and agent dispatches",
+  "refresh": "Refresh",
+  "search_placeholder": "Filter the loaded trail by action, operator, or target…",
+  "search_aria": "Filter the loaded audit records",
+  "table_label": "Audit records",
+  "col_timestamp": "Timestamp",
+  "col_actor": "Operator / Actor",
+  "col_action": "Action",
+  "col_target": "Target Endpoint / Entity",
+  "col_details": "Details",
+  "reading": "Reading audit records...",
+  "no_records": "No audit trail records found",
+  "no_match": "No records match the current filter"
+}

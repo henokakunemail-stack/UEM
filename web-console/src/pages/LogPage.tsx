@@ -10,6 +10,7 @@ import {
 } from 'lucide-react'
 import { api } from '../services/api'
 import { useToast } from '../context/ToastContext'
+import { useT } from '../i18n/core'
 
 const LEVELS = ['all', 'error', 'warn', 'info', 'debug'] as const
 type LevelFilter = (typeof LEVELS)[number]
@@ -42,6 +43,7 @@ function prettyLine(raw: string): string {
 }
 
 export const LogPage: React.FC = () => {
+  const { t } = useT()
   const [lines, setLines] = useState<string[]>([])
   const [total, setTotal] = useState(0)
   const [logFile, setLogFile] = useState('')
@@ -71,7 +73,7 @@ export const LogPage: React.FC = () => {
     } catch (err: unknown) {
       // Keep whatever lines are already on screen; the banner says they are
       // stale rather than the page quietly claiming a live tail.
-      setError(err instanceof Error ? err.message : 'Failed to read server log')
+      setError(err instanceof Error ? err.message : t('log.read_failed'))
     } finally {
       setLoading(false)
     }
@@ -113,9 +115,9 @@ export const LogPage: React.FC = () => {
   const handleCopy = async () => {
     try {
       await navigator.clipboard.writeText(visible.join('\n'))
-      toast.success(`${visible.length} lines copied to clipboard`, 'Log Copied')
+      toast.success(t('log.copied', { count: visible.length }), t('log.copied_title'))
     } catch {
-      toast.error('Clipboard is unavailable in this browser', 'Copy Failed')
+      toast.error(t('log.clipboard_unavailable'), t('log.copy_failed_title'))
     }
   }
 
@@ -123,10 +125,9 @@ export const LogPage: React.FC = () => {
     <div className="page-container">
       <div className="page-header">
         <div>
-          <h1 className="page-title">Server Runtime Log</h1>
+          <h1 className="page-title">{t('log.title')}</h1>
           <p className="page-subtitle">
-            Live tail of what the management server itself is doing — use this when a menu
-            misbehaves, not the Audit tab, which records what operators did
+            {t('log.subtitle')}
           </p>
         </div>
         <div className="header-controls">
@@ -136,14 +137,14 @@ export const LogPage: React.FC = () => {
               checked={autoRefresh}
               onChange={(e) => setAutoRefresh(e.target.checked)}
             />
-            <span>Auto-refresh (10s)</span>
+            <span>{t('log.auto_refresh')}</span>
           </label>
           <span className={`last-sync${error ? ' stale' : ''}`}>
-            {lastReadAt ? `Read at ${lastReadAt.toLocaleTimeString()}` : 'Not yet read'}
+            {lastReadAt ? t('log.read_at', { time: lastReadAt.toLocaleTimeString() }) : t('log.not_yet_read')}
           </span>
           <button type="button" className="btn btn-secondary" onClick={handleCopy}>
             <Copy size={16} />
-            <span>Copy</span>
+            <span>{t('log.copy')}</span>
           </button>
           <button
             type="button"
@@ -152,7 +153,7 @@ export const LogPage: React.FC = () => {
             disabled={loading}
           >
             <RefreshCw size={16} className={loading ? 'spinning' : ''} />
-            <span>Refresh</span>
+            <span>{t('log.refresh')}</span>
           </button>
         </div>
       </div>
@@ -162,7 +163,7 @@ export const LogPage: React.FC = () => {
           <XCircle size={16} />
           <span>
             {error}
-            {lines.length > 0 ? ' Showing the last successful read below.' : ''}
+            {lines.length > 0 ? ` ${t('log.showing_last_read')}` : ''}
           </span>
         </div>
       )}
@@ -170,42 +171,42 @@ export const LogPage: React.FC = () => {
       <div className="kpi-grid">
         <div className="kpi-card">
           <div className="kpi-header">
-            <span className="kpi-label">Buffered Lines</span>
+            <span className="kpi-label">{t('log.kpi_buffered')}</span>
             <FileText className="kpi-icon text-primary" size={20} />
           </div>
           <div className="kpi-value">{total}</div>
           <span className="kpi-hint">
-            {truncated ? `Showing last ${lines.length}` : 'Whole buffer fits in view'}
+            {truncated ? t('log.showing_last', { count: lines.length }) : t('log.whole_buffer')}
           </span>
         </div>
         <div className="kpi-card">
           <div className="kpi-header">
-            <span className="kpi-label">Errors in Buffer</span>
+            <span className="kpi-label">{t('log.kpi_errors')}</span>
             <XCircle className="kpi-icon text-danger" size={20} />
           </div>
           <div className="kpi-value text-danger">{counts.error}</div>
-          <span className="kpi-hint">Server-side failures, not operator actions</span>
+          <span className="kpi-hint">{t('log.kpi_errors_hint')}</span>
         </div>
         <div className="kpi-card">
           <div className="kpi-header">
-            <span className="kpi-label">Warnings in Buffer</span>
+            <span className="kpi-label">{t('log.kpi_warnings')}</span>
             <AlertTriangle className="kpi-icon text-warning" size={20} />
           </div>
           <div className="kpi-value text-warning">{counts.warn}</div>
-          <span className="kpi-hint">Degraded paths worth reviewing</span>
+          <span className="kpi-hint">{t('log.kpi_warnings_hint')}</span>
         </div>
         <div className="kpi-card">
           <div className="kpi-header">
-            <span className="kpi-label">Persistence</span>
+            <span className="kpi-label">{t('log.kpi_persistence')}</span>
             <Info className="kpi-icon text-muted" size={20} />
           </div>
           <div className="kpi-value" style={{ fontSize: '0.875rem', wordBreak: 'break-all' }}>
-            {logFile ? logFile : 'stdout only'}
+            {logFile ? logFile : t('log.stdout_only')}
           </div>
           <span className="kpi-hint">
             {logFile
-              ? 'Set by LOG_FILE; survives restarts'
-              : 'Set LOG_FILE to persist this beyond the ring buffer'}
+              ? t('log.log_file_set')
+              : t('log.log_file_unset')}
           </span>
         </div>
       </div>
@@ -217,8 +218,8 @@ export const LogPage: React.FC = () => {
             <input
               type="text"
               className="search-input"
-              placeholder="Filter the loaded log text…"
-              aria-label="Filter the loaded log lines"
+              placeholder={t('log.search_placeholder')}
+              aria-label={t('log.search_aria')}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
@@ -232,7 +233,7 @@ export const LogPage: React.FC = () => {
                 onClick={() => setLevel(lv)}
                 aria-pressed={level === lv}
               >
-                {lv === 'all' ? 'All' : lv.toUpperCase()}
+                {lv === 'all' ? t('log.level_all') : lv.toUpperCase()}
               </button>
             ))}
           </div>
@@ -242,7 +243,7 @@ export const LogPage: React.FC = () => {
               checked={follow}
               onChange={(e) => setFollow(e.target.checked)}
             />
-            <span>Follow tail</span>
+            <span>{t('log.follow_tail')}</span>
           </label>
         </div>
 
@@ -250,7 +251,7 @@ export const LogPage: React.FC = () => {
           className="log-view"
           ref={viewRef}
           role="log"
-          aria-label="Server runtime log"
+          aria-label={t('log.view_aria')}
           onScroll={(e) => {
             const el = e.currentTarget
             // Turn follow off the moment the operator scrolls up, rather than
@@ -262,15 +263,17 @@ export const LogPage: React.FC = () => {
           {loading ? (
             <div className="page-loader">
               <RefreshCw size={28} className="spinning" />
-              <span>Reading server log buffer...</span>
+              <span>{t('log.reading')}</span>
             </div>
           ) : visible.length === 0 ? (
             <div className="empty-state">
               <FileText size={32} />
               <p>
                 {lines.length === 0
-                  ? 'No log lines buffered yet'
-                  : `No ${level === 'all' ? '' : level.toUpperCase() + ' '}lines match the current filter`}
+                  ? t('log.no_lines')
+                  : level === 'all'
+                    ? t('log.no_match')
+                    : t('log.no_level_match', { level: level.toUpperCase() })}
               </p>
             </div>
           ) : (

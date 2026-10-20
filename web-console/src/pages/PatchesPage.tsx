@@ -16,12 +16,13 @@ import { usePermission } from '../hooks/usePermission'
 import { api } from '../services/api'
 import { useToast } from '../context/ToastContext'
 import type { DeviceDTO, PatchDetailDTO, PatchSummaryDTO } from '../types/api'
+import { useT } from '../i18n/core'
 
 // An absolute date, not "3d ago". The empty-state panel is a compliance claim
 // and "3d ago" invites reading it as current; an auditor needs the date itself.
-function formatScanTime(iso: string): string {
+function formatScanTime(iso: string, t: (key: string) => string): string {
   const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return 'an unrecorded time'
+  if (Number.isNaN(d.getTime())) return t('patches.unrecorded_time')
   return d.toLocaleString(undefined, {
     year: 'numeric',
     month: 'short',
@@ -54,6 +55,7 @@ export const PatchesPage: React.FC = () => {
     null
   )
   const toast = useToast()
+  const { t } = useT()
 
   const loadData = useCallback(async () => {
     try {
@@ -72,7 +74,7 @@ export const PatchesPage: React.FC = () => {
         const err = (devRes as PromiseRejectedResult).reason
         setActionMsg({
           type: 'error',
-          text: err instanceof Error ? err.message : 'Failed to load patch data',
+          text: err instanceof Error ? err.message : t('patches.load_failed'),
         })
       }
     } finally {
@@ -112,7 +114,7 @@ export const PatchesPage: React.FC = () => {
       // An empty list here would read as "fully compliant", which is the
       // opposite of what a failed fetch means.
       setPatchesError(
-        err instanceof Error ? err.message : 'Failed to load patches for this device'
+        err instanceof Error ? err.message : t('patches.device_load_failed')
       )
     } finally {
       // Only the newest request owns the spinner.
@@ -129,14 +131,14 @@ export const PatchesPage: React.FC = () => {
     setScanningId(deviceId)
     try {
       await api.scanDevicePatches(deviceId)
-      const text = 'Patch scan dispatched to device'
+      const text = t('patches.scan_dispatched')
       setActionMsg({ type: 'success', text })
-      toast.info(text, 'Scan Triggered')
+      toast.info(text, t('patches.scan_triggered'))
       setTimeout(loadData, 2000)
     } catch (err: unknown) {
-      const errMsg = err instanceof Error ? err.message : 'Scan failed'
+      const errMsg = err instanceof Error ? err.message : t('patches.scan_failed')
       setActionMsg({ type: 'error', text: errMsg })
-      toast.error(errMsg, 'Scan Failed')
+      toast.error(errMsg, t('patches.scan_failed_title'))
     } finally {
       setScanningId(null)
     }
@@ -150,7 +152,7 @@ export const PatchesPage: React.FC = () => {
     if (patchIds.length === 0) {
       setActionMsg({
         type: 'error',
-        text: 'These patches have no KB or package identifier to install by',
+        text: t('patches.no_identifier'),
       })
       return
     }
@@ -161,15 +163,15 @@ export const PatchesPage: React.FC = () => {
       // does not validate the field, so the old value was persisted verbatim,
       // written into the audit trail, and forwarded to the agent as garbage.
       await api.installDevicePatches(deviceId, patchIds, 'no_reboot')
-      const msg = `Install dispatched for ${patchIds.length} patches`
+      const msg = t('patches.install_dispatched', { count: patchIds.length })
       setActionMsg({ type: 'success', text: msg })
-      toast.success(msg, 'Rollout Started')
+      toast.success(msg, t('patches.rollout_started'))
       closeDetail()
       setTimeout(loadData, 2000)
     } catch (err: unknown) {
-      const errMsg = err instanceof Error ? err.message : 'Install failed'
+      const errMsg = err instanceof Error ? err.message : t('patches.install_failed')
       setActionMsg({ type: 'error', text: errMsg })
-      toast.error(errMsg, 'Install Failed')
+      toast.error(errMsg, t('patches.install_failed_title'))
     } finally {
       setInstalling(false)
     }
@@ -189,9 +191,9 @@ export const PatchesPage: React.FC = () => {
     <div className="page-container">
       <div className="page-header">
         <div>
-          <h2 className="page-title">Patch Management &amp; Compliance</h2>
+          <h2 className="page-title">{t('patches.title')}</h2>
           <p className="page-subtitle">
-            Enterprise OS patch monitoring, vulnerability remediation, and scheduled update rollouts
+            {t('patches.subtitle')}
           </p>
         </div>
         <div className="header-controls">
@@ -202,7 +204,7 @@ export const PatchesPage: React.FC = () => {
             disabled={loading}
           >
             <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
-            <span>Refresh</span>
+            <span>{t('patches.refresh')}</span>
           </button>
         </div>
       </div>
@@ -217,7 +219,7 @@ export const PatchesPage: React.FC = () => {
             type="button"
             onClick={() => setActionMsg(null)}
             className="close-btn"
-            aria-label="Dismiss notification"
+            aria-label={t('patches.dismiss_notification')}
           >
             <X size={14} />
           </button>
@@ -229,48 +231,45 @@ export const PatchesPage: React.FC = () => {
         <div className="kpi-grid">
           <div className="kpi-card">
             <div className="kpi-header">
-              <span className="kpi-label">Vulnerable Devices</span>
+              <span className="kpi-label">{t('patches.kpi_vulnerable')}</span>
               <ShieldAlert className="kpi-icon text-danger" size={20} />
             </div>
             <div className="kpi-value text-danger">{summary.vulnerable_devices}</div>
-            <span className="kpi-hint">Devices with at least one missing update</span>
+            <span className="kpi-hint">{t('patches.kpi_vulnerable_hint')}</span>
           </div>
 
           <div className="kpi-card">
             <div className="kpi-header">
-              <span className="kpi-label">Missing Patches</span>
+              <span className="kpi-label">{t('patches.kpi_missing')}</span>
               <Clock className="kpi-icon text-warning" size={20} />
             </div>
             <div className="kpi-value text-warning">{summary.total_missing_patches}</div>
-            <span className="kpi-hint">Individual updates awaiting install</span>
+            <span className="kpi-hint">{t('patches.kpi_missing_hint')}</span>
           </div>
 
           <div className="kpi-card">
             <div className="kpi-header">
-              <span className="kpi-label">Critical / Security</span>
+              <span className="kpi-label">{t('patches.kpi_critical')}</span>
               <ShieldCheck className="kpi-icon text-danger" size={20} />
             </div>
             <div className="kpi-value text-danger">{summary.critical_security_patches}</div>
-            <span className="kpi-hint">High priority CVE remediations</span>
+            <span className="kpi-hint">{t('patches.kpi_critical_hint')}</span>
           </div>
 
           <div className="kpi-card">
             <div className="kpi-header">
-              <span className="kpi-label">Reboot Pending</span>
+              <span className="kpi-label">{t('patches.kpi_reboot')}</span>
               <RotateCcw className="kpi-icon text-primary" size={20} />
             </div>
             <div className="kpi-value">{summary.reboot_pending_devices}</div>
-            <span className="kpi-hint">Devices needing a restart to finalize</span>
+            <span className="kpi-hint">{t('patches.kpi_reboot_hint')}</span>
           </div>
         </div>
       ) : (
         !loading && (
           <div className="alert-banner alert-error" role="status">
             <ShieldAlert size={18} />
-            <span>
-              Patch summary is unavailable — these figures are not a zero-patch fleet. Reload to
-              retry.
-            </span>
+            <span>{t('patches.summary_unavailable')}</span>
           </div>
         )
       )}
@@ -283,61 +282,61 @@ export const PatchesPage: React.FC = () => {
             <input
               type="text"
               className="search-input"
-              placeholder="Filter the loaded devices by hostname, site, or OS…"
-              aria-label="Filter loaded devices"
+              placeholder={t('patches.filter_placeholder')}
+              aria-label={t('patches.filter_label')}
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
             />
           </div>
         </div>
 
-        <DataTable label="Devices and their patch actions">
+        <DataTable label={t('patches.devices_table_label')}>
           <thead>
             <tr>
-              <th>Hostname</th>
-              <th>OS &amp; Architecture</th>
-              <th>Branch Site</th>
-              <th>Status</th>
-              <th>Patch Actions</th>
+              <th>{t('patches.col_hostname')}</th>
+              <th>{t('patches.col_os')}</th>
+              <th>{t('patches.col_site')}</th>
+              <th>{t('patches.col_status')}</th>
+              <th>{t('patches.col_actions')}</th>
             </tr>
           </thead>
           <tbody>
             {filteredDevices.length === 0 ? (
               <tr>
                 <td colSpan={5} className="text-center py-8 text-muted">
-                  No devices matching the current filter.
+                  {t('patches.no_devices')}
                 </td>
               </tr>
             ) : (
               filteredDevices.map((d) => (
                 <tr key={d.id}>
-                  <td data-label="Hostname">
+                  <td data-label={t('patches.col_hostname')}>
                     <div className="device-host-cell">
                       <span className="host-name">{d.hostname}</span>
                       <span className="device-id-sub font-mono">{d.id.slice(0, 12)}...</span>
                     </div>
                   </td>
-                  <td data-label="OS & Architecture">
+                  <td data-label={t('patches.col_os')}>
                     <span className="os-badge">
                       {d.os_name} {d.os_version}
                     </span>
                   </td>
-                  <td data-label="Branch Site">{d.site || 'Default Site'}</td>
-                  <td data-label="Status">
+                  <td data-label={t('patches.col_site')}>{d.site || t('patches.default_site')}</td>
+                  <td data-label={t('patches.col_status')}>
                     <span className={`status-pill ${d.status === 'online' ? 'online' : 'offline'}`}>
                       {d.status}
                     </span>
                   </td>
-                  <td data-label="Patch Actions">
+                  <td data-label={t('patches.col_actions')}>
                     <div className="action-buttons">
                       <button
                         type="button"
                         className="btn-action"
                         onClick={() => handleOpenPatches(d)}
-                        title="View available patches"
+                        title={t('patches.view_patches_title')}
                       >
                         <ShieldCheck size={15} />
-                        <span>View Patches</span>
+                        <span>{t('patches.view_patches')}</span>
                       </button>
                       {canAct && (
                         <button
@@ -345,13 +344,13 @@ export const PatchesPage: React.FC = () => {
                           className="btn-action"
                           onClick={() => handleScan(d.id)}
                           disabled={scanningId === d.id || d.status !== 'online'}
-                          title="Trigger WUA / Package Manager Scan"
+                          title={t('patches.scan_title')}
                         >
                           <RefreshCw
                             size={14}
                             className={scanningId === d.id ? 'animate-spin' : ''}
                           />
-                          <span>Scan</span>
+                          <span>{t('patches.scan')}</span>
                         </button>
                       )}
                     </div>
@@ -368,17 +367,20 @@ export const PatchesPage: React.FC = () => {
       <Modal
         open={Boolean(selectedDevice)}
         onClose={closeDetail}
-        title={selectedDevice ? `Patch Assessment: ${selectedDevice.hostname}` : ''}
+        title={selectedDevice ? t('patches.assessment_title', { hostname: selectedDevice.hostname }) : ''}
         description={
           selectedDevice
-            ? `${selectedDevice.os_name} ${selectedDevice.os_version} — Site: ${selectedDevice.site || 'Default'}`
+            ? t('patches.assessment_description', {
+                os: `${selectedDevice.os_name} ${selectedDevice.os_version}`,
+                site: selectedDevice.site || t('patches.default'),
+              })
             : undefined
         }
         size="lg"
         footer={
           <>
             <button type="button" className="btn btn-secondary" onClick={closeDetail}>
-              Close
+              {t('common.close')}
             </button>
             {canAct && devicePatches.length > 0 && selectedDevice?.status === 'online' && (
               <button
@@ -388,7 +390,7 @@ export const PatchesPage: React.FC = () => {
                 disabled={installing}
               >
                 <Play size={16} />
-                <span>{installing ? 'Dispatching…' : 'Install All Patches'}</span>
+                <span>{installing ? t('patches.dispatching') : t('patches.install_all')}</span>
               </button>
             )}
           </>
@@ -396,12 +398,12 @@ export const PatchesPage: React.FC = () => {
       >
         {patchesLoading ? (
           <div className="py-8 text-center text-muted">
-            <div className="spinner-inline"></div> Loading patch manifest...
+            <div className="spinner-inline"></div> {t('patches.loading_manifest')}
           </div>
         ) : patchesError ? (
           <div className="py-8 text-center">
             <ShieldAlert size={40} className="text-danger mx-auto mb-2" />
-            <h4 className="text-danger font-semibold">Could not load patches</h4>
+            <h4 className="text-danger font-semibold">{t('patches.could_not_load')}</h4>
             <p className="text-muted text-sm mt-1">{patchesError}</p>
           </div>
         ) : devicePatches.length === 0 ? (
@@ -409,22 +411,17 @@ export const PatchesPage: React.FC = () => {
             {lastScanAt ? (
               <>
                 <CheckCircle2 size={40} className="text-success mx-auto mb-2" />
-                <h4 className="text-success font-semibold">No pending updates</h4>
+                <h4 className="text-success font-semibold">{t('patches.no_pending')}</h4>
                 <p className="text-muted text-sm mt-1">
-                  This device reported nothing outstanding as of its last scan
-                  ({formatScanTime(lastScanAt)}). That is what Windows Update and the
-                  package manager had on offer then, not a standing promise — scan again
-                  after the next update cycle.
+                  {t('patches.no_pending_body', { time: formatScanTime(lastScanAt, t) })}
                 </p>
               </>
             ) : (
               <>
                 <ShieldAlert size={40} className="text-warning mx-auto mb-2" />
-                <h4 className="text-warning font-semibold">Never scanned</h4>
+                <h4 className="text-warning font-semibold">{t('patches.never_scanned')}</h4>
                 <p className="text-muted text-sm mt-1">
-                  This device has never reported a patch scan, so nothing is known about
-                  what it is missing. An empty list here means nobody has looked, not that
-                  the machine is up to date.
+                  {t('patches.never_scanned_body')}
                 </p>
               </>
             )}
@@ -432,58 +429,54 @@ export const PatchesPage: React.FC = () => {
         ) : (
           <div className="patch-list">
             <div className="patch-list-header text-sm text-muted mb-2">
-              Found {devicePatches.length} available updates
+              {t('patches.found_updates', { count: devicePatches.length })}
             </div>
             {devicePatches.some((p) => p.category === 'driver') && (
               <div className="alert-banner alert-error">
-                <strong>This list includes driver and firmware updates.</strong>{' '}
-                Windows Update offers those here too, and Install All will push all of
-                them. A graphics driver is the one to watch: if the machine goes dark
-                after the install, that is the likely cause, and a restart normally
-                brings it back. Windows may also require a restart before a driver
-                install can proceed at all.
+                <strong>{t('patches.driver_warning_title')}</strong>{' '}
+                {t('patches.driver_warning_body')}
               </div>
             )}
-            <DataTable label={`Patches for ${selectedDevice?.hostname ?? 'device'}`}>
+            <DataTable label={t('patches.patches_table_label', { hostname: selectedDevice?.hostname ?? t('patches.device') })}>
               <thead>
                 <tr>
-                  <th>KB / Reference</th>
-                  <th>Title</th>
-                  <th>Severity</th>
-                  <th>Category</th>
-                  <th>Reboot</th>
+                  <th>{t('patches.col_kb')}</th>
+                  <th>{t('patches.col_title')}</th>
+                  <th>{t('patches.col_severity')}</th>
+                  <th>{t('patches.col_category')}</th>
+                  <th>{t('patches.col_reboot')}</th>
                 </tr>
               </thead>
               <tbody>
                 {devicePatches.map((p) => (
                   <tr key={p.id}>
-                    <td data-label="KB / Reference" className="font-mono text-sm">
+                    <td data-label={t('patches.col_kb')} className="font-mono text-sm">
                       {p.kb_id || p.patch_id}
                     </td>
-                    <td data-label="Title">{p.title}</td>
-                    <td data-label="Severity">
+                    <td data-label={t('patches.col_title')}>{p.title}</td>
+                    <td data-label={t('patches.col_severity')}>
                       <span className={`badge-severity ${p.severity?.toLowerCase() || 'medium'}`}>
-                        {p.severity || 'Important'}
+                        {p.severity || t('patches.severity_important')}
                       </span>
                     </td>
-                    <td data-label="Category">
+                    <td data-label={t('patches.col_category')}>
                       {/* A driver carries no KB article — its identifier is the
                           WUA UpdateID GUID, shown in the first column — and it is
                           firmware rather than a security fix, so it must not be
                           counted as one. */}
                       {p.category === 'driver' ? (
-                        <span className="badge-severity medium">Driver / Firmware</span>
+                        <span className="badge-severity medium">{t('patches.driver_firmware')}</span>
                       ) : (
-                        p.category || 'Security Update'
+                        p.category || t('patches.security_update')
                       )}
                     </td>
-                    <td data-label="Reboot">
+                    <td data-label={t('patches.col_reboot')}>
                       {p.reboot_required ? (
                         <span className="badge-severity critical">
-                          <RotateCcw size={12} /> Required
+                          <RotateCcw size={12} /> {t('patches.reboot_required')}
                         </span>
                       ) : (
-                        <span className="text-muted text-sm">No</span>
+                        <span className="text-muted text-sm">{t('patches.reboot_no')}</span>
                       )}
                     </td>
                   </tr>

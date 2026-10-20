@@ -16,6 +16,8 @@ import { api } from '../services/api'
 import { usePermission } from '../hooks/usePermission'
 import { DataTable, Modal } from './ui'
 import type { DeviceDTO, DeviceInventorySnapshot, SoftwareInfo } from '../types/api'
+import { useT } from '../i18n/core'
+import type { Vars } from '../i18n/core'
 
 interface DeviceDetailModalProps {
   device: DeviceDTO | null
@@ -35,21 +37,36 @@ const COLLECT_TIMEOUT_TICKS = 30
 // do arithmetic.
 const SNAPSHOT_STALE_AFTER_MS = 60 * 60 * 1000
 
+/** The current time, refreshed every minute. Reading Date.now() during render
+ *  gives a different answer on every render; this gives one answer per minute,
+ *  which is all a "collected 3 hours ago" label needs, and it keeps moving while
+ *  the modal stays open. */
+function useNow(everyMs = 60_000): number {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), everyMs)
+    return () => window.clearInterval(id)
+  }, [everyMs])
+  return now
+}
+
 // formatAge renders an elapsed duration in the largest unit that still reads as
 // a whole number, because "5 minutes ago" is a fact an operator can act on and
 // "312,000 milliseconds ago" is not. A snapshot whose clock is behind ours
 // (agent clock skew, a timezone written into the timestamp) produces a negative
 // age; it is reported as "just now" rather than as a negative number, since
 // being unable to measure the age is not evidence the data is old.
-function formatAge(ms: number): string {
-  if (ms < 0) return 'just now'
+function formatAge(ms: number, t: (key: string, vars?: Vars) => string): string {
+  if (ms < 0) return t('device_detail.just_now')
   const minutes = Math.floor(ms / 60000)
-  if (minutes < 1) return 'just now'
-  if (minutes < 60) return `${minutes} minute${minutes === 1 ? '' : 's'} ago`
+  if (minutes < 1) return t('device_detail.just_now')
+  if (minutes < 60)
+    return t(minutes === 1 ? 'device_detail.minutes_ago_one' : 'device_detail.minutes_ago_many', { count: minutes })
   const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours} hour${hours === 1 ? '' : 's'} ago`
+  if (hours < 24)
+    return t(hours === 1 ? 'device_detail.hours_ago_one' : 'device_detail.hours_ago_many', { count: hours })
   const days = Math.floor(hours / 24)
-  return `${days} day${days === 1 ? '' : 's'} ago`
+  return t(days === 1 ? 'device_detail.days_ago_one' : 'device_detail.days_ago_many', { count: days })
 }
 
 export const DeviceDetailModal: React.FC<DeviceDetailModalProps> = ({ device, onClose }) => {
@@ -61,6 +78,8 @@ export const DeviceDetailModal: React.FC<DeviceDetailModalProps> = ({ device, on
   const [uninstallTarget, setUninstallTarget] = useState<SoftwareInfo | null>(null)
   const [uninstalling, setUninstalling] = useState(false)
   const canUninstall = usePermission().can('technician')
+  const { t } = useT()
+  const now = useNow()
 
   const [activeUninstall, setActiveUninstall] = useState<{
     name: string
@@ -156,15 +175,13 @@ export const DeviceDetailModal: React.FC<DeviceDetailModalProps> = ({ device, on
       // reports, so a spinner here would be waiting for an event this device
       // cannot produce yet.
       if (res.status === 'queued') {
-        setActionMsg(
-          'The endpoint is offline. The collection is queued and will run on its next report.'
-        )
+        setActionMsg(t('device_detail.collect_queued'))
         setCollecting(false)
         return
       }
 
       if (!preserveBanner) {
-        setActionMsg('Collection dispatched. Waiting for the agent to report a new snapshot...')
+        setActionMsg(t('device_detail.collect_dispatched'))
       }
 
       let ticks = 0
@@ -178,10 +195,7 @@ export const DeviceDetailModal: React.FC<DeviceDetailModalProps> = ({ device, on
         if (ticks >= COLLECT_TIMEOUT_TICKS) {
           stopPolling()
           setCollecting(false)
-          setActionMsg(
-            'The endpoint accepted the collection but has not reported a new snapshot yet. ' +
-              'It may be offline, or the agent may still be scanning. Use Collect Inventory again later.'
-          )
+          setActionMsg(t('device_detail.collect_timeout'))
           return
         }
 
@@ -210,23 +224,25 @@ export const DeviceDetailModal: React.FC<DeviceDetailModalProps> = ({ device, on
             return {
               name: current.name,
               status: 'failed',
-              message: `Uninstall finished, but "${current.name}" was still detected in device inventory. Software may still be present on endpoint.`,
+              message: t('device_detail.still_detected', { name: current.name }),
             }
           }
           return {
             name: current.name,
             status: 'done',
-            message: `"${current.name}" was successfully removed from device inventory.`,
+            message: t('device_detail.removed', { name: current.name }),
           }
         })
         setActionMsg(
-          `Snapshot collected: ${updated.software.length} program(s) reported at ` +
-            `${new Date(updated.collected_at).toLocaleTimeString()}.`
+          t('device_detail.snapshot_collected', {
+            count: updated.software.length,
+            time: new Date(updated.collected_at).toLocaleTimeString(),
+          })
         )
       }, COLLECT_POLL_MS)
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Action failed'
-      setActionMsg(`Collection request failed: ${msg}`)
+      const msg = err instanceof Error ? err.message : t('device_detail.action_failed')
+      setActionMsg(t('device_detail.collect_failed', { error: msg }))
       setCollecting(false)
     }
   }
@@ -235,10 +251,10 @@ export const DeviceDetailModal: React.FC<DeviceDetailModalProps> = ({ device, on
     setActionMsg(null)
     try {
       const res = await api.pingDevice(device.id)
-      setActionMsg(`Ping response: ${res.status} (Command ID: ${res.command_id})`)
+      setActionMsg(t('device_detail.ping_response', { status: res.status, command_id: res.command_id }))
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Action failed'
-      setActionMsg(`Ping failed: ${msg}`)
+      const msg = err instanceof Error ? err.message : t('device_detail.action_failed')
+      setActionMsg(t('device_detail.ping_failed', { error: msg }))
     }
   }
 
@@ -250,7 +266,7 @@ export const DeviceDetailModal: React.FC<DeviceDetailModalProps> = ({ device, on
     setActiveUninstall({
       name,
       status: 'sending',
-      message: `Sending uninstall request for "${name}" to ${device.hostname}...`,
+      message: t('device_detail.uninstall_sending', { name, hostname: device.hostname }),
     })
 
     try {
@@ -261,7 +277,7 @@ export const DeviceDetailModal: React.FC<DeviceDetailModalProps> = ({ device, on
       setActiveUninstall({
         name,
         status: 'running',
-        message: `Uninstall request for "${name}" sent to ${device.hostname}. Running silent uninstaller...`,
+        message: t('device_detail.uninstall_running', { name, hostname: device.hostname }),
       })
 
       // Poll command result to display verified outcome to operator
@@ -289,7 +305,7 @@ export const DeviceDetailModal: React.FC<DeviceDetailModalProps> = ({ device, on
               setActiveUninstall({
                 name,
                 status: 'done',
-                message: `Uninstall completed: ${resultText || name}`,
+                message: t('device_detail.uninstall_completed', { result: resultText || name }),
               })
               // Wait 2s grace delay for Windows registry cleanup before re-collecting
               graceTimerRef.current = window.setTimeout(() => {
@@ -299,7 +315,7 @@ export const DeviceDetailModal: React.FC<DeviceDetailModalProps> = ({ device, on
               setActiveUninstall({
                 name,
                 status: 'failed',
-                message: `Uninstall refused or failed: ${resultText || name}`,
+                message: t('device_detail.uninstall_refused', { result: resultText || name }),
               })
             }
           } else if (attempts >= maxAttempts) {
@@ -307,9 +323,7 @@ export const DeviceDetailModal: React.FC<DeviceDetailModalProps> = ({ device, on
             setActiveUninstall({
               name,
               status: 'failed',
-              message:
-                `Uninstall request for "${name}" is still executing on ${device.hostname}. ` +
-                `Use Collect Inventory to refresh the software list once completed.`,
+              message: t('device_detail.uninstall_still_running', { name, hostname: device.hostname }),
             })
           }
         } catch {
@@ -318,14 +332,14 @@ export const DeviceDetailModal: React.FC<DeviceDetailModalProps> = ({ device, on
             setActiveUninstall({
               name,
               status: 'failed',
-              message: `Failed to query uninstall status for "${name}".`,
+              message: t('device_detail.uninstall_query_failed', { name }),
             })
           }
         }
       }, 1500)
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Request failed'
-      setConfirmError(`Uninstall of "${name}" was not sent: ${msg}`)
+      const msg = err instanceof Error ? err.message : t('device_detail.request_failed')
+      setConfirmError(t('device_detail.uninstall_not_sent', { name, error: msg }))
       setActiveUninstall(null)
       setUninstalling(false)
     }
@@ -333,7 +347,7 @@ export const DeviceDetailModal: React.FC<DeviceDetailModalProps> = ({ device, on
 
   const hw = inventory?.hw || inventory?.hardware
   const snapshotAge = inventory?.collected_at
-    ? Date.now() - new Date(inventory.collected_at).getTime()
+    ? now - new Date(inventory.collected_at).getTime()
     : null
   const snapshotIsStale = snapshotAge !== null && snapshotAge > SNAPSHOT_STALE_AFTER_MS
   const ramBytes = hw?.ram_total_bytes || inventory?.ram_bytes || inventory?.hw_ram_bytes
@@ -357,19 +371,25 @@ export const DeviceDetailModal: React.FC<DeviceDetailModalProps> = ({ device, on
           {device.hostname}
         </span>
       }
-      description={`ID: ${device.id} • ${device.site || 'HQ'} • OS: ${device.os_name} ${device.os_version}`}
+      description={t('device_detail.description', {
+        id: device.id,
+        site: device.site || 'HQ',
+        os_name: device.os_name,
+        os_version: device.os_version,
+      })}
       footer={
         <>
           <span className="snapshot-timestamp">
-            Last Inventory Snapshot:{' '}
+            {t('device_detail.last_snapshot')}{' '}
             {inventory?.collected_at
-              ? `${new Date(inventory.collected_at).toLocaleString()} (${formatAge(snapshotAge!)}${
-                  snapshotIsStale ? ' — this list may be out of date' : ''
-                })`
-              : 'Never'}
+              ? t(snapshotIsStale ? 'device_detail.snapshot_when_stale' : 'device_detail.snapshot_when', {
+                  time: new Date(inventory.collected_at).toLocaleString(),
+                  age: formatAge(snapshotAge!, t),
+                })
+              : t('device_detail.never')}
           </span>
           <button type="button" className="btn btn-secondary" onClick={onClose}>
-            Close
+            {t('common.close')}
           </button>
         </>
       }
@@ -383,19 +403,19 @@ export const DeviceDetailModal: React.FC<DeviceDetailModalProps> = ({ device, on
 
       <div className="device-overview-bar">
         <div className="overview-item">
-          <span className="overview-label">STATUS</span>
+          <span className="overview-label">{t('device_detail.status')}</span>
           <span className={`status-pill ${device.hostname === 'Pending Enrollment' || (!device.last_seen_at && device.status === 'offline') ? 'pending' : device.status}`}>
-            {device.hostname === 'Pending Enrollment' || (!device.last_seen_at && device.status === 'offline') ? 'PENDING' : device.status.toUpperCase()}
+            {device.hostname === 'Pending Enrollment' || (!device.last_seen_at && device.status === 'offline') ? t('device_detail.pending') : device.status.toUpperCase()}
           </span>
         </div>
         <div className="overview-item">
-          <span className="overview-label">AGENT VERSION</span>
-          <span className="overview-val">{device.agent_version || 'Not Enrolled'}</span>
+          <span className="overview-label">{t('device_detail.agent_version')}</span>
+          <span className="overview-val">{device.agent_version || t('device_detail.not_enrolled')}</span>
         </div>
         <div className="overview-item">
-          <span className="overview-label">LAST SEEN</span>
+          <span className="overview-label">{t('device_detail.last_seen')}</span>
           <span className="overview-val">
-            {device.last_seen_at ? new Date(device.last_seen_at).toLocaleTimeString() : 'Never'}
+            {device.last_seen_at ? new Date(device.last_seen_at).toLocaleTimeString() : t('device_detail.never')}
           </span>
         </div>
         <div className="overview-item actions">
@@ -406,7 +426,7 @@ export const DeviceDetailModal: React.FC<DeviceDetailModalProps> = ({ device, on
             disabled={device.status !== 'online'}
           >
             <Activity size={14} />
-            <span>Ping</span>
+            <span>{t('device_detail.ping')}</span>
           </button>
           <button
             type="button"
@@ -415,12 +435,12 @@ export const DeviceDetailModal: React.FC<DeviceDetailModalProps> = ({ device, on
             disabled={collecting || device.status !== 'online'}
           >
             <RefreshCw size={14} className={collecting ? 'spinning' : ''} />
-            <span>{collecting ? 'Collecting...' : 'Collect Inventory'}</span>
+            <span>{collecting ? t('device_detail.collecting') : t('device_detail.collect')}</span>
           </button>
         </div>
       </div>
 
-      <div className="modal-tabs" role="tablist" aria-label="Device inventory">
+      <div className="modal-tabs" role="tablist" aria-label={t('device_detail.tabs_label')}>
         <button
           type="button"
           role="tab"
@@ -429,7 +449,7 @@ export const DeviceDetailModal: React.FC<DeviceDetailModalProps> = ({ device, on
           onClick={() => setActiveTab('hardware')}
         >
           <Cpu size={16} />
-          <span>Hardware Specs</span>
+          <span>{t('device_detail.tab_hardware')}</span>
         </button>
         <button
           type="button"
@@ -439,7 +459,7 @@ export const DeviceDetailModal: React.FC<DeviceDetailModalProps> = ({ device, on
           onClick={() => setActiveTab('software')}
         >
           <Layers size={16} />
-          <span>Installed Software ({softwareList.length})</span>
+          <span>{t('device_detail.tab_software', { count: softwareList.length })}</span>
         </button>
         <button
           type="button"
@@ -449,7 +469,7 @@ export const DeviceDetailModal: React.FC<DeviceDetailModalProps> = ({ device, on
           onClick={() => setActiveTab('network')}
         >
           <Network size={16} />
-          <span>Network & Interfaces</span>
+          <span>{t('device_detail.tab_network')}</span>
         </button>
       </div>
 
@@ -457,19 +477,19 @@ export const DeviceDetailModal: React.FC<DeviceDetailModalProps> = ({ device, on
         {loading ? (
           <div className="loading-state">
             <RefreshCw size={24} className="spinning" />
-            <span>Loading device telemetry and inventory snapshot...</span>
+            <span>{t('device_detail.loading')}</span>
           </div>
         ) : !inventory ? (
           <div className="empty-state">
             <Database size={28} />
-            <p>No inventory snapshot has been received from this device yet.</p>
+            <p>{t('device_detail.no_snapshot')}</p>
             <button
               type="button"
               className="btn btn-primary"
               onClick={() => handleCollect()}
               disabled={collecting || device.status !== 'online'}
             >
-              Collect Inventory
+              {t('device_detail.collect')}
             </button>
           </div>
         ) : (
@@ -480,45 +500,45 @@ export const DeviceDetailModal: React.FC<DeviceDetailModalProps> = ({ device, on
                   <div className="spec-card">
                     <div className="spec-header">
                       <Cpu size={16} />
-                      <h4>Processor (CPU)</h4>
+                      <h4>{t('device_detail.cpu')}</h4>
                     </div>
                     <p className="spec-val">
-                      {hw?.cpu?.name || inventory.hw_cpu_model || 'Unknown CPU'}
+                      {hw?.cpu?.name || inventory.hw_cpu_model || t('device_detail.unknown_cpu')}
                     </p>
                     <div className="spec-meta">
-                      <span>Cores: {hw?.cpu?.number_of_cores || 'N/A'}</span>
-                      <span>Logical Threads: {hw?.cpu?.logical_processors || 'N/A'}</span>
+                      <span>{t('device_detail.cores', { value: hw?.cpu?.number_of_cores || t('device_detail.na') })}</span>
+                      <span>{t('device_detail.threads', { value: hw?.cpu?.logical_processors || t('device_detail.na') })}</span>
                     </div>
                   </div>
 
                   <div className="spec-card">
                     <div className="spec-header">
                       <Database size={16} />
-                      <h4>Installed Memory (RAM)</h4>
+                      <h4>{t('device_detail.ram')}</h4>
                     </div>
-                    <p className="spec-val">{ramGB ? `${ramGB} GB` : 'Not reported'}</p>
+                    <p className="spec-val">{ramGB ? t('device_detail.gb', { value: ramGB }) : t('device_detail.not_reported')}</p>
                     <div className="spec-meta">
-                      <span>Query Method: CIM Win32_ComputerSystem</span>
+                      <span>{t('device_detail.query_method', { method: 'CIM Win32_ComputerSystem' })}</span>
                     </div>
                   </div>
 
                   <div className="spec-card">
                     <div className="spec-header">
                       <Server size={16} />
-                      <h4>System Identity</h4>
+                      <h4>{t('device_detail.system_identity')}</h4>
                     </div>
                     <p className="spec-val">
-                      {hw?.model?.vendor || 'Unknown'} {hw?.model?.product || ''}
+                      {hw?.model?.vendor || t('common.unknown')} {hw?.model?.product || ''}
                     </p>
                     <div className="spec-meta">
-                      <span>Serial: {hw?.model?.serial_number || 'N/A'}</span>
+                      <span>{t('device_detail.serial', { value: hw?.model?.serial_number || t('device_detail.na') })}</span>
                     </div>
                   </div>
                 </div>
 
                 <h4 className="section-title">
                   <HardDrive size={16} />
-                  <span>Mounted Storage Volumes</span>
+                  <span>{t('device_detail.volumes')}</span>
                 </h4>
                 <div className="disk-list">
                   {hw?.disks && hw.disks.length > 0 ? (
@@ -532,7 +552,7 @@ export const DeviceDetailModal: React.FC<DeviceDetailModalProps> = ({ device, on
                       return (
                         <div key={d.name} className="disk-card">
                           <div className="disk-header">
-                            <strong>Volume {d.name}</strong>
+                            <strong>{t('device_detail.volume', { name: d.name })}</strong>
                             <span>{d.filesystem || 'NTFS'}</span>
                           </div>
                           <div className="progress-bar-bg">
@@ -545,15 +565,15 @@ export const DeviceDetailModal: React.FC<DeviceDetailModalProps> = ({ device, on
                           </div>
                           <div className="disk-footer">
                             <span>
-                              Free: {freeGB} GB ({100 - usedPct}%)
+                              {t('device_detail.free', { free: freeGB, pct: 100 - usedPct })}
                             </span>
-                            <span>Total: {totalGB} GB</span>
+                            <span>{t('device_detail.total', { total: totalGB })}</span>
                           </div>
                         </div>
                       )
                     })
                   ) : (
-                    <p className="subtext">No disk volumes detected</p>
+                    <p className="subtext">{t('device_detail.no_disks')}</p>
                   )}
                 </div>
               </div>
@@ -567,8 +587,8 @@ export const DeviceDetailModal: React.FC<DeviceDetailModalProps> = ({ device, on
                     id="device-software-filter"
                     type="search"
                     className="search-input"
-                    aria-label="Filter installed software"
-                    placeholder="Filter installed packages or applications..."
+                    aria-label={t('device_detail.software_filter_label')}
+                    placeholder={t('device_detail.software_filter_placeholder')}
                     value={softwareSearch}
                     onChange={(e) => setSoftwareSearch(e.target.value)}
                   />
@@ -589,21 +609,21 @@ export const DeviceDetailModal: React.FC<DeviceDetailModalProps> = ({ device, on
                     )}
                     <span>
                       {activeUninstall.message ||
-                        `Uninstalling ${activeUninstall.name}...`}
+                        t('device_detail.uninstalling_name', { name: activeUninstall.name })}
                     </span>
                   </div>
                 )}
 
-                <DataTable label="Installed software">
+                <DataTable label={t('device_detail.software_table')}>
                   <table>
                     <thead>
                       <tr>
-                        <th>Application Name</th>
-                        <th>Version</th>
-                        <th>Publisher / Vendor</th>
+                        <th>{t('device_detail.col_app')}</th>
+                        <th>{t('device_detail.col_version')}</th>
+                        <th>{t('device_detail.col_publisher')}</th>
                         {canUninstall && (
                           <th className="text-right">
-                            <span className="visually-hidden">Actions</span>
+                            <span className="visually-hidden">{t('device_detail.col_actions')}</span>
                           </th>
                         )}
                       </tr>
@@ -612,7 +632,7 @@ export const DeviceDetailModal: React.FC<DeviceDetailModalProps> = ({ device, on
                       {filteredSoftware.length === 0 ? (
                         <tr>
                           <td colSpan={canUninstall ? 4 : 3} className="text-center py-4">
-                            No matching software entries
+                            {t('device_detail.no_software')}
                           </td>
                         </tr>
                       ) : (
@@ -648,7 +668,7 @@ export const DeviceDetailModal: React.FC<DeviceDetailModalProps> = ({ device, on
                                           }}
                                         >
                                           <RefreshCw size={11} className="spinning" />
-                                          <span>Uninstalling...</span>
+                                          <span>{t('device_detail.uninstalling')}</span>
                                         </span>
                                       )}
                                       {activeUninstall.status === 'done' && (
@@ -659,7 +679,7 @@ export const DeviceDetailModal: React.FC<DeviceDetailModalProps> = ({ device, on
                                             fontSize: '0.75rem',
                                           }}
                                         >
-                                          Uninstalled
+                                          {t('device_detail.uninstalled')}
                                         </span>
                                       )}
                                       {activeUninstall.status === 'failed' && (
@@ -670,7 +690,7 @@ export const DeviceDetailModal: React.FC<DeviceDetailModalProps> = ({ device, on
                                             fontSize: '0.75rem',
                                           }}
                                         >
-                                          Failed
+                                          {t('device_detail.failed')}
                                         </span>
                                       )}
                                     </>
@@ -684,17 +704,17 @@ export const DeviceDetailModal: React.FC<DeviceDetailModalProps> = ({ device, on
                                   <button
                                     type="button"
                                     className="btn btn-danger-outline btn-sm"
-                                    aria-label={`Uninstall ${s.name}`}
+                                    aria-label={t('device_detail.uninstall_label', { name: s.name })}
                                     disabled={
                                       device.status !== 'online' ||
                                       isUninstallInProgress
                                     }
                                     title={
                                       device.status !== 'online'
-                                        ? 'Endpoint is offline'
+                                        ? t('device_detail.offline_title')
                                         : isUninstallInProgress
-                                        ? 'Uninstall in progress'
-                                        : 'Request silent uninstall'
+                                        ? t('device_detail.in_progress_title')
+                                        : t('device_detail.request_title')
                                     }
                                     onClick={() => {
                                       setUninstallTarget(s)
@@ -721,13 +741,13 @@ export const DeviceDetailModal: React.FC<DeviceDetailModalProps> = ({ device, on
 
             {activeTab === 'network' && (
               <div className="tab-pane network-pane">
-                <DataTable label="Network interfaces">
+                <DataTable label={t('device_detail.network_table')}>
                   <table>
                     <thead>
                       <tr>
-                        <th>Interface Name</th>
-                        <th>Hardware MAC Address</th>
-                        <th>Assigned IP Addresses</th>
+                        <th>{t('device_detail.col_interface')}</th>
+                        <th>{t('device_detail.col_mac')}</th>
+                        <th>{t('device_detail.col_ips')}</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -744,7 +764,7 @@ export const DeviceDetailModal: React.FC<DeviceDetailModalProps> = ({ device, on
                       ) : (
                         <tr>
                           <td colSpan={3} className="text-center">
-                            No network interfaces reported
+                            {t('device_detail.no_nics')}
                           </td>
                         </tr>
                       )}
@@ -774,7 +794,7 @@ export const DeviceDetailModal: React.FC<DeviceDetailModalProps> = ({ device, on
         title={
           <span className="modal-title-group">
             <Trash2 size={22} className="modal-icon" />
-            Request uninstall
+            {t('device_detail.confirm_title')}
           </span>
         }
         footer={
@@ -788,7 +808,7 @@ export const DeviceDetailModal: React.FC<DeviceDetailModalProps> = ({ device, on
               }}
               disabled={uninstalling}
             >
-              Cancel
+              {t('common.cancel')}
             </button>
             <button
               type="button"
@@ -796,7 +816,7 @@ export const DeviceDetailModal: React.FC<DeviceDetailModalProps> = ({ device, on
               onClick={handleUninstall}
               disabled={uninstalling}
             >
-              {uninstalling ? 'Sending...' : 'Send uninstall request'}
+              {uninstalling ? t('device_detail.sending') : t('device_detail.send_uninstall')}
             </button>
           </>
         }
@@ -812,23 +832,18 @@ export const DeviceDetailModal: React.FC<DeviceDetailModalProps> = ({ device, on
           </div>
         )}
         <p>
-          Send an uninstall request to{' '}
-          <strong>{device.hostname}</strong> for:
+          {t('device_detail.confirm_to_before')}{' '}
+          <strong>{device.hostname}</strong> {t('device_detail.confirm_to_after')}
         </p>
         <p className="subtext">
           <strong>{uninstallTarget?.name}</strong>
           {uninstallTarget?.version ? ` ${uninstallTarget.version}` : ''}
         </p>
         <p className="subtext">
-          The agent works out the silent uninstall switches from the endpoint
-          itself. If the program records no verifiable silent command, the request
-          is refused and nothing is run -- no window ever opens on the endpoint.
+          {t('device_detail.confirm_switches')}
         </p>
         <p className="subtext">
-          This sends a request. It does not confirm removal: the agent can still
-          refuse once it receives it. Use Collect Inventory afterwards to collect a new
-          inventory -- the row disappears only if the program really was
-          removed.
+          {t('device_detail.confirm_not_removal')}
         </p>
       </Modal>
     </Modal>

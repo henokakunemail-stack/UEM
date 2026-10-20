@@ -22,6 +22,7 @@ import { AlertsList } from '../components/AlertsList'
 import { KPICard } from '../components/KPICard'
 import { OSDistribution } from '../components/OSDistribution'
 import { SiteDistribution } from '../components/SiteDistribution'
+import { useT, type Vars } from '../i18n/core'
 import { api } from '../services/api'
 import type {
   ActivityItem,
@@ -31,18 +32,18 @@ import type {
   SiteMetric,
 } from '../types/api'
 
-function formatRelativeTime(dateString: string): string {
+function formatRelativeTime(dateString: string, t: (key: string, vars?: Vars) => string): string {
   const date = new Date(dateString)
   const now = new Date()
   const diffSec = Math.floor((now.getTime() - date.getTime()) / 1000)
 
-  if (diffSec < 60) return 'Just now'
+  if (diffSec < 60) return t('dashboard.just_now')
   const diffMin = Math.floor(diffSec / 60)
-  if (diffMin < 60) return `${diffMin}m ago`
+  if (diffMin < 60) return t('dashboard.minutes_ago', { count: diffMin })
   const diffHour = Math.floor(diffMin / 60)
-  if (diffHour < 24) return `${diffHour}h ago`
+  if (diffHour < 24) return t('dashboard.hours_ago', { count: diffHour })
   const diffDay = Math.floor(diffHour / 24)
-  return `${diffDay}d ago`
+  return t('dashboard.days_ago', { count: diffDay })
 }
 
 const getActivityIcon = (action: string) => {
@@ -59,6 +60,7 @@ const getActivityIcon = (action: string) => {
 
 export const DashboardPage: React.FC = () => {
   const navigate = useNavigate()
+  const { t } = useT()
   const [summary, setSummary] = useState<DashboardSummary | null>(null)
   const [sites, setSites] = useState<SiteMetric[]>([])
   const [osMetrics, setOsMetrics] = useState<OSMetric[]>([])
@@ -74,7 +76,8 @@ export const DashboardPage: React.FC = () => {
   // this: the timestamp answers "when did we last have good data", and moving
   // it on an error is how a stale dashboard keeps claiming LIVE.
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  // Dictionary keys of the sections that failed to refresh; translated at render.
+  const [error, setError] = useState<string[] | null>(null)
   // Stops an in-flight poll from writing over a newer one.
   const requestSeq = useRef(0)
 
@@ -96,17 +99,17 @@ export const DashboardPage: React.FC = () => {
 
       const failures: string[] = []
       if (sumRes.status === 'fulfilled') setSummary(sumRes.value)
-      else failures.push('summary')
+      else failures.push('dashboard.section_summary')
       if (siteRes.status === 'fulfilled') setSites(siteRes.value)
-      else failures.push('sites')
+      else failures.push('dashboard.section_sites')
       if (osRes.status === 'fulfilled') setOsMetrics(osRes.value)
-      else failures.push('OS breakdown')
+      else failures.push('dashboard.section_os')
       if (alertRes.status === 'fulfilled') {
         setAlerts(alertRes.value)
         setAlertsKnown(true)
-      } else failures.push('alerts')
+      } else failures.push('dashboard.section_alerts')
       if (actRes.status === 'fulfilled') setActivity(actRes.value)
-      else failures.push('activity')
+      else failures.push('dashboard.section_activity')
 
       if (failures.length === 0) {
         setError(null)
@@ -114,7 +117,7 @@ export const DashboardPage: React.FC = () => {
       } else {
         // Partial failure: whatever did load stays on screen, and the banner
         // names which sections are now stale instead of claiming all-clear.
-        setError(`Could not refresh ${failures.join(', ')}. Showing last known values.`)
+        setError(failures)
       }
     } finally {
       if (seq === requestSeq.current) {
@@ -161,9 +164,9 @@ export const DashboardPage: React.FC = () => {
     <div className="page-container dashboard-page">
       <div className="page-header">
         <div>
-          <h1 className="page-title">Fleet Telemetry Dashboard</h1>
+          <h1 className="page-title">{t('dashboard.title')}</h1>
           <p className="page-subtitle">
-            Real-time health, compliance, and distribution across all corporate sites
+            {t('dashboard.subtitle')}
           </p>
         </div>
         <div className="header-controls">
@@ -173,26 +176,26 @@ export const DashboardPage: React.FC = () => {
               checked={autoRefresh}
               onChange={(e) => setAutoRefresh(e.target.checked)}
             />
-            <span>Auto-refresh (15s)</span>
+            <span>{t('dashboard.auto_refresh')}</span>
           </label>
           {/* Freshness stated honestly: no timestamp at all until a poll has
               actually returned, and no LIVE badge anywhere. */}
           <span className={`last-sync${error ? ' stale' : ''}`}>
             {lastUpdated
-              ? `Updated ${lastUpdated.toLocaleTimeString()}`
+              ? t('dashboard.updated_at', { time: lastUpdated.toLocaleTimeString() })
               : loading
-                ? 'Connecting…'
-                : 'Not yet updated'}
+                ? t('dashboard.connecting')
+                : t('dashboard.not_yet_updated')}
           </span>
           <button
             type="button"
             className="btn btn-secondary btn-icon"
             onClick={() => loadData(false)}
             disabled={refreshing}
-            title="Refresh telemetry"
+            title={t('dashboard.refresh_telemetry')}
           >
             <RefreshCw size={16} className={refreshing ? 'spinning' : ''} />
-            <span>{refreshing ? 'Refreshing...' : 'Refresh'}</span>
+            <span>{refreshing ? t('dashboard.refreshing') : t('dashboard.refresh')}</span>
           </button>
         </div>
       </div>
@@ -200,56 +203,56 @@ export const DashboardPage: React.FC = () => {
       {error && (
         <div className="alert-banner alert-error" role="status">
           <XCircle size={18} />
-          <span>{error}</span>
+          <span>{t('dashboard.could_not_refresh', { sections: error.map((key) => t(key)).join(', ') })}</span>
         </div>
       )}
 
       {loading ? (
         <div className="page-loader">
           <RefreshCw size={32} className="spinning" />
-          <span>Aggregating fleet telemetry...</span>
+          <span>{t('dashboard.aggregating')}</span>
         </div>
       ) : (
         <>
           {/* Row 1 — Fleet Scale & Reach */}
           <div className="kpi-grid">
             <KPICard
-              title="TOTAL MANAGED ENDPOINTS"
+              title={t('dashboard.kpi_total')}
               value={known ? total : unknown}
-              subtitle={known ? `${online} currently connected` : 'Summary unavailable'}
+              subtitle={known ? t('dashboard.connected', { count: online }) : t('dashboard.summary_unavailable')}
               icon={<Laptop size={22} />}
               variant={known ? 'primary' : 'unknown'}
-              badge={known ? 'Fleet Scale' : 'Unknown'}
+              badge={known ? t('dashboard.badge_fleet_scale') : t('common.unknown')}
               onClick={() => goDevices()}
             />
             <KPICard
-              title="FLEET ONLINE RATIO"
+              title={t('dashboard.kpi_online_ratio')}
               value={known && total > 0 ? `${onlinePct}%` : unknown}
-              subtitle={!known ? 'Summary unavailable' : total === 0 ? 'No devices enrolled yet' : `${offline} endpoints offline`}
+              subtitle={!known ? t('dashboard.summary_unavailable') : total === 0 ? t('dashboard.no_devices_enrolled') : t('dashboard.endpoints_offline', { count: offline })}
               icon={<Radio size={22} />}
               // With no devices there is no ratio: 0% read as "Degraded" on a
               // fresh install that had nothing wrong with it.
               variant={!known ? 'unknown' : total === 0 ? 'neutral' : onlinePct >= 80 ? 'success' : onlinePct >= 50 ? 'warning' : 'danger'}
-              badge={!known ? 'Unknown' : total === 0 ? 'No devices' : onlinePct >= 80 ? 'Healthy' : 'Degraded'}
+              badge={!known ? t('common.unknown') : total === 0 ? t('dashboard.badge_no_devices') : onlinePct >= 80 ? t('dashboard.badge_healthy') : t('dashboard.badge_degraded')}
               progress={known && total > 0 ? { current: online, total } : undefined}
               onClick={() => goDevices('?status=online')}
             />
             <KPICard
-              title="ACTIVE SITES"
+              title={t('dashboard.kpi_active_sites')}
               value={known ? siteCount : unknown}
-              subtitle={!known ? 'Summary unavailable' : siteCount > 0 ? 'Branches reporting telemetry' : 'No site assigned yet'}
+              subtitle={!known ? t('dashboard.summary_unavailable') : siteCount > 0 ? t('dashboard.branches_reporting') : t('dashboard.no_site_assigned')}
               icon={<Users size={22} />}
               variant={known ? 'neutral' : 'unknown'}
-              badge={known ? 'Coverage' : 'Unknown'}
+              badge={known ? t('dashboard.badge_coverage') : t('common.unknown')}
               onClick={() => goDevices()}
             />
             <KPICard
-              title="RETIRED / DECOMMISSIONED"
+              title={t('dashboard.kpi_retired')}
               value={known ? (summary.retired_devices ?? 0) : unknown}
-              subtitle="Excluded from telemetry"
+              subtitle={t('dashboard.excluded_from_telemetry')}
               icon={<Wrench size={22} />}
               variant={known ? 'neutral' : 'unknown'}
-              badge={known ? 'Lifecycle' : 'Unknown'}
+              badge={known ? t('dashboard.badge_lifecycle') : t('common.unknown')}
               onClick={() => goDevices('?status=retired')}
             />
           </div>
@@ -257,21 +260,21 @@ export const DashboardPage: React.FC = () => {
           {/* Row 2 — Operational Health & Issues */}
           <div className="kpi-grid">
             <KPICard
-              title="OFFLINE DEVICES"
+              title={t('dashboard.kpi_offline')}
               value={known ? offline : unknown}
-              subtitle="Pending reconnection"
+              subtitle={t('dashboard.pending_reconnection')}
               icon={<WifiOff size={22} />}
               variant={!known ? 'unknown' : offline > 0 ? 'warning' : 'neutral'}
-              badge={!known ? 'Unknown' : offline > 0 ? 'Attention' : 'Optimal'}
+              badge={!known ? t('common.unknown') : offline > 0 ? t('dashboard.badge_attention') : t('dashboard.badge_optimal')}
               onClick={() => goDevices('?status=offline')}
             />
             <KPICard
-              title="LOW DISK ENDPOINTS"
+              title={t('dashboard.kpi_low_disk')}
               value={known ? lowDisk : unknown}
-              subtitle="Below free-space threshold"
+              subtitle={t('dashboard.below_free_space')}
               icon={<HardDrive size={22} />}
               variant={!known ? 'unknown' : lowDisk > 0 ? 'danger' : 'success'}
-              badge={!known ? 'Unknown' : lowDisk > 0 ? 'Storage Risk' : 'Healthy'}
+              badge={!known ? t('common.unknown') : lowDisk > 0 ? t('dashboard.badge_storage_risk') : t('dashboard.badge_healthy')}
               // Deliberately not a filter link. /api/devices accepts only
               // status and site, and neither expresses free space, so a
               // ?disk=low link would be ignored server-side and land on the
@@ -279,20 +282,20 @@ export const DashboardPage: React.FC = () => {
               // honest about not narrowing; the count is real either way.
             />
             <KPICard
-              title="HARDWARE CHANGES (24H)"
+              title={t('dashboard.kpi_hw_changes')}
               value={known ? hwChanges : unknown}
-              subtitle="RAM / disk / CPU replacements"
+              subtitle={t('dashboard.hw_replacements')}
               icon={<Wrench size={22} />}
               variant={!known ? 'unknown' : hwChanges > 0 ? 'warning' : 'neutral'}
-              badge={!known ? 'Unknown' : hwChanges > 0 ? 'Audit Event' : 'Stable'}
+              badge={!known ? t('common.unknown') : hwChanges > 0 ? t('dashboard.badge_audit_event') : t('dashboard.badge_stable')}
             />
             <KPICard
-              title="ACTIVE HEALTH ALERTS"
+              title={t('dashboard.kpi_health_alerts')}
               value={alertsKnown ? alerts.length : unknown}
-              subtitle="Low disk and prolonged-offline conditions"
+              subtitle={t('dashboard.health_alerts_desc')}
               icon={<AlertTriangle size={22} />}
               variant={!alertsKnown ? 'unknown' : alerts.length > 0 ? 'warning' : 'success'}
-              badge={!alertsKnown ? 'Unknown' : alerts.length > 0 ? 'Action Needed' : 'Normal'}
+              badge={!alertsKnown ? t('common.unknown') : alerts.length > 0 ? t('dashboard.badge_action_needed') : t('dashboard.badge_normal')}
               onClick={() => navigate('/alerts')}
             />
           </div>
@@ -302,32 +305,32 @@ export const DashboardPage: React.FC = () => {
             <button type="button" className="quick-action-tile" onClick={() => goDevices()}>
               <Laptop size={18} />
               <div>
-                <strong>Endpoint Inventory</strong>
-                <span>Hardware, storage, installed software</span>
+                <strong>{t('dashboard.quick_inventory')}</strong>
+                <span>{t('dashboard.quick_inventory_desc')}</span>
               </div>
               <ArrowRight size={16} />
             </button>
             <button type="button" className="quick-action-tile" onClick={() => navigate('/alerts')}>
               <AlertTriangle size={18} />
               <div>
-                <strong>Alert Incidents</strong>
-                <span>Acknowledge and resolve anomalies</span>
+                <strong>{t('dashboard.quick_incidents')}</strong>
+                <span>{t('dashboard.quick_incidents_desc')}</span>
               </div>
               <ArrowRight size={16} />
             </button>
             <button type="button" className="quick-action-tile" onClick={() => navigate('/patches')}>
               <ShieldAlert size={18} />
               <div>
-                <strong>Patch Compliance</strong>
-                <span>Missing and critical security updates</span>
+                <strong>{t('dashboard.quick_patches')}</strong>
+                <span>{t('dashboard.quick_patches_desc')}</span>
               </div>
               <ArrowRight size={16} />
             </button>
             <button type="button" className="quick-action-tile" onClick={() => navigate('/log')}>
               <ScrollText size={18} />
               <div>
-                <strong>Server Log</strong>
-                <span>Live tail when something misbehaves</span>
+                <strong>{t('dashboard.quick_log')}</strong>
+                <span>{t('dashboard.quick_log_desc')}</span>
               </div>
               <ArrowRight size={16} />
             </button>
@@ -356,13 +359,13 @@ export const DashboardPage: React.FC = () => {
               <div className="card-header">
                 <div className="card-title-group">
                   <Activity size={18} className="card-icon" />
-                  <h3 className="card-title">Recent Fleet Activity & Audit</h3>
+                  <h3 className="card-title">{t('dashboard.activity_title')}</h3>
                 </div>
-                <span className="card-badge">{activity.length} Events</span>
+                <span className="card-badge">{t('dashboard.events_count', { count: activity.length })}</span>
               </div>
               <div className="activity-body">
                 {activity.length === 0 ? (
-                  <div className="empty-state">No recent activity recorded</div>
+                  <div className="empty-state">{t('dashboard.no_activity')}</div>
                 ) : (
                   <div className="activity-timeline">
                     {activity.map((item) => (
@@ -382,7 +385,7 @@ export const DashboardPage: React.FC = () => {
                             className="timeline-time"
                             title={new Date(item.created_at).toLocaleString()}
                           >
-                            {formatRelativeTime(item.created_at)}
+                            {formatRelativeTime(item.created_at, t)}
                           </span>
                         </div>
                       </div>
