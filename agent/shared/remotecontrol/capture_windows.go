@@ -32,21 +32,22 @@ var (
 	procMapVirtualKeyExW   = user32.NewProc("MapVirtualKeyExW")
 	procGetKeyboardLayout  = user32.NewProc("GetKeyboardLayout")
 
-	procCreateCompatibleDC     = gdi32.NewProc("CreateCompatibleDC")
-	procCreateCompatibleBitmap = gdi32.NewProc("CreateCompatibleBitmap")
-	procSelectObject           = gdi32.NewProc("SelectObject")
-	procBitBlt                 = gdi32.NewProc("BitBlt")
-	procGetDIBits              = gdi32.NewProc("GetDIBits")
-	procDeleteObject           = gdi32.NewProc("DeleteObject")
-	procDeleteDC               = gdi32.NewProc("DeleteDC")
+	procCreateCompatibleDC = gdi32.NewProc("CreateCompatibleDC")
+	procCreateDIBSection   = gdi32.NewProc("CreateDIBSection")
+	procSelectObject       = gdi32.NewProc("SelectObject")
+	procBitBlt             = gdi32.NewProc("BitBlt")
+	procGdiFlush           = gdi32.NewProc("GdiFlush")
+	procDeleteObject       = gdi32.NewProc("DeleteObject")
+	procDeleteDC           = gdi32.NewProc("DeleteDC")
 )
 
 const (
-	SM_CXSCREEN = 0
-	SM_CYSCREEN = 1
-	SRCCOPY     = 0x00CC0020
-	CAPTUREBLT  = 0x40000000
-	BI_RGB      = 0
+	SM_CXSCREEN    = 0
+	SM_CYSCREEN    = 1
+	SRCCOPY        = 0x00CC0020
+	CAPTUREBLT     = 0x40000000
+	BI_RGB         = 0
+	DIB_RGB_COLORS = 0
 
 	// SendInput, not the legacy mouse_event/keybd_event. Both are documented as
 	// superseded, and the legacy pair is where the interesting bugs live: they
@@ -123,6 +124,100 @@ type bitmapInfoHeader struct {
 	BiClrImportant  uint32
 }
 
+// bitmapInfo is BITMAPINFO: the header plus the one-entry colour table the
+// struct declares. CreateDIBSection reads a BITMAPINFO, not a bare header, so
+// the trailing slot keeps the call inside memory we own.
+type bitmapInfo struct {
+	Header bitmapInfoHeader
+	Colors [1]uint32
+}
+
+// dibSurface is the memory DC and the DIB section selected into it that every
+// frame is blitted into.
+//
+// The capture used to blit into a CreateCompatibleBitmap device bitmap and read
+// it back with GetDIBits. That readback is the step that failed on endpoints --
+// "getdibits failed" with a Win32 error of 0 -- after BitBlt had succeeded, and
+// it failed persistently once it started: a device bitmap lives wherever the
+// display driver puts it, and converting a full-screen one back to a DIB is a
+// driver operation that a basic or virtual display adapter, or one short of
+// memory, refuses without saying why. It also cost an 8MB device allocation on
+// every tick.
+//
+// A DIB section is system memory GDI owns and draws into directly, so BitBlt
+// writes the pixels straight into the buffer we read and there is no readback
+// at all. It is what VNC servers capture into for the same reason. It is
+// top-down (negative height), so rows arrive in the order Damage.Diff expects
+// and nothing has to be flipped.
+type dibSurface struct {
+	hdcMem  uintptr
+	hBitmap uintptr
+	hOld    uintptr
+	bits    unsafe.Pointer
+	width   int
+	height  int
+}
+
+func newDIBSurface(hdcScreen uintptr, width, height int) (*dibSurface, error) {
+	hdcMem, _, callErr := procCreateCompatibleDC.Call(hdcScreen)
+	if hdcMem == 0 {
+		return nil, fmt.Errorf("CreateCompatibleDC failed: %w", cleanWin32Err(callErr))
+	}
+
+	var bi bitmapInfo
+	bi.Header.BiSize = uint32(unsafe.Sizeof(bi.Header))
+	bi.Header.BiWidth = int32(width)
+	bi.Header.BiHeight = -int32(height) // negative: top-down rows
+	bi.Header.BiPlanes = 1
+	bi.Header.BiBitCount = 32
+	bi.Header.BiCompression = BI_RGB
+
+	var bits unsafe.Pointer
+	hBitmap, _, callErr := procCreateDIBSection.Call(
+		hdcScreen,
+		uintptr(unsafe.Pointer(&bi)),
+		DIB_RGB_COLORS,
+		uintptr(unsafe.Pointer(&bits)),
+		0,
+		0,
+	)
+	if hBitmap == 0 || bits == nil {
+		procDeleteDC.Call(hdcMem)
+		return nil, fmt.Errorf("CreateDIBSection %dx%d failed: %w", width, height, cleanWin32Err(callErr))
+	}
+
+	hOld, _, _ := procSelectObject.Call(hdcMem, hBitmap)
+	return &dibSurface{
+		hdcMem:  hdcMem,
+		hBitmap: hBitmap,
+		hOld:    hOld,
+		bits:    bits,
+		width:   width,
+		height:  height,
+	}, nil
+}
+
+// close deselects the section before deleting it. DeleteObject refuses a bitmap
+// that is still selected into a DC, and the refusal is silent: the 8MB section
+// would simply never be freed.
+func (s *dibSurface) close() {
+	procSelectObject.Call(s.hdcMem, s.hOld)
+	procDeleteObject.Call(s.hBitmap)
+	procDeleteDC.Call(s.hdcMem)
+}
+
+// blit copies the screen into the section and waits for GDI to finish writing
+// it. GDI batches drawing calls per thread, and the section's bits are only
+// guaranteed to hold the blit once the batch is flushed.
+func (s *dibSurface) blit(hdcScreen uintptr) error {
+	ret, _, callErr := procBitBlt.Call(s.hdcMem, 0, 0, uintptr(s.width), uintptr(s.height), hdcScreen, 0, 0, uintptr(SRCCOPY|CAPTUREBLT))
+	if ret == 0 {
+		return cleanWin32Err(callErr)
+	}
+	procGdiFlush.Call()
+	return nil
+}
+
 type WindowsCapturer struct {
 	// mu guards held. The capturer is one object shared by the capability probe,
 	// the capture loop and the input loop, which run on three different
@@ -133,6 +228,12 @@ type WindowsCapturer struct {
 	// administered.
 	mu   sync.Mutex
 	held map[uint16]bool
+
+	// capMu guards surf. The surface is reused from frame to frame and is only
+	// rebuilt when the resolution changes; two captures blitting into the same
+	// section at once would hand each of them a mixture of both frames.
+	capMu sync.Mutex
+	surf  *dibSurface
 }
 
 func NewPlatformCapturer() ScreenCapturer {
@@ -201,6 +302,47 @@ func attachToInputDesktop() error {
 	return nil
 }
 
+// reattachInputDesktop moves the calling thread onto whatever desktop is the
+// input desktop now, after a blit has failed.
+//
+// The input desktop changes under a running session -- a UAC prompt, Ctrl+Alt+Del
+// or the lock screen all switch it -- and a thread still attached to the old one
+// gets "Access is denied" from every blit. This used to forget the thread and
+// CloseDesktop the handle it was still attached to; Windows refuses to close a
+// desktop a thread is using, so the handle leaked on every failed tick and the
+// next attach opened another. The old handle is closed only once the thread has
+// actually moved off it.
+func reattachInputDesktop() {
+	tid, _, _ := procGetCurrentThreadID.Call()
+	hDesktop, _, _ := procOpenInputDesktop.Call(0, 0, desktopAll)
+	if hDesktop == 0 {
+		// The input desktop is one this user cannot open (the secure desktop
+		// behind a lock or UAC prompt). Stay where we are: the next tick tries
+		// again, and succeeds once the user is back on their own desktop.
+		return
+	}
+	if ret, _, _ := procSetThreadDesktop.Call(hDesktop); ret == 0 {
+		procCloseDesktop.Call(hDesktop)
+		return
+	}
+	if prev, ok := attachedThreads.Swap(tid, hDesktop); ok {
+		if old, ok := prev.(uintptr); ok && old != 0 && old != hDesktop {
+			procCloseDesktop.Call(old)
+		}
+	}
+}
+
+// sessionZeroHint names the one cause of a failed blit that no retry fixes: the
+// process is in Session 0, which has no desktop a person is looking at.
+func sessionZeroHint() string {
+	var sessionID uint32
+	pid, _, _ := procGetCurrentProcessId.Call()
+	if r, _, _ := procProcessIdToSessionId.Call(pid, uintptr(unsafe.Pointer(&sessionID))); r != 0 && sessionID == 0 {
+		return " (running in Windows Session 0: workstation is locked or has no active logged-on user session)"
+	}
+	return ""
+}
+
 // Capabilities reports what this host can actually do, not what Windows can do
 // in general. The input paths go through SendInput, which is present on every
 // supported version, so neither of those is a stub here.
@@ -236,7 +378,8 @@ func cleanWin32Err(callErr error) error {
 	return callErr
 }
 
-// probeCapture performs a 1x1 blit and reports why it failed, if it did.
+// probeCapture performs a 1x1 blit through the same DIB-section path the real
+// capture uses, and reports why it failed, if it did.
 func (c *WindowsCapturer) probeCapture() error {
 	// The probe is the thing that decides whether the console is told the host
 	// can capture, so it has to run on an attached thread. Probing from a
@@ -250,62 +393,15 @@ func (c *WindowsCapturer) probeCapture() error {
 	}
 	defer procReleaseDC.Call(0, hdcScreen)
 
-	hdcMem, _, _ := procCreateCompatibleDC.Call(hdcScreen)
-	if hdcMem == 0 {
-		return errors.New("CreateCompatibleDC failed")
+	surf, err := newDIBSurface(hdcScreen, 1, 1)
+	if err != nil {
+		return err
 	}
-	defer procDeleteDC.Call(hdcMem)
+	defer surf.close()
 
-	hBitmap, _, _ := procCreateCompatibleBitmap.Call(hdcScreen, 1, 1)
-	if hBitmap == 0 {
-		return errors.New("CreateCompatibleBitmap failed")
-	}
-	defer procDeleteObject.Call(hBitmap)
-
-	old, _, _ := procSelectObject.Call(hdcMem, hBitmap)
-	defer procSelectObject.Call(hdcMem, old)
-
-	if ret, _, callErr := procBitBlt.Call(hdcMem, 0, 0, 1, 1, hdcScreen, 0, 0, uintptr(SRCCOPY|CAPTUREBLT)); ret == 0 {
-		tid, _, _ := procGetCurrentThreadID.Call()
-		if val, ok := attachedThreads.LoadAndDelete(tid); ok {
-			if hDesktop, ok := val.(uintptr); ok && hDesktop != 0 {
-				procCloseDesktop.Call(hDesktop)
-			}
-		}
-		var extra string
-		var sessionID uint32
-		pid, _, _ := procGetCurrentProcessId.Call()
-		r, _, _ := procProcessIdToSessionId.Call(pid, uintptr(unsafe.Pointer(&sessionID)))
-		if r != 0 && sessionID == 0 {
-			extra = " (running in Windows Session 0: workstation is locked or has no active logged-on user session)"
-		}
-		return fmt.Errorf("BitBlt failed: %w%s", cleanWin32Err(callErr), extra)
-	}
-
-	// Verify GetDIBits on the screen DC with the bitmap unselected from hdcMem.
-	// A driver or display mode that rejects GetDIBits must be caught here so
-	// Capabilities() accurately reflects host support before starting the stream.
-	procSelectObject.Call(hdcMem, old)
-	var bi bitmapInfoHeader
-	bi.BiSize = uint32(unsafe.Sizeof(bi))
-	bi.BiWidth = 1
-	bi.BiHeight = 1
-	bi.BiPlanes = 1
-	bi.BiBitCount = 32
-	bi.BiCompression = BI_RGB
-	bi.BiSizeImage = 4
-
-	var probePixel [4]byte
-	if ret, _, callErr := procGetDIBits.Call(
-		hdcScreen,
-		hBitmap,
-		0,
-		1,
-		uintptr(unsafe.Pointer(&probePixel[0])),
-		uintptr(unsafe.Pointer(&bi)),
-		0,
-	); ret == 0 {
-		return fmt.Errorf("GetDIBits probe failed: %w", cleanWin32Err(callErr))
+	if err := surf.blit(hdcScreen); err != nil {
+		reattachInputDesktop()
+		return fmt.Errorf("BitBlt failed: %w%s", err, sessionZeroHint())
 	}
 	return nil
 }
@@ -331,103 +427,56 @@ func (c *WindowsCapturer) CaptureScreen() ([]byte, int, int, error) {
 	}
 	defer procReleaseDC.Call(0, hdcScreen)
 
-	hdcMem, _, _ := procCreateCompatibleDC.Call(hdcScreen)
-	if hdcMem == 0 {
-		return nil, 0, 0, fmt.Errorf("failed to create compatible DC")
-	}
-	defer procDeleteDC.Call(hdcMem)
+	c.capMu.Lock()
+	defer c.capMu.Unlock()
 
-	hBitmap, _, _ := procCreateCompatibleBitmap.Call(hdcScreen, uintptr(width), uintptr(height))
-	if hBitmap == 0 {
-		return nil, 0, 0, fmt.Errorf("failed to create compatible bitmap")
-	}
-	defer procDeleteObject.Call(hBitmap)
-
-	hOld, _, _ := procSelectObject.Call(hdcMem, hBitmap)
-	defer procSelectObject.Call(hdcMem, hOld)
-
-	ret, _, callErr := procBitBlt.Call(hdcMem, 0, 0, uintptr(width), uintptr(height), hdcScreen, 0, 0, uintptr(SRCCOPY|CAPTUREBLT))
-	if ret == 0 {
-		tid, _, _ := procGetCurrentThreadID.Call()
-		if val, ok := attachedThreads.LoadAndDelete(tid); ok {
-			if hDesktop, ok := val.(uintptr); ok && hDesktop != 0 {
-				procCloseDesktop.Call(hDesktop)
-			}
+	// The surface survives between frames and is rebuilt only when the
+	// resolution changes, so a steady session allocates nothing in GDI per tick.
+	if c.surf == nil || c.surf.width != width || c.surf.height != height {
+		if c.surf != nil {
+			c.surf.close()
+			c.surf = nil
 		}
+		surf, err := newDIBSurface(hdcScreen, width, height)
+		if err != nil {
+			return nil, 0, 0, err
+		}
+		c.surf = surf
+	}
+
+	if err := c.surf.blit(hdcScreen); err != nil {
 		// The Win32 code is kept deliberately. A non-interactive window station
 		// (a service, a CI runner, a container) makes BitBlt fail with a code
 		// that no amount of code change will fix, and without it this error is
-		// indistinguishable from a genuine capture bug. A failed LazyProc call
-		// returns that code as its error, so wrapping it prints it.
-		if callErr == nil {
-			callErr = errors.New("unknown win32 error")
-		}
-		var extra string
-		var sessionID uint32
-		pid, _, _ := procGetCurrentProcessId.Call()
-		r, _, _ := procProcessIdToSessionId.Call(pid, uintptr(unsafe.Pointer(&sessionID)))
-		if r != 0 && sessionID == 0 {
-			extra = " (running in Windows Session 0: workstation is locked or has no active logged-on user session)"
-		}
-		return nil, 0, 0, fmt.Errorf("bitblt failed on a %dx%d blit: %w%s", width, height, cleanWin32Err(callErr), extra)
+		// indistinguishable from a genuine capture bug.
+		reattachInputDesktop()
+		return nil, 0, 0, fmt.Errorf("bitblt failed on a %dx%d blit: %w%s", width, height, err, sessionZeroHint())
 	}
 
-	var bi bitmapInfoHeader
-	bi.BiSize = uint32(unsafe.Sizeof(bi))
-	bi.BiWidth = int32(width)
-	bi.BiHeight = int32(height) // positive for bottom-up bitmap (universal display driver support)
-	bi.BiPlanes = 1
-	bi.BiBitCount = 32
-	bi.BiCompression = BI_RGB
-	bi.BiSizeImage = uint32(width * height * 4)
-
-	// The DIB is read as 32-bit BGRA and handed back as it is. Converting it to
-	// RGBA and encoding it here is what made this a polled screenshot: the
-	// conversion is a full pass over 8MB and the encode is another, both spent
-	// on the whole desktop whether or not anything on it changed, and the result
-	// is a blob the change detection cannot look inside.
+	// The section is overwritten by the next blit, and Damage keeps the frame it
+	// is handed as its baseline, so the pixels are copied out rather than lent.
 	//
-	// Damage.Diff works on these bytes directly, and only the rectangles it
-	// decides to send get converted and encoded.
-	rawPixels := make([]byte, width*height*4)
+	// They stay BGRA. Converting to RGBA and encoding here is what made this a
+	// polled screenshot: both are full passes over 8MB spent on the whole desktop
+	// whether or not anything changed. Damage.Diff works on these bytes directly,
+	// and only the rectangles it decides to send get converted and encoded.
+	size := width * height * 4
+	pixels := make([]byte, size)
+	copy(pixels, unsafe.Slice((*byte)(c.surf.bits), size))
+	return pixels, width, height, nil
+}
 
-	// Win32 GDI requires hBitmap not be selected into hdcMem when calling GetDIBits.
-	// Pass hdcScreen (which retains native 32-bpp format), NOT hdcMem (which holds
-	// the 1-bpp monochrome hOld stock bitmap).
-	procSelectObject.Call(hdcMem, hOld)
-
-	ret, _, callErr = procGetDIBits.Call(
-		hdcScreen,
-		hBitmap,
-		0,
-		uintptr(height),
-		uintptr(unsafe.Pointer(&rawPixels[0])),
-		uintptr(unsafe.Pointer(&bi)),
-		0,
-	)
-	if ret == 0 {
-		tid, _, _ := procGetCurrentThreadID.Call()
-		if val, ok := attachedThreads.LoadAndDelete(tid); ok {
-			if hDesktop, ok := val.(uintptr); ok && hDesktop != 0 {
-				procCloseDesktop.Call(hDesktop)
-			}
-		}
-		return nil, 0, 0, fmt.Errorf("getdibits failed: %w", cleanWin32Err(callErr))
+// releaseCaptureResources frees the cached surface when a session ends. The
+// service process keeps one capturer for its whole life, and without this an
+// 8MB section from a fallback session would stay allocated until the agent
+// restarts.
+func (c *WindowsCapturer) releaseCaptureResources() {
+	c.capMu.Lock()
+	defer c.capMu.Unlock()
+	if c.surf != nil {
+		c.surf.close()
+		c.surf = nil
 	}
-
-	// Invert scanlines in-place: convert bottom-up DIB to top-down buffer expected by Damage.Diff.
-	stride := width * 4
-	rowBuf := make([]byte, stride)
-	for top := 0; top < height/2; top++ {
-		bottom := height - 1 - top
-		topOffset := top * stride
-		bottomOffset := bottom * stride
-		copy(rowBuf, rawPixels[topOffset:topOffset+stride])
-		copy(rawPixels[topOffset:topOffset+stride], rawPixels[bottomOffset:bottomOffset+stride])
-		copy(rawPixels[bottomOffset:bottomOffset+stride], rowBuf)
-	}
-
-	return rawPixels, width, height, nil
 }
 
 func (c *WindowsCapturer) InjectMouseEvent(e InputEvent) error {

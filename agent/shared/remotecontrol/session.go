@@ -94,14 +94,14 @@ const (
 )
 
 type Session struct {
-	config    SessionConfig
-	serverURL string
-	creds     Credentials
-	capturer  ScreenCapturer
-	conn      *websocket.Conn
-	mu        sync.Mutex
-	stopChan  chan struct{}
-	stopOnce  sync.Once
+	config           SessionConfig
+	serverURL        string
+	creds            Credentials
+	capturer         ScreenCapturer
+	conn             *websocket.Conn
+	mu               sync.Mutex
+	stopChan         chan struct{}
+	stopOnce         sync.Once
 	modeMu           sync.RWMutex
 	mode             string
 	wakeChan         chan struct{}
@@ -326,6 +326,13 @@ func (s *Session) streamFramesLoop() {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 	defer s.Stop()
+	// A capturer that caches a frame surface between ticks frees it here, when
+	// the only loop that blits into it is done with it.
+	defer func() {
+		if r, ok := s.capturer.(interface{ releaseCaptureResources() }); ok {
+			r.releaseCaptureResources()
+		}
+	}()
 
 	interval := minCaptureInterval
 	timer := time.NewTimer(interval)

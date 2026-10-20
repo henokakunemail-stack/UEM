@@ -335,6 +335,15 @@ func (h *Handler) handleOperatorWS(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
+		// A refresh asks the agent for a full keyframe. It is not input, so it
+		// must not hit the view_only gate: a view-only console that missed the
+		// agent's first frame would otherwise only ever receive the rectangles
+		// that changed, and sit on a mostly blank desktop.
+		if isRefreshMessage(msg) {
+			_ = relay.ForwardControlMessage(msgType, msg)
+			continue
+		}
+
 		if err := relay.ForwardOperatorInput(msgType, msg); err != nil {
 			break
 		}
@@ -452,6 +461,14 @@ func parseModeMessage(msg []byte) (string, bool) {
 		return "", false
 	}
 	return probe.Mode, true
+}
+
+// isRefreshMessage reports whether a console message is a keyframe request.
+func isRefreshMessage(msg []byte) bool {
+	var probe struct {
+		Type string `json:"type"`
+	}
+	return json.Unmarshal(msg, &probe) == nil && probe.Type == "refresh"
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {

@@ -104,7 +104,7 @@ func (d *Damage) ForceKeyframe() {
 // Diff compares a freshly blitted frame against the baseline and returns the
 // rectangles that have to be sent.
 //
-// pixels is BGRA, which is what GetDIBits produces and what the encoder below
+// pixels is BGRA, which is what the capture blits into its DIB section and what the encoder below
 // expects, so nothing is converted on the full frame: only the rectangles that
 // are actually sent are swapped to RGBA for encoding.
 func (d *Damage) Diff(pixels []byte) []Rect {

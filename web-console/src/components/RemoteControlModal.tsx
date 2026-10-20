@@ -148,6 +148,9 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
     let currentSessionId = ''
     const deviceId = device.id
     const startMode = modeRef.current
+    // Whether this session has painted decides how a capture failure is shown,
+    // so a previous device's frames must not count for this one.
+    lastFrameAtRef.current = 0
 
     const initSession = async () => {
       try {
@@ -369,6 +372,17 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
       if (msg.type === 'hello') {
         setCapabilities(msg.capabilities ?? null)
         if (msg.mode) setMode(msg.mode)
+      } else if (msg.type === 'capture_failed' && lastFrameAtRef.current > 0) {
+        // The desktop was already streaming, so this is the agent saying a few
+        // grabs in a row failed -- a UAC prompt, the lock screen, a display
+        // mode change. The agent keeps retrying, and the next frame moves the
+        // session back to 'active'. Tearing the canvas down here made one
+        // transient failure look like a dead endpoint and threw away the
+        // desktop the operator was looking at.
+        setStatus((prev) => (prev === 'ended' || prev === 'error' ? prev : 'stalled'))
+        setErrorMessage(
+          `The endpoint stopped sending its screen (${msg.reason || 'capture failed'}). Showing the last frame; it resumes on its own when capture recovers.`
+        )
       } else if (msg.type === 'unsupported' || msg.type === 'connect_failed' || msg.type === 'capture_failed') {
         setAwaitingFirstFrame(false)
         setCapabilities({ capture: false, mouse: false, keyboard: false, reason: msg.reason ?? '' })

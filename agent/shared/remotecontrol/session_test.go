@@ -29,7 +29,7 @@ func (f *fakeCapturer) CaptureScreen() ([]byte, int, int, error) {
 		return nil, 0, 0, f.captureErr
 	}
 	const w, h = 8, 4
-	// BGRA pixels, 4 bytes each, row by row -- what GetDIBits produces and
+	// BGRA pixels, 4 bytes each, row by row -- what the capture blits into its DIB section and
 	// what the damage diff expects to compare.
 	pixels := make([]byte, w*h*4)
 	for i := range pixels {

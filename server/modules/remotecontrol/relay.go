@@ -115,19 +115,22 @@ func (rm *RelayManager) AttachOperator(sessionID string, ws *websocket.Conn) (*a
 	}
 	rm.relaysMu.Unlock()
 
+	// The write lock is taken before the socket is published. Publishing first
+	// left a gap in which ForwardAgentFrame could see the new socket and write a
+	// frame ahead of the buffered "hello" or "unsupported", so the console
+	// painted before it knew the endpoint's capabilities -- or never learned why
+	// the endpoint could not stream at all.
+	r.operatorWriteMu.Lock()
 	r.mu.Lock()
 	r.operatorWS = ws
 	pending := r.pendingControl
 	r.pendingControl = nil
 	r.mu.Unlock()
-
-	if len(pending) > 0 {
-		r.operatorWriteMu.Lock()
-		for _, msg := range pending {
-			_ = ws.WriteMessage(websocket.TextMessage, msg)
-		}
-		r.operatorWriteMu.Unlock()
+	for _, msg := range pending {
+		_ = ws.SetWriteDeadline(time.Now().Add(operatorWriteWait))
+		_ = ws.WriteMessage(websocket.TextMessage, msg)
 	}
+	r.operatorWriteMu.Unlock()
 
 	// A read deadline plus a pong handler keeps a half-open socket — a laptop
 	// that closed without a close frame — from holding the relay open forever.
@@ -359,8 +362,19 @@ func (r *activeRelay) ForwardAgentFrame(msgType int, data []byte) error {
 
 	r.operatorWriteMu.Lock()
 	defer r.operatorWriteMu.Unlock()
-	_ = ws.SetWriteDeadline(time.Now().Add(2500 * time.Millisecond))
+	_ = ws.SetWriteDeadline(time.Now().Add(frameWriteDeadline(len(data))))
 	return ws.WriteMessage(msgType, data)
+}
+
+// frameWriteDeadline scales the write budget with the frame. A flat 2.5s was
+// sized for small damage rectangles; a full 1080p keyframe is 1-3MB and needs
+// several seconds on a branch-office link, and a write that times out leaves a
+// gorilla connection permanently broken -- so the session died on its first
+// full frame. 2.5s plus one second per 128KB, capped at 30s, still drops an
+// operator socket that has genuinely stopped reading.
+func frameWriteDeadline(size int) time.Duration {
+	d := 2500*time.Millisecond + time.Duration(size/(128*1024))*time.Second
+	return min(d, 30*time.Second)
 }
 
 // ForwardOperatorInput forwards an operator input event to the agent. In
