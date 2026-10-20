@@ -60,7 +60,8 @@ func rcFixture(t *testing.T) (*Handler, *sqlx.DB, *busyHub) {
 
 	// site is selected by ListSessionsByDevice; the real schema has it and this
 	// table exists only to hold two rows.
-	database.MustExec(`CREATE TABLE devices (id TEXT PRIMARY KEY, hostname TEXT, site TEXT, status TEXT);`)
+	database.MustExec(`CREATE TABLE devices (id TEXT PRIMARY KEY, hostname TEXT, site TEXT, status TEXT, connected_node TEXT);`)
+	database.MustExec(`CREATE TABLE server_nodes (id TEXT PRIMARY KEY, last_seen_at DATETIME NOT NULL);`)
 	database.MustExec(`CREATE TABLE users (id TEXT PRIMARY KEY, username TEXT);`)
 	database.MustExec(`CREATE TABLE remote_control_sessions (
 		id TEXT PRIMARY KEY,

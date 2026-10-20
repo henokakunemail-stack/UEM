@@ -107,6 +107,61 @@ func (c *Conn) writePump(finished chan struct{}) {
 type Hub struct {
 	mu    sync.RWMutex
 	conns map[string]*Conn
+
+	// router reaches agents whose socket is on another server node. nil on a
+	// single node (SQLite), where a device not in conns is simply offline.
+	router Router
+	closed bool
+}
+
+// Router delivers to agents connected to other server nodes. SendTo and Online
+// ask it only after the local map has no socket for the device, so a command
+// for a local agent never touches the database.
+type Router interface {
+	Forward(deviceID string, msg []byte) bool
+	RemoteOnline(deviceID string) bool
+}
+
+// SetRouter installs the cross-node router. Called once at startup, before the
+// server accepts requests.
+func (h *Hub) SetRouter(r Router) {
+	h.mu.Lock()
+	h.router = r
+	h.mu.Unlock()
+}
+
+// SendLocal delivers only to a socket on this node. The router uses it for
+// commands forwarded from another node, so a forwarded command can never be
+// forwarded again.
+func (h *Hub) SendLocal(deviceID string, b []byte) bool {
+	c := h.Get(deviceID)
+	if c == nil {
+		return false
+	}
+	return c.Send(b)
+}
+
+// Close disconnects every agent and refuses new registrations. Called at
+// shutdown, after the HTTP server stopped accepting: the agents see their
+// socket close, reconnect, and land on another node -- instead of hanging on a
+// process that is exiting until their read deadline notices.
+func (h *Hub) Close() {
+	h.mu.Lock()
+	h.closed = true
+	conns := make([]*Conn, 0, len(h.conns))
+	for _, c := range h.conns {
+		conns = append(conns, c)
+	}
+	h.conns = make(map[string]*Conn)
+	h.mu.Unlock()
+	for _, c := range conns {
+		c.writeMu.Lock()
+		_ = c.ws.WriteControl(websocket.CloseMessage,
+			websocket.FormatCloseMessage(websocket.CloseGoingAway, "server shutting down"),
+			time.Now().Add(2*time.Second))
+		c.writeMu.Unlock()
+		_ = c.ws.Close()
+	}
 }
 
 func NewHub() *Hub {
@@ -117,6 +172,13 @@ func NewHub() *Hub {
 func (h *Hub) Register(deviceID string, ws *websocket.Conn) *Conn {
 	c := newConn(deviceID, ws)
 	h.mu.Lock()
+	if h.closed {
+		// Shutting down: the socket is closed straight away, so the caller's
+		// read loop returns at once and the agent reconnects elsewhere.
+		h.mu.Unlock()
+		_ = ws.Close()
+		return c
+	}
 	if old, ok := h.conns[deviceID]; ok {
 		// A previous session is still registered. Abandon it: its read loop will
 		// hit a write error or a closed socket and run its own cleanup.
@@ -168,16 +230,24 @@ func (h *Hub) Get(deviceID string) *Conn {
 
 // Online returns true if the device currently has a live connection.
 func (h *Hub) Online(deviceID string) bool {
-	return h.Get(deviceID) != nil
+	if h.Get(deviceID) != nil {
+		return true
+	}
+	h.mu.RLock()
+	r := h.router
+	h.mu.RUnlock()
+	return r != nil && r.RemoteOnline(deviceID)
 }
 
 // SendTo delivers a message to a device's live connection.
 func (h *Hub) SendTo(deviceID string, b []byte) bool {
-	c := h.Get(deviceID)
-	if c == nil {
-		return false
+	if c := h.Get(deviceID); c != nil {
+		return c.Send(b)
 	}
-	return c.Send(b)
+	h.mu.RLock()
+	r := h.router
+	h.mu.RUnlock()
+	return r != nil && r.Forward(deviceID, b)
 }
 
 // Count returns the number of live connections.

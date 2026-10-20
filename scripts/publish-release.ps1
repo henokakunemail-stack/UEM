@@ -59,14 +59,14 @@ try {
     $env:CGO_ENABLED = "0"
     $env:GOOS = "linux"
     $env:GOARCH = "amd64"
-    go build -ldflags "-s -w" -o "$DistDir/server-linux-amd64" ./server/cmd/server
+    go build -ldflags "-s -w -X main.serverVersion=$CleanVer" -o "$DistDir/server-linux-amd64" ./server/cmd/server
     go build -ldflags "-s -w -X github.com/henokakunemail-stack/Endpoint-Manager/agent/shared/osinfo.Version=$CleanVer" -o "$DistDir/agent-linux-amd64" ./agent/cmd/agent
     tar -czf "$DistDir/endpoint-server-linux-amd64.tar.gz" -C "$DistDir" server-linux-amd64
 
     # 4. Compile Windows Binaries
     Write-Host "[2/5] Compiling Windows server & agent binaries..." -ForegroundColor Cyan
     $env:GOOS = "windows"
-    go build -ldflags "-s -w" -o "$DistDir/server-windows-amd64.exe" ./server/cmd/server
+    go build -ldflags "-s -w -X main.serverVersion=$CleanVer" -o "$DistDir/server-windows-amd64.exe" ./server/cmd/server
     go build -ldflags "-s -w -X github.com/henokakunemail-stack/Endpoint-Manager/agent/shared/osinfo.Version=$CleanVer" -o "$DistDir/agent-windows-amd64.exe" ./agent/cmd/agent
 
     # 5. Build NSIS Windows Installers & Uninstallers

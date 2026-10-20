@@ -125,6 +125,34 @@ func (r *Repository) UpdateStatus(ctx context.Context, id, status string, lastSe
 	return nil
 }
 
+// ClaimConnection records that nodeID now holds this device's agent socket.
+func (r *Repository) ClaimConnection(ctx context.Context, id, nodeID string, at time.Time) error {
+	_, err := r.db.ExecContext(ctx, `
+		UPDATE devices SET connected_node = ?, connected_at = ? WHERE id = ? AND retired_at IS NULL`,
+		nodeID, at, id)
+	if err != nil {
+		return fmt.Errorf("claim connection %s: %w", id, err)
+	}
+	return nil
+}
+
+// ReleaseConnection marks the device offline when its socket on nodeID closes --
+// but only if nodeID still owns it. An agent that dropped from node A and
+// reconnected to node B before A finished cleaning up is owned by B, and A's
+// late cleanup must not mark a live device offline. It reports whether the row
+// was this node's to release.
+func (r *Repository) ReleaseConnection(ctx context.Context, id, nodeID string, lastSeen time.Time) (bool, error) {
+	res, err := r.db.ExecContext(ctx, `
+		UPDATE devices SET status = ?, last_seen_at = ?, updated_at = ?, connected_node = NULL
+		 WHERE id = ? AND retired_at IS NULL AND (connected_node = ? OR connected_node IS NULL)`,
+		StatusOffline, lastSeen, time.Now().UTC(), id, nodeID)
+	if err != nil {
+		return false, fmt.Errorf("release connection %s: %w", id, err)
+	}
+	n, _ := res.RowsAffected()
+	return n == 1, nil
+}
+
 // UpdateLastPatchScan stamps the device with the time of its most recent patch
 // scan. Called when a scan report is accepted, so the stamp moves only when the
 // server actually holds the result -- a scan that died on the device, or a

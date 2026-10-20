@@ -24,6 +24,10 @@ type WSHandler struct {
 	repo         *devicemgmt.Repository
 	db           *sqlx.DB
 	offlineAfter time.Duration
+	// nodeID is this server node's identity. When set, the handler records
+	// which node holds each agent socket and only marks a device offline if
+	// this node still owns it. Empty in tests that build a bare handler.
+	nodeID string
 	flusher      *HeartbeatFlusher
 	// inventory accepts agent collection reports. Optional: nil means reports are
 	// logged and dropped, which keeps Phase 1 deployments working unchanged.
@@ -110,6 +114,12 @@ func (h *WSHandler) WithInventory(r InventoryReceiver) *WSHandler {
 }
 
 // WithUpdateQueue attaches the handler that delivers update tasks queued while
+// WithNode makes the handler record socket ownership for nodeID.
+func (h *WSHandler) WithNode(nodeID string) *WSHandler {
+	h.nodeID = nodeID
+	return h
+}
+
 // a device was offline. Without it, a queued update waits for the operator to
 // press Dispatch again -- the row is left in its pending state and nothing ever
 // re-reads it.
@@ -215,7 +225,14 @@ func (h *WSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// On disconnect the device is offline; last_seen keeps the timestamp.
 		// r.Context() is still live here: the goroutine it guards — this very
 		// handler — has not returned yet, so the DB write is not orphaned.
-		_ = h.repo.UpdateStatus(r.Context(), deviceID, devicemgmt.StatusOffline, time.Now().UTC())
+		//
+		// With a node identity, only if this node still owns the device: an
+		// agent that already reconnected to another node is not offline.
+		if h.nodeID != "" {
+			_, _ = h.repo.ReleaseConnection(r.Context(), deviceID, h.nodeID, time.Now().UTC())
+		} else {
+			_ = h.repo.UpdateStatus(r.Context(), deviceID, devicemgmt.StatusOffline, time.Now().UTC())
+		}
 		_ = audit.Log(r.Context(), h.db, "agent", deviceID, "agent.disconnect", deviceID, nil)
 		log.Info().Str("device", deviceID).Msg("agent disconnected")
 	}()
@@ -236,6 +253,11 @@ func (h *WSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err := h.repo.UpdateStatus(r.Context(), deviceID, devicemgmt.StatusOnline, time.Now().UTC()); err != nil {
 		log.Warn().Err(err).Str("device", deviceID).Msg("refusing agent connection without active device")
 		return
+	}
+	if h.nodeID != "" {
+		if err := h.repo.ClaimConnection(r.Context(), deviceID, h.nodeID, time.Now().UTC()); err != nil {
+			log.Warn().Err(err).Str("device", deviceID).Msg("record agent socket owner")
+		}
 	}
 	if !h.credentialIsLive(r.Context(), deviceID, secretHash) {
 		return

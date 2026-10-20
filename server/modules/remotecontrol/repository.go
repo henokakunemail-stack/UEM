@@ -143,13 +143,23 @@ func (r *Repository) EndSession(ctx context.Context, id string, frames int, byte
 // memory, so at server start no session can still be live: any row still
 // 'active' belongs to a process that exited without closing it, and would
 // otherwise read as an open session in history forever.
-func (r *Repository) EndStaleSessions(ctx context.Context) (int64, error) {
+func (r *Repository) EndStaleSessions(ctx context.Context, selfNode string, aliveSince time.Time) (int64, error) {
+	// Relays live in a node's memory, so a session left 'active' by a node that
+	// is gone can never be resumed. A session whose device is held by another
+	// node that is still running may be live on that node, and ending it from
+	// here would cut an operator off mid-session every time a node restarts.
+	// On a single node (SQLite) there is no other node, and every 'active'
+	// session at startup is stale, exactly as before.
 	res, err := r.db.ExecContext(ctx, `
 		UPDATE remote_control_sessions SET
 			status = 'ended',
 			ended_at = ?
 		WHERE status = 'active'
-	`, time.Now().UTC())
+		  AND device_id NOT IN (
+			SELECT d.id FROM devices d
+			  JOIN server_nodes n ON n.id = d.connected_node
+			 WHERE n.id <> ? AND n.last_seen_at > ?)
+	`, time.Now().UTC(), selfNode, aliveSince)
 	if err != nil {
 		return 0, fmt.Errorf("end stale rc sessions: %w", err)
 	}

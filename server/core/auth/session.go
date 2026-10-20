@@ -66,6 +66,11 @@ type sessionCacheEntry struct {
 type sessionCache struct {
 	mu    sync.RWMutex
 	items map[string]sessionCacheEntry
+	// notify, when set, is told about every revocation this process makes,
+	// so other server nodes can drop their cached answer for it at once
+	// instead of honouring a revoked token for up to the cache TTL. "*" means
+	// every session.
+	notify func(jti string)
 }
 
 var (
@@ -107,19 +112,53 @@ func NewSessionStore(db *sqlx.DB, refreshTTL time.Duration) *SessionStore {
 }
 
 func (s *SessionStore) invalidateCache(jti string) {
-	if s.cache != nil {
-		s.cache.mu.Lock()
-		delete(s.cache.items, jti)
-		s.cache.mu.Unlock()
-	}
+	s.DropCached(jti)
+	s.publish(jti)
 }
 
 func (s *SessionStore) invalidateAllCache() {
-	if s.cache != nil {
-		s.cache.mu.Lock()
-		s.cache.items = make(map[string]sessionCacheEntry)
-		s.cache.mu.Unlock()
+	s.DropCached("*")
+	s.publish("*")
+}
+
+func (s *SessionStore) publish(jti string) {
+	if s.cache == nil {
+		return
 	}
+	s.cache.mu.RLock()
+	notify := s.cache.notify
+	s.cache.mu.RUnlock()
+	if notify != nil {
+		notify(jti)
+	}
+}
+
+// SetRevokeNotifier installs the function told about every revocation, for
+// every SessionStore sharing this database handle. The cluster bus uses it to
+// broadcast revocations to the other server nodes.
+func (s *SessionStore) SetRevokeNotifier(notify func(jti string)) {
+	if s.cache == nil {
+		return
+	}
+	s.cache.mu.Lock()
+	s.cache.notify = notify
+	s.cache.mu.Unlock()
+}
+
+// DropCached forgets this node's cached answer for jti ("*" for all) without
+// telling anyone. It is what a revocation broadcast from another node calls;
+// re-broadcasting from here would echo between nodes forever.
+func (s *SessionStore) DropCached(jti string) {
+	if s.cache == nil {
+		return
+	}
+	s.cache.mu.Lock()
+	if jti == "*" {
+		s.cache.items = make(map[string]sessionCacheEntry)
+	} else {
+		delete(s.cache.items, jti)
+	}
+	s.cache.mu.Unlock()
 }
 
 const sessionColumns = `jti, user_id, username, role, revoked, revoked_at, rotated_to,

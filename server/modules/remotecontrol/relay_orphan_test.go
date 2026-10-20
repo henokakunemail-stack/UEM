@@ -232,7 +232,7 @@ func TestStartupSweepEndsActiveRows(t *testing.T) {
 	}
 	finished := readRow(t, database, ids[2])
 
-	n, err := h.repo.EndStaleSessions(ctx)
+	n, err := h.repo.EndStaleSessions(ctx, "node-self", time.Now().UTC().Add(-30*time.Second))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -248,5 +248,38 @@ func TestStartupSweepEndsActiveRows(t *testing.T) {
 	after := readRow(t, database, ids[2])
 	if after.Frames != 9 || !after.EndedAt.Equal(*finished.EndedAt) {
 		t.Errorf("sweep touched an already-ended row: %+v, was %+v", after, finished)
+	}
+}
+
+// With several server nodes, a restarting node must not end sessions that are
+// live on another node: its relays are in that node's memory, not this one's.
+func TestStartupSweepSparesSessionsLiveOnAnotherNode(t *testing.T) {
+	h, database, _ := rcFixture(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	database.MustExec(`INSERT INTO devices (id, hostname, status, connected_node) VALUES ('dev-2','OTHER','online','node-b')`)
+	database.MustExec(`INSERT INTO devices (id, hostname, status, connected_node) VALUES ('dev-3','GONE','online','node-dead')`)
+	database.MustExec(`INSERT INTO server_nodes (id, last_seen_at) VALUES ('node-b', ?), ('node-dead', ?)`,
+		now, now.Add(-time.Hour))
+
+	mk := func(device string) string {
+		s := &RemoteControlSession{DeviceID: device, OperatorID: "u-1", SessionMode: "full_control"}
+		if err := h.repo.CreateSession(ctx, s); err != nil {
+			t.Fatal(err)
+		}
+		return s.ID
+	}
+	onLiveNode, onDeadNode, unowned := mk("dev-2"), mk("dev-3"), mk("dev-1")
+
+	if _, err := h.repo.EndStaleSessions(ctx, "node-self", now.Add(-30*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if got := readRow(t, database, onLiveNode).Status; got != "active" {
+		t.Errorf("session live on node-b was %s by another node's startup", got)
+	}
+	for _, id := range []string{onDeadNode, unowned} {
+		if got := readRow(t, database, id).Status; got != "ended" {
+			t.Errorf("stale session %s is %s, want ended", id, got)
+		}
 	}
 }

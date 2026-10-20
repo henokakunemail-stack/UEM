@@ -60,6 +60,11 @@ import (
 // services with one name is an install-time collision, not a shared config.
 const serviceName = "endpoint-mgmt-server"
 
+// serverVersion is stamped at build time (-ldflags "-X main.serverVersion=1.5.3")
+// by the release script. It is reported by /healthz and recorded per node, so a
+// mixed-version cluster mid-upgrade is visible instead of guessed at.
+var serverVersion = "dev"
+
 // dbPathForBackup resolves the database path for -backup and -restore.
 //
 // It reads only DB_PATH, and only after -env-file has been applied, because
@@ -378,6 +383,13 @@ func buildServer(cfg config.Config, database *sqlx.DB) (*http.Server, func()) {
 	deviceRepo := devicemgmt.NewRepository(database)
 	hub := transport.NewHub()
 
+	// This process's identity among the server nodes sharing the database. On
+	// SQLite there is only ever this one, and the row is bookkeeping.
+	node := cluster.NewNode(database, serverVersion)
+	if err := node.Register(context.Background()); err != nil {
+		log.Warn().Err(err).Msg("register server node")
+	}
+
 	// One session store, wired into RequireAuth and into login. jwtSvc is built
 	// first because the rest of this function takes its middleware, and it is
 	// handed the store afterwards; the store is still authoritative for every
@@ -390,6 +402,16 @@ func buildServer(cfg config.Config, database *sqlx.DB) (*http.Server, func()) {
 	// quietly stop applying to the tokens the middleware accepts.
 	sessionStore := auth.NewSessionStore(database, cfg.RefreshTokenTTL)
 	jwtSvc = jwtSvc.WithSessionStore(sessionStore)
+
+	// On PostgreSQL several nodes can serve one fleet. The bus routes a command
+	// to the node holding the agent's socket, and tells every node when a
+	// session is revoked so none of them honours it from its cache.
+	var bus *cluster.Bus
+	if db.IsPostgres(database) {
+		bus = cluster.NewBus(database, cfg.DBURL, node, hub, sessionStore)
+		hub.SetRouter(bus)
+		sessionStore.SetRevokeNotifier(bus.PublishSessionRevoked)
+	}
 
 	// Phase 2: inventory receiver + HTTP routes. The handler needs the hub both to
 	// answer "is this device online" and to deliver the collect request; the
@@ -506,6 +528,7 @@ func buildServer(cfg config.Config, database *sqlx.DB) (*http.Server, func()) {
 	remoteExecH := remoteexec.NewHandler(remoteExecRepo, hub, termRelay, &auditAdapter{db: database}, jwtSvc.RequireAuth, deviceRepo, checkOrigin)
 
 	wsH := transport.NewWSHandler(hub, deviceRepo, database, cfg.AgentOfflineAfter).
+		WithNode(node.ID).
 		WithInventory(invH).
 		WithTerminal(termRelay).
 		WithOriginChecker(checkOrigin)
@@ -550,6 +573,14 @@ func buildServer(cfg config.Config, database *sqlx.DB) (*http.Server, func()) {
 	// Background loops that run for the life of the process. The cancel is owned
 	// by the cleanup closure at the end of this function; see the note there.
 	bgCtx, stopBackground := context.WithCancel(context.Background())
+	go node.Heartbeat(bgCtx)
+	if bus != nil {
+		go func() {
+			if err := bus.Run(bgCtx); err != nil {
+				log.Error().Err(err).Msg("cluster bus stopped; commands for agents on other nodes are not delivered")
+			}
+		}()
+	}
 
 	// leaderOnly collects the loops that must run on exactly one server node.
 	// Each one either acts on shared rows (the scheduler fires scripts, the
@@ -597,7 +628,7 @@ func buildServer(cfg config.Config, database *sqlx.DB) (*http.Server, func()) {
 	// Relays are in memory only, so a session still 'active' at start was left
 	// by a process that exited without closing it. Ended here, before any
 	// route is served, so history never shows it as live.
-	if n, err := rcRepo.EndStaleSessions(bgCtx); err != nil {
+	if n, err := rcRepo.EndStaleSessions(bgCtx, node.ID, time.Now().UTC().Add(-cluster.NodeAliveWithin)); err != nil {
 		log.Warn().Err(err).Msg("end stale remote control sessions")
 	} else if n > 0 {
 		log.Info().Int64("sessions", n).Msg("ended remote control sessions left active by a previous run")
@@ -815,6 +846,7 @@ func buildServer(cfg config.Config, database *sqlx.DB) (*http.Server, func()) {
 	// Both are silent: the API keeps answering 200 while the thing that makes
 	// those answers correct quietly stops happening.
 	cleanup := func() {
+		node.Leave(context.Background())
 		wsH.Close()
 		loginH.Close()
 		apiLimiter.Close()
