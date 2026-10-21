@@ -169,6 +169,14 @@ type createEnrollTokenResp struct {
 	IsMultiUse      bool      `json:"is_multi_use"`
 }
 
+// sharedTokenTTL is a shared token's lifetime when none is asked for, and
+// maxTokenTTL the longest any token may be issued for (it also keeps the
+// hours-to-duration conversion from overflowing into an expired token).
+const (
+	sharedTokenTTL = 24 * time.Hour
+	maxTokenTTL    = 365 * 24 * time.Hour
+)
+
 func (h *Handler) issueEnrollmentToken() (plaintext, hash string, expiresAt time.Time) {
 	plaintext = GenerateToken()
 	hash = HashToken(plaintext) // consumed to NULL once the agent enrolls
@@ -229,11 +237,32 @@ func (h *Handler) createEnrollToken(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().UTC()
 	tokenHash := HashToken(plain)
 
-	// Configurable expiration duration
+	if req.MaxUses != nil && *req.MaxUses < 0 {
+		// A negative limit is stored as a token no device can ever use.
+		writeErrCode(w, http.StatusBadRequest, "invalid_max_uses", "max_uses must be 0 (unlimited) or more")
+		return
+	}
+	multi := req.IsMultiUse || (req.MaxUses != nil && *req.MaxUses != 1)
+
+	// Configurable expiration duration. A shared token is for a rollout, so
+	// without an explicit expiry it lasts a day rather than the 30-minute
+	// window of a one-device token.
 	ttl := h.ttl
-	if req.ExpiresInHours != nil && *req.ExpiresInHours > 0 {
+	if multi {
+		ttl = sharedTokenTTL
+	}
+	switch {
+	case req.ExpiresInHours != nil && *req.ExpiresInHours > 0:
+		if *req.ExpiresInHours > int(maxTokenTTL/time.Hour) {
+			writeErrCode(w, http.StatusBadRequest, "invalid_expiry", "expires_in_hours may be at most 8760 (365 days)")
+			return
+		}
 		ttl = time.Duration(*req.ExpiresInHours) * time.Hour
-	} else if req.DurationSeconds != nil && *req.DurationSeconds > 0 {
+	case req.DurationSeconds != nil && *req.DurationSeconds > 0:
+		if *req.DurationSeconds > int64(maxTokenTTL/time.Second) {
+			writeErrCode(w, http.StatusBadRequest, "invalid_expiry", "duration_seconds may be at most 365 days")
+			return
+		}
 		ttl = time.Duration(*req.DurationSeconds) * time.Second
 	}
 	expiresAt := now.Add(ttl)
@@ -245,12 +274,14 @@ func (h *Handler) createEnrollToken(w http.ResponseWriter, r *http.Request) {
 
 	actor := auth.UserIDFromContext(r.Context())
 
-	// Multi-Device / Reusable Shared Token
-	maxUses := 1
-	if req.MaxUses != nil {
-		maxUses = *req.MaxUses
-	}
-	if req.IsMultiUse || (req.MaxUses != nil && *req.MaxUses != 1) {
+	// Multi-Device / Reusable Shared Token. Without max_uses it is
+	// unlimited: a multi-use request that left it out used to get exactly one
+	// use, so the second machine was refused.
+	if multi {
+		maxUses := 0
+		if req.MaxUses != nil {
+			maxUses = *req.MaxUses
+		}
 		tokenID := NewID()
 		tokenName := req.Name
 		if tokenName == "" {
