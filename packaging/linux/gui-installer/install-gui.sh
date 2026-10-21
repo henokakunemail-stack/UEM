@@ -76,6 +76,21 @@ if [ -z "$BIN_SRC" ]; then
     exit 1
 fi
 
+BIN_CHECK="$BIN_SRC"
+# These scripts install whatever agent binary is lying next to them. One built
+# before -site and the stored-identity check existed exits at once on -site
+# ("flag provided but not defined") or re-enrolls on every run, spending a use
+# of a multi-device token each time. Refuse it with a clear reason.
+if ! "$BIN_CHECK" -h 2>&1 | grep -q -- '-reenroll'; then
+    MSG_OLD="The agent binary at $BIN_CHECK is older than this installer (no -reenroll/-site support). Rebuild it from source or download the current release."
+    if [ "$USE_TOOL" = "zenity" ]; then
+        zenity --error --title="$TITLE" --text="$MSG_OLD"
+    else
+        echo "[-] $MSG_OLD" >&2
+    fi
+    exit 1
+fi
+
 DEST_BIN="/usr/local/bin/endpoint-agent"
 CREDS_PATH="/etc/endpoint-agent/creds.json"
 
@@ -86,7 +101,15 @@ chmod 0755 "$DEST_BIN"
 
 # Perform Enrollment if token provided
 if [ -n "$ENROLL_TOKEN" ]; then
-    "$DEST_BIN" -server "$SERVER_URL" -enroll "$ENROLL_TOKEN" -enroll-only -creds "$CREDS_PATH" || true
+    if ! ENROLL_OUT=$("$DEST_BIN" -server "$SERVER_URL" -enroll "$ENROLL_TOKEN" -enroll-only -creds "$CREDS_PATH" 2>&1); then
+        MSG="Enrollment failed: $(printf '%s' "$ENROLL_OUT" | tail -n 3)"
+        if [ "$USE_TOOL" = "zenity" ]; then
+            zenity --error --title="$TITLE" --text="$MSG"
+        else
+            echo "[-] $MSG" >&2
+        fi
+        exit 1
+    fi
 fi
 
 # Register and start systemd service

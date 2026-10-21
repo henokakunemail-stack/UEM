@@ -31,6 +31,16 @@ if [ -z "$BIN_SRC" ]; then
 fi
 
 echo "[+] Using binary: $BIN_SRC"
+BIN_CHECK="$BIN_SRC"
+# These scripts install whatever agent binary is lying next to them. One built
+# before -site and the stored-identity check existed exits at once on -site
+# ("flag provided but not defined") or re-enrolls on every run, spending a use
+# of a multi-device token each time. Refuse it with a clear reason.
+if ! "$BIN_CHECK" -h 2>&1 | grep -q -- '-reenroll'; then
+    MSG_OLD="The agent binary at $BIN_CHECK is older than this installer (no -reenroll/-site support). Rebuild it from source or download the current release."
+    echo "[-] $MSG_OLD"
+    exit 1
+fi
 
 mkdir -p /usr/local/bin /etc/endpoint-agent
 chmod 700 /etc/endpoint-agent
@@ -40,9 +50,11 @@ chmod 0755 "$INSTALL_BIN"
 if [ -n "$ENROLL_TOKEN" ]; then
     echo "[*] Enrolling device with $SERVER_URL..."
     if [ -n "$SITE" ]; then
-        "$INSTALL_BIN" -server "$SERVER_URL" -enroll "$ENROLL_TOKEN" -site "$SITE" -enroll-only -creds "$CREDS_PATH" || echo "[!] Enrollment warning (will continue)"
+        "$INSTALL_BIN" -server "$SERVER_URL" -enroll "$ENROLL_TOKEN" -site "$SITE" -enroll-only -creds "$CREDS_PATH" ||
+            { echo "[-] Enrollment failed; the agent printed the reason above."; exit 1; }
     else
-        "$INSTALL_BIN" -server "$SERVER_URL" -enroll "$ENROLL_TOKEN" -enroll-only -creds "$CREDS_PATH" || echo "[!] Enrollment warning (will continue)"
+        "$INSTALL_BIN" -server "$SERVER_URL" -enroll "$ENROLL_TOKEN" -enroll-only -creds "$CREDS_PATH" ||
+            { echo "[-] Enrollment failed; the agent printed the reason above."; exit 1; }
     fi
 fi
 

@@ -60,6 +60,14 @@ if (-not $resolvedBin) {
 }
 Write-Host "[+] Using agent binary: $resolvedBin" -ForegroundColor Green
 
+# A binary built before -site and the stored-identity check exits at once on
+# -site or re-enrolls on every run, spending a use of a multi-device token.
+$help = (& $resolvedBin -h 2>&1 | Out-String)
+if ($help -notmatch '-reenroll') {
+    Write-Error "[-] The agent binary at $resolvedBin is older than this installer (no -reenroll/-site support). Rebuild it from source or download the current release."
+    exit 1
+}
+
 # 3. Create target directory
 $binDir = [System.IO.Path]::GetDirectoryName($InstallBin)
 $credsDir = [System.IO.Path]::GetDirectoryName($CredsPath)
@@ -77,7 +85,8 @@ if ($EnrollToken) {
     Write-Host "[*] Enrolling device with $ServerUrl..." -ForegroundColor Cyan
     & $InstallBin -server $ServerUrl -enroll $EnrollToken -enroll-only -creds $CredsPath
     if ($LASTEXITCODE -ne 0) {
-        Write-Warning "[-] Enrollment returned exit code $LASTEXITCODE. Service will continue installation."
+        Write-Error "[-] Enrollment failed (exit code $LASTEXITCODE); the agent printed the reason above."
+        exit 1
     } else {
         Write-Host "[+] Device enrolled successfully." -ForegroundColor Green
     }
