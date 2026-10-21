@@ -83,6 +83,10 @@ type FleetPatchSummary struct {
 
 type PatchScanReport struct {
 	Patches []DevicePatch `json:"patches"`
+	// RebootPending is the OS's own answer to "is a reboot needed to finish
+	// installing updates". nil means the agent could not tell (an older agent,
+	// or an OS with no marker), and the stored flags are left alone.
+	RebootPending *bool `json:"reboot_pending,omitempty"`
 }
 
 type PatchInstallReport struct {

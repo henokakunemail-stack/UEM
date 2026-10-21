@@ -901,6 +901,8 @@ func buildServer(cfg config.Config, database *sqlx.DB) (*http.Server, *serverApp
 	// Software tasks: refusals come back under the task id, and tasks queued
 	// for an offline device are sent after its next hello.
 	wsH.WithCommandResultReceiver(softH).WithReconnectQueue(softH)
+	// Patch install jobs are sent under the job id; a refusal fails the job.
+	wsH.WithCommandResultReceiver(patchH)
 	// Same for the filter policy: a sync clicked against a device that was offline
 	// wrote status='pending' and nothing ever re-read the row, so the endpoint
 	// stayed unfiltered until someone pressed Sync a second time.
@@ -1021,6 +1023,8 @@ func buildServer(cfg config.Config, database *sqlx.DB) (*http.Server, *serverApp
 	leaderOnly = append(leaderOnly, func(ctx context.Context) {
 		updateRepo.StartSweep(ctx, agentupdate.SweepInterval, agentupdate.TaskTimeoutGrace)
 	})
+	// Patch install jobs with no result for 30 minutes are failed as no_report.
+	leaderOnly = append(leaderOnly, func(ctx context.Context) { patchRepo.StartSweep(ctx, patchmgmt.SweepInterval) })
 	// Campaign waves are a schedule in the database, released by whichever
 	// node leads; the same loop retries queued updates for online devices.
 	leaderOnly = append(leaderOnly, func(ctx context.Context) { go updateH.RunWaves(ctx, agentupdate.WaveInterval) })

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/jmoiron/sqlx"
+	"github.com/rs/zerolog/log"
 )
 
 var (
@@ -206,7 +207,9 @@ func (r *Repository) GetFleetSummary(ctx context.Context) (FleetPatchSummary, er
 		return summary, err
 	}
 
-	q3 := `SELECT COUNT(DISTINCT device_id) FROM device_patches WHERE reboot_required = 1`
+	// Only installed patches can be waiting on a reboot; a missing one that
+	// a scan tagged as reboot-requiring has not been installed yet.
+	q3 := `SELECT COUNT(DISTINCT device_id) FROM device_patches WHERE reboot_required = 1 AND installed_state = 'installed'`
 	if err := r.db.GetContext(ctx, &summary.RebootPendingDevices, q3); err != nil {
 		return summary, err
 	}
@@ -223,8 +226,8 @@ func (r *Repository) CreateInstallJob(ctx context.Context, job *PatchInstallJob)
 	query := `
 		INSERT INTO patch_install_jobs (
 			id, device_id, operator_id, patch_ids, status, reboot_policy, reboot_required,
-			output_log, error_message, started_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			output_log, error_message, started_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
 	rebootReq := 0
 	if job.RebootRequired {
@@ -232,7 +235,7 @@ func (r *Repository) CreateInstallJob(ctx context.Context, job *PatchInstallJob)
 	}
 	_, err := r.db.ExecContext(ctx, query,
 		job.ID, job.DeviceID, job.OperatorID, job.PatchIDs, job.Status, job.RebootPolicy,
-		rebootReq, job.OutputLog, job.ErrorMessage, job.StartedAt,
+		rebootReq, job.OutputLog, job.ErrorMessage, job.StartedAt, job.StartedAt,
 	)
 	if err != nil {
 		return fmt.Errorf("create patch install job: %w", err)
@@ -294,6 +297,11 @@ func (r *Repository) ListInstallJobs(ctx context.Context, deviceID string, limit
 // overwrite the output log of any other agent's install job, and the audit
 // record would name the attacking device as the one that did it.
 func (r *Repository) UpdateInstallJobResult(ctx context.Context, deviceID string, rep PatchInstallReport) error {
+	terminal := rep.Status == JobStatusCompleted || rep.Status == JobStatusFailed
+	if !terminal && rep.Status != JobStatusInstalling {
+		return ErrInvalidStatus
+	}
+
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
@@ -305,22 +313,38 @@ func (r *Repository) UpdateInstallJobResult(ctx context.Context, deviceID string
 	if rep.RebootRequired {
 		rebootReq = 1
 	}
+	var completedAt *time.Time
+	if terminal {
+		completedAt = &now
+	}
 
+	// A finished job is not rewritten: a retried or late report used to
+	// overwrite the result and restamp completed_at every time. The one
+	// exception is a job the sweep gave up on (no_report): if the agent's
+	// result does arrive, it is the truth and replaces the guess.
 	query := `
 		UPDATE patch_install_jobs
-		SET status = ?, reboot_required = ?, output_log = ?, error_message = ?, completed_at = ?
+		SET status = ?, reboot_required = ?, output_log = ?, error_message = ?,
+			completed_at = COALESCE(?, completed_at), updated_at = ?
 		WHERE id = ? AND device_id = ?
+		  AND (status NOT IN ('completed', 'failed')
+		       OR (? AND status = 'failed' AND error_message LIKE 'no_report:%'))
 	`
 	res, err := tx.ExecContext(ctx, query,
-		rep.Status, rebootReq, rep.OutputLog, rep.ErrorMessage, now, rep.JobID, deviceID,
+		rep.Status, rebootReq, rep.OutputLog, rep.ErrorMessage, completedAt, now, rep.JobID, deviceID, terminal,
 	)
 	if err != nil {
 		return fmt.Errorf("update patch install job: %w", err)
 	}
-	// Zero rows means the job does not exist or belongs to another device. Both
-	// are refused identically, so a caller cannot use this endpoint to probe
-	// which job ids exist.
+	// Zero rows means the job does not exist, belongs to another device, or
+	// already finished. The first two are refused identically, so a caller
+	// cannot use this endpoint to probe which job ids exist.
 	if n, err := res.RowsAffected(); err == nil && n == 0 {
+		var owned int
+		if err := tx.GetContext(ctx, &owned, `SELECT COUNT(*) FROM patch_install_jobs WHERE id = ? AND device_id = ?`,
+			rep.JobID, deviceID); err == nil && owned == 1 {
+			return ErrJobFinished
+		}
 		return ErrNotFound
 	}
 
@@ -344,4 +368,87 @@ func (r *Repository) UpdateInstallJobResult(ctx context.Context, deviceID string
 	}
 
 	return tx.Commit()
+}
+
+// ErrInvalidStatus is an install report with a status the job cannot take.
+var ErrInvalidStatus = errors.New("status must be installing, completed or failed")
+
+// ErrJobFinished is a report for a job that already finished.
+var ErrJobFinished = errors.New("install job already finished")
+
+// FailJob closes a job that never ran -- the send failed, or the agent
+// refused the command -- with the reason. It only touches a job that has not
+// finished, and reports whether it changed one.
+func (r *Repository) FailJob(ctx context.Context, jobID, deviceID, reason string) (bool, error) {
+	now := time.Now().UTC()
+	res, err := r.db.ExecContext(ctx, `
+		UPDATE patch_install_jobs SET status = 'failed', error_message = ?, completed_at = ?, updated_at = ?
+		WHERE id = ? AND device_id = ? AND status IN ('pending', 'dispatched', 'installing')`,
+		reason, now, now, jobID, deviceID)
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n == 1, nil
+}
+
+// JobOwned reports whether jobID is an install job of deviceID.
+func (r *Repository) JobOwned(ctx context.Context, jobID, deviceID string) (bool, error) {
+	var n int
+	err := r.db.GetContext(ctx, &n, `SELECT COUNT(*) FROM patch_install_jobs WHERE id = ? AND device_id = ?`, jobID, deviceID)
+	return n == 1, err
+}
+
+// ClearRebootRequired drops the reboot flag on a device's patches after the
+// device reported that no reboot is pending. The flag was only ever set, so
+// the console's "reboot pending" count only ever grew.
+func (r *Repository) ClearRebootRequired(ctx context.Context, deviceID string) error {
+	_, err := r.db.ExecContext(ctx, `UPDATE device_patches SET reboot_required = 0, updated_at = ?
+		WHERE device_id = ? AND reboot_required = 1`, time.Now().UTC(), deviceID)
+	return err
+}
+
+// JobNoReportAfter is how long a sent install job may go without a result
+// before it is failed. Windows Update installs can be slow, but an agent that
+// is alive reports within this.
+const JobNoReportAfter = 30 * time.Minute
+
+// SweepInterval is how often the job sweep runs.
+const SweepInterval = time.Minute
+
+// AbandonSilentJobs fails install jobs with no result for JobNoReportAfter.
+// Nothing closed them before: a job whose agent died or whose result was lost
+// said 'dispatched' forever.
+func (r *Repository) AbandonSilentJobs(ctx context.Context) (int64, error) {
+	now := time.Now().UTC()
+	res, err := r.db.ExecContext(ctx, `
+		UPDATE patch_install_jobs
+		SET status = 'failed', completed_at = ?, updated_at = ?,
+			error_message = 'no_report: the agent sent no result within 30 minutes; check the device and scan again'
+		WHERE status IN ('pending', 'dispatched', 'installing')
+		  AND COALESCE(updated_at, started_at) < ?`, now, now, now.Add(-JobNoReportAfter))
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+// StartSweep runs AbandonSilentJobs until ctx is cancelled.
+func (r *Repository) StartSweep(ctx context.Context, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	go func() {
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if n, err := r.AbandonSilentJobs(ctx); err != nil {
+					log.Warn().Err(err).Msg("patch job sweep")
+				} else if n > 0 {
+					log.Warn().Int64("jobs", n).Msg("patch job sweep: failed install jobs with no result")
+				}
+			}
+		}
+	}()
 }

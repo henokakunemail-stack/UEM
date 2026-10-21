@@ -580,7 +580,9 @@ func runAgent(serverURL, enrollToken, enrollSite, credsPath string, heartbeatSec
 				log.Error().Err(err).Msg("patch scan failed")
 				return
 			}
-			if err := patchEngine.ReportScan(context.Background(), patches, nil); err != nil {
+			// Reported with the scan so the server can clear a reboot flag
+			// once the device has actually rebooted.
+			if err := patchEngine.ReportScan(context.Background(), patches, patch.RebootPending()); err != nil {
 				log.Error().Err(err).Msg("report patch scan failed")
 			} else {
 				log.Info().Int("count", len(patches)).Msg("patch scan reported successfully")
@@ -591,7 +593,11 @@ func runAgent(serverURL, enrollToken, enrollSite, credsPath string, heartbeatSec
 
 	dispatcher.Register("patch.install", func(ctx context.Context, command, id string, payload json.RawMessage) any {
 		var params patch.InstallParams
-		_ = json.Unmarshal(payload, &params)
+		if err := json.Unmarshal(payload, &params); err != nil {
+			// Refused under the envelope id, which is the job id: the server
+			// fails the job with this reason instead of waiting on it.
+			return map[string]string{"status": "rejected", "error": "invalid patch.install payload: " + err.Error()}
+		}
 		if params.JobID == "" {
 			params.JobID = id
 		}

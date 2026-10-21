@@ -64,7 +64,8 @@ func patchFixture(t *testing.T) (*Handler, *sqlx.DB) {
 		output_log TEXT,
 		error_message TEXT,
 		started_at DATETIME,
-		completed_at DATETIME
+		completed_at DATETIME,
+		updated_at DATETIME
 	);`)
 	database.MustExec(`CREATE TABLE device_patches (
 		device_id TEXT NOT NULL,

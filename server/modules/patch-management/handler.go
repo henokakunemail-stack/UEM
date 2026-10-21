@@ -27,9 +27,16 @@ type DeviceValidator interface {
 	UpdateLastPatchScan(ctx context.Context, id string, at time.Time) error
 }
 
+// HubDispatcher is the slice of the transport hub this module uses, as in the
+// other modules that send commands.
+type HubDispatcher interface {
+	Online(deviceID string) bool
+	SendTo(deviceID string, payload []byte) bool
+}
+
 type Handler struct {
 	repo           *Repository
-	hub            *transport.Hub
+	hub            HubDispatcher
 	audit          AuditLogger
 	jwtSvc         *auth.JWTService
 	authMiddleware func(http.Handler) http.Handler
@@ -38,7 +45,7 @@ type Handler struct {
 
 func NewHandler(
 	repo *Repository,
-	hub *transport.Hub,
+	hub HubDispatcher,
 	audit AuditLogger,
 	jwtSvc *auth.JWTService,
 	authMiddleware func(http.Handler) http.Handler,
@@ -213,6 +220,11 @@ func (h *Handler) installPatches(w http.ResponseWriter, r *http.Request) {
 	}
 	b, _ := json.Marshal(installEnv)
 	if !h.hub.SendTo(deviceID, b) {
+		// The job row exists and nothing will ever report for it; it used to
+		// stay 'dispatched' forever next to this 409.
+		if _, err := h.repo.FailJob(r.Context(), jobID, deviceID, "send_failed: the command could not be delivered to the agent"); err != nil {
+			log.Warn().Err(err).Str("job_id", jobID).Msg("fail undelivered patch job")
+		}
 		writeErr(w, http.StatusConflict, "failed to dispatch install command to agent")
 		return
 	}
@@ -282,6 +294,11 @@ func (h *Handler) reportScanResults(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	if rep.RebootPending != nil && !*rep.RebootPending {
+		if err := h.repo.ClearRebootRequired(r.Context(), deviceID); err != nil {
+			log.Warn().Err(err).Str("device", deviceID).Msg("clear reboot flag after scan")
+		}
+	}
 
 	// Stamp only after the rows landed. This is what lets the console tell an
 	// unpatched device from one nobody has scanned: both have zero pending rows,
@@ -339,6 +356,16 @@ func (h *Handler) reportInstallResult(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusNotFound, "install job not found")
 			return
 		}
+		if errors.Is(err, ErrInvalidStatus) {
+			writeErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if errors.Is(err, ErrJobFinished) {
+			// A retry or a late report for a closed job. Acknowledged so the
+			// agent stops retrying; the stored result stands.
+			writeJSON(w, http.StatusOK, map[string]string{"status": "ignored"})
+			return
+		}
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -360,4 +387,25 @@ func writeJSON(w http.ResponseWriter, status int, data any) {
 
 func writeErr(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
+}
+
+// HandleCommandResult claims the agent's answer to a patch.install command,
+// which is sent under the job id. A refusal means nothing was installed, and
+// the job is closed with the agent's reason; it used to be dropped because no
+// agent_commands row matched. It is a transport.CommandResultReceiver.
+func (h *Handler) HandleCommandResult(ctx context.Context, deviceID, id, status, errMsg string) bool {
+	owned, err := h.repo.JobOwned(ctx, id, deviceID)
+	if err != nil || !owned {
+		return false
+	}
+	if status != "failed" {
+		return true
+	}
+	if errMsg == "" {
+		errMsg = "the agent refused the command"
+	}
+	if _, err := h.repo.FailJob(ctx, id, deviceID, "rejected: "+errMsg); err != nil {
+		log.Warn().Err(err).Str("job_id", id).Msg("record refused patch command")
+	}
+	return true
 }
