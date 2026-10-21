@@ -35,6 +35,9 @@ type Auditor interface {
 // Repository.MarkDispatched records.
 const TaskStatusPending = "pending"
 
+// TaskStatusFailed is terminal; the error message says why.
+const TaskStatusFailed = "failed"
+
 // HubDispatcher is the slice of the transport hub this module uses. Declared
 // as an interface rather than taking *transport.Hub, matching the six other
 // modules that talk to the hub: it keeps the dependency one-way and lets the
@@ -598,120 +601,172 @@ func (h *Handler) handleStartCampaign(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	batchSize := campaign.BatchSize
-	if batchSize <= 0 {
-		batchSize = 25
-	}
-	staggerSec := campaign.StaggerIntervalSec
-	if staggerSec < 0 {
-		staggerSec = 0
-	}
-
-	dispatchDevice := func(ctx context.Context, devID string) bool {
-		dev, err := h.deviceRepo.GetByID(ctx, devID)
-		if err != nil {
-			return false
+	// Every task is created now, in one transaction, so the campaign always
+	// knows how much work is left. A device with no release for its OS and
+	// architecture gets a failed task that says so instead of being dropped
+	// from the rollout without a trace.
+	tasks := make([]*DeviceUpdateTask, 0, len(deviceIDs))
+	noRelease := 0
+	now := time.Now().UTC()
+	for _, devID := range deviceIDs {
+		dev, err := h.deviceRepo.GetByID(r.Context(), devID)
+		if err != nil || dev.AgentVersionString() == campaign.TargetVersion {
+			continue
 		}
-		if dev.AgentVersionString() == campaign.TargetVersion {
-			return false // already at target version
-		}
-
-		// Lookup release for this device OS and arch
-		arch := h.repo.GetDeviceArch(ctx, devID)
-		rel, err := h.repo.GetActiveReleaseForDevice(ctx, campaign.TargetVersion, dev.OSName, arch)
-		if err != nil {
-			log.Warn().Err(err).Str("device", devID).Msg("no active release for device")
-			return false
-		}
-
-		now := time.Now().UTC()
-		fromVersion := dev.AgentVersionString()
 		task := &DeviceUpdateTask{
 			CampaignID:    &campaign.ID,
 			DeviceID:      devID,
-			FromVersion:   fromVersion,
+			FromVersion:   dev.AgentVersionString(),
 			TargetVersion: campaign.TargetVersion,
 			Status:        TaskStatusPending,
-			DispatchedAt:  &now,
 		}
-		if err := h.repo.CreateUpdateTask(ctx, task); err != nil {
-			return false
+		arch := h.repo.GetDeviceArch(r.Context(), devID)
+		if _, err := h.repo.GetActiveReleaseForDevice(r.Context(), campaign.TargetVersion, dev.OSName, arch); err != nil {
+			task.Status = TaskStatusFailed
+			task.ErrorMessage = fmt.Sprintf("no_release: no active release of %s for %s/%s", campaign.TargetVersion, dev.OSName, arch)
+			task.CompletedAt = &now
+			task.ReleasedAt = &now
+			noRelease++
 		}
-
-		if h.hub.Online(devID) {
-			if err := h.SendTask(ctx, task, rel); err == nil {
-				_ = h.auditor.Log(ctx, "system", devID, "agent_update.task_dispatched", devID, map[string]string{
-					"campaign_id":    campaign.ID,
-					"task_id":        task.ID,
-					"target_version": campaign.TargetVersion,
-					"from_version":   fromVersion,
-					"status":         "dispatched",
-				})
-				return true
-			}
-		} else {
-			_ = h.auditor.Log(ctx, "system", devID, "agent_update.task_queued", devID, map[string]string{
-				"campaign_id":    campaign.ID,
-				"task_id":        task.ID,
-				"target_version": campaign.TargetVersion,
-				"from_version":   fromVersion,
-				"status":         "pending_offline",
-			})
-		}
-		return false
+		tasks = append(tasks, task)
+	}
+	if err := h.repo.CreateCampaignTasks(r.Context(), tasks); err != nil {
+		// Hand the campaign back so it can be started again; nothing was sent.
+		_, _ = h.repo.TransitionCampaignStatus(r.Context(), id, "draft", "in_progress")
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
 	}
 
-	dispatchedCount := 0
-	firstBatchEnd := batchSize
-	if firstBatchEnd > len(deviceIDs) {
-		firstBatchEnd = len(deviceIDs)
+	dispatched, queued, err := h.releaseWave(r.Context(), campaign)
+	if err != nil {
+		log.Warn().Err(err).Str("campaign_id", id).Msg("release first wave")
 	}
-
-	for _, devID := range deviceIDs[:firstBatchEnd] {
-		if dispatchDevice(r.Context(), devID) {
-			dispatchedCount++
-		}
-	}
-
-	_ = h.repo.SyncCampaignStatusByID(r.Context(), campaign.ID)
-
-	// If there are subsequent batches, process in background with stagger interval
-	if len(deviceIDs) > firstBatchEnd {
-		remainingIDs := append([]string(nil), deviceIDs[firstBatchEnd:]...)
-		campaignID := campaign.ID
-		go func() {
-			for i := 0; i < len(remainingIDs); i += batchSize {
-				if staggerSec > 0 {
-					time.Sleep(time.Duration(staggerSec) * time.Second)
-				}
-				// Verify campaign is still in progress
-				c, err := h.repo.GetCampaign(context.Background(), campaignID)
-				if err != nil || c.Status == "cancelled" || c.Status == "failed" {
-					log.Info().Str("campaign_id", campaignID).Msg("campaign halted or cancelled; stopping rollout waves")
-					return
-				}
-				end := i + batchSize
-				if end > len(remainingIDs) {
-					end = len(remainingIDs)
-				}
-				for _, devID := range remainingIDs[i:end] {
-					dispatchDevice(context.Background(), devID)
-				}
-				_ = h.repo.SyncCampaignStatusByID(context.Background(), campaignID)
-			}
-		}()
+	if err := h.repo.SyncCampaignStatusByID(r.Context(), campaign.ID); err != nil {
+		log.Warn().Err(err).Str("campaign_id", id).Msg("roll up campaign")
 	}
 
 	_ = h.auditor.Log(r.Context(), "user", actorID, "agent_update.campaign_start", id, map[string]string{
-		"dispatched": fmt.Sprintf("%d", dispatchedCount),
+		"dispatched": fmt.Sprintf("%d", dispatched),
+		"queued":     fmt.Sprintf("%d", queued),
+		"no_release": fmt.Sprintf("%d", noRelease),
 		"target":     campaign.TargetType,
 	})
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status":          "started",
 		"total_targets":   len(deviceIDs),
-		"dispatched_live": dispatchedCount,
+		"tasks":           len(tasks),
+		"dispatched_live": dispatched,
+		"queued":          queued,
+		"no_release":      noRelease,
 	})
+}
+
+// releaseWave lets the campaign's next batch go: online devices are sent the
+// update now, offline ones keep a released task that the reconnect flush
+// sends. It returns how many went out and how many were queued.
+func (h *Handler) releaseWave(ctx context.Context, campaign *UpdateCampaign) (dispatched, queued int, err error) {
+	stagger := time.Duration(campaign.StaggerIntervalSec) * time.Second
+	if stagger < 0 {
+		stagger = 0
+	}
+	released, err := h.repo.ReleaseNextWave(ctx, campaign.ID, campaign.BatchSize, stagger)
+	for _, task := range released {
+		if h.dispatchReleased(ctx, campaign, task) {
+			dispatched++
+		} else {
+			queued++
+		}
+	}
+	return dispatched, queued, err
+}
+
+// dispatchReleased sends one released task if its device is online and
+// reports whether it did. A task that is not sent stays pending and released:
+// queued for the reconnect flush, or for the wave loop's retry.
+func (h *Handler) dispatchReleased(ctx context.Context, campaign *UpdateCampaign, task *DeviceUpdateTask) bool {
+	details := map[string]string{
+		"campaign_id":    campaign.ID,
+		"task_id":        task.ID,
+		"target_version": task.TargetVersion,
+		"from_version":   task.FromVersion,
+	}
+	if !h.hub.Online(task.DeviceID) {
+		details["status"] = "pending_offline"
+		_ = h.auditor.Log(ctx, "system", task.DeviceID, "agent_update.task_queued", task.DeviceID, details)
+		return false
+	}
+	dev, err := h.deviceRepo.GetByID(ctx, task.DeviceID)
+	if err != nil {
+		return false
+	}
+	arch := h.repo.GetDeviceArch(ctx, task.DeviceID)
+	rel, err := h.repo.GetActiveReleaseForDevice(ctx, task.TargetVersion, dev.OSName, arch)
+	if err != nil {
+		_ = h.repo.RecordTaskProgress(ctx, task.ID, TaskStatusFailed,
+			fmt.Sprintf("no_release: no active release of %s for %s/%s", task.TargetVersion, dev.OSName, arch))
+		return false
+	}
+	if err := h.SendTask(ctx, task, rel); err != nil {
+		log.Warn().Err(err).Str("device", task.DeviceID).Str("task_id", task.ID).Msg("send update; will retry")
+		return false
+	}
+	details["status"] = "dispatched"
+	_ = h.auditor.Log(ctx, "system", task.DeviceID, "agent_update.task_dispatched", task.DeviceID, details)
+	return true
+}
+
+// RunWaves releases due campaign waves and retries queued tasks for online
+// devices until ctx is cancelled. It runs on the leader only.
+//
+// Waves used to be a goroutine per campaign sleeping on context.Background():
+// a restart or a leader change lost every wave not yet sent, and the campaign
+// sat in_progress with devices that were never told to update. The schedule
+// now lives in the database (next_wave_at), so whichever node leads picks it
+// up where the last one stopped.
+func (h *Handler) RunWaves(ctx context.Context, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			tickCtx, cancel := context.WithTimeout(ctx, interval*3)
+			h.WaveTick(tickCtx)
+			cancel()
+		}
+	}
+}
+
+// WaveTick runs one pass of the wave loop.
+func (h *Handler) WaveTick(ctx context.Context) {
+	due, err := h.repo.DueWaveCampaigns(ctx, time.Now().UTC())
+	if err != nil {
+		log.Warn().Err(err).Msg("list due campaign waves")
+	}
+	for _, c := range due {
+		if _, _, err := h.releaseWave(ctx, c); err != nil {
+			log.Warn().Err(err).Str("campaign_id", c.ID).Msg("release campaign wave")
+		}
+		if err := h.repo.SyncCampaignStatusByID(ctx, c.ID); err != nil {
+			log.Warn().Err(err).Str("campaign_id", c.ID).Msg("roll up campaign")
+		}
+	}
+
+	devices, err := h.repo.DevicesWithQueuedTasks(ctx)
+	if err != nil {
+		log.Warn().Err(err).Msg("list devices with queued updates")
+		return
+	}
+	for _, devID := range devices {
+		if !h.hub.Online(devID) {
+			continue
+		}
+		if err := h.FlushPendingUpdates(ctx, devID); err != nil {
+			log.Warn().Err(err).Str("device", devID).Msg("retry queued updates")
+		}
+	}
 }
 
 func (h *Handler) handleDispatchDeviceUpdate(w http.ResponseWriter, r *http.Request) {

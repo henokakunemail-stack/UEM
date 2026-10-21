@@ -22,6 +22,11 @@ import { Modal } from '../components/ui/Modal'
 import { ConfirmDialog } from '../components/ui/ConfirmDialog'
 import type { AgentReleaseDTO, UpdateCampaignDTO, CampaignTaskDetail, CampaignLogItem } from '../types/api'
 import { useT } from '../i18n/core'
+import { settleAll } from '../services/settled'
+import { campaignProgress, taskDisplayStatus } from './campaignProgress'
+
+// How often a running campaign is re-read.
+const POLL_MS = 5000
 
 // Campaign, task and target values are server enums. Known ones get a
 // translated label; anything else is shown exactly as the server sent it.
@@ -30,6 +35,7 @@ const STATUS_KEYS: Record<string, string> = {
   pending: 'updates.status_pending',
   in_progress: 'updates.status_in_progress',
   completed: 'updates.status_completed',
+  partial: 'common.status_partial',
   cancelled: 'updates.status_cancelled',
   dispatched: 'updates.status_dispatched',
   downloading: 'updates.status_downloading',
@@ -76,9 +82,15 @@ export const AgentUpdatesPage: React.FC<AgentUpdatesPageProps> = ({ activeTab: s
   const [detailSubTab, setDetailSubTab] = useState<'tasks' | 'logs'>('tasks')
 
   const [msg, setMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
+  const [loadFailed, setLoadFailed] = useState<string[]>([])
+  const [pollFailed, setPollFailed] = useState(false)
   const toast = useToast()
   const { t } = useT()
-  const statusLabel = (s: string) => (STATUS_KEYS[s] ? t(STATUS_KEYS[s]) : s)
+  const statusLabel = (s: string) => {
+    if (s === 'queued') return t('common.status_queued')
+    if (s === 'waiting_wave') return t('updates.status_waiting_wave')
+    return STATUS_KEYS[s] ? t(STATUS_KEYS[s]) : s
+  }
 
   // Upload Release Form
   const [relVersion, setRelVersion] = useState('')
@@ -98,17 +110,18 @@ export const AgentUpdatesPage: React.FC<AgentUpdatesPageProps> = ({ activeTab: s
     stagger_interval_sec: 60,
   })
 
+  // A section that fails to load keeps what it had and is named in a banner;
+  // it used to be replaced by an empty list that read "no campaigns".
   const loadData = async () => {
     setLoading(true)
     try {
-      const [rList, cList] = await Promise.all([
-        api.getAgentReleases().catch(() => []),
-        api.getUpdateCampaigns().catch(() => []),
-      ])
-      setReleases(rList)
-      setCampaigns(cList)
-    } catch (err: any) {
-      setMsg({ type: 'error', text: err.message || t('updates.load_failed') })
+      const { data, failed } = await settleAll({
+        releases: () => api.getAgentReleases(),
+        campaigns: () => api.getUpdateCampaigns(),
+      })
+      if (data.releases) setReleases(data.releases)
+      if (data.campaigns) setCampaigns(data.campaigns)
+      setLoadFailed(failed.map((k) => t(k === 'releases' ? 'updates.section_releases' : 'updates.section_campaigns')))
     } finally {
       setLoading(false)
     }
@@ -118,17 +131,27 @@ export const AgentUpdatesPage: React.FC<AgentUpdatesPageProps> = ({ activeTab: s
     loadData()
   }, [])
 
+  // The list itself refreshes while any campaign runs, so waves released by
+  // the server show up without a manual refresh.
+  const anyRunning = campaigns.some((c) => c.status === 'in_progress')
+  useEffect(() => {
+    if (!anyRunning || isDetailsModalOpen) return
+    const timer = setInterval(() => {
+      api.getUpdateCampaigns().then(setCampaigns, () => setLoadFailed([t('updates.section_campaigns')]))
+    }, POLL_MS)
+    return () => clearInterval(timer)
+  }, [anyRunning, isDetailsModalOpen])
+
   const fetchCampaignDetails = async (campaignId: string) => {
     setDetailsLoading(true)
     try {
-      const [tasks, logs] = await Promise.all([
-        api.getCampaignTasks(campaignId).catch(() => []),
-        api.getCampaignLogs(campaignId).catch(() => []),
-      ])
-      setCampaignTasks(tasks)
-      setCampaignLogs(logs)
-    } catch (err: any) {
-      toast.error(err.message || t('updates.details_load_failed'), t('updates.error'))
+      const { data, failed } = await settleAll({
+        tasks: () => api.getCampaignTasks(campaignId),
+        logs: () => api.getCampaignLogs(campaignId),
+      })
+      if (data.tasks) setCampaignTasks(data.tasks)
+      if (data.logs) setCampaignLogs(data.logs)
+      if (failed.length > 0) toast.error(t('updates.details_load_failed'), t('updates.error'))
     } finally {
       setDetailsLoading(false)
     }
@@ -148,7 +171,8 @@ export const AgentUpdatesPage: React.FC<AgentUpdatesPageProps> = ({ activeTab: s
 
     fetchCampaignDetails(selectedCampaign.id)
 
-    // Poll every 3s if campaign is in_progress
+    // Poll while the campaign runs. A failed poll is shown, not swallowed:
+    // a frozen progress bar otherwise looks like a stalled rollout.
     if (selectedCampaign.status === 'in_progress') {
       const timer = setInterval(async () => {
         if (!selectedCampaignRef.current) return
@@ -161,14 +185,15 @@ export const AgentUpdatesPage: React.FC<AgentUpdatesPageProps> = ({ activeTab: s
           setCampaignTasks(tasks)
           setCampaignLogs(logs)
           setCampaigns(cList)
+          setPollFailed(false)
           const updated = cList.find((c) => c.id === selectedCampaignRef.current?.id)
           if (updated) {
             setSelectedCampaign(updated)
           }
         } catch {
-          // ignore background polling errors
+          setPollFailed(true)
         }
-      }, 3000)
+      }, POLL_MS)
       return () => clearInterval(timer)
     }
   }, [isDetailsModalOpen, selectedCampaign?.id, selectedCampaign?.status])
@@ -239,7 +264,15 @@ export const AgentUpdatesPage: React.FC<AgentUpdatesPageProps> = ({ activeTab: s
   const handleStartCampaign = async (id: string, name: string) => {
     try {
       const res = await api.startUpdateCampaign(id)
-      const successText = res.message || t('updates.campaign_started', { name, live: res.dispatched_live, total: res.total_targets })
+      const successText =
+        res.message ||
+        t('updates.campaign_started', {
+          name,
+          live: res.dispatched_live,
+          total: res.total_targets,
+          queued: res.queued ?? 0,
+          no_release: res.no_release ?? 0,
+        })
       setMsg({ type: 'success', text: successText })
       toast.success(successText, t('updates.rollout_started'))
       loadData()
@@ -296,6 +329,11 @@ export const AgentUpdatesPage: React.FC<AgentUpdatesPageProps> = ({ activeTab: s
       case 'verifying':
       case 'swapping':
         return 'warning'
+      case 'partial':
+        return 'partial'
+      case 'queued':
+      case 'waiting_wave':
+        return 'pending'
       case 'failed':
       case 'rollback':
       case 'cancelled':
@@ -340,6 +378,12 @@ export const AgentUpdatesPage: React.FC<AgentUpdatesPageProps> = ({ activeTab: s
           <button type="button" onClick={() => setMsg(null)} className="close-btn" aria-label={t('updates.dismiss_message')}>
             <X size={14} />
           </button>
+        </div>
+      )}
+
+      {loadFailed.length > 0 && (
+        <div className="alert-banner alert-warning" role="alert">
+          <span>{t('common.load_failed_sections', { sections: loadFailed.join(', ') })}</span>
         </div>
       )}
 
@@ -477,11 +521,7 @@ export const AgentUpdatesPage: React.FC<AgentUpdatesPageProps> = ({ activeTab: s
                   </tr>
                 ) : (
                   campaigns.map((c) => {
-                    const total = c.total_tasks || 0
-                    const succ = c.succeeded_tasks || 0
-                    const fail = c.failed_tasks || 0
-                    const pend = c.pending_tasks || 0
-                    const percent = total > 0 ? Math.round((succ / total) * 100) : c.status === 'completed' ? 100 : 0
+                    const { total, succeeded: succ, failed: fail, running, queued, waiting, percent } = campaignProgress(c)
 
                     return (
                       <tr key={c.id}>
@@ -499,23 +539,23 @@ export const AgentUpdatesPage: React.FC<AgentUpdatesPageProps> = ({ activeTab: s
                           {total > 0 ? (
                             <div style={{ minWidth: 150 }}>
                               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', marginBottom: 3 }}>
-                                <span className="font-semibold">{succ}/{total} ({percent}%)</span>
+                                <span className="font-semibold">{t('updates.progress_done', { done: succ + fail, total, percent })}</span>
                                 <span>
                                   <span className="text-success" title={t('updates.succeeded')}>✓{succ}</span>{' '}
                                   {fail > 0 && <span className="text-danger" title={t('updates.failed')}>✗{fail} </span>}
-                                  {pend > 0 && <span className="text-warning" title={t('updates.pending')}>⧖{pend}</span>}
+                                  {running > 0 && <span className="text-primary" title={t('updates.status_in_progress')}>↻{running} </span>}
+                                  {queued > 0 && <span className="text-warning" title={t('common.status_queued')}>⧖{queued} </span>}
+                                  {waiting > 0 && <span className="text-muted" title={t('updates.status_waiting_wave')}>…{waiting}</span>}
                                 </span>
                               </div>
-                              <div style={{ width: '100%', height: 6, background: 'var(--border-color, #e2e8f0)', borderRadius: 3, overflow: 'hidden' }}>
-                                <div
-                                  style={{
-                                    width: `${percent}%`,
-                                    height: '100%',
-                                    background: fail > 0 && percent === 0 ? 'var(--danger-color, #ef4444)' : 'var(--primary-color, #3b82f6)',
-                                    borderRadius: 3,
-                                    transition: 'width 0.3s ease',
-                                  }}
-                                />
+                              <div
+                                className="campaign-progress"
+                                role="img"
+                                aria-label={t('updates.progress_done', { done: succ + fail, total, percent })}
+                              >
+                                <div className="campaign-progress-success" style={{ width: `${(succ / total) * 100}%` }} />
+                                <div className="campaign-progress-failed" style={{ width: `${(fail / total) * 100}%` }} />
+                                <div className="campaign-progress-running" style={{ width: `${(running / total) * 100}%` }} />
                               </div>
                             </div>
                           ) : (
@@ -589,7 +629,9 @@ export const AgentUpdatesPage: React.FC<AgentUpdatesPageProps> = ({ activeTab: s
           footer={
             <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center' }}>
               <div style={{ fontSize: '0.85rem' }} className="text-muted">
-                {selectedCampaign.status === 'in_progress' ? (
+                {selectedCampaign.status === 'in_progress' && pollFailed ? (
+                  <span className="text-warning" role="status">{t('updates.poll_failed')}</span>
+                ) : selectedCampaign.status === 'in_progress' ? (
                   <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                     <RefreshCw size={14} className="spinning text-primary" />
                     <span>{t('updates.auto_refreshing')}</span>
@@ -754,8 +796,8 @@ export const AgentUpdatesPage: React.FC<AgentUpdatesPageProps> = ({ activeTab: s
                               <span className="font-semibold text-primary" style={{ fontSize: '0.85rem' }}>v{task.target_version}</span>
                             </td>
                             <td>
-                              <span className={`status-pill ${formatStatusPill(task.status)}`}>
-                                {statusLabel(task.status)}
+                              <span className={`status-pill ${formatStatusPill(taskDisplayStatus(task))}`}>
+                                {statusLabel(taskDisplayStatus(task))}
                               </span>
                             </td>
                             <td style={{ maxWidth: 220 }}>
@@ -782,6 +824,10 @@ export const AgentUpdatesPage: React.FC<AgentUpdatesPageProps> = ({ activeTab: s
                               ) : task.status === 'dispatched' ? (
                                 <span className="text-muted" style={{ fontSize: '0.8rem' }}>
                                   {t('updates.note_dispatched')}
+                                </span>
+                              ) : taskDisplayStatus(task) === 'waiting_wave' ? (
+                                <span className="text-muted" style={{ fontSize: '0.8rem' }}>
+                                  {t('updates.note_waiting_wave')}
                                 </span>
                               ) : (
                                 <span className="text-muted" style={{ fontSize: '0.8rem' }}>
@@ -830,7 +876,7 @@ export const AgentUpdatesPage: React.FC<AgentUpdatesPageProps> = ({ activeTab: s
                         parsedDetails = log.details
                       }
 
-                      const timeStr = new Date(log.created_at).toLocaleTimeString()
+                      const timeStr = new Date(log.timestamp).toLocaleTimeString()
                       const actionTag = log.action.replace('agent_update.', '').toUpperCase()
 
                       return (

@@ -25,7 +25,7 @@
   "campaign_launched_title": "Kampanye Diluncurkan",
   "launch_failed": "Gagal meluncurkan kampanye pembaruan",
   "launch_failed_title": "Peluncuran Gagal",
-  "campaign_started": "Kampanye '{name}' dimulai: {live} dari {total} target langsung dikirim.",
+  "campaign_started": "Kampanye '{name}' dimulai: {live} dikirim sekarang, {queued} menunggu perangkatnya, {no_release} tanpa rilis untuk platformnya, dari {total} target.",
   "rollout_started": "Peluncuran Dimulai",
   "start_failed": "Gagal memulai kampanye",
   "start_failed_title": "Gagal Memulai",
@@ -80,7 +80,7 @@
   "start": "Mulai",
   "cancel_title": "Batalkan eksekusi kampanye ini",
   "campaign_title": "Kampanye: {name}",
-  "auto_refreshing": "Memuat ulang progres real-time otomatis setiap 3 detik...",
+  "auto_refreshing": "Memuat ulang progres otomatis setiap 5 detik...",
   "finished_on": "Selesai pada {date}",
   "cancel_rollout": "Batalkan Peluncuran",
   "campaign_status": "Status Kampanye",
@@ -139,5 +139,11 @@
   "start_confirm_label": "Mulai rollout",
   "cancel_confirm_title": "Batalkan rollout",
   "error_not_startable": "Kampanye ini sudah dimulai, selesai, atau dibatalkan.",
-  "error_not_cancellable": "Kampanye ini sudah selesai atau dibatalkan."
+  "error_not_cancellable": "Kampanye ini sudah selesai atau dibatalkan.",
+  "status_waiting_wave": "Menunggu gelombang",
+  "note_waiting_wave": "Menunggu gelombangnya dilepas",
+  "progress_done": "{done}/{total} selesai ({percent}%)",
+  "poll_failed": "Gagal memperbarui progres. Mencoba lagi...",
+  "section_releases": "rilis",
+  "section_campaigns": "kampanye"
 }

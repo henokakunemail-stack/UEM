@@ -304,18 +304,7 @@ func (h *WSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Flush whatever was queued while this device was away. After the status
-	// update, not before: the queue flush reads the release and sends on this
-	// socket, and SendTask marks the row sent before the write, so a failure
-	// here leaves the task pending for the next reconnect rather than losing it.
-	// A flush error is logged and swallowed -- the connection is live either
-	// way, and returning would tear down a healthy agent over a delivery
-	// problem that the pending set already accounts for.
-	if h.updateQueue != nil {
-		if err := h.updateQueue.FlushPendingUpdates(r.Context(), deviceID); err != nil {
-			log.Warn().Err(err).Str("device", deviceID).Msg("flush pending agent updates")
-		}
-	}
+	// Queued agent updates are flushed after hello, not here: see handleHello.
 
 	// Same reasoning for the filter policy: a sync clicked while the device was
 	// offline never reached it. Ordered after the status update because this
@@ -515,6 +504,17 @@ func (h *WSHandler) handleHello(ctx context.Context, c *Conn, env Envelope) {
 	}
 	if h.updateQueue != nil && p.AgentVersion != "" {
 		_ = h.updateQueue.ReconcileDeviceVersion(ctx, c.DeviceID, p.AgentVersion)
+	}
+	// Flush queued agent updates after the reconcile. It used to run on
+	// connect, before hello: an agent that had installed the update while
+	// away was sent it again, because its task was only marked successful
+	// once the version it reported was read. A flush error is logged and
+	// swallowed -- the connection is live either way, and the task stays
+	// pending for the wave loop's retry.
+	if h.updateQueue != nil {
+		if err := h.updateQueue.FlushPendingUpdates(ctx, c.DeviceID); err != nil {
+			log.Warn().Err(err).Str("device", c.DeviceID).Msg("flush pending agent updates")
+		}
 	}
 	// Queued work goes out after hello, not on connect: only now are the
 	// device's capabilities and agent version the ones it is actually running.

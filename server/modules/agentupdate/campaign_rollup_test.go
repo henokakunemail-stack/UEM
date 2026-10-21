@@ -133,17 +133,18 @@ func TestACampaignWhoseDevicesAllFailedIsFailed(t *testing.T) {
 	}
 }
 
-// TestACampaignWithOneSuccessIsCompleted: the rollup asks whether everything
-// finished, not whether everything succeeded.
-func TestACampaignWithOneSuccessIsCompleted(t *testing.T) {
+// TestACampaignWithMixedResultsIsPartial: the rollup waits until everything
+// finished, and then says how it went. One success out of two used to read
+// "completed", the same word as a rollout that updated every device.
+func TestACampaignWithMixedResultsIsPartial(t *testing.T) {
 	f := newCampaignFixture(t, []string{"d1", "d2"})
 
 	f.reportAs(t, "d1", "success")
 	f.reportAs(t, "d2", "failed")
 
-	if got := f.status(t); got != "completed" {
-		t.Errorf("campaign status = %q, want \"completed\": the rollout ran and "+
-			"every endpoint has reported", got)
+	if got := f.status(t); got != "partial" {
+		t.Errorf("campaign status = %q, want \"partial\": one device updated and "+
+			"one failed", got)
 	}
 }
 

@@ -2,6 +2,7 @@ package transport
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -92,5 +93,34 @@ func TestResultError(t *testing.T) {
 	}
 	if got := resultError(nil); got != "" {
 		t.Fatalf("resultError(nil) = %q", got)
+	}
+}
+
+type orderedUpdateQueue struct{ calls []string }
+
+func (q *orderedUpdateQueue) FlushPendingUpdates(context.Context, string) error {
+	q.calls = append(q.calls, "flush")
+	return nil
+}
+
+func (q *orderedUpdateQueue) ReconcileDeviceVersion(context.Context, string, string) error {
+	q.calls = append(q.calls, "reconcile")
+	return nil
+}
+
+// An agent that installed its update while away reports the new version in
+// hello. The reconcile marks the task done; flushing first sent it the same
+// update again.
+func TestHello_ReconcilesBeforeFlushingQueuedUpdates(t *testing.T) {
+	h := newTestHandler(t)
+	q := &orderedUpdateQueue{}
+	h.WithUpdateQueue(q)
+
+	h.handleHello(context.Background(), &Conn{DeviceID: "dev-1"}, Envelope{
+		Type: TypeHello, Payload: map[string]any{"agent_version": "2.0.0"},
+	})
+
+	if strings.Join(q.calls, ",") != "reconcile,flush" {
+		t.Fatalf("update queue calls = %v, want [reconcile flush]", q.calls)
 	}
 }

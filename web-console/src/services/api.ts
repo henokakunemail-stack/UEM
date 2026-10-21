@@ -199,6 +199,18 @@ export async function fetchRaw(path: string, init: RequestInit = {}): Promise<Re
   return send()
 }
 
+// What POST /campaigns/{id}/start answers. queued are devices of the first
+// wave that are offline; no_release are devices with no build for their
+// platform, which get a failed task instead of being dropped.
+export interface CampaignStartResult {
+  status: string
+  total_targets: number
+  dispatched_live: number
+  queued?: number
+  no_release?: number
+  message?: string
+}
+
 export const api = {
   async login(username: string, password: string): Promise<UserToken> {
     const res = await fetch('/api/auth/login', {
@@ -851,8 +863,8 @@ export const api = {
 
   async startUpdateCampaign(
     id: string,
-  ): Promise<{ status: string; total_targets: number; dispatched_live: number; message?: string }> {
-    return request<{ status: string; total_targets: number; dispatched_live: number; message?: string }>(
+  ): Promise<CampaignStartResult> {
+    return request<CampaignStartResult>(
       `/api/agent-updates/campaigns/${id}/start`,
       { method: 'POST' },
     )

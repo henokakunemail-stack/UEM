@@ -86,9 +86,11 @@ func TestAbandonOrphanedTasksReapsOfflineAndTimesOut(t *testing.T) {
 		DeviceID:      "dev-offline-1",
 		FromVersion:   "1.0.0",
 		TargetVersion: "1.4.0",
-		Status:        TaskStatusPending,
-		DispatchedAt:  &oldTime,
-		CreatedAt:     oldTime,
+		// Sent, and then the device went away without reporting. A task that
+		// was only queued is not reaped here; see TestQueuedTasks*.
+		Status:       "dispatched",
+		DispatchedAt: &oldTime,
+		CreatedAt:    oldTime,
 	}
 	if err := repo.CreateUpdateTask(context.Background(), task); err != nil {
 		t.Fatal(err)

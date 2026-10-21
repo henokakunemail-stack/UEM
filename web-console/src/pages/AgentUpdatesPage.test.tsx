@@ -75,3 +75,54 @@ describe('AgentUpdatesPage start', () => {
     await waitFor(() => expect(screen.getAllByText('This campaign has already started, finished or been cancelled.').length).toBeGreaterThan(0))
   })
 })
+
+import runningCampaign from '../test/contracts/update-campaign.json'
+import logItem from '../test/contracts/campaign-log-item.json'
+import taskDetail from '../test/contracts/campaign-task-detail.json'
+import { campaignProgress, taskDisplayStatus } from './campaignProgress'
+import type { CampaignTaskDetail } from '../types/api'
+
+// The fixtures are the server's own field names: the Go test
+// TestConsoleContractFixturesMatchTheDTOs fails if they drift from the DTOs.
+describe('AgentUpdatesPage progress from the server contract', () => {
+  beforeAll(() => {
+    HTMLDialogElement.prototype.showModal = function () {
+      this.setAttribute('open', '')
+    }
+    HTMLDialogElement.prototype.close = function () {
+      this.removeAttribute('open')
+    }
+  })
+  beforeEach(() => {
+    vi.clearAllMocks()
+    api.getAgentReleases.mockResolvedValue([])
+    api.getUpdateCampaigns.mockResolvedValue([runningCampaign])
+    api.getCampaignTasks.mockResolvedValue([taskDetail])
+    api.getCampaignLogs.mockResolvedValue([logItem])
+  })
+
+  it('counts finished, running, queued and waiting devices', () => {
+    expect(campaignProgress(runningCampaign as UpdateCampaignDTO)).toEqual({
+      total: 10, succeeded: 3, failed: 1, running: 1, queued: 2, waiting: 3, percent: 40,
+    })
+  })
+
+  it('renders the progress of a running campaign', async () => {
+    renderPage()
+    expect(await screen.findByText('4/10 finished (40%)')).toBeTruthy()
+  })
+
+  it('tells a task waiting for its device from one waiting for its wave', () => {
+    expect(taskDisplayStatus(taskDetail as CampaignTaskDetail)).toBe('queued')
+    expect(taskDisplayStatus({ ...taskDetail, released_at: null } as CampaignTaskDetail)).toBe('waiting_wave')
+    expect(taskDisplayStatus({ ...taskDetail, status: 'success' } as CampaignTaskDetail)).toBe('success')
+  })
+
+  it('shows log times from the timestamp field', async () => {
+    renderPage()
+    fireEvent.click(await screen.findByText('Logs & Impact'))
+    fireEvent.click(await screen.findByRole('button', { name: /Rollout Activity Logs/ }))
+    await waitFor(() => expect(document.body.textContent).toContain('TASK_DISPATCHED'))
+    expect(document.body.textContent).not.toContain('Invalid Date')
+  })
+})

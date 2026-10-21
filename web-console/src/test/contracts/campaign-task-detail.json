@@ -1,0 +1,17 @@
+{
+  "id": "t-1",
+  "campaign_id": "c-run",
+  "device_id": "dev-1",
+  "hostname": "PC-1",
+  "os_name": "windows",
+  "device_online_status": "offline",
+  "current_version": "1.0.0",
+  "from_version": "1.0.0",
+  "target_version": "2.0.0",
+  "status": "pending",
+  "error_message": "",
+  "dispatched_at": "2026-10-21T08:00:00Z",
+  "completed_at": "2026-10-21T08:10:00Z",
+  "created_at": "2026-10-21T08:00:00Z",
+  "released_at": "2026-10-21T08:00:00Z"
+}

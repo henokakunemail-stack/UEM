@@ -32,12 +32,19 @@ type recordingHub struct {
 	online  bool
 	sent    [][]byte
 	sendErr bool // the connection exists but is momentarily busy
+	// onlineSet, when set, decides per device and overrides online.
+	onlineSet map[string]bool
 }
 
-func (h *recordingHub) Online(string) bool { return h.online }
+func (h *recordingHub) Online(id string) bool {
+	if h.onlineSet != nil {
+		return h.onlineSet[id]
+	}
+	return h.online
+}
 
-func (h *recordingHub) SendTo(_ string, msg []byte) bool {
-	if h.sendErr || !h.online {
+func (h *recordingHub) SendTo(id string, msg []byte) bool {
+	if h.sendErr || !h.Online(id) {
 		return false
 	}
 	h.mu.Lock()

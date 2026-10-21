@@ -670,10 +670,16 @@ export interface UpdateCampaignDTO {
   created_by: string
   created_at: string
   updated_at: string
-  total_tasks?: number
-  succeeded_tasks?: number
-  failed_tasks?: number
-  pending_tasks?: number
+  // Verbatim json tags of UpdateCampaignDTO in server/modules/agentupdate.
+  // These were *_tasks here while the server sent *_devices, so the progress
+  // column never rendered and every finished campaign read 0% or 100%.
+  next_wave_at?: string | null
+  total_devices: number
+  succeeded_devices: number
+  failed_devices: number
+  pending_devices: number
+  in_progress_devices: number
+  queued_devices: number
 }
 
 export interface CampaignTaskDetail {
@@ -690,6 +696,9 @@ export interface CampaignTaskDetail {
   dispatched_at?: string | null
   completed_at?: string | null
   created_at: string
+  // null on a pending task means it waits for its wave, set means it waits
+  // for the device to come online.
+  released_at?: string | null
 }
 
 export interface CampaignLogItem {
@@ -697,10 +706,10 @@ export interface CampaignLogItem {
   actor_type: string
   actor_id: string
   action: string
-  target_type: string
   target_id: string
   details: string
-  created_at: string
+  // The server's json tag is "timestamp"; reading created_at gave Invalid Date.
+  timestamp: string
 }
 
 // Phase 15: Device Maintenance

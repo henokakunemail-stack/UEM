@@ -1015,7 +1015,12 @@ func buildServer(cfg config.Config, database *sqlx.DB) (*http.Server, *serverApp
 
 	// Agent update tasks stranded on offline devices or dead agents. Without
 	// this, offline endpoints leave update campaigns stuck in 'in_progress' forever.
-	leaderOnly = append(leaderOnly, func(ctx context.Context) { go updateRepo.StartSweep(ctx, 30*time.Second, 10*time.Minute) })
+	leaderOnly = append(leaderOnly, func(ctx context.Context) {
+		updateRepo.StartSweep(ctx, agentupdate.SweepInterval, agentupdate.TaskTimeoutGrace)
+	})
+	// Campaign waves are a schedule in the database, released by whichever
+	// node leads; the same loop retries queued updates for online devices.
+	leaderOnly = append(leaderOnly, func(ctx context.Context) { go updateH.RunWaves(ctx, agentupdate.WaveInterval) })
 
 	leader = cluster.NewLeader(database)
 	go leader.Run(bgCtx, func(ctx context.Context) {

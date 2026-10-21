@@ -25,7 +25,7 @@
   "campaign_launched_title": "Campaign Launched",
   "launch_failed": "Failed to launch update campaign",
   "launch_failed_title": "Launch Failed",
-  "campaign_started": "Campaign '{name}' started: {live} of {total} targets dispatched live.",
+  "campaign_started": "Campaign '{name}' started: {live} sent now, {queued} waiting for their device, {no_release} without a release for their platform, out of {total} targets.",
   "rollout_started": "Rollout Started",
   "start_failed": "Failed to start campaign",
   "start_failed_title": "Start Failed",
@@ -80,7 +80,7 @@
   "start": "Start",
   "cancel_title": "Cancel this campaign's execution",
   "campaign_title": "Campaign: {name}",
-  "auto_refreshing": "Auto-refreshing real-time progress every 3s...",
+  "auto_refreshing": "Auto-refreshing progress every 5s...",
   "finished_on": "Finished on {date}",
   "cancel_rollout": "Cancel Rollout",
   "campaign_status": "Campaign Status",
@@ -139,5 +139,11 @@
   "start_confirm_label": "Start rollout",
   "cancel_confirm_title": "Cancel rollout",
   "error_not_startable": "This campaign has already started, finished or been cancelled.",
-  "error_not_cancellable": "This campaign has already finished or been cancelled."
+  "error_not_cancellable": "This campaign has already finished or been cancelled.",
+  "status_waiting_wave": "Waiting for wave",
+  "note_waiting_wave": "Waiting for its wave to be released",
+  "progress_done": "{done}/{total} finished ({percent}%)",
+  "poll_failed": "Could not refresh progress. Retrying...",
+  "section_releases": "releases",
+  "section_campaigns": "campaigns"
 }

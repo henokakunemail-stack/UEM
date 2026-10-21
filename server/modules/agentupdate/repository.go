@@ -135,6 +135,11 @@ type UpdateCampaignDTO struct {
 	FailedDevices      int       `db:"failed_devices" json:"failed_devices"`
 	PendingDevices     int       `db:"pending_devices" json:"pending_devices"`
 	InProgressDevices  int       `db:"in_progress_devices" json:"in_progress_devices"`
+	// NextWaveAt is when the next batch is released; nil when none is due.
+	NextWaveAt *time.Time `db:"next_wave_at" json:"next_wave_at,omitempty"`
+	// QueuedDevices are pending tasks their wave has released: they wait for
+	// the device to come online. The rest of PendingDevices wait for a wave.
+	QueuedDevices int `db:"queued_devices" json:"queued_devices"`
 }
 
 type CampaignTaskDetail struct {
@@ -152,6 +157,9 @@ type CampaignTaskDetail struct {
 	DispatchedAt       *time.Time `db:"dispatched_at" json:"dispatched_at,omitempty"`
 	CompletedAt        *time.Time `db:"completed_at" json:"completed_at,omitempty"`
 	CreatedAt          time.Time  `db:"created_at" json:"created_at"`
+	// ReleasedAt tells "waiting for its wave" (nil) from "waiting for the
+	// device" on a pending task.
+	ReleasedAt *time.Time `db:"released_at" json:"released_at,omitempty"`
 }
 
 type CampaignLogItem struct {
@@ -350,11 +358,13 @@ func (r *Repository) ListCampaigns(ctx context.Context) ([]*UpdateCampaignDTO, e
 		SELECT
 			c.id, c.name, c.description, c.target_version, c.target_type, c.target_id,
 			c.batch_size, c.stagger_interval_sec, c.status, c.created_by, c.created_at, c.updated_at,
+			c.next_wave_at,
 			COALESCE(counts.total_devices, 0) AS total_devices,
 			COALESCE(counts.succeeded_devices, 0) AS succeeded_devices,
 			COALESCE(counts.failed_devices, 0) AS failed_devices,
 			COALESCE(counts.pending_devices, 0) AS pending_devices,
-			COALESCE(counts.in_progress_devices, 0) AS in_progress_devices
+			COALESCE(counts.in_progress_devices, 0) AS in_progress_devices,
+			COALESCE(counts.queued_devices, 0) AS queued_devices
 		FROM update_campaigns c
 		LEFT JOIN (
 			SELECT
@@ -363,7 +373,8 @@ func (r *Repository) ListCampaigns(ctx context.Context) ([]*UpdateCampaignDTO, e
 				SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) AS succeeded_devices,
 				SUM(CASE WHEN status IN ('failed', 'rollback') THEN 1 ELSE 0 END) AS failed_devices,
 				SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending_devices,
-				SUM(CASE WHEN status IN ('dispatched', 'downloading', 'verifying', 'swapping') THEN 1 ELSE 0 END) AS in_progress_devices
+				SUM(CASE WHEN status IN ('dispatched', 'downloading', 'verifying', 'swapping') THEN 1 ELSE 0 END) AS in_progress_devices,
+				SUM(CASE WHEN status = 'pending' AND released_at IS NOT NULL THEN 1 ELSE 0 END) AS queued_devices
 			FROM device_update_tasks
 			WHERE campaign_id IS NOT NULL
 			GROUP BY campaign_id
@@ -392,7 +403,7 @@ func (r *Repository) CancelCampaign(ctx context.Context, campaignID string) (boo
 
 	res, err := tx.ExecContext(ctx, `
 		UPDATE update_campaigns
-		SET status = 'cancelled', updated_at = ?
+		SET status = 'cancelled', updated_at = ?, next_wave_at = NULL
 		WHERE id = ? AND status IN ('draft', 'pending', 'in_progress')
 	`, now, campaignID)
 	if err != nil {
@@ -427,7 +438,7 @@ func (r *Repository) ListCampaignTasks(ctx context.Context, campaignID string) (
 			COALESCE(d.agent_version, t.from_version) AS current_version,
 			t.from_version, t.target_version,
 			t.status, t.error_message,
-			t.dispatched_at, t.completed_at, t.created_at
+			t.dispatched_at, t.completed_at, t.created_at, t.released_at
 		FROM device_update_tasks t
 		LEFT JOIN devices d ON d.id = t.device_id
 		WHERE t.campaign_id = ?
@@ -441,17 +452,22 @@ func (r *Repository) ListCampaignTasks(ctx context.Context, campaignID string) (
 }
 
 func (r *Repository) ListCampaignLogs(ctx context.Context, campaignID string) ([]*CampaignLogItem, error) {
+	// Per-device entries are written against the device, so they are found
+	// through the campaign's own task rows -- by index -- rather than by a
+	// LIKE over every audit detail, which scanned audit_logs on every 3-second
+	// poll of an open campaign.
 	var list []*CampaignLogItem
-	pattern := "%" + campaignID + "%"
 	query := `
-		SELECT id, actor_type, actor_id, action, target_id, details, created_at
-		FROM audit_logs
-		WHERE target_id = ?
-		   OR (details LIKE ? AND action LIKE 'agent_update.%')
-		ORDER BY created_at DESC
+		SELECT a.id, a.actor_type, a.actor_id, a.action, a.target_id, a.details, a.created_at
+		FROM audit_logs a
+		WHERE a.target_id = ?
+		   OR (a.target_id IN (SELECT device_id FROM device_update_tasks WHERE campaign_id = ?)
+		       AND a.action LIKE 'agent_update.%'
+		       AND a.created_at >= (SELECT created_at FROM update_campaigns WHERE id = ?))
+		ORDER BY a.created_at DESC
 		LIMIT 100
 	`
-	err := r.db.SelectContext(ctx, &list, query, campaignID, pattern)
+	err := r.db.SelectContext(ctx, &list, query, campaignID, campaignID, campaignID)
 	if err != nil {
 		return nil, fmt.Errorf("list campaign logs: %w", err)
 	}
@@ -482,6 +498,8 @@ func (r *Repository) TransitionCampaignStatus(ctx context.Context, id, to string
 	return n == 1, nil
 }
 
+// CreateUpdateTask inserts a one-off task. It is released at once: there is
+// no wave to wait for, so a pending row means "waiting for the device".
 func (r *Repository) CreateUpdateTask(ctx context.Context, t *DeviceUpdateTask) error {
 	if t.ID == "" {
 		t.ID = newID()
@@ -491,21 +509,137 @@ func (r *Repository) CreateUpdateTask(ctx context.Context, t *DeviceUpdateTask) 
 	if t.Status == "" {
 		t.Status = "pending"
 	}
-
-	query := `
-		INSERT INTO device_update_tasks (
-			id, campaign_id, device_id, from_version, target_version,
-			status, error_message, dispatched_at, completed_at, created_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`
-	_, err := r.db.ExecContext(ctx, query,
-		t.ID, t.CampaignID, t.DeviceID, t.FromVersion, t.TargetVersion,
-		t.Status, t.ErrorMessage, t.DispatchedAt, t.CompletedAt, t.CreatedAt,
-	)
-	if err != nil {
+	if t.ReleasedAt == nil {
+		t.ReleasedAt = &now
+	}
+	if err := insertTask(ctx, r.db, t); err != nil {
 		return fmt.Errorf("create update task: %w", err)
 	}
 	return nil
+}
+
+// CreateCampaignTasks inserts every task of a campaign in one transaction, in
+// the order given. Creating them all up front is what lets the campaign know
+// how much work is left: tasks used to be created wave by wave, so a first
+// wave that produced nothing made the rollup see zero tasks and close a
+// campaign whose later waves had not run yet.
+func (r *Repository) CreateCampaignTasks(ctx context.Context, tasks []*DeviceUpdateTask) error {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("create campaign tasks: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	now := time.Now().UTC()
+	for i, t := range tasks {
+		if t.ID == "" {
+			t.ID = newID()
+		}
+		// Waves release in created_at order; a microsecond apart keeps the
+		// operator's target order on both databases.
+		t.CreatedAt = now.Add(time.Duration(i) * time.Microsecond)
+		if t.Status == "" {
+			t.Status = TaskStatusPending
+		}
+		if err := insertTask(ctx, tx, t); err != nil {
+			return fmt.Errorf("create campaign task: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("create campaign tasks: %w", err)
+	}
+	return nil
+}
+
+func insertTask(ctx context.Context, ex sqlx.ExecerContext, t *DeviceUpdateTask) error {
+	_, err := ex.ExecContext(ctx, `
+		INSERT INTO device_update_tasks (
+			id, campaign_id, device_id, from_version, target_version,
+			status, error_message, dispatched_at, completed_at, created_at, released_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		t.ID, t.CampaignID, t.DeviceID, t.FromVersion, t.TargetVersion,
+		t.Status, t.ErrorMessage, t.DispatchedAt, t.CompletedAt, t.CreatedAt, t.ReleasedAt,
+	)
+	return err
+}
+
+// ReleaseNextWave lets the next batch of a campaign's waiting tasks go and
+// schedules the wave after it. It returns the tasks this call released; a
+// task is released once even if two callers race, because each release is
+// conditional on the task still being unreleased.
+func (r *Repository) ReleaseNextWave(ctx context.Context, campaignID string, batch int, stagger time.Duration) ([]*DeviceUpdateTask, error) {
+	if batch <= 0 {
+		batch = 25
+	}
+	now := time.Now().UTC()
+	var ids []string
+	if err := r.db.SelectContext(ctx, &ids, `
+		SELECT id FROM device_update_tasks
+		WHERE campaign_id = ? AND released_at IS NULL AND status = 'pending'
+		ORDER BY created_at, id
+		LIMIT ?`, campaignID, batch); err != nil {
+		return nil, fmt.Errorf("next wave: %w", err)
+	}
+	var released []*DeviceUpdateTask
+	for _, id := range ids {
+		res, err := r.db.ExecContext(ctx, `UPDATE device_update_tasks SET released_at = ?
+			WHERE id = ? AND released_at IS NULL AND status = 'pending'`, now, id)
+		if err != nil {
+			return released, fmt.Errorf("release task: %w", err)
+		}
+		if n, _ := res.RowsAffected(); n != 1 {
+			continue
+		}
+		t, err := r.GetUpdateTask(ctx, id)
+		if err != nil {
+			return released, err
+		}
+		released = append(released, t)
+	}
+
+	var waiting int
+	if err := r.db.GetContext(ctx, &waiting, `
+		SELECT COUNT(*) FROM device_update_tasks
+		WHERE campaign_id = ? AND released_at IS NULL AND status = 'pending'`, campaignID); err != nil {
+		return released, fmt.Errorf("count waiting tasks: %w", err)
+	}
+	var next *time.Time
+	if waiting > 0 {
+		t := now.Add(stagger)
+		next = &t
+	}
+	if _, err := r.db.ExecContext(ctx, `UPDATE update_campaigns SET next_wave_at = ?, updated_at = ?
+		WHERE id = ? AND status = 'in_progress'`, next, now, campaignID); err != nil {
+		return released, fmt.Errorf("schedule next wave: %w", err)
+	}
+	return released, nil
+}
+
+// DueWaveCampaigns returns the running campaigns whose next wave is due.
+func (r *Repository) DueWaveCampaigns(ctx context.Context, now time.Time) ([]*UpdateCampaign, error) {
+	var list []*UpdateCampaign
+	err := r.db.SelectContext(ctx, &list, `
+		SELECT * FROM update_campaigns
+		WHERE status = 'in_progress' AND next_wave_at IS NOT NULL AND next_wave_at <= ?
+		ORDER BY next_wave_at`, now)
+	if err != nil {
+		return nil, fmt.Errorf("due waves: %w", err)
+	}
+	return list, nil
+}
+
+// DevicesWithQueuedTasks lists devices that have a released task still
+// waiting to be sent. The wave loop retries those that are online: a send can
+// fail on a busy socket, and a device that stays connected never triggers the
+// reconnect flush again.
+func (r *Repository) DevicesWithQueuedTasks(ctx context.Context) ([]string, error) {
+	var ids []string
+	err := r.db.SelectContext(ctx, &ids, `
+		SELECT DISTINCT device_id FROM device_update_tasks
+		WHERE status = 'pending' AND released_at IS NOT NULL`)
+	if err != nil {
+		return nil, fmt.Errorf("devices with queued tasks: %w", err)
+	}
+	return ids, nil
 }
 
 func (r *Repository) GetUpdateTask(ctx context.Context, id string) (*DeviceUpdateTask, error) {
@@ -546,7 +680,7 @@ func (r *Repository) PendingTasksFor(ctx context.Context, deviceID string) ([]*D
 	var tasks []*DeviceUpdateTask
 	err := r.db.SelectContext(ctx, &tasks, `
 		SELECT * FROM device_update_tasks
-		WHERE device_id = ? AND status = 'pending'
+		WHERE device_id = ? AND status = 'pending' AND released_at IS NOT NULL
 		ORDER BY created_at ASC`, deviceID)
 	if err != nil {
 		return nil, fmt.Errorf("pending tasks for %s: %w", deviceID, err)
@@ -594,7 +728,7 @@ func (r *Repository) RequeueTask(ctx context.Context, taskID string) error {
 	_, err := r.db.ExecContext(ctx, `
 		UPDATE device_update_tasks
 		SET status = 'pending', dispatched_at = NULL
-		WHERE id = ?`, taskID)
+		WHERE id = ? AND status = 'dispatched'`, taskID)
 	return err
 }
 
@@ -638,10 +772,10 @@ func (r *Repository) RecordTaskProgress(ctx context.Context, taskID, status, err
 
 	query := `
 		UPDATE device_update_tasks
-		SET status = ?, error_message = ?, completed_at = COALESCE(?, completed_at)
+		SET status = ?, error_message = ?, completed_at = COALESCE(?, completed_at), progress_at = ?
 		WHERE id = ?
 	`
-	args := []any{status, errMsg, completedAt, taskID}
+	args := []any{status, errMsg, completedAt, now, taskID}
 	if !terminal {
 		// Only a nonterminal report can regress a finished task. Terminal
 		// reports are left alone above so a later 'success' can still
@@ -667,15 +801,33 @@ func (r *Repository) UpdateDeviceAgentVersion(ctx context.Context, deviceID, ver
 // SweepInterval is how often StartSweep reaps orphaned update tasks.
 const SweepInterval = 30 * time.Second
 
-// TaskTimeoutGrace is how long an update task on an offline device or a silent device
-// may sit in a non-terminal state before being marked failed.
+// TaskTimeoutGrace is how long a task that was sent may go without a report
+// while its device is offline before it is marked failed.
 const TaskTimeoutGrace = 10 * time.Minute
+
+// StaleProgressAfter is how long a sent task may go without any report, even
+// on a device that looks online, before it is marked failed.
+const StaleProgressAfter = 15 * time.Minute
+
+// QueuedTaskExpiry is how long a released task waits for its device to come
+// online. A laptop away for a week still gets its update; after that the task
+// fails as never connected, so the campaign can finish.
+const QueuedTaskExpiry = 7 * 24 * time.Hour
+
+// WaveInterval is how often the wave loop releases due waves.
+const WaveInterval = 10 * time.Second
 
 // SyncCampaignStatusByID recomputes a rollout's status from its task rows and
 // writes it once every task has reached a terminal state.
 //
-// A campaign with 0 tasks (e.g. all targets already on the target version)
-// resolves directly to 'completed' instead of being permanently stuck in 'in_progress'.
+// Every task exists from the start, including those still waiting for their
+// wave, so "every task terminal" really means the rollout is over. The result
+// is completed when every device updated, failed when none did, and partial
+// for a mix -- a campaign that updated 3 of 500 devices used to read
+// "completed".
+//
+// A campaign with 0 tasks resolves to 'completed' instead of being stuck in
+// 'in_progress'.
 func (r *Repository) SyncCampaignStatusByID(ctx context.Context, campaignID string) error {
 	if campaignID == "" {
 		return nil
@@ -696,26 +848,24 @@ func (r *Repository) SyncCampaignStatusByID(ctx context.Context, campaignID stri
 		return err
 	}
 
-	// Both writes below only finish a campaign that is running. A cancelled
-	// one fails its tasks, and a late agent report or the sweeper calling this
-	// afterwards used to see every task done and overwrite 'cancelled'.
-	if counts.Total == 0 {
-		now := time.Now().UTC()
-		_, err := r.db.ExecContext(ctx, `UPDATE update_campaigns SET status = 'completed', updated_at = ?
-			WHERE id = ? AND status = 'in_progress'`, now, campaignID)
-		return err
-	}
-
 	if counts.Total != counts.Done {
 		return nil
 	}
 
-	status := "completed"
-	if counts.Succeeded == 0 {
+	var status string
+	switch {
+	case counts.Total == 0 || counts.Succeeded == counts.Total:
+		status = "completed"
+	case counts.Succeeded == 0:
 		status = "failed"
+	default:
+		status = "partial"
 	}
+	// Only a running campaign is finished here. A cancelled one fails its
+	// tasks, and a late agent report or the sweeper calling this afterwards
+	// used to see every task done and overwrite 'cancelled'.
 	now := time.Now().UTC()
-	_, err := r.db.ExecContext(ctx, `UPDATE update_campaigns SET status = ?, updated_at = ?
+	_, err := r.db.ExecContext(ctx, `UPDATE update_campaigns SET status = ?, updated_at = ?, next_wave_at = NULL
 		WHERE id = ? AND status = 'in_progress'`, status, now, campaignID)
 	return err
 }
@@ -735,64 +885,85 @@ func (r *Repository) SyncCampaignStatus(ctx context.Context, taskID string) erro
 	return r.SyncCampaignStatusByID(ctx, *campaignID)
 }
 
-// AbandonOrphanedTasks transitions stranded update tasks to 'failed' and rolls up their campaigns:
-// 1. Tasks in non-terminal state whose device is offline and older than grace period.
-// 2. Tasks in 'dispatched', 'downloading', 'verifying', or 'swapping' state that have not reported for over 15 minutes.
+// AbandonOrphanedTasks fails the update tasks that can no longer finish and
+// rolls up their campaigns:
+//
+//  1. A sent task whose device went offline and has not reported for grace.
+//  2. A sent task with no report for StaleProgressAfter, online or not -- the
+//     agent crashed, or rebooted into the old binary.
+//  3. A queued task whose device has not come online for QueuedTaskExpiry.
+//
+// A queued task is NOT failed just because its device is offline: that is
+// what queued means. The sweep used to include 'pending' in rule 1, so an
+// update queued for a sleeping laptop failed ten minutes later and the
+// reconnect flush had nothing left to send. Rules 1 and 2 measure from the
+// last report, not from the send, so a slow download that keeps reporting is
+// not killed at the 15-minute mark.
 func (r *Repository) AbandonOrphanedTasks(ctx context.Context, grace time.Duration) (int64, error) {
 	now := time.Now().UTC()
-	cutoff := now.Add(-grace)
-	staleCutoff := now.Add(-15 * time.Minute)
+	offlineCutoff := now.Add(-grace)
+	staleCutoff := now.Add(-StaleProgressAfter)
+	queuedCutoff := now.Add(-QueuedTaskExpiry)
 
-	// Collect campaign IDs needing rollup before updating rows
+	const lastHeard = `COALESCE(t.progress_at, t.dispatched_at, t.created_at)`
+	type rule struct {
+		where string
+		args  []any
+		msg   string
+	}
+	rules := []rule{
+		{
+			where: `t.status IN ('dispatched', 'downloading', 'verifying', 'swapping')
+				AND ` + lastHeard + ` < ?
+				AND t.device_id IN (SELECT id FROM devices WHERE status != 'online')`,
+			args: []any{offlineCutoff},
+			msg:  "Endpoint went offline before reporting the update result",
+		},
+		{
+			where: `t.status IN ('dispatched', 'downloading', 'verifying', 'swapping')
+				AND ` + lastHeard + ` < ?`,
+			args: []any{staleCutoff},
+			msg:  "Update task timed out after 15 minutes without a progress report",
+		},
+		{
+			where: `t.status = 'pending' AND t.released_at IS NOT NULL AND t.released_at < ?`,
+			args:  []any{queuedCutoff},
+			msg:   "never_connected: the device did not come online within 7 days",
+		},
+	}
+
+	var total int64
+	seen := map[string]bool{}
 	var campaignIDs []string
-	queryFindCampaigns := `
-		SELECT DISTINCT campaign_id
-		FROM device_update_tasks t
-		LEFT JOIN devices d ON d.id = t.device_id
-		WHERE t.campaign_id IS NOT NULL
-		  AND t.status IN ('pending', 'dispatched', 'downloading', 'verifying', 'swapping')
-		  AND (
-		      (t.created_at < ? AND (d.status IS NULL OR d.status != 'online'))
-		      OR (t.dispatched_at IS NOT NULL AND t.dispatched_at < ?)
-		  )
-	`
-	_ = r.db.SelectContext(ctx, &campaignIDs, queryFindCampaigns, cutoff, staleCutoff)
-
-	// 1. Reap offline tasks
-	const offlineMsg = "Endpoint went offline or failed to report during update rollout"
-	res1, err := r.db.ExecContext(ctx, `
-		UPDATE device_update_tasks
-		SET status = 'failed', error_message = ?, completed_at = ?
-		WHERE status IN ('pending', 'dispatched', 'downloading', 'verifying', 'swapping')
-		  AND created_at < ?
-		  AND device_id IN (SELECT id FROM devices WHERE status != 'online')
-	`, offlineMsg, now, cutoff)
-	if err != nil {
-		return 0, err
+	for _, ru := range rules {
+		var ids []string
+		if err := r.db.SelectContext(ctx, &ids, `SELECT DISTINCT t.campaign_id FROM device_update_tasks t
+			WHERE t.campaign_id IS NOT NULL AND `+ru.where, ru.args...); err != nil {
+			return total, fmt.Errorf("find campaigns to roll up: %w", err)
+		}
+		for _, id := range ids {
+			if !seen[id] {
+				seen[id] = true
+				campaignIDs = append(campaignIDs, id)
+			}
+		}
+		args := append([]any{ru.msg, now}, ru.args...)
+		res, err := r.db.ExecContext(ctx, `UPDATE device_update_tasks
+			SET status = 'failed', error_message = ?, completed_at = ?
+			WHERE id IN (SELECT t.id FROM device_update_tasks t WHERE `+ru.where+`)`, args...)
+		if err != nil {
+			return total, err
+		}
+		n, _ := res.RowsAffected()
+		total += n
 	}
-	n1, _ := res1.RowsAffected()
 
-	// 2. Reap stale dispatched/in-flight tasks (even if device shows online, agent may have crashed or rebooted)
-	const timeoutMsg = "Update task timed out after 15 minutes without progress report"
-	res2, err := r.db.ExecContext(ctx, `
-		UPDATE device_update_tasks
-		SET status = 'failed', error_message = ?, completed_at = ?
-		WHERE status IN ('dispatched', 'downloading', 'verifying', 'swapping')
-		  AND dispatched_at IS NOT NULL AND dispatched_at < ?
-	`, timeoutMsg, now, staleCutoff)
-	if err != nil {
-		return n1, err
-	}
-	n2, _ := res2.RowsAffected()
-
-	// Roll up affected campaigns
 	for _, cid := range campaignIDs {
-		if cid != "" {
-			_ = r.SyncCampaignStatusByID(ctx, cid)
+		if err := r.SyncCampaignStatusByID(ctx, cid); err != nil {
+			log.Warn().Err(err).Str("campaign_id", cid).Msg("roll up campaign after sweep")
 		}
 	}
-
-	return n1 + n2, nil
+	return total, nil
 }
 
 // StartSweep reaps orphaned update tasks until ctx is cancelled.
