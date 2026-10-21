@@ -344,8 +344,10 @@ func TestE2ESoftwareDeployment(t *testing.T) {
 		t.Fatalf("decode final deployment: %v", err)
 	}
 
-	if finalDep.Status != "completed" {
-		t.Fatalf("expected deployment status 'completed', got %q", finalDep.Status)
+	// One device succeeded and one failed: the rollout finished, but only
+	// partly. "completed" is reserved for a deployment every device took.
+	if finalDep.Status != "partial" {
+		t.Fatalf("expected deployment status 'partial', got %q", finalDep.Status)
 	}
 	if finalDep.TotalTasks != 2 || finalDep.SuccessTasks != 1 || finalDep.FailedTasks != 1 {
 		t.Fatalf("expected 2 total, 1 success, 1 failed; got total=%d, success=%d, failed=%d",

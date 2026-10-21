@@ -11,6 +11,13 @@ import (
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/modules/taskscheduler"
 )
 
+// onlineHub reports every device connected and accepts every send, so the
+// run below reaches its devices and they can report.
+type onlineHub struct{}
+
+func (onlineHub) Online(string) bool         { return true }
+func (onlineHub) SendTo(string, []byte) bool { return true }
+
 func TestTaskScheduler_Lifecycle(t *testing.T) {
 	database, err := db.Open(":memory:")
 	if err != nil {
@@ -19,7 +26,9 @@ func TestTaskScheduler_Lifecycle(t *testing.T) {
 	defer database.Close()
 
 	repo := taskscheduler.NewRepository(database)
-	scheduler := taskscheduler.NewScheduler(repo, nil) // hub is nil for unit/integration repo test
+	// A nil hub reads every device as offline: their runs would fail at
+	// dispatch, and a finished device run is not rewritten by a later result.
+	scheduler := taskscheduler.NewScheduler(repo, onlineHub{})
 	ctx := context.Background()
 	now := time.Now().UTC()
 
