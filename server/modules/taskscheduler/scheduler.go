@@ -67,12 +67,22 @@ func (s *Scheduler) TriggerSchedule(ctx context.Context, scheduleID, actorID str
 		return nil, fmt.Errorf("create task run: %w", err)
 	}
 
+	// Every device run exists before any is dispatched. The rollup counts the
+	// device runs it can see, so creating them inside the dispatch loop let an
+	// offline first target (or a fast first report) close the run against a
+	// partial set, before the remaining endpoints were even recorded.
+	devRuns := make([]*ScheduledTaskDeviceRun, 0, len(deviceIDs))
 	for _, devID := range deviceIDs {
 		devRun, err := s.repo.CreateDeviceRun(ctx, run.ID, devID)
 		if err != nil {
 			log.Error().Err(err).Str("device", devID).Msg("create device run record")
 			continue
 		}
+		devRuns = append(devRuns, devRun)
+	}
+
+	for _, devRun := range devRuns {
+		devID := devRun.DeviceID
 
 		if s.hub == nil || !s.hub.Online(devID) {
 			s.failDeviceRun(ctx, devRun.ID, "device is offline")

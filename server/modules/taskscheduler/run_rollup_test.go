@@ -501,6 +501,31 @@ type oneOnlineHub struct{ stubHub }
 
 func (oneOnlineHub) Online(deviceID string) bool { return deviceID == "d1" }
 
+// lastOnlineHub reaches only the last device in the fixture's order.
+type lastOnlineHub struct{ stubHub }
+
+func (lastOnlineHub) Online(deviceID string) bool { return deviceID == "d3" }
+
+// TestAnOfflineDeviceDispatchedFirstDoesNotCloseTheRun: device runs used to be
+// created one at a time inside the dispatch loop, so when the first target was
+// offline its failure rolled the run up against the only device run that
+// existed yet. The run closed as failed in the same millisecond it was
+// triggered, and the reachable endpoint's success could no longer move it.
+func TestAnOfflineDeviceDispatchedFirstDoesNotCloseTheRun(t *testing.T) {
+	f := newRunFixtureWithHub(t, []string{"d1", "d2", "d3"}, lastOnlineHub{})
+
+	if status, completedAt := f.parent(t); status != "running" || completedAt != nil {
+		t.Fatalf("parent = %q completed_at=%v with d3 still executing, want \"running\"",
+			status, completedAt)
+	}
+	if rec := f.report(t, "d3", f.deviceRunFor(t, "d3"), "success"); rec.Code != http.StatusOK {
+		t.Fatalf("d3 -> %d %s", rec.Code, rec.Body.String())
+	}
+	if status, _ := f.parent(t); status != "partial" {
+		t.Errorf("parent = %q after d3 succeeded and d1, d2 were offline, want \"partial\"", status)
+	}
+}
+
 // TestATriggerAgainstOfflineDevicesReportsTheFinishedRunNotARunningOne closes
 // the response side. The returned struct was hand-edited from a copy taken
 // before the dispatch loop, so even with the rollup in place it went back to the
