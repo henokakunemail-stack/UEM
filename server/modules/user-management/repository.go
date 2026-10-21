@@ -9,11 +9,16 @@ import (
 	"time"
 
 	"github.com/jmoiron/sqlx"
+
+	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/db"
 )
 
 var (
 	ErrNotFound  = errors.New("user not found")
 	ErrDuplicate = errors.New("username already exists")
+	// ErrLastAdmin refuses a change that would leave no active administrator:
+	// nobody could then manage users, and the console would be locked for good.
+	ErrLastAdmin = errors.New("at least one active administrator must remain")
 )
 
 type Repository struct {
@@ -44,14 +49,19 @@ func (r *Repository) Create(ctx context.Context, u *User) error {
 	return nil
 }
 
-func (r *Repository) GetByID(ctx context.Context, id string) (*User, error) {
-	query := `SELECT id, username, password_hash, role,
+const getUserQuery = `SELECT id, username, password_hash, role,
 		COALESCE(display_name, '') as display_name,
 		COALESCE(is_active, 1) as is_active,
 		last_login_at, created_at, updated_at
 		FROM users WHERE id = ?`
+
+func (r *Repository) GetByID(ctx context.Context, id string) (*User, error) {
+	return getUser(ctx, r.db, id)
+}
+
+func getUser(ctx context.Context, q sqlx.QueryerContext, id string) (*User, error) {
 	var u User
-	if err := r.db.GetContext(ctx, &u, query, id); err != nil {
+	if err := sqlx.GetContext(ctx, q, &u, getUserQuery, id); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
 		}
@@ -101,6 +111,10 @@ func (r *Repository) List(ctx context.Context, limit int) ([]User, error) {
 var ErrNoFields = errors.New("no fields to update")
 
 func (r *Repository) Update(ctx context.Context, id string, req UpdateUserRequest) error {
+	return updateUser(ctx, r.db, id, req)
+}
+
+func updateUser(ctx context.Context, ex sqlx.ExecerContext, id string, req UpdateUserRequest) error {
 	now := time.Now().UTC()
 	setClauses := "updated_at = ?"
 	args := []any{now}
@@ -128,7 +142,7 @@ func (r *Repository) Update(ctx context.Context, id string, req UpdateUserReques
 
 	args = append(args, id)
 	query := fmt.Sprintf("UPDATE users SET %s WHERE id = ?", setClauses)
-	res, err := r.db.ExecContext(ctx, query, args...)
+	res, err := ex.ExecContext(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("update user: %w", err)
 	}
@@ -154,18 +168,76 @@ func (r *Repository) UpdatePassword(ctx context.Context, id, hash string) error 
 	return nil
 }
 
+// UpdateGuarded applies req unless it would leave no active administrator.
+// check runs against the row as it was, inside the same transaction, for rules
+// that depend on it (an operator changing their own role). It returns the row
+// before and after the change.
+//
+// The count and the write are one unit. Checking first and writing after would
+// let two admins demote each other at the same moment, each seeing the other
+// still active: on SQLite the IMMEDIATE transaction serialises writers, and on
+// PostgreSQL -- where READ COMMITTED alone would allow it -- the advisory lock
+// serialises every server node.
+func (r *Repository) UpdateGuarded(ctx context.Context, id string, req UpdateUserRequest,
+	check func(prior *User) error) (prior, updated *User, err error) {
+	err = db.WithAdvisoryLock(ctx, r.db, db.LockUserAdmins, func() error {
+		tx, err := r.db.BeginTxx(ctx, nil)
+		if err != nil {
+			return fmt.Errorf("begin: %w", err)
+		}
+		defer func() { _ = tx.Rollback() }()
+
+		p, err := getUser(ctx, tx, id)
+		if err != nil {
+			return err
+		}
+		if check != nil {
+			if err := check(p); err != nil {
+				return err
+			}
+		}
+		if removesActiveAdmin(p, req) {
+			var others int
+			if err := tx.GetContext(ctx, &others, `SELECT COUNT(*) FROM users
+				WHERE role = 'admin' AND COALESCE(is_active, 1) = 1 AND id <> ?`, id); err != nil {
+				return fmt.Errorf("count admins: %w", err)
+			}
+			if others == 0 {
+				return ErrLastAdmin
+			}
+		}
+		if err := updateUser(ctx, tx, id, req); err != nil {
+			return err
+		}
+		u, err := getUser(ctx, tx, id)
+		if err != nil {
+			return err
+		}
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("commit: %w", err)
+		}
+		prior, updated = p, u
+		return nil
+	})
+	return prior, updated, err
+}
+
+// removesActiveAdmin reports whether req takes an active admin out of the set
+// of active admins, by demotion or deactivation.
+func removesActiveAdmin(prior *User, req UpdateUserRequest) bool {
+	if prior.Role != "admin" || !prior.IsActive {
+		return false
+	}
+	demoted := req.Role != nil && *req.Role != "admin"
+	deactivated := req.IsActive != nil && !*req.IsActive
+	return demoted || deactivated
+}
+
+// Deactivate turns an account off, with the same last-admin guard as an edit.
 func (r *Repository) Deactivate(ctx context.Context, id string) error {
-	now := time.Now().UTC()
-	res, err := r.db.ExecContext(ctx,
-		"UPDATE users SET is_active = 0, updated_at = ? WHERE id = ?", now, id)
-	if err != nil {
-		return fmt.Errorf("deactivate user: %w", err)
-	}
-	rows, _ := res.RowsAffected()
-	if rows == 0 {
-		return ErrNotFound
-	}
-	return nil
+	off := false
+	_, _, err := r.UpdateGuarded(ctx, id, UpdateUserRequest{IsActive: &off}, nil)
+	return err
 }
 
 func (r *Repository) UpdateLastLogin(ctx context.Context, id string) error {

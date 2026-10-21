@@ -71,5 +71,17 @@
   "deactivated": "User '{username}' deactivated.",
   "toast_deactivated": "Account Deactivated",
   "deactivate_failed": "Failed to deactivate user",
-  "toast_deactivate_failed": "Deactivation Failed"
+  "toast_deactivate_failed": "Deactivation Failed",
+  "no_changes": "Nothing changed.",
+  "reactivate": "Reactivate",
+  "reactivate_title": "Allow this user to sign in again",
+  "reactivate_dialog_title": "Reactivate user",
+  "reactivate_dialog_message": "Reactivate {username}? They can sign in again with their current password.",
+  "reactivated": "{username} has been reactivated.",
+  "toast_reactivated": "User reactivated",
+  "reactivate_failed": "Could not reactivate the user.",
+  "toast_reactivate_failed": "Reactivation failed",
+  "error_last_admin": "At least one active administrator must remain. Make another user an admin first.",
+  "error_cannot_deactivate_self": "You cannot deactivate your own account.",
+  "error_cannot_change_own_role": "You cannot change your own role. Ask another administrator."
 }

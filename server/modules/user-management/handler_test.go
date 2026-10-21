@@ -16,6 +16,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -27,10 +28,17 @@ import (
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/rbac"
 )
 
-type recordingAuditor struct{ entries []string }
+type recordingAuditor struct {
+	mu      sync.Mutex
+	entries []string
+	details []map[string]string
+}
 
-func (a *recordingAuditor) Log(_ context.Context, actorType, actorID, action, targetID string, _ map[string]string) error {
+func (a *recordingAuditor) Log(_ context.Context, actorType, actorID, action, targetID string, details map[string]string) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	a.entries = append(a.entries, actorType+":"+actorID+":"+action+":"+targetID)
+	a.details = append(a.details, details)
 	return nil
 }
 
@@ -541,22 +549,32 @@ func TestADemotedUsersSessionsAreRevoked(t *testing.T) {
 // trigger is the role actually differing, and the check reads the row before
 // the write to see what it is changing from.
 func TestARoleChangeThatDoesNotChangeTheRoleRevokesNothing(t *testing.T) {
-	e := newEnv(t)
-	victim := e.seed("victim", "victim-password-1", rbac.RoleTechnician)
+	// The victim holds a real session. The earlier version of this test had
+	// none, so "nothing was revoked" was true whatever the handler did -- and
+	// the handler did revoke on every update that carried a role.
+	for name, payload := range map[string]map[string]string{
+		"same role":         {"role": rbac.RoleTechnician},
+		"display name only": {"display_name": "Victim Renamed"},
+		"both, role same":   {"role": rbac.RoleTechnician, "display_name": "Victim Again"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := newEnv(t)
+			victim := e.seed("victim", "victim-password-1", rbac.RoleTechnician)
+			e.liveAccessToken("victim", "victim-password-1")
 
-	// A same-role update, which is what an admin sends to fix a display name.
-	body, _ := json.Marshal(map[string]string{"role": rbac.RoleTechnician})
-	if rec := e.call("PUT", "/api/users/"+victim, rbac.RoleAdmin, string(body)); rec.Code != http.StatusOK {
-		t.Fatalf("update = %d, want 200\nbody: %s", rec.Code, rec.Body.String())
-	}
-
-	var live int
-	if err := e.db.Get(&live,
-		`SELECT COUNT(*) FROM auth_sessions WHERE user_id = ? AND revoked = 0`, victim); err != nil {
-		t.Fatal(err)
-	}
-	if live != 0 {
-		t.Errorf("%d session(s) revoked by a no-op role update", live)
+			body, _ := json.Marshal(payload)
+			if rec := e.call("PUT", "/api/users/"+victim, rbac.RoleAdmin, string(body)); rec.Code != http.StatusOK {
+				t.Fatalf("update = %d, want 200\nbody: %s", rec.Code, rec.Body.String())
+			}
+			var live int
+			if err := e.db.Get(&live,
+				`SELECT COUNT(*) FROM auth_sessions WHERE user_id = ? AND revoked = 0`, victim); err != nil {
+				t.Fatal(err)
+			}
+			if live != 1 {
+				t.Errorf("%d live session(s) after an edit that changed no role, want 1: the user was signed out", live)
+			}
+		})
 	}
 }
 
@@ -685,6 +703,10 @@ func TestADeactivatedUserKeepsTheirAuditTrail(t *testing.T) {
 
 func TestEveryAdminActionIsAudited(t *testing.T) {
 	e := newEnv(t)
+	// The caller is an active admin, as in real use. Without it the victim,
+	// promoted below, would be the only admin, and deactivating them is
+	// correctly refused by the last-admin guard.
+	e.seedWithID(actorID, "actor", "actor-password-1", rbac.RoleAdmin)
 	victim := e.seed("victim", "victim-password-1", rbac.RoleTechnician)
 
 	steps := []struct {

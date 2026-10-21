@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -189,68 +190,93 @@ func (h *Handler) updateUser(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// A role change has to be read before the write, because the row afterwards
-	// no longer says what it used to. It is one lookup, and it is the difference
-	// between "this user was promoted, so their old sessions are stale" and
-	// "this user was renamed, so nothing has to go".
-	//
-	// An admin demoting or deactivating their own account is refused the way
-	// deactivateUser refuses it: the request is the one that would sign the
-	// operator out of the console they are making it from, which is a lockout
-	// dressed as an edit. Promoting yourself is allowed -- an admin making
-	// another admin does not lose anything, and is the shape of a legitimate
-	// first-deploy handover.
-	if req.Role != nil || (req.IsActive != nil && !*req.IsActive) {
-		prior, err := h.repo.GetByID(r.Context(), id)
-		if err != nil {
-			if errors.Is(err, ErrNotFound) {
-				writeErr(w, http.StatusNotFound, "user not found")
-				return
-			}
-			writeErr(w, http.StatusInternalServerError, err.Error())
-			return
+	// An operator changing their own role, or turning their own account off,
+	// is refused: either would sign them out of the console they are using.
+	// Promoting yourself is not a change of role here (it already is admin),
+	// and editing your own display name is allowed.
+	actorID := auth.UserIDFromContext(r.Context())
+	check := func(prior *User) error {
+		if prior.ID != actorID {
+			return nil
 		}
-		if prior.ID == auth.UserIDFromContext(r.Context()) && req.Role != nil && *req.Role != prior.Role {
-			writeErr(w, http.StatusBadRequest, "cannot change your own role; ask another admin")
-			return
+		if req.Role != nil && *req.Role != prior.Role {
+			return errOwnRole
 		}
+		if req.IsActive != nil && !*req.IsActive && prior.IsActive {
+			return errDeactivateSelf
+		}
+		return nil
 	}
 
-	if err := h.repo.Update(r.Context(), id, req); err != nil {
-		if errors.Is(err, ErrNotFound) {
-			writeErr(w, http.StatusNotFound, "user not found")
-			return
-		}
-		if errors.Is(err, ErrNoFields) {
-			// Not a server fault: the payload simply carried nothing to change.
-			// 400 says so, where 200 would tell the operator an edit was saved
-			// that never touched a column.
-			writeErr(w, http.StatusBadRequest, "no fields to update: send role, display_name or is_active")
-			return
-		}
-		writeErr(w, http.StatusInternalServerError, err.Error())
+	prior, updated, err := h.repo.UpdateGuarded(r.Context(), id, req, check)
+	if err != nil {
+		h.writeUpdateErr(w, err)
 		return
 	}
 
-	actorID := auth.UserIDFromContext(r.Context())
-	_ = h.audit.Log(r.Context(), "user", actorID, "user.update", id, map[string]string{})
+	_ = h.audit.Log(r.Context(), "user", actorID, "user.update", id, changedFields(prior, updated))
 
-	// A role change revokes for the same reason refresh checks the role: the
-	// token carries the old one, and rbac.RequireRole reads the claim, not the
-	// row. Without this a viewer promoted to technician has to wait out an
-	// access token to actually become one, and a technician demoted to viewer
-	// keeps terminal access for the same 15 minutes -- which is long enough to
-	// matter and exactly the window a dismissed employee would use.
-	if req.Role != nil || (req.IsActive != nil && !*req.IsActive) {
+	// Sessions go only when they became wrong. The token carries the role, and
+	// rbac.RequireRole reads the claim, not the row: a promoted viewer would
+	// otherwise wait out an access token to become a technician, and a demoted
+	// technician would keep terminal access for 15 minutes. A rename, or saving
+	// the role it already had, changes nothing a token says.
+	if prior.Role != updated.Role || (prior.IsActive && !updated.IsActive) {
 		h.revokeSessions(r, id)
 	}
 
-	updated, err := h.repo.GetByID(r.Context(), id)
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
-		return
-	}
 	writeJSON(w, http.StatusOK, updated)
+}
+
+var (
+	errOwnRole        = errors.New("cannot change your own role; ask another admin")
+	errDeactivateSelf = errors.New("cannot deactivate your own account")
+)
+
+// writeUpdateErr maps the guarded update's refusals to a status and a code the
+// console translates.
+func (h *Handler) writeUpdateErr(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, ErrNotFound):
+		writeErr(w, http.StatusNotFound, "user not found")
+	case errors.Is(err, ErrNoFields):
+		// Not a server fault: the payload carried nothing to change. 400 says
+		// so, where 200 would claim an edit was saved that touched no column.
+		writeErr(w, http.StatusBadRequest, "no fields to update: send role, display_name or is_active")
+	case errors.Is(err, errOwnRole):
+		writeErrCode(w, http.StatusBadRequest, "cannot_change_own_role", err.Error())
+	case errors.Is(err, errDeactivateSelf):
+		writeErrCode(w, http.StatusBadRequest, "cannot_deactivate_self", err.Error())
+	case errors.Is(err, ErrLastAdmin):
+		writeErrCode(w, http.StatusConflict, "last_admin", err.Error())
+	default:
+		writeErr(w, http.StatusInternalServerError, err.Error())
+	}
+}
+
+// changedFields is the audit detail for an edit: each field that changed,
+// before and after. Separate keys rather than "a -> b" strings, because a
+// display name is free text and a joined string could not be split back.
+func changedFields(prior, updated *User) map[string]string {
+	d := map[string]string{"username": updated.Username}
+	if prior.Role != updated.Role {
+		d["role_from"], d["role_to"] = prior.Role, updated.Role
+	}
+	if prior.IsActive != updated.IsActive {
+		d["is_active_from"], d["is_active_to"] = strconv.FormatBool(prior.IsActive), strconv.FormatBool(updated.IsActive)
+	}
+	from, to := deref(prior.DisplayName), deref(updated.DisplayName)
+	if from != to {
+		d["display_name_from"], d["display_name_to"] = from, to
+	}
+	return d
+}
+
+func deref(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }
 
 func (h *Handler) resetPassword(w http.ResponseWriter, r *http.Request) {
@@ -351,20 +377,18 @@ func (h *Handler) deactivateUser(w http.ResponseWriter, r *http.Request) {
 	actorID := auth.UserIDFromContext(r.Context())
 
 	if id == actorID {
-		writeErr(w, http.StatusBadRequest, "cannot deactivate your own account")
+		writeErrCode(w, http.StatusBadRequest, "cannot_deactivate_self", errDeactivateSelf.Error())
 		return
 	}
 
-	if err := h.repo.Deactivate(r.Context(), id); err != nil {
-		if errors.Is(err, ErrNotFound) {
-			writeErr(w, http.StatusNotFound, "user not found")
-			return
-		}
-		writeErr(w, http.StatusInternalServerError, err.Error())
+	off := false
+	prior, _, err := h.repo.UpdateGuarded(r.Context(), id, UpdateUserRequest{IsActive: &off}, nil)
+	if err != nil {
+		h.writeUpdateErr(w, err)
 		return
 	}
 
-	_ = h.audit.Log(r.Context(), "user", actorID, "user.deactivate", id, map[string]string{})
+	_ = h.audit.Log(r.Context(), "user", actorID, "user.deactivate", id, map[string]string{"username": prior.Username})
 
 	// Ordering matters and is not a detail: the flag is what stops the next
 	// login, this is what ends the current one. Doing it the other way round
@@ -373,6 +397,11 @@ func (h *Handler) deactivateUser(w http.ResponseWriter, r *http.Request) {
 	h.revokeSessions(r, id)
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "user deactivated successfully"})
+}
+
+// writeErrCode adds a machine-readable code the console translates.
+func writeErrCode(w http.ResponseWriter, status int, code, msg string) {
+	writeJSON(w, status, map[string]string{"error": msg, "code": code})
 }
 
 func writeJSON(w http.ResponseWriter, status int, data any) {

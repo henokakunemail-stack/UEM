@@ -14,6 +14,7 @@ const (
 	LockMigrate    int64 = 0x55454D0001 // applying migrations
 	LockAuditChain int64 = 0x55454D0002 // appending to the audit hash chain
 	LockLeader     int64 = 0x55454D0003 // background-loop leadership
+	LockUserAdmins int64 = 0x55454D0004 // changes that could remove the last active admin
 )
 
 // IsPostgres reports whether d talks to PostgreSQL. Everything that exists only

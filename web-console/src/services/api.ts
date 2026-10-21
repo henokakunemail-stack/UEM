@@ -1003,7 +1003,7 @@ export const api = {
     })
   },
 
-  async updateUser(id: string, data: { display_name?: string; role?: string }): Promise<UserDTO> {
+  async updateUser(id: string, data: { display_name?: string; role?: string; is_active?: boolean }): Promise<UserDTO> {
     return request<UserDTO>(`/api/users/${id}`, {
       method: 'PUT',
       body: JSON.stringify(data),

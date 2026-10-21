@@ -4,6 +4,7 @@ import {
   Key,
   RefreshCw,
   ShieldAlert,
+  UserCheck,
   UserPlus,
   Users,
   UserX,
@@ -13,7 +14,9 @@ import { ConfirmDialog } from '../components/ui/ConfirmDialog'
 import { DataTable } from '../components/ui/DataTable'
 import { Modal } from '../components/ui/Modal'
 import { usePermission } from '../hooks/usePermission'
-import { api } from '../services/api'
+import { ApiError, api } from '../services/api'
+import { useAuth } from '../context/AuthContext'
+import { changedUserFields, USER_ERRORS } from './userEdits'
 import { useToast } from '../context/ToastContext'
 import { useT } from '../i18n/core'
 import type { UserDTO } from '../types/api'
@@ -30,6 +33,16 @@ const ROLE_KEYS: Record<string, string> = {
 
 export const UsersPage: React.FC = () => {
   const { t } = useT()
+  const { user } = useAuth()
+
+  // A refusal the server explains with a code is shown translated; anything
+  // else keeps the server's message as before.
+  const userError = (err: unknown, fallbackKey: string) =>
+    err instanceof ApiError && err.code && USER_ERRORS[err.code]
+      ? t(USER_ERRORS[err.code])
+      : err instanceof Error
+        ? err.message
+        : t(fallbackKey)
   const { can } = usePermission()
   // Every /api/users route except the self-service password change is admin
   // only, so a technician gets an explanation rather than a 403 on load.
@@ -46,6 +59,8 @@ export const UsersPage: React.FC = () => {
   const [selectedUser, setSelectedUser] = useState<UserDTO | null>(null)
   const [deactivateTarget, setDeactivateTarget] = useState<UserDTO | null>(null)
   const [deactivating, setDeactivating] = useState(false)
+  const [reactivateTarget, setReactivateTarget] = useState<UserDTO | null>(null)
+  const [reactivating, setReactivating] = useState(false)
   const [saving, setSaving] = useState(false)
 
   // Create Form
@@ -122,19 +137,22 @@ export const UsersPage: React.FC = () => {
   const handleSaveEdit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!selectedUser) return
+    const changes = changedUserFields(selectedUser, { display_name: editDisplayName, role: editRole })
+    if (Object.keys(changes).length === 0) {
+      toast.info(t('users.no_changes'), t('users.toast_updated'))
+      setIsEditModalOpen(false)
+      return
+    }
     setSaving(true)
     try {
-      await api.updateUser(selectedUser.id, {
-        display_name: editDisplayName,
-        role: editRole,
-      })
+      await api.updateUser(selectedUser.id, changes)
       const successText = t('users.updated', { username: selectedUser.username })
       setMsg({ type: 'success', text: successText })
       toast.success(successText, t('users.toast_updated'))
       setIsEditModalOpen(false)
       loadUsers()
     } catch (err: unknown) {
-      const errorText = err instanceof Error ? err.message : t('users.update_failed')
+      const errorText = userError(err, 'users.update_failed')
       setMsg({ type: 'error', text: errorText })
       toast.error(errorText, t('users.toast_update_failed'))
     } finally {
@@ -190,11 +208,30 @@ export const UsersPage: React.FC = () => {
       setDeactivateTarget(null)
       loadUsers()
     } catch (err: unknown) {
-      const errorText = err instanceof Error ? err.message : t('users.deactivate_failed')
+      const errorText = userError(err, 'users.deactivate_failed')
       setMsg({ type: 'error', text: errorText })
       toast.error(errorText, t('users.toast_deactivate_failed'))
     } finally {
       setDeactivating(false)
+    }
+  }
+
+  const handleReactivate = async () => {
+    if (!reactivateTarget) return
+    setReactivating(true)
+    try {
+      await api.updateUser(reactivateTarget.id, { is_active: true })
+      const infoText = t('users.reactivated', { username: reactivateTarget.username })
+      setMsg({ type: 'success', text: infoText })
+      toast.success(infoText, t('users.toast_reactivated'))
+      setReactivateTarget(null)
+      loadUsers()
+    } catch (err: unknown) {
+      const errorText = userError(err, 'users.reactivate_failed')
+      setMsg({ type: 'error', text: errorText })
+      toast.error(errorText, t('users.toast_reactivate_failed'))
+    } finally {
+      setReactivating(false)
     }
   }
 
@@ -345,7 +382,9 @@ export const UsersPage: React.FC = () => {
                         <Key size={14} />
                         <span>{t('users.password')}</span>
                       </button>
-                      {u.is_active && u.username !== 'admin' && (
+                      {/* Your own account is never offered for deactivation: the
+                          server refuses it, and it would sign you out. */}
+                      {u.is_active && u.id !== user?.uid && (
                         <button
                           type="button"
                           className="btn-action text-danger"
@@ -354,6 +393,17 @@ export const UsersPage: React.FC = () => {
                         >
                           <UserX size={14} />
                           <span>{t('users.deactivate')}</span>
+                        </button>
+                      )}
+                      {!u.is_active && (
+                        <button
+                          type="button"
+                          className="btn-action"
+                          onClick={() => setReactivateTarget(u)}
+                          title={t('users.reactivate_title')}
+                        >
+                          <UserCheck size={14} />
+                          <span>{t('users.reactivate')}</span>
                         </button>
                       )}
                     </div>
@@ -584,6 +634,20 @@ export const UsersPage: React.FC = () => {
         pending={deactivating}
         onConfirm={handleDeactivate}
         onCancel={() => setDeactivateTarget(null)}
+      />
+
+      <ConfirmDialog
+        open={Boolean(reactivateTarget)}
+        title={t('users.reactivate_dialog_title')}
+        message={
+          reactivateTarget
+            ? t('users.reactivate_dialog_message', { username: reactivateTarget.username })
+            : ''
+        }
+        confirmLabel={t('users.reactivate')}
+        pending={reactivating}
+        onConfirm={handleReactivate}
+        onCancel={() => setReactivateTarget(null)}
       />
     </div>
   )

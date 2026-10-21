@@ -71,5 +71,17 @@
   "deactivated": "Pengguna '{username}' dinonaktifkan.",
   "toast_deactivated": "Akun Dinonaktifkan",
   "deactivate_failed": "Gagal menonaktifkan pengguna",
-  "toast_deactivate_failed": "Penonaktifan Gagal"
+  "toast_deactivate_failed": "Penonaktifan Gagal",
+  "no_changes": "Tidak ada yang berubah.",
+  "reactivate": "Aktifkan kembali",
+  "reactivate_title": "Izinkan pengguna ini masuk lagi",
+  "reactivate_dialog_title": "Aktifkan kembali pengguna",
+  "reactivate_dialog_message": "Aktifkan kembali {username}? Pengguna bisa masuk lagi dengan kata sandinya saat ini.",
+  "reactivated": "{username} telah diaktifkan kembali.",
+  "toast_reactivated": "Pengguna diaktifkan kembali",
+  "reactivate_failed": "Tidak dapat mengaktifkan kembali pengguna.",
+  "toast_reactivate_failed": "Gagal mengaktifkan kembali",
+  "error_last_admin": "Harus tetap ada minimal satu administrator aktif. Jadikan pengguna lain admin terlebih dahulu.",
+  "error_cannot_deactivate_self": "Anda tidak dapat menonaktifkan akun Anda sendiri.",
+  "error_cannot_change_own_role": "Anda tidak dapat mengubah peran Anda sendiri. Minta administrator lain."
 }
