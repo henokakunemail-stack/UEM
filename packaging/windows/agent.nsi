@@ -137,7 +137,12 @@ Function ServerConfigPageLeave
         Abort
     ${EndIf}
 
-    ; Normalize URL: auto-prepend https:// if scheme is missing
+    Call NormalizeServerURL
+FunctionEnd
+
+; Auto-prepend https:// when the scheme is missing. Shared by the page and by
+; silent installs, which never show the page.
+Function NormalizeServerURL
     StrCpy $0 $ServerURL 7
     StrCpy $1 $ServerURL 8
     ${If} $0 != "http://"
@@ -168,6 +173,15 @@ Section "Install Agent" SecInstall
 
     ; 3. Run Enrollment if token provided
     ${If} $EnrollToken != ""
+        ; A silent install (/S) never shows the server page, so /SERVER= is the
+        ; only source of the URL. It used to enroll against an empty server.
+        ${If} $ServerURL == ""
+            DetailPrint "ERROR: /SERVER= is required for a silent install with /TOKEN=."
+            MessageBox MB_ICONSTOP|MB_OK "Server URL is required (/SERVER=https://server:8443)." /SD IDOK
+            SetErrorLevel 2
+            Abort
+        ${EndIf}
+        Call NormalizeServerURL
         DetailPrint "Enrolling device with central server..."
         ${If} $SiteLocation != ""
             nsExec::ExecToLog '"$INSTDIR\endpoint-agent.exe" -server "$ServerURL" -enroll "$EnrollToken" -site "$SiteLocation" -enroll-only -creds "$DATADIR\creds.json"'
@@ -175,12 +189,15 @@ Section "Install Agent" SecInstall
             nsExec::ExecToLog '"$INSTDIR\endpoint-agent.exe" -server "$ServerURL" -enroll "$EnrollToken" -enroll-only -creds "$DATADIR\creds.json"'
         ${EndIf}
         Pop $0
+        ; The agent keeps a stored identity the server still accepts and exits
+        ; 0, so a non-zero exit is a real failure even when creds.json exists:
+        ; those credentials were refused or could not be checked. The agent's
+        ; own message (token_used_up, token_expired, ...) is in the details log.
         ${If} $0 != 0
-            ${IfNot} ${FileExists} "$DATADIR\creds.json"
-                DetailPrint "ERROR: Enrollment failed with exit code $0."
-                MessageBox MB_ICONSTOP|MB_OK "Device enrollment failed (exit code $0).$\r$\n$\r$\nPastikan:$\r$\n1. Server URL ($ServerURL) dapat diakses.$\r$\n2. Enrollment Token valid dan belum kadaluarsa.$\r$\n3. Koneksi internet/jaringan aktif.$\r$\n$\r$\nInstalasi dibatalkan untuk mencegah service error."
-                Abort
-            ${EndIf}
+            DetailPrint "ERROR: Enrollment failed with exit code $0. The agent output above gives the reason."
+            MessageBox MB_ICONSTOP|MB_OK "Device enrollment failed (exit code $0).$\r$\n$\r$\nAlasan dari server tercantum di log detail installer (Show details).$\r$\n$\r$\nPastikan:$\r$\n1. Server URL ($ServerURL) dapat diakses.$\r$\n2. Enrollment Token valid, belum kadaluarsa, dan kuotanya belum habis.$\r$\n3. Koneksi jaringan aktif.$\r$\n$\r$\nInstalasi dibatalkan untuk mencegah service error." /SD IDOK
+            SetErrorLevel 3
+            Abort
         ${Else}
             DetailPrint "Device enrolled successfully."
         ${EndIf}

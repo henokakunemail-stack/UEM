@@ -32,7 +32,7 @@ case "$1" in
         echo
         echo "endpoint-agent installed and enabled for boot."
         echo "It is NOT running until this endpoint enrolls:"
-        echo "  endpoint-agent -server https://<server>:8443 -creds /etc/endpoint-agent/creds.json -enroll <enrollment-token>"
+        echo "  endpoint-agent -server https://<server>:8443 -enroll <enrollment-token> -enroll-only -creds /etc/endpoint-agent/creds.json"
         echo "  systemctl start endpoint-agent"
     ;;
     abort-upgrade|abort-remove|abort-deconfigure)

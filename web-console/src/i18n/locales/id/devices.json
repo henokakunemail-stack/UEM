@@ -112,5 +112,6 @@
   "bulk_dialog_message": "Hapus permanen {count} perangkat yang dipensiunkan dari basis data? Tindakan ini TIDAK DAPAT dibatalkan.",
   "bulk_confirm": "Hapus {count} perangkat",
   "site_unassigned": "Belum ditetapkan",
-  "bulk_deleted_partial": "{ok} terhapus, {failed} gagal dihapus. Pastikan perangkatnya sudah di-retire lalu coba lagi."
+  "bulk_deleted_partial": "{ok} terhapus, {failed} gagal dihapus. Pastikan perangkatnya sudah di-retire lalu coba lagi.",
+  "tab_tokens": "Token enrollment"
 }

@@ -90,8 +90,15 @@ func TestRunEnrollOnly_InvalidToken(t *testing.T) {
 	}
 }
 
+// The stored identity is no longer accepted (the device was retired, or its
+// secret rotated), so the token enrolls a new one and the old file is kept as
+// a backup.
 func TestRunEnrollOnly_DeviceIDMismatch_OverwritesWithBackup(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/agent/identity" {
+			http.Error(w, "invalid device credentials", http.StatusUnauthorized)
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]string{
 			"device_id":     "dev-new-id",
@@ -163,5 +170,49 @@ func TestRunEnrollOnly_WithSite(t *testing.T) {
 	}
 	if receivedSite != "Surabaya-Branch" {
 		t.Errorf("expected server to receive site=Surabaya-Branch, got %s", receivedSite)
+	}
+}
+
+// Running an installer again on an enrolled machine used to enroll it again:
+// with a multi-device token every rerun made a duplicate device and spent one
+// of the token's uses. An identity the server still accepts is kept.
+func TestRunEnrollOnly_KeepsAnIdentityTheServerAccepts(t *testing.T) {
+	enrollCalls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/agent/identity":
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]string{"device_id": "dev-old-id"})
+		case "/api/agent/enroll":
+			enrollCalls++
+			_ = json.NewEncoder(w).Encode(map[string]string{"device_id": "dev-new-id", "device_secret": "secret-new"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	credsPath := filepath.Join(t.TempDir(), "creds.json")
+	if err := enrollment.Save(credsPath, enrollment.Credentials{DeviceID: "dev-old-id", DeviceSecret: "secret-old", ServerURL: server.URL}); err != nil {
+		t.Fatal(err)
+	}
+	if err := runEnrollOnly(server.URL, "batch-token", "", credsPath); err != nil {
+		t.Fatalf("runEnrollOnly: %v", err)
+	}
+	if enrollCalls != 0 {
+		t.Fatalf("enroll called %d times for a machine the server already knows, want 0", enrollCalls)
+	}
+	creds, _ := enrollment.Load(credsPath)
+	if creds.DeviceID != "dev-old-id" {
+		t.Fatalf("device_id = %s, want the existing dev-old-id", creds.DeviceID)
+	}
+
+	forceReenroll = true
+	defer func() { forceReenroll = false }()
+	if err := runEnrollOnly(server.URL, "batch-token", "", credsPath); err != nil {
+		t.Fatalf("runEnrollOnly -reenroll: %v", err)
+	}
+	if enrollCalls != 1 {
+		t.Fatalf("-reenroll did not enroll (calls %d)", enrollCalls)
 	}
 }

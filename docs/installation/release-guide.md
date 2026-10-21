@@ -134,13 +134,25 @@ The agent communicates with the server via **outbound-only TLS WebSocket connect
 For automated mass rollout without GUI interaction:
 
 ```cmd
-:: Enroll and register service in one step
-endpoint-agent.exe -server https://uem.example.com:8443 -creds "C:\ProgramData\EndpointAgent\creds.json" -enroll <YOUR_ENROLLMENT_TOKEN>
-
-:: Register and start Windows Service
-endpoint-agent.exe -server https://uem.example.com:8443 -creds "C:\ProgramData\EndpointAgent\creds.json" -service install
-endpoint-agent.exe -service start
+:: The installer enrolls, registers the Windows Service and starts it.
+:: /S is silent; the exit code is non-zero if enrollment fails.
+EndpointAgent-Setup.exe /S /SERVER=https://uem.example.com:8443 /TOKEN=<YOUR_ENROLLMENT_TOKEN>
 ```
+
+Without the installer (agent binary already copied to the machine):
+
+```cmd
+:: Enroll only: saves the credentials and exits.
+"C:\Program Files\EndpointAgent\endpoint-agent.exe" -server https://uem.example.com:8443 -enroll <YOUR_ENROLLMENT_TOKEN> -enroll-only -creds "C:\ProgramData\EndpointAgent\creds.json"
+
+:: Register and start the Windows Service with the same -creds path.
+"C:\Program Files\EndpointAgent\endpoint-agent.exe" -server https://uem.example.com:8443 -creds "C:\ProgramData\EndpointAgent\creds.json" -service install
+"C:\Program Files\EndpointAgent\endpoint-agent.exe" -service start
+```
+
+Use a **multi-device** token for mass rollout. Running the same command again
+on an enrolled machine keeps its identity and does not use up the token; add
+`-reenroll` only to give a machine a new identity on purpose.
 
 ---
 
@@ -151,8 +163,9 @@ endpoint-agent.exe -service start
 # 1. Install package
 sudo dpkg -i endpoint-agent_1.0.0_amd64.deb
 
-# 2. Enroll to server
-sudo /usr/bin/endpoint-agent -server https://uem.example.com:8443 -enroll <YOUR_ENROLLMENT_TOKEN>
+# 2. Enroll to server, then start the service
+sudo /usr/bin/endpoint-agent -server https://uem.example.com:8443 -enroll <YOUR_ENROLLMENT_TOKEN> -enroll-only -creds /etc/endpoint-agent/creds.json
+sudo systemctl start endpoint-agent
 
 # 3. Enable and start systemd service
 sudo systemctl enable --now endpoint-agent

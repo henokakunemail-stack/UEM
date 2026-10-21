@@ -26,6 +26,7 @@ import { ConfirmDialog } from '../components/ui/ConfirmDialog'
 import { DataTable } from '../components/ui/DataTable'
 import { usePermission } from '../hooks/usePermission'
 import { useToast } from '../context/ToastContext'
+import { EnrollTokensPanel } from '../components/EnrollTokensPanel'
 import { relativeTime } from '../services/relativeTime'
 
 // The server's filter value for devices with no site.
@@ -410,6 +411,19 @@ export const DevicesPage: React.FC<{
           <Layers size={16} />
           <span>{t('devices.tab_groups')}</span>
         </button>
+        {/* Enrollment tokens are admin-only on the server. */}
+        {can('admin') && (
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === 'tokens'}
+            className={`btn ${tab === 'tokens' ? 'btn-primary' : 'btn-secondary'}`}
+            onClick={() => setQuery({ tab: 'tokens', group: '' })}
+          >
+            <KeyRound size={16} />
+            <span>{t('devices.tab_tokens')}</span>
+          </button>
+        )}
       </div>
 
       {actionMsg && (
@@ -427,7 +441,9 @@ export const DevicesPage: React.FC<{
         </div>
       )}
 
-      {tab === 'groups' ? (
+      {tab === 'tokens' && can('admin') ? (
+        <EnrollTokensPanel />
+      ) : tab === 'groups' ? (
         <DeviceGroupsPanel
           onViewDevices={(groupId) => setQuery({ tab: 'devices', group: groupId, page: 1 })}
           onManageMembers={(groupId) => {

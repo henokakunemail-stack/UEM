@@ -41,7 +41,7 @@ func TestReports_Aggregations(t *testing.T) {
 	}
 
 	// Test Inventory Report
-	invRows, err := repo.GetDeviceInventoryReport(ctx, "", "")
+	invRows, _, err := repo.GetDeviceInventoryReport(ctx, "", "")
 	if err != nil {
 		t.Fatal("get inventory report:", err)
 	}
@@ -63,7 +63,7 @@ func TestReports_Aggregations(t *testing.T) {
 		t.Fatal("seed patch:", err)
 	}
 
-	patchRows, err := repo.GetPatchComplianceReport(ctx, "", "")
+	patchRows, _, err := repo.GetPatchComplianceReport(ctx, "", "")
 	if err != nil {
 		t.Fatal("get patch report:", err)
 	}
@@ -85,7 +85,7 @@ func TestReports_Aggregations(t *testing.T) {
 		t.Fatal("seed audit log:", err)
 	}
 
-	auditRows, err := repo.GetAuditTrailReport(ctx, "", 10)
+	auditRows, _, err := repo.GetAuditTrailReport(ctx, "", 10)
 	if err != nil {
 		t.Fatal("get audit report:", err)
 	}

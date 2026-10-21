@@ -5,6 +5,7 @@ import type {
   DeviceDTO,
   DeviceInventorySnapshot,
   DeviceListResponse,
+  SharedEnrollmentTokenDTO,
   EnrollmentTokenDTO,
   OSMetric,
   SiteMetric,
@@ -356,6 +357,22 @@ export const api = {
   // Pre-registers a device and returns a one-time token the agent exchanges for
   // its persistent secret. Admin only, and the plaintext comes back exactly
   // once — close the dialog without copying it and it is gone.
+  // Multi-device tokens: how many machines each has enrolled, and revocation.
+  async listEnrollmentTokens(): Promise<SharedEnrollmentTokenDTO[]> {
+    const res = await request<SharedEnrollmentTokenDTO[]>('/api/devices/enroll-tokens')
+    return res || []
+  },
+
+  async getEnrollmentToken(id: string): Promise<SharedEnrollmentTokenDTO> {
+    const path = `/api/devices/enroll-tokens/${encodeURIComponent(id)}`
+    return request<SharedEnrollmentTokenDTO>(path)
+  },
+
+  async revokeEnrollmentToken(id: string): Promise<SharedEnrollmentTokenDTO> {
+    const path = `/api/devices/enroll-tokens/${encodeURIComponent(id)}/revoke`
+    return request<SharedEnrollmentTokenDTO>(path, { method: 'POST' })
+  },
+
   async createEnrollmentToken(body: {
     hostname?: string
     os_name?: string

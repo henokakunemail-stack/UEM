@@ -65,6 +65,7 @@ func main() {
 	flag.StringVar(&enrollToken, "enroll", "", "one-time enrollment token (first run only)")
 	flag.StringVar(&enrollSite, "site", envOr("AGENT_SITE", ""), "site / branch location label for device enrollment (e.g. Medan-Branch)")
 	flag.BoolVar(&enrollOnly, "enroll-only", false, "enroll device with server, save credentials, and exit immediately")
+	flag.BoolVar(&forceReenroll, "reenroll", false, "enroll as a new device even if the stored credentials are still valid")
 	flag.StringVar(&credsPath, "creds", defaultCredsPath(), "path to persisted credentials")
 	flag.IntVar(&heartbeatSecs, "heartbeat", 20, "heartbeat interval in seconds")
 	flag.StringVar(&serviceAction, "service", "", "OS service management action (install|uninstall|start|stop|status)")
@@ -197,6 +198,10 @@ func runRCWorker(cfgArg, credsPath string) {
 // the installer process does not block on the background agent daemon.
 //
 // ponytail: skip daemon init, metrics, inventory, websocket; exit immediately.
+// forceReenroll is set by -reenroll: replace a stored identity the server
+// still accepts.
+var forceReenroll bool
+
 func runEnrollOnly(serverURL, enrollToken, enrollSite, credsPath string) error {
 	if strings.TrimSpace(enrollToken) == "" {
 		return errors.New("-enroll token is required when using -enroll-only")
@@ -208,6 +213,15 @@ func runEnrollOnly(serverURL, enrollToken, enrollSite, credsPath string) error {
 	creds, err := enrollment.Load(credsPath)
 	if err != nil && !errors.Is(err, enrollment.ErrNotEnrolled) {
 		return fmt.Errorf("load existing credentials: %w", err)
+	}
+	enroll, err := enrollment.ShouldEnroll(serverURL, creds, forceReenroll)
+	if err != nil {
+		return err
+	}
+	if !enroll {
+		log.Info().Str("device_id", creds.DeviceID).Msg("already enrolled; keeping the existing identity")
+		fmt.Printf("Device already enrolled (device_id: %s); keeping it. Use -reenroll to enroll as a new device.\n", creds.DeviceID)
+		return nil
 	}
 
 	info, _ := osProvider.Collect()
@@ -247,7 +261,20 @@ func runAgent(serverURL, enrollToken, enrollSite, credsPath string, heartbeatSec
 	}
 
 	creds, err := enrollment.Load(credsPath)
-	if enrollToken != "" {
+	enrollNow := enrollToken != ""
+	if enrollNow && err == nil {
+		// A service or script that keeps passing -enroll must not enroll the
+		// machine again each time it starts.
+		should, checkErr := enrollment.ShouldEnroll(serverURL, creds, forceReenroll)
+		if checkErr != nil {
+			log.Warn().Err(checkErr).Str("device_id", creds.DeviceID).
+				Msg("could not verify the stored identity; keeping it")
+		} else if !should {
+			log.Info().Str("device_id", creds.DeviceID).Msg("already enrolled; ignoring -enroll")
+		}
+		enrollNow = checkErr == nil && should
+	}
+	if enrollNow {
 		if err != nil && !errors.Is(err, enrollment.ErrNotEnrolled) {
 			log.Fatal().Err(err).Msg("load existing credentials")
 		}

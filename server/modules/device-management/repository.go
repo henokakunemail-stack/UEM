@@ -514,3 +514,113 @@ func deviceFilter(prefix, status, site string) (string, []any) {
 	}
 	return cond, args
 }
+
+// Enrollment failure codes. The agent prints them, and the installer and the
+// console show them, so an operator can tell "this token is used up" from
+// "this token was never valid".
+const (
+	EnrollTokenInvalid = "token_invalid"
+	EnrollTokenExpired = "token_expired"
+	EnrollTokenUsedUp  = "token_used_up"
+	EnrollTokenRevoked = "token_revoked"
+)
+
+// EnrollmentTokenFailure explains why a token was refused. It reads the token
+// without the validity conditions the enroll path applies, so a shared token
+// that ran out of uses, expired or was revoked says which; it returns the
+// shared token's id when there is one, for the audit entry. A single-device
+// token that was already spent no longer has a hash to find, so it reads as
+// invalid.
+func (r *Repository) EnrollmentTokenFailure(ctx context.Context, tokenHash string) (code, tokenID string, err error) {
+	now := time.Now().UTC()
+	var t struct {
+		ID        string     `db:"id"`
+		ExpiresAt time.Time  `db:"expires_at"`
+		MaxUses   int        `db:"max_uses"`
+		UseCount  int        `db:"use_count"`
+		RevokedAt *time.Time `db:"revoked_at"`
+	}
+	err = r.db.GetContext(ctx, &t, r.db.Rebind(`SELECT id, expires_at, max_uses, use_count, revoked_at
+		FROM enrollment_tokens WHERE token_hash = ?`), tokenHash)
+	switch {
+	case err == nil:
+		switch {
+		case t.RevokedAt != nil:
+			return EnrollTokenRevoked, t.ID, nil
+		case !now.Before(t.ExpiresAt):
+			return EnrollTokenExpired, t.ID, nil
+		case t.MaxUses > 0 && t.UseCount >= t.MaxUses:
+			return EnrollTokenUsedUp, t.ID, nil
+		default:
+			return EnrollTokenInvalid, t.ID, nil
+		}
+	case !errors.Is(err, sql.ErrNoRows):
+		return "", "", fmt.Errorf("explain enrollment token: %w", err)
+	}
+
+	var expires *time.Time
+	err = r.db.GetContext(ctx, &expires, r.db.Rebind(`SELECT enrollment_token_expires_at FROM devices
+		WHERE enrollment_token_hash = ? AND retired_at IS NULL`), tokenHash)
+	switch {
+	case err == nil:
+		if expires != nil && !now.Before(*expires) {
+			return EnrollTokenExpired, "", nil
+		}
+		return EnrollTokenInvalid, "", nil
+	case !errors.Is(err, sql.ErrNoRows):
+		return "", "", fmt.Errorf("explain enrollment token: %w", err)
+	}
+	return EnrollTokenInvalid, "", nil
+}
+
+const sharedTokenCols = `id, token_hash, name, site, created_at, expires_at, max_uses, use_count, created_by, revoked_at`
+
+// ListSharedEnrollmentTokens returns every shared token, newest first. Nothing
+// read use_count or revoked_at before, so an operator could not tell a token
+// that ran out of uses from one that never worked, or stop a leaked one.
+func (r *Repository) ListSharedEnrollmentTokens(ctx context.Context) ([]EnrollmentTokenRecord, error) {
+	list := []EnrollmentTokenRecord{}
+	if err := r.db.SelectContext(ctx, &list, `SELECT `+sharedTokenCols+` FROM enrollment_tokens ORDER BY created_at DESC`); err != nil {
+		return nil, fmt.Errorf("list shared enrollment tokens: %w", err)
+	}
+	return list, nil
+}
+
+// GetSharedEnrollmentToken returns one shared token by id.
+func (r *Repository) GetSharedEnrollmentToken(ctx context.Context, id string) (*EnrollmentTokenRecord, error) {
+	var t EnrollmentTokenRecord
+	err := r.db.GetContext(ctx, &t, r.db.Rebind(`SELECT `+sharedTokenCols+` FROM enrollment_tokens WHERE id = ?`), id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get shared enrollment token: %w", err)
+	}
+	return &t, nil
+}
+
+// RevokeSharedEnrollmentToken stops a shared token from enrolling anything
+// more. It reports whether this call revoked it.
+func (r *Repository) RevokeSharedEnrollmentToken(ctx context.Context, id string) (bool, error) {
+	res, err := r.db.ExecContext(ctx, r.db.Rebind(`UPDATE enrollment_tokens SET revoked_at = ?
+		WHERE id = ? AND revoked_at IS NULL`), time.Now().UTC(), id)
+	if err != nil {
+		return false, fmt.Errorf("revoke shared enrollment token: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	return n == 1, nil
+}
+
+// Status is what the token can do now: active, used_up, expired or revoked.
+func (t EnrollmentTokenRecord) Status(now time.Time) string {
+	switch {
+	case t.RevokedAt != nil:
+		return "revoked"
+	case !now.Before(t.ExpiresAt):
+		return "expired"
+	case t.MaxUses > 0 && t.UseCount >= t.MaxUses:
+		return "used_up"
+	default:
+		return "active"
+	}
+}

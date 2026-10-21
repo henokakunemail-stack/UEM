@@ -221,10 +221,15 @@ func TestE2EUninstallRefusesEndpointWithoutCapability(t *testing.T) {
 	}
 }
 
-// An endpoint that has never sent a hello has no capability list at all, and
-// that is not permission. It is the state of every device enrolled before the
-// agent reported capabilities, so it is the most likely one in the field.
-func TestE2EDeploymentRefusesEndpointThatNeverSaidHello(t *testing.T) {
+// An endpoint with no capability list is not refused for the whole rollout
+// any more: one laptop that has not reconnected since capabilities existed
+// used to block every other target. The deployment is created, and the task
+// says why it cannot run. This device is connected yet reported nothing, so it
+// runs an agent that predates the command, and its task fails as
+// unsupported_agent instead of waiting forever. (A device whose list lacks the
+// command is still refused up front; see
+// TestE2EUninstallRefusesEndpointWithoutCapability.)
+func TestE2EDeploymentFailsTheTaskOfAnEndpointWithoutCapabilities(t *testing.T) {
 	env := setupUninstall(t, "")
 
 	resp := env.createDeployment(t, map[string]any{
@@ -234,9 +239,19 @@ func TestE2EDeploymentRefusesEndpointThatNeverSaidHello(t *testing.T) {
 		"target_id":   env.deviceID,
 		"action":      "install",
 	})
-	if resp.StatusCode != http.StatusBadRequest {
-		t.Fatalf("expected 400 for a device with no capabilities, got %d: %s",
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201 for a device whose capabilities are not known, got %d: %s",
 			resp.StatusCode, readBody(t, resp))
+	}
+	var task struct {
+		Status string  `db:"status"`
+		Err    *string `db:"error_message"`
+	}
+	if err := env.db.Get(&task, `SELECT status, error_message FROM deployment_tasks WHERE device_id = ?`, env.deviceID); err != nil {
+		t.Fatal(err)
+	}
+	if task.Status != "failed" || task.Err == nil || !strings.HasPrefix(*task.Err, "unsupported_agent") {
+		t.Fatalf("task = %q %v, want failed with an unsupported_agent reason", task.Status, task.Err)
 	}
 }
 

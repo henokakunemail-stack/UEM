@@ -28,9 +28,10 @@ export interface DeviceDTO {
 }
 
 // The plaintext token is returned exactly once, by the request that mints it.
-// Nothing else in the system ever sees it: the server stores only the hash, and
-// after the agent exchanges it the row's hash is nulled. Re-closing this modal
-// therefore loses it for good, and a lost token means minting another one.
+// Nothing else in the system ever sees it: the server stores only the hash.
+// Closing the dialog therefore loses it for good, and a lost token means
+// minting another one. A single-device token's hash is nulled when the agent
+// exchanges it; a multi-device token's stays until it expires or is revoked.
 export interface EnrollmentTokenDTO {
   device_id?: string
   token_id?: string
@@ -38,6 +39,21 @@ export interface EnrollmentTokenDTO {
   expires_at: string
   max_uses?: number
   is_multi_use?: boolean
+}
+
+// A multi-device token as the console sees it: never the token itself.
+export interface SharedEnrollmentTokenDTO {
+  id: string
+  name: string
+  site?: string | null
+  created_at: string
+  expires_at: string
+  // 0 means unlimited.
+  max_uses: number
+  use_count: number
+  created_by: string
+  revoked_at?: string | null
+  status: 'active' | 'used_up' | 'expired' | 'revoked'
 }
 
 export interface DeviceListResponse {  devices: DeviceDTO[]

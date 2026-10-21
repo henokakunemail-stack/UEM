@@ -48,9 +48,13 @@ Skrip akan:
 Installer NSIS ini juga mendukung parameter baris perintah untuk instalasi massal tanpa dialog GUI:
 
 ```cmd
-EndpointAgent-Setup.exe /S
+EndpointAgent-Setup.exe /S /SERVER=https://server:8443 /TOKEN=<TOKEN> [/SITE=Medan-Branch]
 ```
-*(Catatan: `/S` bersifat case-sensitive pada NSIS)*
+*(Catatan: `/S` bersifat case-sensitive pada NSIS.)*
+
+- `/SERVER=` wajib bila `/TOKEN=` diberikan: mode senyap tidak menampilkan halaman server, jadi tanpa parameter ini installer berhenti dengan kode keluar 2.
+- Bila enroll gagal, installer berhenti dengan kode keluar 3; alasannya (mis. `token_used_up`, `token_expired`) tercatat di log detail installer.
+- Gunakan token **multi-device**. Menjalankan installer lagi di mesin yang sudah terdaftar mempertahankan identitasnya dan tidak memakai kuota token.
 
 ---
 
