@@ -9,20 +9,24 @@ $port = 18452
 $base = "http://localhost:$port"
 $dbPath = Join-Path $env:TEMP "em-e2e-scheduler.db"
 $serverExe = Join-Path $env:TEMP "emserver-scheduler.exe"
+$agentExe = Join-Path $env:TEMP "emagent-scheduler.exe"
+$credsPath = Join-Path $env:TEMP "em-e2e-scheduler-creds.json"
 
 # Clean slate
-Remove-Item $dbPath -ErrorAction SilentlyContinue
-Get-Process emserver-scheduler -ErrorAction SilentlyContinue |
+Remove-Item $dbPath, $credsPath -ErrorAction SilentlyContinue
+Get-Process emserver-scheduler, emagent-scheduler -ErrorAction SilentlyContinue |
     Stop-Process -Force -ErrorAction SilentlyContinue
 
 Write-Host "=== FASE 10 E2E: TASK SCHEDULER & SCRIPT REPOSITORY ===" -ForegroundColor Cyan
 
 # 1. Build
-Write-Host "1. Building server binary..."
+Write-Host "1. Building server and agent binaries..."
 Push-Location (Resolve-Path (Join-Path $PSScriptRoot ".."))
 $env:CGO_ENABLED = '0'
 go build -o $serverExe ./server/cmd/server
 if ($LASTEXITCODE -ne 0) { throw "Server compilation failed" }
+go build -o $agentExe ./agent/cmd/agent
+if ($LASTEXITCODE -ne 0) { throw "Agent compilation failed" }
 Pop-Location
 
 # 2. Start server
@@ -71,10 +75,12 @@ try {
     # 4. Script Repository RBAC & Integrity
     Write-Host "`n3. Testing Script Repository RBAC and SHA-256 Validation..."
     $scriptPayload = @{
-        name = "Fleet Flush DNS & Temp"
-        description = "Flushes local DNS resolver cache and cleans temp"
+        name = "Fleet Maintenance Check"
+        description = "Reports that scheduled maintenance reached the endpoint"
         script_type = "powershell"
-        script_content = "Clear-DnsClientCache; Write-Output 'DNS Cache Flushed Successfully'"
+        # A live agent runs this on the machine executing the test, so it must
+        # not need elevation or change anything there.
+        script_content = "Write-Output 'Scheduled maintenance ran'"
         default_args = ""
         timeout_seconds = 60
     } | ConvertTo-Json
@@ -102,8 +108,88 @@ try {
     if ($scripts.Count -lt 1) { throw "Viewer failed to list scripts" }
     Write-Host "  [PASS] Viewer successfully listed $($scripts.Count) script(s)" -ForegroundColor Green
 
-    # 5. Task Schedule RBAC & Creation
-    Write-Host "`n4. Testing Task Schedule Management & RBAC..."
+    # A schedule whose target has no active device is refused when it is saved:
+    # it would only ever produce runs that dispatch to nobody. Checked here,
+    # before the devices below exist.
+    $emptyPayload = @{
+        name = "Fleet With No Devices"
+        script_id = $scriptId
+        target_type = "all"
+        target_id = ""
+        schedule_type = "interval"
+        schedule_expr = "60"
+        is_enabled = $true
+    } | ConvertTo-Json
+    try {
+        Invoke-RestMethod -Uri "$base/api/schedules" -Method POST -Headers $adminHeaders -Body $emptyPayload -ContentType "application/json"
+        throw "A schedule targeting no active devices was accepted"
+    } catch {
+        $code = $null
+        if ($_.ErrorDetails.Message) { $code = ($_.ErrorDetails.Message | ConvertFrom-Json).code }
+        if ($_.Exception.Response.StatusCode.value__ -eq 400 -and $code -eq "no_targets") {
+            Write-Host "  [PASS] Schedule with no active target devices REJECTED (HTTP 400 no_targets)" -ForegroundColor Green
+        } else {
+            throw "Expected HTTP 400 no_targets, got: $($_.Exception.Message) $($_.ErrorDetails.Message)"
+        }
+    }
+
+    # 5. Target Devices: one live agent, one enrolled endpoint that is offline
+    Write-Host "`n4. Enrolling a Live Agent and Seeding an Offline Device..."
+    # A dispatch only stays open while the device is connected: an offline
+    # device run is closed as failed at once, and a closed run cannot be
+    # overwritten by a later report. So the success path needs a real agent
+    # that receives the command, runs it and reports through the same endpoint
+    # a production agent uses.
+    Push-Location (Resolve-Path (Join-Path $PSScriptRoot ".."))
+    # The secret hash must be the real HashToken of a known secret: the task
+    # result endpoint authenticates the agent (AuthenticateAgent), and a literal
+    # placeholder like 'h1' matches no secret, so the report is rejected with 401.
+    $schedSecret2 = 'e2e-scheduler-secret-two'
+    $seedDevices = @"
+package main
+
+import (
+    "time"
+
+    devicemgmt "github.com/henokakunemail-stack/Endpoint-Manager/server/modules/device-management"
+    "github.com/jmoiron/sqlx"
+    _ "modernc.org/sqlite"
+)
+
+func main() {
+    d, err := sqlx.Open("sqlite", "$($dbPath.Replace('\', '/'))")
+    if err != nil { panic(err) }
+    defer d.Close()
+    now := time.Now().UTC()
+    _, _ = d.Exec("INSERT INTO devices (id, hostname, os_name, os_version, agent_version, site, status, enrolled_at, last_seen_at, device_secret_hash, created_at, updated_at) VALUES ('d-sched-2', 'PC-MEDAN-02', 'windows', '10.0', '1.0.0', 'Medan', 'online', ?, ?, ?, ?, ?)", now, now, devicemgmt.HashToken("$schedSecret2"), now, now)
+}
+"@
+    $helperFile = Join-Path $env:TEMP "seed_sched_devices.go"
+    Set-Content -Path $helperFile -Value $seedDevices -Encoding UTF8
+    go run $helperFile
+    Remove-Item $helperFile -ErrorAction SilentlyContinue
+    Pop-Location
+    Write-Host "  [PASS] Offline device seeded: PC-MEDAN-02" -ForegroundColor Green
+
+    $enrollTokenBody = @{ hostname = "PC-SURABAYA-01"; os_name = "windows"; site = "Surabaya" } | ConvertTo-Json
+    $enrollToken = (Invoke-RestMethod -Uri "$base/api/devices/enroll-token" -Method POST -Headers $adminHeaders -Body $enrollTokenBody -ContentType "application/json").enrollment_token
+    if (-not $enrollToken) { throw "Failed to generate enrollment token" }
+    $agentErr = Join-Path $env:TEMP "emagent-scheduler.err"
+    $agentProc = Start-Process $agentExe -PassThru -WindowStyle Hidden `
+        -RedirectStandardError $agentErr `
+        -ArgumentList "-server", $base, "-enroll", $enrollToken, "-creds", $credsPath
+    $connected = $false
+    for ($i = 0; $i -lt 30; $i++) {
+        $health = Invoke-RestMethod "$base/healthz"
+        if ($health.agents_online -ge 1 -and (Test-Path $credsPath)) { $connected = $true; break }
+        Start-Sleep -Milliseconds 400
+    }
+    if (-not $connected) { throw "Agent failed to establish a live WebSocket connection" }
+    $liveDeviceId = (Get-Content $credsPath | ConvertFrom-Json).device_id
+    Write-Host "  [PASS] Live agent enrolled and connected: PC-SURABAYA-01 ($liveDeviceId)" -ForegroundColor Green
+
+    # 6. Task Schedule RBAC & Creation
+    Write-Host "`n5. Testing Task Schedule Management & RBAC..."
     # An interval, not a cron expression. pollDueSchedules only ever evaluated
     # schedule_type = 'interval', so a cron schedule was accepted, listed, shown
     # in the console, and never fired -- with no log line and no error. An E2E
@@ -142,41 +228,6 @@ try {
     if ($schedules.Count -lt 1) { throw "Viewer failed to list schedules" }
     Write-Host "  [PASS] Viewer successfully listed $($schedules.Count) schedule(s)" -ForegroundColor Green
 
-    # 6. Seed Target Devices
-    Write-Host "`n5. Seeding Target Devices..."
-    Push-Location (Resolve-Path (Join-Path $PSScriptRoot ".."))
-    # The secret hash must be the real HashToken of a known secret: the task
-    # result endpoint authenticates the agent (AuthenticateAgent), and a literal
-    # placeholder like 'h1' matches no secret, so the report is rejected with 401.
-    $schedSecret1 = 'e2e-scheduler-secret-one'
-    $schedSecret2 = 'e2e-scheduler-secret-two'
-    $seedDevices = @"
-package main
-
-import (
-    "time"
-
-    devicemgmt "github.com/henokakunemail-stack/Endpoint-Manager/server/modules/device-management"
-    "github.com/jmoiron/sqlx"
-    _ "modernc.org/sqlite"
-)
-
-func main() {
-    d, err := sqlx.Open("sqlite", "$($dbPath.Replace('\', '/'))")
-    if err != nil { panic(err) }
-    defer d.Close()
-    now := time.Now().UTC()
-    _, _ = d.Exec("INSERT INTO devices (id, hostname, os_name, os_version, agent_version, site, status, enrolled_at, last_seen_at, device_secret_hash, created_at, updated_at) VALUES ('d-sched-1', 'PC-SURABAYA-01', 'windows', '11.0', '1.0.0', 'Surabaya', 'online', ?, ?, ?, ?, ?)", now, now, devicemgmt.HashToken("$schedSecret1"), now, now)
-    _, _ = d.Exec("INSERT INTO devices (id, hostname, os_name, os_version, agent_version, site, status, enrolled_at, last_seen_at, device_secret_hash, created_at, updated_at) VALUES ('d-sched-2', 'PC-MEDAN-02', 'windows', '10.0', '1.0.0', 'Medan', 'online', ?, ?, ?, ?, ?)", now, now, devicemgmt.HashToken("$schedSecret2"), now, now)
-}
-"@
-    $helperFile = Join-Path $env:TEMP "seed_sched_devices.go"
-    Set-Content -Path $helperFile -Value $seedDevices -Encoding UTF8
-    go run $helperFile
-    Remove-Item $helperFile -ErrorAction SilentlyContinue
-    Pop-Location
-    Write-Host "  [PASS] 2 devices seeded: PC-SURABAYA-01, PC-MEDAN-02" -ForegroundColor Green
-
     # 7. Trigger Schedule Run & RBAC
     Write-Host "`n6. Testing Schedule Execution Run & RBAC..."
     try {
@@ -198,39 +249,53 @@ func main() {
 
     # 8. Check Device Task Dispatches
     Write-Host "`n7. Checking Device Task Runs..."
-    $devRuns = Invoke-RestMethod -Uri "$base/api/schedules/runs/$runId/devices" -Headers $viewerHeaders
+    $devRuns = (Invoke-RestMethod -Uri "$base/api/schedules/runs/$runId/devices" -Headers $viewerHeaders)
     if ($devRuns.Count -ne 2) {
         throw "Expected 2 device task runs, got: $($devRuns.Count)"
     }
-    $firstTaskId = $devRuns[0].id
-    Write-Host "  [PASS] 2 device task runs created (Dispatched to $($devRuns[0].hostname) and $($devRuns[1].hostname))" -ForegroundColor Green
+    $liveTask = $devRuns | Where-Object { $_.device_id -eq $liveDeviceId }
+    $offlineTask = $devRuns | Where-Object { $_.device_id -eq 'd-sched-2' }
+    if (-not $liveTask -or -not $offlineTask) { throw "Device task runs do not cover both targets: $($devRuns | ConvertTo-Json)" }
+    # The offline device never receives the command, so its run is closed by
+    # the server at dispatch instead of waiting forever for a report.
+    if ($offlineTask.status -ne "failed" -or $offlineTask.error_message -ne "device is offline") {
+        throw "Offline device run was not closed as failed: $($offlineTask | ConvertTo-Json)"
+    }
+    Write-Host "  [PASS] 2 device task runs created; offline PC-MEDAN-02 closed as 'device is offline'" -ForegroundColor Green
 
-    # 9. Report Agent Task Execution Result
-    Write-Host "`n8. Simulating Agent Task Execution Callback..."
-    $reportPayload = @{
-        status = "success"
-        exit_code = 0
-        output_log = "DNS Cache Flushed Successfully`r`nCleared 12 entries."
-        error_message = ""
-    } | ConvertTo-Json
-    # The endpoint authenticates the reporting agent with these headers, exactly
-    # as the production agent does when it reports a finished task. The device ID
-    # comes from the dispatch row, and the secret is whichever one that device was
-    # seeded with.
-    $firstDeviceId = $devRuns[0].device_id
-    $firstDeviceSecret = if ($firstDeviceId -eq 'd-sched-1') { $schedSecret1 } else { $schedSecret2 }
-    $schedHeaders = @{ "X-Device-Id" = $firstDeviceId; "X-Device-Secret" = $firstDeviceSecret }
-    $repRes = Invoke-RestMethod -Uri "$base/api/agent/schedules/tasks/$firstTaskId/result" -Method POST -Headers $schedHeaders -Body $reportPayload -ContentType "application/json"
-    if ($repRes.status -ne "recorded") { throw "Failed to report task result" }
-    Write-Host "  [PASS] Agent task execution reported successfully" -ForegroundColor Green
-
-    # Verify updated device run
-    $devRunsAfter = Invoke-RestMethod -Uri "$base/api/schedules/runs/$runId/devices" -Headers $viewerHeaders
-    $updatedTask = $devRunsAfter | Where-Object { $_.id -eq $firstTaskId }
-    if ($updatedTask.status -ne "success" -or $updatedTask.exit_code -ne 0 -or -not ($updatedTask.output_log -match "DNS Cache Flushed")) {
-        throw "Device task was not updated properly: $($updatedTask | ConvertTo-Json)"
+    # 9. The live agent runs the script and reports the result itself
+    Write-Host "`n8. Waiting for the Live Agent to Run the Script and Report..."
+    $updatedTask = $null
+    for ($i = 0; $i -lt 60; $i++) {
+        $updatedTask = (Invoke-RestMethod -Uri "$base/api/schedules/runs/$runId/devices" -Headers $viewerHeaders) |
+            Where-Object { $_.id -eq $liveTask.id }
+        if ($updatedTask.status -in @("success", "failed")) { break }
+        Start-Sleep -Milliseconds 500
+    }
+    if ($updatedTask.status -ne "success" -or $updatedTask.exit_code -ne 0 -or -not ($updatedTask.output_log -match "Scheduled maintenance ran")) {
+        if (Test-Path $agentErr) { Get-Content $agentErr -Tail 20 | Write-Host }
+        throw "Live agent task did not report success: $($updatedTask | ConvertTo-Json)"
     }
     Write-Host "  [PASS] Task execution verified: Status=success, ExitCode=0, Hostname=$($updatedTask.hostname)" -ForegroundColor Green
+
+    # A report that arrives for a run the server already closed is accepted
+    # from the authenticated device but does not rewrite the outcome.
+    $lateReport = @{ status = "success"; exit_code = 0; output_log = "late"; error_message = "" } | ConvertTo-Json
+    $offlineHeaders = @{ "X-Device-Id" = "d-sched-2"; "X-Device-Secret" = $schedSecret2 }
+    $null = Invoke-RestMethod -Uri "$base/api/agent/schedules/tasks/$($offlineTask.id)/result" -Method POST -Headers $offlineHeaders -Body $lateReport -ContentType "application/json"
+    $offlineAfter = (Invoke-RestMethod -Uri "$base/api/schedules/runs/$runId/devices" -Headers $viewerHeaders) |
+        Where-Object { $_.id -eq $offlineTask.id }
+    if ($offlineAfter.status -ne "failed") {
+        throw "A late report rewrote a closed device run: $($offlineAfter | ConvertTo-Json)"
+    }
+    Write-Host "  [PASS] Late report did not reopen the closed offline run" -ForegroundColor Green
+
+    $runRow = (Invoke-RestMethod -Uri "$base/api/schedules/runs?limit=50" -Headers $viewerHeaders) |
+        Where-Object { $_.id -eq $runId }
+    if ($runRow.status -ne "partial" -or -not $runRow.completed_at) {
+        throw "Expected the run to close as 'partial' (one success, one offline), got: $($runRow | ConvertTo-Json)"
+    }
+    Write-Host "  [PASS] Run rolled up to 'partial' with a completion time" -ForegroundColor Green
 
     # 10. Verify Audit Log
     Write-Host "`n9. Verifying Audit Trail..."
@@ -284,8 +349,11 @@ func main() {
 
 } finally {
     Write-Host "`nCleaning up background processes..."
+    if ($agentProc -and -not $agentProc.HasExited) {
+        Stop-Process -Id $agentProc.Id -Force -ErrorAction SilentlyContinue
+    }
     if ($serverProc -and -not $serverProc.HasExited) {
         Stop-Process -Id $serverProc.Id -Force -ErrorAction SilentlyContinue
     }
-    Remove-Item $dbPath -ErrorAction SilentlyContinue
+    Remove-Item $dbPath, $credsPath -ErrorAction SilentlyContinue
 }
