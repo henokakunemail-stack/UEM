@@ -4,6 +4,15 @@ import { useAuth } from '../context/AuthContext'
 import { ThemeToggle } from '../context/ThemeContext'
 import { LanguageToggle } from '../i18n/LanguageToggle'
 import { useT } from '../i18n/core'
+import { apiErrorMessage } from '../services/apiErrorMessage'
+
+// The server's reasons, shown in the operator's language. Any other failure
+// (network, 500) falls back to a generic message rather than raw server text.
+const LOGIN_ERRORS: Record<string, string> = {
+  invalid_credentials: 'auth.error_invalid_credentials',
+  account_disabled: 'auth.error_account_disabled',
+  too_many_attempts: 'auth.error_too_many_attempts',
+}
 
 export function LoginPage() {
   const { login } = useAuth()
@@ -18,7 +27,7 @@ export function LoginPage() {
     setError(null)
     setLoading(true)
     try { await login(username, password) }
-    catch (error) { setError(error instanceof Error ? error.message : t('auth.unable_to_sign_in')) }
+    catch (error) { setError(apiErrorMessage(error, t, LOGIN_ERRORS, 'auth.unable_to_sign_in')) }
     finally { setLoading(false) }
   }
 

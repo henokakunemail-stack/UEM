@@ -53,9 +53,11 @@ func (a accountLockout) lockedFor(ctx context.Context, username string) time.Dur
 // within the window reaches the limit. Errors are logged, never returned: a
 // lockout table that cannot be written must not turn a wrong password into a
 // server error, and the per-IP limiter still applies.
-func (a accountLockout) recordFailure(ctx context.Context, username string) {
+// recordFailure counts one failed attempt and reports whether this attempt is
+// the one that locked the account, so the lock can be audited exactly once.
+func (a accountLockout) recordFailure(ctx context.Context, username string) (lockedNow bool) {
 	if a.db == nil {
-		return
+		return false
 	}
 	key := lockoutKey(username)
 	now := time.Now().UTC()
@@ -67,7 +69,7 @@ func (a accountLockout) recordFailure(ctx context.Context, username string) {
 		 WHERE username = ? AND window_started_at > ?`, key, now.Add(-AccountWindow))
 	if err != nil {
 		log.Warn().Err(err).Msg("record login failure")
-		return
+		return false
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
 		// No row, or one from an expired window: start a fresh window. A
@@ -81,17 +83,23 @@ func (a accountLockout) recordFailure(ctx context.Context, username string) {
 			INSERT INTO login_failures (username, failures, window_started_at) VALUES (?, 1, ?)`, key, now); err != nil {
 			if _, err := a.db.ExecContext(ctx, `UPDATE login_failures SET failures = failures + 1 WHERE username = ?`, key); err != nil {
 				log.Warn().Err(err).Msg("record login failure")
-				return
+				return false
 			}
 		}
 	}
 
-	if _, err := a.db.ExecContext(ctx, `
+	// Matches only while the account is not already locked, so exactly one
+	// failure -- the one that crosses the limit -- sees a row change.
+	lock, err := a.db.ExecContext(ctx, `
 		UPDATE login_failures SET locked_until = ?
 		 WHERE username = ? AND failures >= ? AND (locked_until IS NULL OR locked_until < ?)`,
-		now.Add(AccountLockout), key, AccountMaxFailures, now); err != nil {
+		now.Add(AccountLockout), key, AccountMaxFailures, now)
+	if err != nil {
 		log.Warn().Err(err).Msg("lock account after failed logins")
+		return false
 	}
+	n, _ := lock.RowsAffected()
+	return n == 1
 }
 
 // reset clears the count after a successful sign-in.

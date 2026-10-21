@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jmoiron/sqlx"
@@ -40,7 +41,21 @@ type LoginHandler struct {
 	// lockout counts failures per account in the database, so it holds
 	// across server nodes and across source addresses.
 	lockout accountLockout
+	// compare checks a password against a hash; a field so tests can see that
+	// an unknown username still costs one bcrypt comparison.
+	compare func(hash, plain string) error
 }
+
+// dummyHash is compared against when the username does not exist, so a
+// missing account takes as long to refuse as a wrong password and response
+// time does not reveal which usernames exist. Same cost as real hashes.
+var dummyHash = sync.OnceValue(func() string {
+	h, err := HashPassword("timing-equaliser-not-a-real-password")
+	if err != nil {
+		return ""
+	}
+	return h
+})
 
 func NewLoginHandler(db *sqlx.DB, jwt *JWTService) *LoginHandler {
 	return &LoginHandler{
@@ -50,6 +65,7 @@ func NewLoginHandler(db *sqlx.DB, jwt *JWTService) *LoginHandler {
 		limiter:  NewIPRateLimiter(5, 1*time.Minute, 5*time.Minute),
 		clientIP: NewClientIPResolver(nil),
 		lockout:  accountLockout{db: db},
+		compare:  ComparePassword,
 	}
 }
 
@@ -132,9 +148,7 @@ func (h *LoginHandler) Register(mux any) {
 func (h *LoginHandler) login(w http.ResponseWriter, r *http.Request) {
 	clientIP := h.clientIP.ClientIP(r)
 	if allowed, wait := h.limiter.IsAllowed(clientIP); !allowed {
-		waitSec := int(wait.Seconds()) + 1
-		w.Header().Set("Retry-After", strconv.Itoa(waitSec))
-		writeErr(w, http.StatusTooManyRequests, fmt.Sprintf("too many failed login attempts, please try again in %d seconds", waitSec))
+		writeTooManyAttempts(w, wait)
 		return
 	}
 
@@ -156,9 +170,7 @@ func (h *LoginHandler) login(w http.ResponseWriter, r *http.Request) {
 	// Checked before the password, so a locked account is not a free oracle
 	// for whether the next guess would have been right.
 	if wait := h.lockout.lockedFor(r.Context(), req.Username); wait > 0 {
-		waitSec := int(wait.Seconds()) + 1
-		w.Header().Set("Retry-After", strconv.Itoa(waitSec))
-		writeErr(w, http.StatusTooManyRequests, fmt.Sprintf("too many failed login attempts, please try again in %d seconds", waitSec))
+		writeTooManyAttempts(w, wait)
 		return
 	}
 
@@ -177,23 +189,43 @@ func (h *LoginHandler) login(w http.ResponseWriter, r *http.Request) {
 		SELECT u.id, u.username, u.password_hash, u.role,
 		       COALESCE(u.is_active, 1) AS is_active
 		FROM users u WHERE u.username = ?`, req.Username)
-	if err != nil {
-		// Do not leak whether the username exists.
+	// The order is the point: nothing about the account -- whether it exists,
+	// whether it is disabled -- is revealed before the password is proven.
+	// "account is disabled" used to come before the password check, so any
+	// junk password confirmed that an account existed and had been offboarded.
+	if err != nil || u.PasswordHash == "" {
+		// Unknown user, or a row with no usable credential: spend the same
+		// bcrypt time a real comparison would, then refuse like a bad password.
+		_ = h.compare(dummyHash(), req.Password)
 		h.limiter.RecordFailure(clientIP)
 		h.lockout.recordFailure(r.Context(), req.Username)
-		log.Debug().Err(err).Str("username", req.Username).Msg("login unknown user")
-		writeErr(w, http.StatusUnauthorized, "invalid credentials")
+		// Unknown usernames are not audited: anyone can send random names,
+		// and the audit trail is for accounts that exist.
+		log.Debug().Str("username", req.Username).Msg("login refused: unknown user or no credential")
+		writeErrCode(w, http.StatusUnauthorized, "invalid_credentials", "invalid credentials")
 		return
 	}
-	if u.IsActive != 1 || u.PasswordHash == "" {
+	if err := h.compare(u.PasswordHash, req.Password); err != nil {
 		h.limiter.RecordFailure(clientIP)
-		writeErr(w, http.StatusUnauthorized, "account is disabled")
+		lockedNow := h.lockout.recordFailure(r.Context(), req.Username)
+		h.auditLoginFailure(r, u.ID, u.Username, clientIP, "bad_password")
+		if lockedNow {
+			_ = audit.Log(r.Context(), h.db, "system", "auth", "auth.account_locked", u.ID, map[string]string{
+				"username":     u.Username,
+				"ip":           clientIP,
+				"failures":     strconv.Itoa(AccountMaxFailures),
+				"locked_until": time.Now().UTC().Add(AccountLockout).Format(time.RFC3339),
+			})
+		}
+		writeErrCode(w, http.StatusUnauthorized, "invalid_credentials", "invalid credentials")
 		return
 	}
-	if err := ComparePassword(u.PasswordHash, req.Password); err != nil {
+	if u.IsActive != 1 {
+		// The password was right, so saying why is not an oracle any more. It
+		// is not counted toward the lockout: the caller holds the password.
 		h.limiter.RecordFailure(clientIP)
-		h.lockout.recordFailure(r.Context(), req.Username)
-		writeErr(w, http.StatusUnauthorized, "invalid credentials")
+		h.auditLoginFailure(r, u.ID, u.Username, clientIP, "account_disabled")
+		writeErrCode(w, http.StatusUnauthorized, "account_disabled", "account is disabled")
 		return
 	}
 
@@ -533,4 +565,31 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 
 func writeErr(w http.ResponseWriter, code int, msg string) {
 	writeJSON(w, code, map[string]string{"error": msg})
+}
+
+// writeErrCode adds a machine-readable reason the console translates.
+func writeErrCode(w http.ResponseWriter, status int, code, msg string) {
+	writeJSON(w, status, map[string]string{"error": msg, "code": code})
+}
+
+// writeTooManyAttempts answers both lockouts (per address and per account)
+// the same way, with the wait in the header and in the body.
+func writeTooManyAttempts(w http.ResponseWriter, wait time.Duration) {
+	waitSec := int(wait.Seconds()) + 1
+	w.Header().Set("Retry-After", strconv.Itoa(waitSec))
+	writeJSON(w, http.StatusTooManyRequests, map[string]any{
+		"error":       fmt.Sprintf("too many failed login attempts, please try again in %d seconds", waitSec),
+		"code":        "too_many_attempts",
+		"retry_after": waitSec,
+	})
+}
+
+// auditLoginFailure records a refused sign-in for an account that exists.
+// Volume is bounded by the per-address limiter and the account lockout.
+func (h *LoginHandler) auditLoginFailure(r *http.Request, userID, username, ip, reason string) {
+	_ = audit.Log(r.Context(), h.db, "anonymous", ip, "auth.login_failed", userID, map[string]string{
+		"username": username,
+		"ip":       ip,
+		"reason":   reason,
+	})
 }
