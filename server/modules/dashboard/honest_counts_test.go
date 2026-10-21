@@ -40,6 +40,13 @@ func TestPendingEnrollmentsAreNotOfflineDevices(t *testing.T) {
 			t.Fatalf("the pending row appears as a site device: %+v", sites)
 		}
 	}
+	osm, err := NewRepository(d).GetOSMetrics(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(osm) != 1 || osm[0].Count != 2 {
+		t.Fatalf("os metrics = %+v, want 2 windows devices (the pending row is not one)", osm)
+	}
 }
 
 // The health-alert card was the length of a list capped at 15 + 15.

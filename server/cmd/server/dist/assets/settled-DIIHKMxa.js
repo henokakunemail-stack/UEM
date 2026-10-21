@@ -1,0 +1,1 @@
+async function e(e){let t=Object.keys(e),n=await Promise.allSettled(t.map(t=>e[t]())),r={},i=[];return n.forEach((e,n)=>{let a=t[n];e.status===`fulfilled`?r[a]=e.value:i.push(a)}),{data:r,failed:i}}export{e as t};

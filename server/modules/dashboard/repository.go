@@ -140,7 +140,7 @@ func (r *Repository) GetOSMetrics(ctx context.Context) ([]OSMetric, error) {
 			COALESCE(os_name, 'unknown') as os_name,
 			COUNT(*) as count
 		FROM devices
-		WHERE retired_at IS NULL
+		WHERE retired_at IS NULL AND NOT (` + pendingCond + `)
 		GROUP BY os_name
 		ORDER BY count DESC`
 
