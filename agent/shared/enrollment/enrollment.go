@@ -146,3 +146,43 @@ func enrollError(resp *http.Response) error {
 	}
 	return fmt.Errorf("enroll failed: HTTP %d", resp.StatusCode)
 }
+
+// ShouldEnroll decides whether a token should be exchanged when credentials
+// may already exist. Running an installer again used to enroll every time:
+// with a one-time token that failed harmlessly, but each run with a
+// multi-device token created a duplicate device and used up one of the
+// token's uses, until new machines were refused.
+//
+// It enrolls when forced, when there are no credentials, when they belong to
+// another server, or when the server no longer accepts them (401, 403, or
+// 404 from a server without the identity check). It keeps them when the
+// server confirms them. Anything else is an error: an unreachable server can
+// neither confirm the old identity nor issue a new one.
+func ShouldEnroll(serverURL string, existing Credentials, force bool) (bool, error) {
+	if force || existing.DeviceID == "" || existing.DeviceSecret == "" {
+		return true, nil
+	}
+	normURL := transport.NormalizeServerURL(serverURL)
+	if existing.ServerURL != "" && transport.NormalizeServerURL(existing.ServerURL) != normURL {
+		return true, nil
+	}
+	req, err := http.NewRequest(http.MethodGet, normURL+"/api/agent/identity", nil)
+	if err != nil {
+		return false, err
+	}
+	req.Header.Set("X-Device-Id", existing.DeviceID)
+	req.Header.Set("X-Device-Secret", existing.DeviceSecret)
+	resp, err := transport.NewHTTPClient(15 * time.Second).Do(req)
+	if err != nil {
+		return false, fmt.Errorf("check existing enrollment: %w", err)
+	}
+	defer resp.Body.Close()
+	switch resp.StatusCode {
+	case http.StatusOK:
+		return false, nil
+	case http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound:
+		return true, nil
+	default:
+		return false, fmt.Errorf("check existing enrollment: HTTP %d", resp.StatusCode)
+	}
+}

@@ -74,8 +74,10 @@ func (h *EnrollmentHandler) Register(mux any) {
 	switch m := mux.(type) {
 	case *http.ServeMux:
 		m.Handle("POST /api/agent/enroll", httpguard.LimitJSONBody(http.HandlerFunc(h.enroll)))
+		m.HandleFunc("GET /api/agent/identity", h.identity)
 	case chiRouter:
 		m.With(httpguard.LimitJSONBody).Post("/api/agent/enroll", h.enroll)
+		m.Get("/api/agent/identity", h.identity)
 	default:
 		panic("device-management.EnrollmentHandler.Register: unsupported mux type")
 	}
@@ -269,4 +271,17 @@ func (h *EnrollmentHandler) refuseToken(w http.ResponseWriter, r *http.Request, 
 	}
 	_ = audit.Log(r.Context(), h.db, "agent", "", "device.enroll_failed", tokenID, details)
 	writeErrCode(w, http.StatusUnauthorized, code, enrollRefusals[code])
+}
+
+// identity tells an agent whether the credentials it holds still identify a
+// device here. An installer that is run again checks this first and keeps a
+// working identity instead of spending another use of a multi-device token
+// on a duplicate device. A retired device's secret is cleared, so it answers
+// 401 and the agent enrolls again.
+func (h *EnrollmentHandler) identity(w http.ResponseWriter, r *http.Request) {
+	deviceID, ok := AuthenticateAgent(w, r, h.repo)
+	if !ok {
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"device_id": deviceID})
 }

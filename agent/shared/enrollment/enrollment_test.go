@@ -146,3 +146,57 @@ func TestExchangeReportsTheServerReason(t *testing.T) {
 		t.Fatalf("token sent = %q, want it trimmed", gotToken)
 	}
 }
+
+func identityServer(t *testing.T, status int, calls *int) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/agent/identity" {
+			*calls++
+			if r.Header.Get("X-Device-Id") == "" || r.Header.Get("X-Device-Secret") == "" {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			w.WriteHeader(status)
+			return
+		}
+		w.WriteHeader(http.StatusTeapot)
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// Running an installer again used to enroll every time. With a multi-device
+// token each run made a duplicate device and spent one of the token's uses.
+func TestShouldEnrollKeepsAnIdentityTheServerStillAccepts(t *testing.T) {
+	calls := 0
+	srv := identityServer(t, http.StatusOK, &calls)
+	creds := Credentials{DeviceID: "d1", DeviceSecret: "s", ServerURL: srv.URL}
+
+	if got, err := ShouldEnroll(srv.URL, creds, false); err != nil || got {
+		t.Fatalf("valid identity: enroll=%v err=%v, want keep it", got, err)
+	}
+	if got, _ := ShouldEnroll(srv.URL, creds, true); !got {
+		t.Fatal("-reenroll did not force a new enrollment")
+	}
+	if got, _ := ShouldEnroll(srv.URL, Credentials{}, false); !got {
+		t.Fatal("no credentials: want enroll")
+	}
+	if got, _ := ShouldEnroll(srv.URL, Credentials{DeviceID: "d1", DeviceSecret: "s", ServerURL: "http://other:8443"}, false); !got {
+		t.Fatal("credentials for another server: want enroll")
+	}
+	if calls != 1 {
+		t.Fatalf("identity checks = %d, want 1 (only the case that needs the server)", calls)
+	}
+}
+
+func TestShouldEnrollReplacesAnIdentityTheServerRefuses(t *testing.T) {
+	calls := 0
+	srv := identityServer(t, http.StatusUnauthorized, &calls)
+	if got, err := ShouldEnroll(srv.URL, Credentials{DeviceID: "d1", DeviceSecret: "s"}, false); err != nil || !got {
+		t.Fatalf("refused identity: enroll=%v err=%v, want enroll", got, err)
+	}
+	broken := identityServer(t, http.StatusInternalServerError, &calls)
+	if _, err := ShouldEnroll(broken.URL, Credentials{DeviceID: "d1", DeviceSecret: "s"}, false); err == nil {
+		t.Fatal("a server error was taken as an answer")
+	}
+}
