@@ -140,7 +140,7 @@
   "upload_restore_failed": "Upload & restore failed",
   "restore_signin_again": "Sign in again if asked: your session belonged to the database that was replaced.",
   "restore_failed_rolled_back": "The restore failed. The previous database was put back and the server restarted on it; nothing was lost.",
-  "restore_failed_rollback_failed": "The restore failed and putting the previous database back failed too. Check the server log and restore the pre-restore snapshot manually.",
+  "restore_failed_rollback_failed": "The restore failed and the database file could not be replaced at all (another program may be holding it). The database was left as it was; check the server log.",
   "restore_timeout": "The server did not come back within 3 minutes. Check that its service is running; the outcome is shown under Last restore once it is up.",
   "restore_in_progress": "A restore is already running.",
   "restore_safety_snapshot_failed": "The safety snapshot taken before every restore failed, so the restore was not started.",

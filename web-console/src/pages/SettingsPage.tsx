@@ -167,15 +167,19 @@ export function SettingsPage({ activeTab = 'directory', onTabChange }: SettingsP
       if (outcome === 'succeeded') {
         toast.success(t('settings.restore_back_online') + ' ' + t('settings.restore_signin_again'), t('settings.toast_restore_complete'))
         setTimeout(() => window.location.reload(), 1500)
-      } else if (outcome === 'failed') {
+        return
+      }
+      if (outcome === 'failed') {
         toast.error(t('settings.restore_failed_rolled_back'), t('settings.toast_restore_failed'))
-        void loadBackups()
-        api.getLastRestoreStatus().then(setLastRestore).catch(() => {})
       } else if (outcome === 'rollback_failed') {
         toast.error(t('settings.restore_failed_rollback_failed'), t('settings.toast_restore_failed'))
       } else {
         toast.error(t('settings.restore_timeout'), t('settings.toast_restore_failed'))
       }
+      // The toast goes; the page keeps showing what happened: the new safety
+      // snapshot in the list and the outcome in the Last restore banner.
+      void loadBackups()
+      api.getLastRestoreStatus().then(setLastRestore).catch(() => {})
     })
     return () => {
       stopped = true

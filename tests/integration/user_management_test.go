@@ -2,6 +2,7 @@ package integration
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -102,7 +103,18 @@ func TestUserManagement_CRUD(t *testing.T) {
 	}
 	t.Log("Password updated and verified")
 
-	// 6. Deactivate User
+	// 6. Deactivate User. johndoe is now the only administrator, and turning
+	// off the last active admin is refused; with a second admin it is allowed.
+	if err := repo.Deactivate(ctx, user.ID); !errors.Is(err, usermgmt.ErrLastAdmin) {
+		t.Fatalf("deactivating the only admin: err = %v, want ErrLastAdmin", err)
+	}
+	other := &usermgmt.User{
+		ID: usermgmt.NewID(), Username: "root", PasswordHash: hash, Role: rbac.RoleAdmin,
+		IsActive: true, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := repo.Create(ctx, other); err != nil {
+		t.Fatal("create second admin:", err)
+	}
 	if err := repo.Deactivate(ctx, user.ID); err != nil {
 		t.Fatal("deactivate user:", err)
 	}
@@ -118,7 +130,7 @@ func TestUserManagement_CRUD(t *testing.T) {
 	if err != nil {
 		t.Fatal("list users:", err)
 	}
-	if len(users) != 1 {
-		t.Fatalf("expected 1 user, got %d", len(users))
+	if len(users) != 2 { // johndoe and the second admin
+		t.Fatalf("expected 2 users, got %d", len(users))
 	}
 }
