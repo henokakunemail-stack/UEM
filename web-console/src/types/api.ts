@@ -332,9 +332,15 @@ export interface TaskRunDTO {
   id: string
   schedule_id: string
   script_id: string
+  // running | completed | partial | failed
   status: string
   triggered_at: string
   completed_at?: string | null
+  // Why a run failed with no device run to explain it (no_targets: ...).
+  error_message?: string | null
+  devices_total?: number
+  devices_succeeded?: number
+  devices_failed?: number
   schedule_name?: string
   script_name?: string
 }

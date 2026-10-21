@@ -114,8 +114,9 @@ func TestAMixedRunClosesOnlyWhenEveryDeviceIsAccountedFor(t *testing.T) {
 	if rec := f.report(t, "d2", f.deviceRunFor(t, "d2"), "success"); rec.Code != 200 {
 		t.Fatalf("d2 -> %d", rec.Code)
 	}
-	if status, completedAt := f.parent(t); status != "completed" || completedAt == nil {
-		t.Errorf("parent = %q completed_at=%v, want \"completed\" with a timestamp",
+	// d1 was reaped as failed, d2 succeeded: a mix.
+	if status, completedAt := f.parent(t); status != "partial" || completedAt == nil {
+		t.Errorf("parent = %q completed_at=%v, want \"partial\" with a timestamp",
 			status, completedAt)
 	}
 }

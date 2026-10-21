@@ -240,9 +240,10 @@ func TestAFullyFailedRunIsFailedNotCompleted(t *testing.T) {
 	}
 }
 
-// TestAPartlySuccessfulRunIsCompleted: the rollup asks "did everything finish",
-// not "did everything succeed". One of two endpoints failing still completed.
-func TestAPartlySuccessfulRunIsCompleted(t *testing.T) {
+// TestAPartlySuccessfulRunIsPartial: the rollup waits until everything
+// finished, then says how it went. One of two endpoints failing is partial;
+// it used to read "completed", the same word as a run that worked everywhere.
+func TestAPartlySuccessfulRunIsPartial(t *testing.T) {
 	f := newRunFixture(t, []string{"d1", "d2"})
 
 	if rec := f.report(t, "d1", f.deviceRunFor(t, "d1"), "success"); rec.Code != http.StatusOK {
@@ -251,8 +252,8 @@ func TestAPartlySuccessfulRunIsCompleted(t *testing.T) {
 	if rec := f.report(t, "d2", f.deviceRunFor(t, "d2"), "failed"); rec.Code != http.StatusOK {
 		t.Fatalf("d2 -> %d", rec.Code)
 	}
-	if status, _ := f.parent(t); status != "completed" {
-		t.Errorf("parent status = %q, want \"completed\": every endpoint reported", status)
+	if status, _ := f.parent(t); status != "partial" {
+		t.Errorf("parent status = %q, want \"partial\": one endpoint succeeded, one failed", status)
 	}
 }
 
@@ -487,9 +488,10 @@ func TestAMixedRunIsNotClosedEarly(t *testing.T) {
 	if rec := f.report(t, "d1", f.deviceRunFor(t, "d1"), "success"); rec.Code != http.StatusOK {
 		t.Fatalf("d1 -> %d %s", rec.Code, rec.Body.String())
 	}
-	if status, completedAt := f.parent(t); status != "completed" || completedAt == nil {
+	// d2 was offline and failed at dispatch, d1 succeeded: a mix.
+	if status, completedAt := f.parent(t); status != "partial" || completedAt == nil {
 		t.Errorf("parent = %q completed_at=%v after the last device reported, want "+
-			"\"completed\" with a timestamp", status, completedAt)
+			"\"partial\" with a timestamp", status, completedAt)
 	}
 }
 

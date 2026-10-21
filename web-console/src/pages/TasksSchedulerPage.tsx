@@ -13,8 +13,10 @@ import { useToast } from '../context/ToastContext'
 import { usePermission } from '../hooks/usePermission'
 import { DataTable } from '../components/ui/DataTable'
 import { Modal } from '../components/ui/Modal'
-import type { DeviceRunDTO, ScheduleDTO, ScriptDTO, TaskRunDTO } from '../types/api'
+import type { DeviceDTO, DeviceGroupDTO, DeviceRunDTO, ScheduleDTO, ScriptDTO, TaskRunDTO } from '../types/api'
 import { useT, type Vars } from '../i18n/core'
+import { ApiError } from '../services/api'
+import { settleAll } from '../services/settled'
 
 type TFn = (key: string, vars?: Vars) => string
 
@@ -38,6 +40,7 @@ const STATUS_KEYS: Record<string, string> = {
   pending: 'scheduler.status_pending',
   running: 'scheduler.status_running',
   completed: 'scheduler.status_completed',
+  partial: 'common.status_partial',
   success: 'scheduler.status_success',
   failed: 'scheduler.status_failed',
 }
@@ -48,6 +51,28 @@ const TARGET_KEYS: Record<string, string> = {
 }
 function enumLabel(map: Record<string, string>, value: string, t: TFn): string {
   return map[value] ? t(map[value]) : value
+}
+
+function runPill(status: string): string {
+  switch (status) {
+    case 'completed':
+    case 'success':
+      return 'online'
+    case 'partial':
+      return 'partial'
+    case 'failed':
+      return 'danger'
+    default:
+      return 'warning'
+  }
+}
+
+// Codes the server attaches to a refused schedule.
+const SCHEDULE_ERROR_KEYS: Record<string, string> = {
+  invalid_interval: 'scheduler.error_invalid_interval',
+  invalid_target: 'scheduler.error_invalid_target',
+  no_targets: 'scheduler.error_no_targets',
+  run_in_progress: 'scheduler.error_run_in_progress',
 }
 
 export type SchedulerTab = 'schedules' | 'runs'
@@ -75,6 +100,10 @@ export const TasksSchedulerPage: React.FC<TasksSchedulerPageProps> = ({ activeTa
   const [viewRunDevices, setViewRunDevices] = useState<TaskRunDTO | null>(null)
   const [runDevices, setRunDevices] = useState<DeviceRunDTO[]>([])
   const [devicesLoading, setDevicesLoading] = useState(false)
+  const [runDevicesFailed, setRunDevicesFailed] = useState(false)
+  const [groups, setGroups] = useState<DeviceGroupDTO[]>([])
+  const [devices, setDevices] = useState<DeviceDTO[]>([])
+  const [loadFailed, setLoadFailed] = useState<string[]>([])
 
   // Form states
   const [newScript, setNewScript] = useState({
@@ -104,22 +133,33 @@ export const TasksSchedulerPage: React.FC<TasksSchedulerPageProps> = ({ activeTa
   const toast = useToast()
   const { t } = useT()
 
+  // A section that fails keeps what it had and is named in a banner. Each
+  // used to fall back to an empty list, so a failed request read as "no
+  // schedules" and the error branch below it could never run.
   const loadData = async () => {
     setLoading(true)
     try {
-      const [scList, schList, runList] = await Promise.all([
-        api.getScripts().catch(() => []),
-        api.getSchedules().catch(() => []),
-        api.getTaskRuns().catch(() => []),
-      ])
-      setScripts(scList)
-      setSchedules(schList)
-      setRuns(runList)
-    } catch (err: any) {
-      setMsg({ type: 'error', text: err.message || t('scheduler.load_failed') })
+      const { data, failed } = await settleAll({
+        scripts: () => api.getScripts(),
+        schedules: () => api.getSchedules(),
+        runs: () => api.getTaskRuns(),
+        groups: () => api.getDeviceGroups(),
+        devices: () => api.getDevices(200),
+      })
+      if (data.scripts) setScripts(data.scripts)
+      if (data.schedules) setSchedules(data.schedules)
+      if (data.runs) setRuns(data.runs)
+      if (data.groups) setGroups(data.groups)
+      if (data.devices) setDevices(data.devices.devices || [])
+      setLoadFailed(failed.map((k) => t(`scheduler.section_${k}`)))
     } finally {
       setLoading(false)
     }
+  }
+
+  const scheduleError = (err: unknown, fallbackKey: string) => {
+    if (err instanceof ApiError && err.code && SCHEDULE_ERROR_KEYS[err.code]) return t(SCHEDULE_ERROR_KEYS[err.code])
+    return err instanceof Error && err.message ? err.message : t(fallbackKey)
   }
 
   useEffect(() => {
@@ -129,10 +169,13 @@ export const TasksSchedulerPage: React.FC<TasksSchedulerPageProps> = ({ activeTa
   const openRunDevices = async (run: TaskRunDTO) => {
     setViewRunDevices(run)
     setDevicesLoading(true)
+    setRunDevicesFailed(false)
     try {
       setRunDevices(await api.getRunDeviceRuns(run.id))
     } catch {
+      // Not "no device rows": the rows could not be read.
       setRunDevices([])
+      setRunDevicesFailed(true)
     } finally {
       setDevicesLoading(false)
     }
@@ -168,8 +211,8 @@ export const TasksSchedulerPage: React.FC<TasksSchedulerPageProps> = ({ activeTa
       toast.success(successText, t('scheduler.schedule_activated'))
       setIsScheduleModalOpen(false)
       loadData()
-    } catch (err: any) {
-      const errorText = err.message || t('scheduler.schedule_create_failed')
+    } catch (err: unknown) {
+      const errorText = scheduleError(err, 'scheduler.schedule_create_failed')
       setMsg({ type: 'error', text: errorText })
       toast.error(errorText, t('scheduler.schedule_failed'))
     }
@@ -204,6 +247,12 @@ export const TasksSchedulerPage: React.FC<TasksSchedulerPageProps> = ({ activeTa
           <button type="button" onClick={() => setMsg(null)} className="close-btn" aria-label={t('scheduler.dismiss_message')}>
             <X size={14} />
           </button>
+        </div>
+      )}
+
+      {loadFailed.length > 0 && (
+        <div className="alert-banner alert-warning" role="alert">
+          <span>{t('common.load_failed_sections', { sections: loadFailed.join(', ') })}</span>
         </div>
       )}
 
@@ -299,6 +348,7 @@ export const TasksSchedulerPage: React.FC<TasksSchedulerPageProps> = ({ activeTa
                   <th>{t('scheduler.col_schedule')}</th>
                   <th>{t('scheduler.col_script')}</th>
                   <th>{t('scheduler.col_status')}</th>
+                  <th>{t('scheduler.col_devices')}</th>
                   <th>{t('scheduler.col_triggered_at')}</th>
                   <th>{t('scheduler.col_completed_at')}</th>
                   <th>{t('scheduler.col_actions')}</th>
@@ -307,7 +357,7 @@ export const TasksSchedulerPage: React.FC<TasksSchedulerPageProps> = ({ activeTa
               <tbody>
                 {runs.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="text-center py-8 text-muted">
+                    <td colSpan={8} className="text-center py-8 text-muted">
                       {t('scheduler.no_runs')}
                     </td>
                   </tr>
@@ -318,17 +368,21 @@ export const TasksSchedulerPage: React.FC<TasksSchedulerPageProps> = ({ activeTa
                       <td>{r.schedule_name || r.schedule_id.slice(0, 12)}</td>
                       <td>{r.script_name || r.script_id.slice(0, 12)}</td>
                       <td>
-                        <span
-                          className={`status-pill ${
-                            r.status === 'completed'
-                              ? 'online'
-                              : r.status === 'failed'
-                                ? 'danger'
-                                : 'warning'
-                          }`}
-                        >
+                        <span className={`status-pill ${runPill(r.status)}`}>
                           {enumLabel(STATUS_KEYS, r.status, t)}
                         </span>
+                        {r.error_message && (
+                          <div className="text-xs text-danger">
+                            {r.error_message.startsWith('no_targets') ? t('scheduler.run_no_targets') : r.error_message}
+                          </div>
+                        )}
+                      </td>
+                      <td className="text-sm">
+                        {t('scheduler.run_devices_summary', {
+                          ok: r.devices_succeeded ?? 0,
+                          failed: r.devices_failed ?? 0,
+                          total: r.devices_total ?? 0,
+                        })}
                       </td>
                       <td className="text-sm text-muted">
                         {new Date(r.triggered_at).toLocaleString()}
@@ -380,6 +434,8 @@ export const TasksSchedulerPage: React.FC<TasksSchedulerPageProps> = ({ activeTa
           <div className="py-8 text-center text-muted">
             <div className="spinner-inline"></div> {t('scheduler.loading_device_results')}
           </div>
+        ) : runDevicesFailed ? (
+          <div className="py-8 text-center text-danger" role="alert">{t('scheduler.device_rows_failed')}</div>
         ) : runDevices.length === 0 ? (
           <div className="py-8 text-center text-muted">{t('scheduler.no_device_rows')}</div>
         ) : (
@@ -404,15 +460,7 @@ export const TasksSchedulerPage: React.FC<TasksSchedulerPageProps> = ({ activeTa
                     </td>
                     <td>{d.site || '—'}</td>
                     <td>
-                      <span
-                        className={`status-pill ${
-                          d.status === 'success'
-                            ? 'online'
-                            : d.status === 'failed'
-                              ? 'danger'
-                              : 'warning'
-                        }`}
-                      >
+                      <span className={`status-pill ${runPill(d.status)}`}>
                         {enumLabel(STATUS_KEYS, d.status, t)}
                       </span>
                     </td>
@@ -590,13 +638,44 @@ export const TasksSchedulerPage: React.FC<TasksSchedulerPageProps> = ({ activeTa
               id="schedule-target"
               className="form-select"
               value={newSchedule.target_type}
-              onChange={(e) => setNewSchedule({ ...newSchedule, target_type: e.target.value })}
+              // A target id belongs to one kind of target; switching kinds
+              // clears it rather than sending a group id as a device id.
+              onChange={(e) => setNewSchedule({ ...newSchedule, target_type: e.target.value, target_id: '' })}
             >
               <option value="all">{t('scheduler.target_all')}</option>
               <option value="group">{t('scheduler.target_group')}</option>
               <option value="device">{t('scheduler.target_device')}</option>
             </select>
           </div>
+          {newSchedule.target_type !== 'all' && (
+            <div className="form-group">
+              <label className="form-label" htmlFor="schedule-target-id">
+                {newSchedule.target_type === 'group' ? t('scheduler.select_group') : t('scheduler.select_device')}
+              </label>
+              <select
+                id="schedule-target-id"
+                className="form-select"
+                required
+                value={newSchedule.target_id}
+                onChange={(e) => setNewSchedule({ ...newSchedule, target_id: e.target.value })}
+              >
+                <option value="">{t('scheduler.choose')}</option>
+                {newSchedule.target_type === 'group'
+                  ? groups.map((g) => (
+                      <option key={g.id} value={g.id}>
+                        {g.name}
+                      </option>
+                    ))
+                  : devices
+                      .filter((d) => !d.retired_at)
+                      .map((d) => (
+                        <option key={d.id} value={d.id}>
+                          {d.hostname}
+                        </option>
+                      ))}
+              </select>
+            </div>
+          )}
           <div className="form-group">
             <label className="form-label" htmlFor="schedule-trigger">
               {t('scheduler.trigger_type')}
@@ -622,20 +701,21 @@ export const TasksSchedulerPage: React.FC<TasksSchedulerPageProps> = ({ activeTa
             <label className="form-label" htmlFor="schedule-expr">
               {t('scheduler.interval_label')}
             </label>
+            {/* Minutes, 1 to 30 days. The field used to coerce anything it
+                could not parse to "0", which the scheduler then skipped. */}
             <input
               id="schedule-expr"
-              type="text"
+              type="number"
+              min={1}
+              max={43200}
+              step={1}
               className="form-input"
               required
               placeholder="60"
               value={newSchedule.schedule_expr}
-              onChange={(e) =>
-                setNewSchedule({
-                  ...newSchedule,
-                  schedule_expr: String(Number(e.target.value) || 0),
-                })
-              }
+              onChange={(e) => setNewSchedule({ ...newSchedule, schedule_expr: e.target.value })}
             />
+            <span className="form-hint">{t('scheduler.interval_hint')}</span>
           </div>
         </form>
       </Modal>

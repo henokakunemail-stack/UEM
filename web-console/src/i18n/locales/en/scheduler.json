@@ -78,5 +78,22 @@
   "fixed_interval": "Fixed Interval",
   "interval_label": "Interval (minutes)",
   "output_title": "Job Execution Output",
-  "no_output": "(No output recorded)"
+  "no_output": "(No output recorded)",
+  "col_devices": "Devices",
+  "run_devices_summary": "{ok} ok, {failed} failed of {total}",
+  "run_no_targets": "The target had no active devices",
+  "device_rows_failed": "Could not load the per-device results. Try again.",
+  "select_group": "Group",
+  "select_device": "Device",
+  "choose": "Choose...",
+  "interval_hint": "Minutes between runs, from 1 to 43200 (30 days).",
+  "error_invalid_interval": "The interval must be a whole number of minutes from 1 to 43200.",
+  "error_invalid_target": "Choose a valid target: all devices, a group, or a device.",
+  "error_no_targets": "The selected target has no active devices.",
+  "error_run_in_progress": "The previous run of this schedule has not finished yet.",
+  "section_scripts": "scripts",
+  "section_schedules": "schedules",
+  "section_runs": "run history",
+  "section_groups": "groups",
+  "section_devices": "devices"
 }

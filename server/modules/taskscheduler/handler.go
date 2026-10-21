@@ -3,8 +3,11 @@ package taskscheduler
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/rs/zerolog/log"
@@ -276,6 +279,48 @@ var runnableScheduleTypes = map[string]bool{"interval": true}
 
 func isRunnableScheduleType(v string) bool { return runnableScheduleTypes[v] }
 
+// maxIntervalMinutes is 30 days. A longer interval is almost certainly a
+// unit mistake, and the poller would hold it without ever saying so.
+const maxIntervalMinutes = 30 * 24 * 60
+
+// scheduleProblem is why a schedule cannot be saved: a code the console
+// translates and a message for API callers.
+type scheduleProblem struct{ code, msg string }
+
+// validateSchedule checks what the poller and TriggerSchedule rely on. Before
+// this, a non-numeric or zero interval was stored and silently skipped on
+// every poll, and a missing or mistyped target saved fine and produced runs
+// that reached nothing. checkTargets is false on an update that does not
+// touch the target, so renaming a schedule whose group is empty right now is
+// not refused.
+func (h *Handler) validateSchedule(ctx context.Context, targetType, targetID, expr string, checkTargets bool) (*scheduleProblem, error) {
+	mins, err := strconv.Atoi(strings.TrimSpace(expr))
+	if err != nil || mins < 1 || mins > maxIntervalMinutes {
+		return &scheduleProblem{"invalid_interval",
+			fmt.Sprintf("schedule_expr must be a whole number of minutes from 1 to %d", maxIntervalMinutes)}, nil
+	}
+	switch targetType {
+	case "all":
+	case "device", "group":
+		if strings.TrimSpace(targetID) == "" {
+			return &scheduleProblem{"invalid_target", "target_id is required for a " + targetType + " target"}, nil
+		}
+	default:
+		return &scheduleProblem{"invalid_target", "target_type must be device, group or all"}, nil
+	}
+	if !checkTargets {
+		return nil, nil
+	}
+	ids, err := h.repo.GetTargetDeviceIDs(ctx, targetType, targetID)
+	if err != nil {
+		return nil, err
+	}
+	if len(ids) == 0 {
+		return &scheduleProblem{"no_targets", "the target resolves to no active devices"}, nil
+	}
+	return nil, nil
+}
+
 func (h *Handler) createSchedule(w http.ResponseWriter, r *http.Request) {
 	var req createScheduleReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -294,6 +339,15 @@ func (h *Handler) createSchedule(w http.ResponseWriter, r *http.Request) {
 	// Verify script exists
 	if _, err := h.repo.GetScriptByID(r.Context(), req.ScriptID); err != nil {
 		writeErr(w, http.StatusBadRequest, "referenced script does not exist")
+		return
+	}
+	problem, err := h.validateSchedule(r.Context(), req.TargetType, req.TargetID, req.ScheduleExpr, true)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if problem != nil {
+		writeErrCode(w, http.StatusBadRequest, problem.code, problem.msg)
 		return
 	}
 
@@ -411,6 +465,19 @@ func (h *Handler) updateSchedule(w http.ResponseWriter, r *http.Request) {
 		s.IsEnabled = *req.IsEnabled
 	}
 
+	// The merged schedule is what the poller will run, so it is what is
+	// checked. Targets are resolved only when the update changes them.
+	targetChanged := req.TargetType != nil || req.TargetID != nil
+	problem, err := h.validateSchedule(r.Context(), s.TargetType, s.TargetID, s.ScheduleExpr, targetChanged)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if problem != nil {
+		writeErrCode(w, http.StatusBadRequest, problem.code, problem.msg)
+		return
+	}
+
 	if err := h.repo.UpdateSchedule(r.Context(), s); err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
@@ -442,6 +509,10 @@ func (h *Handler) triggerSchedule(w http.ResponseWriter, r *http.Request) {
 	userID := auth.UserIDFromContext(r.Context())
 
 	run, err := h.scheduler.TriggerSchedule(r.Context(), id, userID)
+	if errors.Is(err, ErrRunInProgress) {
+		writeErrCode(w, http.StatusConflict, "run_in_progress", err.Error())
+		return
+	}
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
@@ -520,7 +591,9 @@ func normalizeTaskStatus(status string, exitCode int) string {
 	switch status {
 	case "completed":
 		return "success"
-	case "failed", "timeout":
+	case "failed", "timeout", "cancelled":
+		// cancelled is terminal for the agent; left as-is it was a status
+		// the rollup never counts as done, and the run never closed.
 		return "failed"
 	case "success", "":
 		if exitCode == 0 {
@@ -584,6 +657,11 @@ func (h *Handler) reportTaskResult(w http.ResponseWriter, r *http.Request) {
 
 func writeErr(w http.ResponseWriter, code int, msg string) {
 	writeJSON(w, code, map[string]string{"error": msg})
+}
+
+// writeErrCode adds a machine-readable code the console translates.
+func writeErrCode(w http.ResponseWriter, status int, code, msg string) {
+	writeJSON(w, status, map[string]string{"error": msg, "code": code})
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {

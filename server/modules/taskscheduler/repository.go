@@ -50,9 +50,17 @@ type ScheduledTaskRun struct {
 	ID          string     `json:"id" db:"id"`
 	ScheduleID  string     `json:"schedule_id" db:"schedule_id"`
 	ScriptID    string     `json:"script_id" db:"script_id"`
-	Status      string     `json:"status" db:"status"` // 'running', 'completed', 'failed'
+	Status      string     `json:"status" db:"status"` // 'running', 'completed', 'partial', 'failed'
 	TriggeredAt time.Time  `json:"triggered_at" db:"triggered_at"`
 	CompletedAt *time.Time `json:"completed_at" db:"completed_at"`
+	// ErrorMessage explains a run that failed with no device run to say why,
+	// such as a target that resolved to no devices.
+	ErrorMessage *string `json:"error_message" db:"error_message"`
+
+	// Device run tallies, filled by ListRuns.
+	DevicesTotal     int `json:"devices_total" db:"devices_total"`
+	DevicesSucceeded int `json:"devices_succeeded" db:"devices_succeeded"`
+	DevicesFailed    int `json:"devices_failed" db:"devices_failed"`
 
 	ScheduleName string `json:"schedule_name,omitempty" db:"schedule_name"`
 	ScriptName   string `json:"script_name,omitempty" db:"script_name"`
@@ -321,13 +329,19 @@ func (r *Repository) GetTargetDeviceIDs(ctx context.Context, targetType, targetI
 	switch targetType {
 	case "device":
 		var count int
-		_ = r.db.GetContext(ctx, &count, `SELECT COUNT(*) FROM devices WHERE id = ? AND retired_at IS NULL`, targetID)
+		if err := r.db.GetContext(ctx, &count, `SELECT COUNT(*) FROM devices WHERE id = ? AND retired_at IS NULL`, targetID); err != nil {
+			return nil, fmt.Errorf("check target device: %w", err)
+		}
 		if count > 0 {
 			ids = append(ids, targetID)
 		}
 	case "group":
+		// Joined to devices so a retired member is not a target. It used to
+		// be, and every run then failed it as "device is offline".
 		err := r.db.SelectContext(ctx, &ids, `
-			SELECT device_id FROM device_group_members WHERE group_id = ?
+			SELECT m.device_id FROM device_group_members m
+			JOIN devices d ON d.id = m.device_id
+			WHERE m.group_id = ? AND d.retired_at IS NULL
 		`, targetID)
 		if err != nil {
 			return nil, fmt.Errorf("select group devices: %w", err)
@@ -341,6 +355,13 @@ func (r *Repository) GetTargetDeviceIDs(ctx context.Context, targetType, targetI
 		return nil, fmt.Errorf("unsupported target_type: %s", targetType)
 	}
 	return ids, nil
+}
+
+// HasRunningRun reports whether the schedule has a run still in progress.
+func (r *Repository) HasRunningRun(ctx context.Context, scheduleID string) (bool, error) {
+	var n int
+	err := r.db.GetContext(ctx, &n, `SELECT COUNT(*) FROM scheduled_task_runs WHERE schedule_id = ? AND status = 'running'`, scheduleID)
+	return n > 0, err
 }
 
 // --- Run Tracking ---
@@ -422,12 +443,15 @@ func (r *Repository) CreateDeviceRun(ctx context.Context, runID, deviceID string
 	}, nil
 }
 
+// UpdateDeviceRunResult records a device run's outcome. A finished device run
+// is not rewritten: a report that arrives after the sweep failed the run, or
+// a retried report, used to overwrite the result and re-roll the parent.
 func (r *Repository) UpdateDeviceRunResult(ctx context.Context, id, status string, exitCode int, output, errMsg string) error {
 	now := time.Now().UTC()
 	_, err := r.db.ExecContext(ctx, `
 		UPDATE scheduled_task_device_runs SET
 			status = ?, exit_code = ?, output_log = ?, error_message = ?, completed_at = ?
-		WHERE id = ?
+		WHERE id = ? AND status NOT IN ('success', 'failed')
 	`, status, exitCode, output, errMsg, now, id)
 	return err
 }
@@ -496,18 +520,36 @@ func (r *Repository) rollupRunByID(ctx context.Context, runID string) error {
 		return nil
 	}
 
-	status := "completed"
-	if counts.Succeeded == 0 {
+	// completed when every device succeeded, failed when none did, partial
+	// for a mix -- one success out of fifty used to read "completed".
+	status := "partial"
+	switch counts.Succeeded {
+	case counts.Total:
+		status = "completed"
+	case 0:
 		status = "failed"
 	}
 	return r.CompleteRun(ctx, runID, status)
 }
 
+// CompleteRun closes a running run. A closed run keeps its first outcome and
+// time: the rollup is called again by late reports and by the sweep.
 func (r *Repository) CompleteRun(ctx context.Context, runID, status string) error {
 	now := time.Now().UTC()
 	_, err := r.db.ExecContext(ctx, `
-		UPDATE scheduled_task_runs SET status = ?, completed_at = ? WHERE id = ?
+		UPDATE scheduled_task_runs SET status = ?, completed_at = COALESCE(completed_at, ?)
+		WHERE id = ? AND status = 'running'
 	`, status, now, runID)
+	return err
+}
+
+// FailRun closes a running run that has no device run to report, with why.
+func (r *Repository) FailRun(ctx context.Context, runID, reason string) error {
+	now := time.Now().UTC()
+	_, err := r.db.ExecContext(ctx, `
+		UPDATE scheduled_task_runs SET status = 'failed', error_message = ?, completed_at = COALESCE(completed_at, ?)
+		WHERE id = ? AND status = 'running'
+	`, reason, now, runID)
 	return err
 }
 
@@ -518,9 +560,12 @@ func (r *Repository) ListRuns(ctx context.Context, scheduleID string, limit int)
 	runs := []ScheduledTaskRun{}
 	query := `
 		SELECT
-			r.id, r.schedule_id, r.script_id, r.status, r.triggered_at, r.completed_at,
+			r.id, r.schedule_id, r.script_id, r.status, r.triggered_at, r.completed_at, r.error_message,
 			COALESCE(s.name, '') as schedule_name,
-			COALESCE(sc.name, '') as script_name
+			COALESCE(sc.name, '') as script_name,
+			(SELECT COUNT(*) FROM scheduled_task_device_runs dr WHERE dr.run_id = r.id) AS devices_total,
+			(SELECT COUNT(*) FROM scheduled_task_device_runs dr WHERE dr.run_id = r.id AND dr.status = 'success') AS devices_succeeded,
+			(SELECT COUNT(*) FROM scheduled_task_device_runs dr WHERE dr.run_id = r.id AND dr.status = 'failed') AS devices_failed
 		FROM scheduled_task_runs r
 		LEFT JOIN task_schedules s ON s.id = r.schedule_id
 		LEFT JOIN script_templates sc ON sc.id = r.script_id
@@ -544,7 +589,7 @@ func (r *Repository) GetRunByID(ctx context.Context, id string) (*ScheduledTaskR
 	var run ScheduledTaskRun
 	query := `
 		SELECT
-			r.id, r.schedule_id, r.script_id, r.status, r.triggered_at, r.completed_at,
+			r.id, r.schedule_id, r.script_id, r.status, r.triggered_at, r.completed_at, r.error_message,
 			COALESCE(s.name, '') as schedule_name,
 			COALESCE(sc.name, '') as script_name
 		FROM scheduled_task_runs r

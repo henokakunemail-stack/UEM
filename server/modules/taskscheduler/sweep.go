@@ -97,6 +97,64 @@ func (r *Repository) AbandonOrphanedRuns(ctx context.Context, grace time.Duratio
 	return n, nil
 }
 
+// StaleGrace is how long past its script's own timeout a device run may stay
+// unreported, on a device that is online, before it is failed.
+const StaleGrace = 5 * time.Minute
+
+// AbandonStaleRuns fails device runs that outlived their script's timeout by
+// StaleGrace without a report, whether or not the device is online. The
+// agent kills a script at its timeout and reports; silence past that means
+// the command or the report was lost, and the run used to stay 'running'
+// forever because AbandonOrphanedRuns only looks at offline devices.
+func (r *Repository) AbandonStaleRuns(ctx context.Context) (int64, error) {
+	now := time.Now().UTC()
+	var rows []struct {
+		ID        string    `db:"id"`
+		RunID     string    `db:"run_id"`
+		StartedAt time.Time `db:"started_at"`
+		Timeout   int       `db:"timeout_seconds"`
+	}
+	if err := r.db.SelectContext(ctx, &rows, `
+		SELECT dr.id, dr.run_id, dr.started_at, COALESCE(sc.timeout_seconds, 300) AS timeout_seconds
+		FROM scheduled_task_device_runs dr
+		JOIN scheduled_task_runs ru ON ru.id = dr.run_id
+		LEFT JOIN script_templates sc ON sc.id = ru.script_id
+		WHERE dr.status IN ('pending', 'dispatched')
+		  AND dr.completed_at IS NULL
+		  AND dr.started_at < ?`, now.Add(-StaleGrace)); err != nil {
+		return 0, err
+	}
+
+	const msg = "no_report: the device sent no result within the script's timeout; the command or its result was lost."
+	var n int64
+	rolled := map[string]bool{}
+	for _, row := range rows {
+		timeout := time.Duration(row.Timeout) * time.Second
+		if timeout <= 0 {
+			timeout = 300 * time.Second
+		}
+		if now.Sub(row.StartedAt) < timeout+StaleGrace {
+			continue
+		}
+		res, err := r.db.ExecContext(ctx, `
+			UPDATE scheduled_task_device_runs SET status = 'failed', error_message = ?, completed_at = ?
+			WHERE id = ? AND status IN ('pending', 'dispatched')`, msg, now, row.ID)
+		if err != nil {
+			return n, err
+		}
+		if k, _ := res.RowsAffected(); k == 1 {
+			n++
+			rolled[row.RunID] = true
+		}
+	}
+	for runID := range rolled {
+		if err := r.rollupRunByID(ctx, runID); err != nil {
+			return n, err
+		}
+	}
+	return n, nil
+}
+
 // StartSweep reaps orphaned device runs until ctx is cancelled.
 //
 // The context is not decoration: without it this loop outlives the process it
@@ -118,6 +176,9 @@ func (r *Repository) StartSweep(ctx context.Context, interval, grace time.Durati
 					// transient error is a sweep that has silently stopped;
 					// the next tick is fifteen seconds away.
 					log.Warn().Err(err).Msg("scheduled task sweep: reap orphaned device runs")
+				}
+				if _, err := r.AbandonStaleRuns(ctx); err != nil {
+					log.Warn().Err(err).Msg("scheduled task sweep: reap stale device runs")
 				}
 			}
 		}

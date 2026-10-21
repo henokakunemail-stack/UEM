@@ -78,5 +78,22 @@
   "fixed_interval": "Interval Tetap",
   "interval_label": "Interval (menit)",
   "output_title": "Output Eksekusi Tugas",
-  "no_output": "(Tidak ada output yang tercatat)"
+  "no_output": "(Tidak ada output yang tercatat)",
+  "col_devices": "Perangkat",
+  "run_devices_summary": "{ok} berhasil, {failed} gagal dari {total}",
+  "run_no_targets": "Target tidak punya perangkat aktif",
+  "device_rows_failed": "Gagal memuat hasil per perangkat. Coba lagi.",
+  "select_group": "Grup",
+  "select_device": "Perangkat",
+  "choose": "Pilih...",
+  "interval_hint": "Menit antar-eksekusi, dari 1 sampai 43200 (30 hari).",
+  "error_invalid_interval": "Interval harus bilangan bulat menit dari 1 sampai 43200.",
+  "error_invalid_target": "Pilih target yang valid: semua perangkat, grup, atau perangkat.",
+  "error_no_targets": "Target yang dipilih tidak punya perangkat aktif.",
+  "error_run_in_progress": "Eksekusi sebelumnya dari jadwal ini belum selesai.",
+  "section_scripts": "skrip",
+  "section_schedules": "jadwal",
+  "section_runs": "riwayat eksekusi",
+  "section_groups": "grup",
+  "section_devices": "perangkat"
 }
