@@ -2,6 +2,7 @@ package backup
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -38,6 +40,9 @@ type RestoreResponseDTO struct {
 	Status       string `json:"status"`
 	Message      string `json:"message"`
 	SafetyBackup string `json:"safety_backup,omitempty"`
+	// RestoreID identifies this restore. The console polls its outcome by it
+	// after the restart, when its own session may no longer exist.
+	RestoreID string `json:"restore_id,omitempty"`
 }
 
 type Handler struct {
@@ -46,6 +51,11 @@ type Handler struct {
 	auditor   Auditor
 	authMw    func(http.Handler) http.Handler
 	onRestore func(candidate, safety string) error
+	// restoring is held from the request until the process exits, so a second
+	// restore cannot start while one runs.
+	restoring atomic.Bool
+	// exit ends the process after a restore; a field so tests can see the code.
+	exit func(code int)
 }
 
 func NewHandler(cfg config.Config, database *sqlx.DB, auditor Auditor, authMw func(http.Handler) http.Handler) *Handler {
@@ -54,6 +64,7 @@ func NewHandler(cfg config.Config, database *sqlx.DB, auditor Auditor, authMw fu
 		database: database,
 		auditor:  auditor,
 		authMw:   authMw,
+		exit:     os.Exit,
 	}
 }
 
@@ -64,6 +75,11 @@ func (h *Handler) WithOnRestore(fn func(candidate, safety string) error) *Handle
 }
 
 func (h *Handler) Register(r chi.Router) {
+	// Outside the auth group on purpose: after a restore the operator's
+	// session is in the database that was replaced. The 128-bit id from the
+	// restore response is the credential, and the answer is only the outcome.
+	r.Get("/api/system/backup/restore-status/{id}", h.handleRestoreStatusByID)
+
 	r.Group(func(cr chi.Router) {
 		cr.Use(h.authMw)
 		cr.Use(rbac.RequireRole(rbac.RoleAdmin))
@@ -75,6 +91,7 @@ func (h *Handler) Register(r chi.Router) {
 		cr.Delete("/api/system/backup/{filename}", h.handleDelete)
 		cr.Post("/api/system/backup/restore/{filename}", h.handleRestore)
 		cr.Post("/api/system/backup/upload-restore", h.handleUploadRestore)
+		cr.Get("/api/system/backup/restore-status", h.handleRestoreStatus)
 	})
 }
 
@@ -346,6 +363,16 @@ func (h *Handler) handleRestore(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, errors.New("restore is supported only on SQLite"))
 		return
 	}
+	if !h.restoring.CompareAndSwap(false, true) {
+		writeErrCode(w, http.StatusConflict, "restore_in_progress", "a restore is already running")
+		return
+	}
+	handedOff := false
+	defer func() {
+		if !handedOff {
+			h.restoring.Store(false)
+		}
+	}()
 
 	filename := chi.URLParam(r, "filename")
 	target, err := h.safeBackupPath(filename)
@@ -363,39 +390,12 @@ func (h *Handler) handleRestore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 1. Verify candidate database integrity
 	if err := db.QuickCheck(target); err != nil {
 		writeErr(w, http.StatusBadRequest, fmt.Errorf("backup candidate integrity check failed: %w", err))
 		return
 	}
 
-	// 2. Take automatic pre-restore safety snapshot
-	dir := h.cfg.BackupDir
-	if dir == "" {
-		dir = filepath.Join(filepath.Dir(h.cfg.DBPath), "backups")
-	}
-	safetyName := fmt.Sprintf("endpoint-mgmt-pre-restore-%s.db", time.Now().UTC().Format("20060102T150405Z"))
-	safetyPath := filepath.Join(dir, safetyName)
-	if err := db.Snapshot(h.database, safetyPath); err != nil {
-		log.Warn().Err(err).Msg("failed to take pre-restore safety snapshot")
-	}
-
-	// 3. Log audit action
-	actorID := auth.UserIDFromContext(r.Context())
-	_ = h.auditor.Log(r.Context(), "user", actorID, "system.backup_restore", filename, map[string]string{
-		"source":        filename,
-		"safety_backup": safetyName,
-	})
-
-	// 4. Return success response
-	writeJSON(w, http.StatusOK, RestoreResponseDTO{
-		Status:       "restoring",
-		Message:      "Database validated. System restore initiated. Reconnecting...",
-		SafetyBackup: safetyName,
-	})
-
-	// 5. Trigger asynchronous restore worker
-	go h.triggerRestore(target, safetyPath)
+	handedOff = h.beginRestore(w, r, target, filename, "system.backup_restore", map[string]string{"source": filename})
 }
 
 func (h *Handler) handleUploadRestore(w http.ResponseWriter, r *http.Request) {
@@ -403,6 +403,18 @@ func (h *Handler) handleUploadRestore(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, errors.New("restore is supported only on SQLite"))
 		return
 	}
+	// Taken before the upload is read, so a second upload is refused before
+	// half a gigabyte is spooled to disk.
+	if !h.restoring.CompareAndSwap(false, true) {
+		writeErrCode(w, http.StatusConflict, "restore_in_progress", "a restore is already running")
+		return
+	}
+	handedOff := false
+	defer func() {
+		if !handedOff {
+			h.restoring.Store(false)
+		}
+	}()
 
 	// Cap multipart form to 500 MiB
 	if err := r.ParseMultipartForm(500 << 20); err != nil {
@@ -422,13 +434,8 @@ func (h *Handler) handleUploadRestore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	dir := h.cfg.BackupDir
-	if dir == "" {
-		dir = filepath.Join(filepath.Dir(h.cfg.DBPath), "backups")
-	}
-
 	uploadedName := fmt.Sprintf("endpoint-mgmt-uploaded-%s.db", time.Now().UTC().Format("20060102T150405Z"))
-	uploadedPath := filepath.Join(dir, uploadedName)
+	uploadedPath := filepath.Join(h.backupDir(), uploadedName)
 
 	dst, err := os.OpenFile(uploadedPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
@@ -451,30 +458,74 @@ func (h *Handler) handleUploadRestore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Pre-restore safety snapshot
-	safetyName := fmt.Sprintf("endpoint-mgmt-pre-restore-%s.db", time.Now().UTC().Format("20060102T150405Z"))
-	safetyPath := filepath.Join(dir, safetyName)
-	if err := db.Snapshot(h.database, safetyPath); err != nil {
-		log.Warn().Err(err).Msg("failed to take pre-restore safety snapshot")
-	}
-
-	actorID := auth.UserIDFromContext(r.Context())
-	_ = h.auditor.Log(r.Context(), "user", actorID, "system.backup_restore_upload", header.Filename, map[string]string{
+	handedOff = h.beginRestore(w, r, uploadedPath, uploadedName, "system.backup_restore_upload", map[string]string{
 		"original_filename": header.Filename,
 		"stored_filename":   uploadedName,
-		"safety_backup":     safetyName,
 	})
+}
+
+func (h *Handler) backupDir() string {
+	if h.cfg.BackupDir != "" {
+		return h.cfg.BackupDir
+	}
+	return filepath.Join(filepath.Dir(h.cfg.DBPath), "backups")
+}
+
+// beginRestore is the part both restore routes share once the candidate is
+// valid. It reports whether the restore was handed to the worker (which then
+// owns the restoring flag until the process exits).
+//
+// The order is deliberate:
+//  1. The request is audited before the safety snapshot, so the entry is
+//     inside the snapshot and survives a rollback. Written after it, as
+//     before, it existed only in the database the restore threw away.
+//  2. A restore without a safety snapshot is not started: there would be
+//     nothing to roll back to. It used to log a warning and go ahead.
+//  3. The pending marker is written before the response, so a crash at any
+//     later point is recorded as an interrupted restore at the next start.
+func (h *Handler) beginRestore(w http.ResponseWriter, r *http.Request, candidate, source, action string, details map[string]string) bool {
+	actorID := auth.UserIDFromContext(r.Context())
+	safetyName := fmt.Sprintf("endpoint-mgmt-pre-restore-%s.db", time.Now().UTC().Format("20060102T150405Z"))
+	safetyPath := filepath.Join(h.backupDir(), safetyName)
+
+	details["safety_backup"] = safetyName
+	_ = h.auditor.Log(r.Context(), "user", actorID, action, source, details)
+
+	if err := db.Snapshot(h.database, safetyPath); err != nil {
+		log.Error().Err(err).Msg("restore refused: pre-restore safety snapshot failed")
+		_ = h.auditor.Log(r.Context(), "user", actorID, "system.backup_restore_failed", source, map[string]string{
+			"source": source, "reason": "safety_snapshot_failed", "error": err.Error(),
+		})
+		writeErrCode(w, http.StatusInternalServerError, "safety_snapshot_failed",
+			"the safety snapshot taken before every restore failed, so the restore was not started: "+err.Error())
+		return false
+	}
+
+	m := &RestoreMarker{
+		ID:           newRestoreID(),
+		State:        RestorePending,
+		Source:       source,
+		SafetyBackup: safetyName,
+		ActorID:      actorID,
+		RequestedAt:  time.Now().UTC(),
+	}
+	if err := writeMarker(h.cfg.DBPath, m); err != nil {
+		writeErrCode(w, http.StatusInternalServerError, "restore_marker_failed",
+			"could not record the restore, so it was not started: "+err.Error())
+		return false
+	}
 
 	writeJSON(w, http.StatusOK, RestoreResponseDTO{
 		Status:       "restoring",
-		Message:      "Uploaded database validated. System restore initiated. Reconnecting...",
+		Message:      "Database validated. System restore initiated. Reconnecting...",
 		SafetyBackup: safetyName,
+		RestoreID:    m.ID,
 	})
-
-	go h.triggerRestore(uploadedPath, safetyPath)
+	go h.triggerRestore(candidate, safetyPath, m)
+	return true
 }
 
-func (h *Handler) triggerRestore(candidatePath, safetyPath string) {
+func (h *Handler) triggerRestore(candidatePath, safetyPath string, m *RestoreMarker) {
 	// Give HTTP response 500ms to completely write and flush to client
 	time.Sleep(500 * time.Millisecond)
 
@@ -482,22 +533,92 @@ func (h *Handler) triggerRestore(candidatePath, safetyPath string) {
 		if err := h.onRestore(candidatePath, safetyPath); err != nil {
 			log.Error().Err(err).Msg("onRestore hook failed")
 		}
+		h.restoring.Store(false)
 		return
 	}
 
+	code := h.performRestore(candidatePath, safetyPath, m)
+	log.Warn().Int("exit_code", code).Msg("restore finished; the server exits now and is restarted by its " +
+		"service manager (systemd, Docker, Windows service). Run by hand, start it again.")
+	h.exit(code)
+}
+
+// performRestore replaces the database and records the outcome, returning the
+// exit code. It never leaves the process running: the database handle every
+// module shares is closed here, and a server that kept serving after a failed
+// restore -- as it used to -- answered every request with "database is
+// closed" until someone restarted it by hand, while the console reported
+// success. Exiting 1 hands the restart to the service manager, which reopens
+// whichever database is in place: the restored one, or the rolled-back one.
+func (h *Handler) performRestore(candidatePath, safetyPath string, m *RestoreMarker) int {
 	log.Warn().Str("candidate", candidatePath).Msg("initiating database restore")
+	// Fold the WAL into the main file first, so the copy the safety snapshot
+	// does not cover is not lost when Restore removes the -wal sidecar.
+	_, _ = h.database.Exec("PRAGMA wal_checkpoint(TRUNCATE)")
 	_ = h.database.Close()
 
-	if err := db.Restore(candidatePath, h.cfg.DBPath); err != nil {
-		log.Error().Err(err).Msg("database restore failed, attempting rollback to safety backup")
-		if safetyPath != "" {
-			_ = db.Restore(safetyPath, h.cfg.DBPath)
+	err := db.Restore(candidatePath, h.cfg.DBPath)
+	now := time.Now().UTC()
+	m.FinishedAt = &now
+	if err == nil {
+		m.State = RestoreSucceeded
+		if werr := writeMarker(h.cfg.DBPath, m); werr != nil {
+			log.Error().Err(werr).Msg("restore succeeded but its marker could not be written")
 		}
-		return
+		log.Info().Msg("database restored successfully")
+		return 0
 	}
 
-	log.Info().Msg("database restored successfully; restarting server process")
-	os.Exit(0)
+	log.Error().Err(err).Msg("database restore failed, rolling back to the safety snapshot")
+	m.State, m.Error = RestoreFailed, err.Error()
+	if rbErr := db.Restore(safetyPath, h.cfg.DBPath); rbErr != nil {
+		m.ErrorCode = ErrCodeRollbackFailed
+		m.Error += "; rollback to " + filepath.Base(safetyPath) + " also failed: " + rbErr.Error()
+		log.Error().Err(rbErr).Msg("rollback to the safety snapshot failed")
+	} else {
+		m.ErrorCode, m.RolledBack = ErrCodeRestoreFailed, true
+	}
+	if werr := writeMarker(h.cfg.DBPath, m); werr != nil {
+		log.Error().Err(werr).Msg("restore failed and its marker could not be written")
+	}
+	return 1
+}
+
+// handleRestoreStatus shows the last restore to an admin.
+func (h *Handler) handleRestoreStatus(w http.ResponseWriter, r *http.Request) {
+	m, err := ReadRestoreMarker(h.cfg.DBPath)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	if m == nil {
+		writeJSON(w, http.StatusOK, map[string]string{"state": "none"})
+		return
+	}
+	writeJSON(w, http.StatusOK, m)
+}
+
+// handleRestoreStatusByID answers the console waiting on a restore it asked
+// for. Without a session, so only for the matching id and only the outcome.
+func (h *Handler) handleRestoreStatusByID(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	m, err := ReadRestoreMarker(h.cfg.DBPath)
+	if err != nil || m == nil || len(id) != len(m.ID) ||
+		subtle.ConstantTimeCompare([]byte(id), []byte(m.ID)) != 1 {
+		writeErr(w, http.StatusNotFound, errors.New("restore not found"))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"id":          m.ID,
+		"state":       m.State,
+		"finished_at": m.FinishedAt,
+		"error_code":  m.ErrorCode,
+		"rolled_back": m.RolledBack,
+	})
+}
+
+func writeErrCode(w http.ResponseWriter, status int, code, msg string) {
+	writeJSON(w, status, map[string]string{"error": msg, "code": code})
 }
 
 func writeErr(w http.ResponseWriter, code int, err error) {

@@ -284,6 +284,18 @@ func run(cfg config.Config, stopService *context.CancelFunc) error {
 		return fmt.Errorf("bootstrap admin: %w", err)
 	}
 
+	// A restore finishes by exiting; its outcome waits in a marker next to the
+	// database. Record it in the audit trail of the database now live, and
+	// turn a restore the process died in the middle of into a visible failure.
+	if !db.IsPostgres(database) {
+		if m, err := backup.FinalizeRestoreMarker(context.Background(), cfg.DBPath, &auditAdapter{db: database}); err != nil {
+			log.Warn().Err(err).Msg("restore marker")
+		} else if m != nil && m.State != backup.RestoreSucceeded && m.State != backup.RestorePending {
+			log.Error().Str("restore_id", m.ID).Str("error_code", m.ErrorCode).Bool("rolled_back", m.RolledBack).
+				Msg("the last database restore failed")
+		}
+	}
+
 	srv, app := buildServer(cfg, database)
 
 	ctx, cancel := context.WithCancel(context.Background())

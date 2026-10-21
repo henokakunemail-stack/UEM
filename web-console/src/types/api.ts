@@ -893,5 +893,20 @@ export interface RestoreResponseDTO {
   status: string
   message: string
   safety_backup?: string
+  /** Identifies this restore; its outcome is read by it after the restart. */
+  restore_id?: string
+}
+
+/** The last restore, as an admin sees it. state is "none" when there was none. */
+export interface RestoreMarkerDTO {
+  id?: string
+  state: 'none' | 'pending' | 'succeeded' | 'failed'
+  source?: string
+  safety_backup?: string
+  requested_at?: string
+  finished_at?: string
+  error_code?: string
+  error?: string
+  rolled_back?: boolean
 }
 

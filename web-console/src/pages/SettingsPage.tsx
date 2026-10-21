@@ -15,7 +15,8 @@ import {
   Users,
   XCircle,
 } from 'lucide-react'
-import { api } from '../services/api'
+import { ApiError, api } from '../services/api'
+import { waitForRestore } from './settings/restorePoller'
 import { useToast } from '../context/ToastContext'
 import { useT } from '../i18n/core'
 import { ConfirmDialog } from '../components/ui/ConfirmDialog'
@@ -25,6 +26,7 @@ import type {
   DirectoryConfigDTO,
   DirectoryContactDTO,
   DirectorySyncPlanDTO,
+  RestoreMarkerDTO,
 } from '../types/api'
 
 // Directory sync only. Nothing here creates a console account: a synced contact
@@ -104,6 +106,10 @@ export function SettingsPage({ activeTab = 'directory', onTabChange }: SettingsP
   const [confirmUploadRestore, setConfirmUploadRestore] = useState(false)
   const [reconnecting, setReconnecting] = useState(false)
   const [reconnectCount, setReconnectCount] = useState(0)
+  // The restore being waited on, and the server process that took the request:
+  // only a different process can report how the restore ended.
+  const [pendingRestore, setPendingRestore] = useState<{ id: string; beforeNode: string | null } | null>(null)
+  const [lastRestore, setLastRestore] = useState<RestoreMarkerDTO | null>(null)
 
   const toast = useToast()
 
@@ -137,33 +143,52 @@ export function SettingsPage({ activeTab = 'directory', onTabChange }: SettingsP
   useEffect(() => {
     if (activeTab === 'backup') {
       void loadBackups()
+      api.getLastRestoreStatus().then(setLastRestore).catch(() => setLastRestore(null))
     }
   }, [activeTab, loadBackups])
 
-  // Reconnection poller after database restore
+  // Wait for the restore to finish in a new server process, then say how it
+  // ended. See restorePoller.ts for why the first answer from /healthz is not it.
   useEffect(() => {
-    if (!reconnecting) return
+    if (!reconnecting || !pendingRestore) return
     let stopped = false
-    const timer = setInterval(async () => {
-      setReconnectCount((c) => c + 1)
-      try {
-        const res = await fetch('/healthz')
-        if (res.ok && !stopped) {
-          clearInterval(timer)
-          toast.success(t('settings.restore_back_online'), t('settings.toast_restore_complete'))
-          setTimeout(() => {
-            window.location.reload()
-          }, 1200)
-        }
-      } catch {
-        // Server still restarting / reconnecting, keep polling
+    const ticker = setInterval(() => setReconnectCount((c) => c + 1), 2000)
+    void waitForRestore(pendingRestore.beforeNode, pendingRestore.id, {
+      fetchNode: (signal) => api.getHealthNode(signal),
+      fetchStatus: (id, signal) => api.getRestoreStatus(id, signal),
+      sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+      now: () => Date.now(),
+    }).then((outcome) => {
+      clearInterval(ticker)
+      if (stopped) return
+      setReconnecting(false)
+      setPendingRestore(null)
+      setRestoring(false)
+      if (outcome === 'succeeded') {
+        toast.success(t('settings.restore_back_online') + ' ' + t('settings.restore_signin_again'), t('settings.toast_restore_complete'))
+        setTimeout(() => window.location.reload(), 1500)
+      } else if (outcome === 'failed') {
+        toast.error(t('settings.restore_failed_rolled_back'), t('settings.toast_restore_failed'))
+        void loadBackups()
+        api.getLastRestoreStatus().then(setLastRestore).catch(() => {})
+      } else if (outcome === 'rollback_failed') {
+        toast.error(t('settings.restore_failed_rollback_failed'), t('settings.toast_restore_failed'))
+      } else {
+        toast.error(t('settings.restore_timeout'), t('settings.toast_restore_failed'))
       }
-    }, 2000)
+    })
     return () => {
       stopped = true
-      clearInterval(timer)
+      clearInterval(ticker)
     }
-  }, [reconnecting])
+  }, [reconnecting, pendingRestore])
+
+  // The server's refusals of a restore request, translated.
+  const restoreError = (err: unknown, fallbackKey: string) => {
+    if (err instanceof ApiError && err.code === 'restore_in_progress') return t('settings.restore_in_progress')
+    if (err instanceof ApiError && err.code === 'safety_snapshot_failed') return t('settings.restore_safety_snapshot_failed')
+    return err instanceof Error && err.message ? err.message : t(fallbackKey)
+  }
 
   // Directory handlers
   const updateConfig = (patch: Partial<DirectoryConfigDTO>) => {
@@ -323,13 +348,16 @@ export function SettingsPage({ activeTab = 'directory', onTabChange }: SettingsP
   const handleConfirmRestore = async () => {
     if (!restoreTarget) return
     setRestoring(true)
+    const beforeNode = await api.getHealthNode().catch(() => null)
     try {
       const res = await api.restoreBackup(restoreTarget.filename)
       toast.info(res.message || t('settings.restore_verified'), t('settings.toast_restoring'))
       setRestoreTarget(null)
+      setReconnectCount(0)
+      setPendingRestore({ id: res.restore_id || '', beforeNode })
       setReconnecting(true)
-    } catch (err: any) {
-      toast.error(err.message || t('settings.restore_verify_failed'), t('settings.toast_restore_failed'))
+    } catch (err: unknown) {
+      toast.error(restoreError(err, 'settings.restore_verify_failed'), t('settings.toast_restore_failed'))
       setRestoring(false)
     }
   }
@@ -337,14 +365,17 @@ export function SettingsPage({ activeTab = 'directory', onTabChange }: SettingsP
   const handleConfirmUploadRestore = async () => {
     if (!uploadFile) return
     setRestoring(true)
+    const beforeNode = await api.getHealthNode().catch(() => null)
     try {
       const res = await api.uploadAndRestoreBackup(uploadFile)
       toast.info(res.message || t('settings.upload_verified'), t('settings.toast_restoring'))
       setConfirmUploadRestore(false)
       setUploadFile(null)
+      setReconnectCount(0)
+      setPendingRestore({ id: res.restore_id || '', beforeNode })
       setReconnecting(true)
-    } catch (err: any) {
-      toast.error(err.message || t('settings.upload_restore_failed'), t('settings.toast_restore_failed'))
+    } catch (err: unknown) {
+      toast.error(restoreError(err, 'settings.upload_restore_failed'), t('settings.toast_restore_failed'))
       setRestoring(false)
     }
   }
@@ -680,6 +711,21 @@ export function SettingsPage({ activeTab = 'directory', onTabChange }: SettingsP
               })}
             </div>
           </div>
+
+          {/* The last restore's outcome, read from the server: after a restart
+              it is the only place a failed restore is still visible. */}
+          {lastRestore && (lastRestore.state === 'succeeded' || lastRestore.state === 'failed') && (
+            <div className={lastRestore.state === 'succeeded' ? 'alert-banner' : 'error-banner'} role="status" style={{ marginBottom: '1rem' }}>
+              <strong>{t('settings.last_restore_title')}:</strong>{' '}
+              {lastRestore.state === 'succeeded'
+                ? t('settings.last_restore_succeeded', { time: formatDateTime(lastRestore.finished_at || lastRestore.requested_at || ''), source: lastRestore.source || '' })
+                : t('settings.last_restore_failed', {
+                    time: formatDateTime(lastRestore.finished_at || lastRestore.requested_at || ''),
+                    code: lastRestore.error_code || '',
+                    rolled: lastRestore.rolled_back ? t('settings.yes') : t('settings.no'),
+                  })}
+            </div>
+          )}
 
           {/* Stats KPI Cards */}
           <div className="kpi-grid">

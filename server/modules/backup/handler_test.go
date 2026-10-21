@@ -243,6 +243,9 @@ func TestBackup_Restore(t *testing.T) {
 		t.Errorf("expected safety backup to be generated")
 	}
 
+	// The worker releases the restore lock just after the hook returns.
+	waitIdle(t, h)
+
 	// Attempt restore of a corrupt file
 	corruptPath := filepath.Join(backupDir, "corrupt.db")
 	_ = os.WriteFile(corruptPath, []byte("NOT A SQLITE FILE"), 0o600)

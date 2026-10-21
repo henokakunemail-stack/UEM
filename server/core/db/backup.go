@@ -6,7 +6,9 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/jmoiron/sqlx"
@@ -59,8 +61,13 @@ func Snapshot(d *sqlx.DB, destPath string) error {
 }
 
 // pruneOldest removes snapshots beyond the retention window, oldest first.
-// Only files whose name starts with prefix are considered, so unrelated files
-// in the same directory are never touched.
+//
+// Only the hourly job's own files are considered: <prefix>-YYYYMMDDTHHMMSSZ.db.
+// Manual backups (<prefix>-manual-...), uploads (<prefix>-uploaded-...) and the
+// safety snapshot taken before every restore (<prefix>-pre-restore-...) share
+// the prefix, and matching on the prefix alone let the hourly rotation delete
+// the very file a failed restore would roll back to. Those are kept until an
+// operator deletes them.
 func pruneOldest(dir, prefix string, retain int) error {
 	if retain <= 0 {
 		return nil
@@ -75,7 +82,7 @@ func pruneOldest(dir, prefix string, retain int) error {
 		if e.IsDir() || filepath.Ext(name) != ".db" {
 			continue
 		}
-		if prefix != "" && (len(name) < len(prefix) || name[:len(prefix)] != prefix) {
+		if !isAutoSnapshotName(name, prefix) {
 			continue
 		}
 		snapshots = append(snapshots, filepath.Join(dir, name))
@@ -212,7 +219,37 @@ func Restore(sourcePath, destPath string) error {
 		return fmt.Errorf("replace dest db %s: %w\n"+
 			"  if the server is running, stop it first (an open database cannot be replaced)", destPath, err)
 	}
+	// The rename is only durable once the directory entry is: a power loss
+	// right after could otherwise bring back the old name.
+	syncDir(filepath.Dir(destPath))
 	return nil
+}
+
+// syncDir flushes a directory entry, best effort. Windows cannot open a
+// directory for syncing, and its rename is already durable on NTFS.
+func syncDir(dir string) {
+	if runtime.GOOS == "windows" {
+		return
+	}
+	if d, err := os.Open(dir); err == nil {
+		_ = d.Sync()
+		_ = d.Close()
+	}
+}
+
+// isAutoSnapshotName reports whether name is one the backup job writes:
+// <prefix>-YYYYMMDDTHHMMSSZ.db, and nothing else.
+func isAutoSnapshotName(name, prefix string) bool {
+	stamp, ok := strings.CutPrefix(name, prefix+"-")
+	if !ok {
+		return false
+	}
+	stamp, ok = strings.CutSuffix(stamp, ".db")
+	if !ok {
+		return false
+	}
+	_, err := time.Parse("20060102T150405Z", stamp)
+	return err == nil
 }
 
 // QuickCheck reports whether the SQLite database at path is structurally sound.
@@ -255,6 +292,12 @@ func copyFile(src, dst string) error {
 	if _, err := io.Copy(out, in); err != nil {
 		out.Close()
 		return fmt.Errorf("copy source file: %w", err)
+	}
+	// On disk before it is renamed over the live database: a crash after the
+	// rename must not leave a file whose contents never left the page cache.
+	if err := out.Sync(); err != nil {
+		out.Close()
+		return fmt.Errorf("sync temp restore file: %w", err)
 	}
 	if err := out.Close(); err != nil {
 		return fmt.Errorf("close temp restore file: %w", err)

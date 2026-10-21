@@ -137,5 +137,16 @@
   "restore_verify_failed": "Verifikasi pemulihan gagal",
   "toast_restore_failed": "Pemulihan Gagal",
   "upload_verified": "Cadangan unggahan terverifikasi. Server sedang dimulai ulang...",
-  "upload_restore_failed": "Unggah & pulihkan gagal"
+  "upload_restore_failed": "Unggah & pulihkan gagal",
+  "restore_signin_again": "Masuk lagi bila diminta: sesi Anda ada di database yang diganti.",
+  "restore_failed_rolled_back": "Restore gagal. Database sebelumnya dipasang kembali dan server dijalankan ulang dengannya; tidak ada data yang hilang.",
+  "restore_failed_rollback_failed": "Restore gagal dan pemasangan kembali database sebelumnya juga gagal. Periksa log server dan pulihkan snapshot pre-restore secara manual.",
+  "restore_timeout": "Server tidak kembali dalam 3 menit. Pastikan layanannya berjalan; hasilnya tampil di Restore terakhir setelah server menyala.",
+  "restore_in_progress": "Sebuah restore sedang berjalan.",
+  "restore_safety_snapshot_failed": "Snapshot pengaman yang diambil sebelum setiap restore gagal, sehingga restore tidak dijalankan.",
+  "last_restore_title": "Restore terakhir",
+  "last_restore_succeeded": "Berhasil pada {time} dari {source}.",
+  "last_restore_failed": "Gagal pada {time} ({code}). Dikembalikan: {rolled}.",
+  "yes": "ya",
+  "no": "tidak"
 }

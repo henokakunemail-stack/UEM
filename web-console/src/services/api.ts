@@ -55,6 +55,7 @@ import type {
   VerifyUninstallTokenResp,
   BackupFileDTO,
   RestoreResponseDTO,
+  RestoreMarkerDTO,
 } from '../types/api'
 
 const TOKEN_KEY = 'em_access_token'
@@ -1192,6 +1193,25 @@ export const api = {
       method: 'POST',
       body: formData,
     })
+  },
+
+  /** The node id of the server process answering, from /healthz. */
+  async getHealthNode(signal?: AbortSignal): Promise<string> {
+    const res = await fetch('/healthz', { signal, cache: 'no-store' })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const body = (await res.json()) as { node?: string }
+    return body.node || ''
+  },
+
+  /** A restore's outcome by its id. Needs no session: after a restore the
+   *  session may be in the database that was replaced. */
+  async getRestoreStatus(id: string, signal?: AbortSignal): Promise<{ state: string; error_code?: string }> {
+    const restoreId = encodeURIComponent(id)
+    return request<{ state: string; error_code?: string }>(`/api/system/backup/restore-status/${restoreId}`, { signal })
+  },
+
+  async getLastRestoreStatus(): Promise<RestoreMarkerDTO> {
+    return request<RestoreMarkerDTO>('/api/system/backup/restore-status')
   },
 
   async downloadBackup(filename: string): Promise<Blob> {

@@ -92,7 +92,8 @@ func TestPruneOldest_KeepsNewestN(t *testing.T) {
 
 	// Six snapshots, oldest to newest, plus an unrelated file that must survive.
 	for i := 0; i < 6; i++ {
-		name := filepath.Join(dir, "endpoint-mgmt-2026010"+string(rune('1'+i))+".db")
+		// The name the backup job writes: <prefix>-YYYYMMDDTHHMMSSZ.db.
+		name := filepath.Join(dir, "endpoint-mgmt-2026010"+string(rune('1'+i))+"T120000Z.db")
 		if err := os.WriteFile(name, []byte("snap"), 0o600); err != nil {
 			t.Fatalf("write %s: %v", name, err)
 		}
@@ -134,7 +135,8 @@ func TestPruneOldest_KeepsNewestN(t *testing.T) {
 func TestPruneOldest_NoopUnderRetention(t *testing.T) {
 	dir := t.TempDir()
 	for i := 0; i < 2; i++ {
-		name := filepath.Join(dir, "endpoint-mgmt-2026010"+string(rune('1'+i))+".db")
+		// The name the backup job writes: <prefix>-YYYYMMDDTHHMMSSZ.db.
+		name := filepath.Join(dir, "endpoint-mgmt-2026010"+string(rune('1'+i))+"T120000Z.db")
 		if err := os.WriteFile(name, []byte("snap"), 0o600); err != nil {
 			t.Fatalf("write: %v", err)
 		}
@@ -228,5 +230,44 @@ func TestBackupAndRestore_CLIHelpers(t *testing.T) {
 	}
 	if count != 1 {
 		t.Errorf("expected 1 device in restored db, got %d", count)
+	}
+}
+
+// The hourly rotation used to match on the prefix alone, so it deleted manual
+// backups, uploads and the safety snapshot a failed restore rolls back to.
+func TestPruneOldestKeepsManualUploadedAndPreRestoreFiles(t *testing.T) {
+	dir := t.TempDir()
+	old := time.Now().Add(-72 * time.Hour)
+	keep := []string{
+		"endpoint-mgmt-pre-restore-20260101T000000Z.db",
+		"endpoint-mgmt-manual-20260101T000000Z.db",
+		"endpoint-mgmt-uploaded-20260101T000000Z.db",
+	}
+	for _, name := range keep {
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		_ = os.Chtimes(p, old, old)
+	}
+	for i, stamp := range []string{"20260105T000000Z", "20260106T000000Z"} {
+		p := filepath.Join(dir, "endpoint-mgmt-"+stamp+".db")
+		if err := os.WriteFile(p, []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		mod := time.Now().Add(time.Duration(i) * time.Hour)
+		_ = os.Chtimes(p, mod, mod)
+	}
+
+	if err := pruneOldest(dir, "endpoint-mgmt", 1); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range keep {
+		if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
+			t.Errorf("%s was pruned: %v", name, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, "endpoint-mgmt-20260105T000000Z.db")); !os.IsNotExist(err) {
+		t.Error("the older automatic snapshot was not pruned")
 	}
 }
