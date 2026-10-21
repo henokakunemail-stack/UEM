@@ -41,5 +41,8 @@
   "ack_incident": "Konfirmasi insiden",
   "ack": "Konfirmasi",
   "resolve_incident": "Selesaikan insiden",
-  "resolve": "Selesaikan"
+  "resolve": "Selesaikan",
+  "text_disk_low": "{host}: sisa disk {free}% (ambang {threshold}%)",
+  "text_offline": "{host}: offline selama {minutes} menit",
+  "text_patches": "{host}: {count} patch kritis belum terpasang"
 }

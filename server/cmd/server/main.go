@@ -829,7 +829,7 @@ func buildServer(cfg config.Config, database *sqlx.DB) (*http.Server, *serverApp
 
 	// Phase 9: alerting & notification engine.
 	alertRepo := alerting.NewRepository(database)
-	alertEval := alerting.NewEvaluator(database, alertRepo)
+	alertEval := alerting.NewEvaluator(database, alertRepo).WithAuditor(&auditAdapter{db: database})
 	alertH := alerting.NewHandler(alertRepo, alertEval, &auditAdapter{db: database}, jwtSvc.RequireAuth)
 	alertH.Register(r)
 	leaderOnly = append(leaderOnly, func(ctx context.Context) { alertEval.StartBackgroundEvaluator(ctx, 30*time.Second) })
@@ -1025,6 +1025,9 @@ func buildServer(cfg config.Config, database *sqlx.DB) (*http.Server, *serverApp
 	})
 	// Patch install jobs with no result for 30 minutes are failed as no_report.
 	leaderOnly = append(leaderOnly, func(ctx context.Context) { patchRepo.StartSweep(ctx, patchmgmt.SweepInterval) })
+	// Enrollment rows that never checked in are retired a week after their
+	// token expired, so they stop counting as offline devices.
+	leaderOnly = append(leaderOnly, func(ctx context.Context) { go invH.RunPendingSweep(ctx, time.Hour) })
 	// Campaign waves are a schedule in the database, released by whichever
 	// node leads; the same loop retries queued updates for online devices.
 	leaderOnly = append(leaderOnly, func(ctx context.Context) { go updateH.RunWaves(ctx, agentupdate.WaveInterval) })

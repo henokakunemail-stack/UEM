@@ -72,3 +72,28 @@ describe('DashboardPage with no data', () => {
     expect(container.querySelectorAll('.kpi-card.unknown').length).toBe(0)
   })
 })
+
+describe('DashboardPage health alerts total', () => {
+  beforeEach(() => {
+    for (const fn of Object.values(api)) fn.mockReset()
+  })
+
+  // The card was the length of a list the server caps at 15 + 15.
+  it('shows the total from the summary, not the length of the first page', async () => {
+    api.getDashboardSummary.mockResolvedValue({
+      total_devices: 50, online_devices: 50, offline_devices: 0, retired_devices: 0, online_pct: 100,
+      low_disk_alerts: 40, recent_hw_changes_24h: 0, sites_count: 1, pending_devices: 0, alerts_total: 40,
+    })
+    api.getDashboardSites.mockResolvedValue([])
+    api.getDashboardOS.mockResolvedValue([])
+    api.getDashboardAlerts.mockResolvedValue(Array.from({ length: 30 }, (_, i) => ({
+      id: `a${i}`, type: 'low_disk', severity: 'warning', device_id: `d${i}`, hostname: `h${i}`, site: '', message: '', timestamp: '2026-10-21T08:00:00Z', value: 3,
+    })))
+    api.getDashboardActivity.mockResolvedValue([])
+    const { container } = renderDashboard('en')
+    await waitFor(() => {
+      const card = [...container.querySelectorAll('.kpi-card')].find((c) => c.textContent?.includes('ACTIVE HEALTH ALERTS'))
+      expect(card?.querySelector('.kpi-value')?.textContent).toBe('40')
+    })
+  })
+})

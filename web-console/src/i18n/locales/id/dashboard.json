@@ -83,5 +83,8 @@
   "severity_warning": "PERINGATAN",
   "severity_info": "INFO",
   "view_endpoint": "Lihat perangkat {name}",
-  "view_endpoint_details": "Lihat detail perangkat {name}"
+  "view_endpoint_details": "Lihat detail perangkat {name}",
+  "alert_low_disk": "Sisa ruang disk rendah: {free}% tersisa",
+  "alert_offline_since": "Tidak terjangkau sejak {date}",
+  "pending_enrollments": "{count} enrollment belum terhubung (tidak dihitung)"
 }

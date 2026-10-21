@@ -33,9 +33,9 @@ func newTickingEvaluator(t *testing.T) (*Evaluator, *sqlx.DB) {
 	now := time.Now().UTC()
 	if _, err := database.Exec(`
 		INSERT INTO devices (id, hostname, os_name, os_version, agent_version, status,
-			device_secret_hash, enrolled_at, created_at, updated_at)
-		VALUES ('d1','offline-box','windows','11','1.0.0','offline','x',?,?,?)`,
-		now, now, now); err != nil {
+			device_secret_hash, enrolled_at, created_at, updated_at, last_seen_at)
+		VALUES ('d1','offline-box','windows','11','1.0.0','offline','x',?,?,?,?)`,
+		now, now, now, now.Add(-time.Hour)); err != nil { // offline past the 15-minute default
 		t.Fatal(err)
 	}
 	if _, err := database.Exec(`

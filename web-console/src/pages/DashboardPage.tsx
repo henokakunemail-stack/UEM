@@ -160,6 +160,11 @@ export const DashboardPage: React.FC = () => {
   // already narrowed instead of dumping the operator on the whole fleet.
   const goDevices = (query = '') => navigate(`/devices${query}`)
 
+  // The alert list is a first page (15 disk + 15 offline); the total comes
+  // from the summary, so the card no longer stops at 30.
+  const healthTotal = summary?.alerts_total ?? alerts.length
+  const healthKnown = summary?.alerts_total !== undefined ? known : alertsKnown
+
   return (
     <div className="page-container dashboard-page">
       <div className="page-header">
@@ -262,7 +267,11 @@ export const DashboardPage: React.FC = () => {
             <KPICard
               title={t('dashboard.kpi_offline')}
               value={known ? offline : unknown}
-              subtitle={t('dashboard.pending_reconnection')}
+              subtitle={
+                known && (summary?.pending_devices ?? 0) > 0
+                  ? t('dashboard.pending_enrollments', { count: summary?.pending_devices ?? 0 })
+                  : t('dashboard.pending_reconnection')
+              }
               icon={<WifiOff size={22} />}
               variant={!known ? 'unknown' : offline > 0 ? 'warning' : 'neutral'}
               badge={!known ? t('common.unknown') : offline > 0 ? t('dashboard.badge_attention') : t('dashboard.badge_optimal')}
@@ -291,11 +300,11 @@ export const DashboardPage: React.FC = () => {
             />
             <KPICard
               title={t('dashboard.kpi_health_alerts')}
-              value={alertsKnown ? alerts.length : unknown}
+              value={healthKnown ? healthTotal : unknown}
               subtitle={t('dashboard.health_alerts_desc')}
               icon={<AlertTriangle size={22} />}
-              variant={!alertsKnown ? 'unknown' : alerts.length > 0 ? 'warning' : 'success'}
-              badge={!alertsKnown ? t('common.unknown') : alerts.length > 0 ? t('dashboard.badge_action_needed') : t('dashboard.badge_normal')}
+              variant={!healthKnown ? 'unknown' : healthTotal > 0 ? 'warning' : 'success'}
+              badge={!healthKnown ? t('common.unknown') : healthTotal > 0 ? t('dashboard.badge_action_needed') : t('dashboard.badge_normal')}
               onClick={() => navigate('/alerts')}
             />
           </div>

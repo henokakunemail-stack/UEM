@@ -83,5 +83,8 @@
   "severity_warning": "WARNING",
   "severity_info": "INFO",
   "view_endpoint": "View endpoint {name}",
-  "view_endpoint_details": "View endpoint details for {name}"
+  "view_endpoint_details": "View endpoint details for {name}",
+  "alert_low_disk": "Free disk space is low: {free}% remaining",
+  "alert_offline_since": "Unreachable since {date}",
+  "pending_enrollments": "{count} enrollments not yet checked in (not counted)"
 }

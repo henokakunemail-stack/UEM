@@ -39,10 +39,17 @@ type AlertIncident struct {
 	FirstTriggeredAt time.Time  `json:"first_triggered_at" db:"first_triggered_at"`
 	LastTriggeredAt  time.Time  `json:"last_triggered_at" db:"last_triggered_at"`
 
+	// Value is what was measured when the incident last fired: disk free %,
+	// minutes offline, or missing critical patches. With RuleType and
+	// Threshold it lets the console word the incident in the reader's language.
+	Value *float64 `json:"value" db:"value"`
+
 	// Joined fields
-	Hostname string `json:"hostname,omitempty" db:"hostname"`
-	Site     string `json:"site,omitempty" db:"site"`
-	RuleName string `json:"rule_name,omitempty" db:"rule_name"`
+	Hostname  string  `json:"hostname,omitempty" db:"hostname"`
+	Site      string  `json:"site,omitempty" db:"site"`
+	RuleName  string  `json:"rule_name,omitempty" db:"rule_name"`
+	RuleType  string  `json:"rule_type,omitempty" db:"rule_type"`
+	Threshold float64 `json:"threshold" db:"threshold"`
 }
 
 type Repository struct {
@@ -151,10 +158,12 @@ func (r *Repository) ListIncidents(ctx context.Context, status, severity string,
 		SELECT
 			i.id, i.rule_id, i.device_id, i.severity, i.title, i.message, i.status,
 			i.trigger_count, i.acknowledged_by, i.acknowledged_at, i.resolved_by, i.resolved_at,
-			i.first_triggered_at, i.last_triggered_at,
+			i.first_triggered_at, i.last_triggered_at, i.value,
 			COALESCE(d.hostname, '') as hostname,
 			COALESCE(d.site, '') as site,
-			COALESCE(r.name, '') as rule_name
+			COALESCE(r.name, '') as rule_name,
+			COALESCE(r.rule_type, '') as rule_type,
+			COALESCE(r.threshold_val, 0) as threshold
 		FROM alert_incidents i
 		LEFT JOIN devices d ON d.id = i.device_id
 		LEFT JOIN alert_rules r ON r.id = i.rule_id
@@ -185,10 +194,12 @@ func (r *Repository) GetIncidentByID(ctx context.Context, id string) (*AlertInci
 		SELECT
 			i.id, i.rule_id, i.device_id, i.severity, i.title, i.message, i.status,
 			i.trigger_count, i.acknowledged_by, i.acknowledged_at, i.resolved_by, i.resolved_at,
-			i.first_triggered_at, i.last_triggered_at,
+			i.first_triggered_at, i.last_triggered_at, i.value,
 			COALESCE(d.hostname, '') as hostname,
 			COALESCE(d.site, '') as site,
-			COALESCE(r.name, '') as rule_name
+			COALESCE(r.name, '') as rule_name,
+			COALESCE(r.rule_type, '') as rule_type,
+			COALESCE(r.threshold_val, 0) as threshold
 		FROM alert_incidents i
 		LEFT JOIN devices d ON d.id = i.device_id
 		LEFT JOIN alert_rules r ON r.id = i.rule_id
@@ -200,7 +211,7 @@ func (r *Repository) GetIncidentByID(ctx context.Context, id string) (*AlertInci
 	return &incident, nil
 }
 
-func (r *Repository) UpsertIncident(ctx context.Context, ruleID, deviceID, severity, title, message string) (*AlertIncident, bool, error) {
+func (r *Repository) UpsertIncident(ctx context.Context, ruleID, deviceID, severity, title, message string, value float64) (*AlertIncident, bool, error) {
 	now := time.Now().UTC()
 
 	// Check if active incident already exists for (rule_id, device_id)
@@ -217,10 +228,12 @@ func (r *Repository) UpsertIncident(ctx context.Context, ruleID, deviceID, sever
 		_, updateErr := r.db.ExecContext(ctx, `
 			UPDATE alert_incidents SET
 				trigger_count = trigger_count + 1,
+				title = ?,
 				message = ?,
+				value = ?,
 				last_triggered_at = ?
 			WHERE id = ?
-		`, message, now, existing.ID)
+		`, title, message, value, now, existing.ID)
 		if updateErr != nil {
 			return nil, false, fmt.Errorf("update incident trigger: %w", updateErr)
 		}
@@ -233,9 +246,9 @@ func (r *Repository) UpsertIncident(ctx context.Context, ruleID, deviceID, sever
 	_, insertErr := r.db.ExecContext(ctx, `
 		INSERT INTO alert_incidents (
 			id, rule_id, device_id, severity, title, message, status,
-			trigger_count, first_triggered_at, last_triggered_at
-		) VALUES (?, ?, ?, ?, ?, ?, 'open', 1, ?, ?)
-	`, newID, ruleID, deviceID, severity, title, message, now, now)
+			trigger_count, first_triggered_at, last_triggered_at, value
+		) VALUES (?, ?, ?, ?, ?, ?, 'open', 1, ?, ?, ?)
+	`, newID, ruleID, deviceID, severity, title, message, now, now, value)
 	if insertErr != nil {
 		// idx_alert_dedup allows one active incident per rule and device. An
 		// insert that loses to a concurrent one -- an overlapping evaluation,
@@ -252,8 +265,9 @@ func (r *Repository) UpsertIncident(ctx context.Context, ruleID, deviceID, sever
 			UPDATE alert_incidents SET
 				trigger_count = trigger_count + 1,
 				message = ?,
+				value = ?,
 				last_triggered_at = ?
-			WHERE id = ?`, message, now, winner); err != nil {
+			WHERE id = ?`, message, value, now, winner); err != nil {
 			return nil, false, fmt.Errorf("update incident trigger: %w", err)
 		}
 		inc, _ := r.GetIncidentByID(ctx, winner)
@@ -300,4 +314,56 @@ func (r *Repository) ResolveIncident(ctx context.Context, id, userID string) err
 		return fmt.Errorf("incident not found or already resolved")
 	}
 	return nil
+}
+
+// SystemActor is who resolves an incident the server closed on its own.
+const SystemActor = "system"
+
+// activeIncident is an open or acknowledged incident of one rule.
+type activeIncident struct {
+	ID       string `db:"id"`
+	DeviceID string `db:"device_id"`
+}
+
+// ActiveIncidentsForRule returns the unresolved incidents of a rule.
+func (r *Repository) ActiveIncidentsForRule(ctx context.Context, ruleID string) ([]activeIncident, error) {
+	var rows []activeIncident
+	err := r.db.SelectContext(ctx, &rows, `SELECT id, device_id FROM alert_incidents
+		WHERE rule_id = ? AND status != 'resolved'`, ruleID)
+	if err != nil {
+		return nil, fmt.Errorf("active incidents for rule: %w", err)
+	}
+	return rows, nil
+}
+
+// ResolveBySystem closes an unresolved incident as the server, and reports
+// whether it did. A concurrent operator resolve wins harmlessly.
+func (r *Repository) ResolveBySystem(ctx context.Context, id string) (bool, error) {
+	res, err := r.db.ExecContext(ctx, `UPDATE alert_incidents SET status = 'resolved', resolved_by = ?, resolved_at = ?
+		WHERE id = ? AND status != 'resolved'`, SystemActor, time.Now().UTC(), id)
+	if err != nil {
+		return false, fmt.Errorf("resolve incident: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	return n == 1, nil
+}
+
+// IncidentCounts is how many incidents are in each active state.
+type IncidentCounts struct {
+	Open         int `json:"open" db:"open"`
+	Acknowledged int `json:"acknowledged" db:"acknowledged"`
+}
+
+// CountIncidents counts active incidents. The console's Open and
+// Acknowledged cards used to be the length of a list capped at 100.
+func (r *Repository) CountIncidents(ctx context.Context) (IncidentCounts, error) {
+	var c IncidentCounts
+	err := r.db.GetContext(ctx, &c, `SELECT
+		COALESCE(SUM(CASE WHEN status = 'open' THEN 1 ELSE 0 END), 0) AS open,
+		COALESCE(SUM(CASE WHEN status = 'acknowledged' THEN 1 ELSE 0 END), 0) AS acknowledged
+		FROM alert_incidents WHERE status != 'resolved'`)
+	if err != nil {
+		return c, fmt.Errorf("count incidents: %w", err)
+	}
+	return c, nil
 }

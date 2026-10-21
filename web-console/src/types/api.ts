@@ -117,6 +117,10 @@ export interface DashboardSummary {
   low_disk_alerts: number
   recent_hw_changes_24h: number
   sites_count: number
+  // Enrollment rows that never checked in; not in total or offline.
+  pending_devices?: number
+  // Every health alert, not just the page /api/dashboard/alerts returns.
+  alerts_total?: number
 }
 
 export interface SiteMetric {
@@ -142,6 +146,8 @@ export interface AlertItem {
   site: string
   message: string
   timestamp: string
+  // The measured number behind the alert (free disk % for low_disk).
+  value?: number | null
 }
 
 export interface ActivityItem {
@@ -440,6 +446,11 @@ export interface AlertIncidentDTO {
   resolved_at?: string | null
   first_triggered_at: string
   last_triggered_at: string
+  // What was measured and against what, so the text can be translated:
+  // disk free %, minutes offline, or missing critical patches.
+  rule_type?: string
+  threshold?: number
+  value?: number | null
 }
 
 export interface AlertRuleDTO {

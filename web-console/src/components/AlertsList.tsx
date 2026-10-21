@@ -9,6 +9,7 @@ import {
 } from 'lucide-react'
 import { useT, type Vars } from '../i18n/core'
 import type { AlertItem } from '../types/api'
+import { dashboardAlertText } from '../services/alertText'
 
 interface AlertsListProps {
   alerts: AlertItem[]
@@ -143,7 +144,7 @@ export const AlertsList: React.FC<AlertsListProps> = ({ alerts, onViewDevice }) 
                     )}
                   </div>
                 </div>
-                <p className="alert-message">{a.message}</p>
+                <p className="alert-message">{dashboardAlertText(a, t)}</p>
                 <div className="alert-footer">
                   <span className="alert-time" title={new Date(a.timestamp).toLocaleString()}>
                     {formatRelativeTime(a.timestamp, t)}

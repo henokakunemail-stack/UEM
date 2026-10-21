@@ -23,6 +23,8 @@ type Evaluator struct {
 	// webhooks tracks deliveries in flight, so shutdown can let them finish
 	// instead of cutting a notification off mid-request.
 	webhooks sync.WaitGroup
+	// audit records incidents the server resolved; optional.
+	audit IncidentAuditor
 }
 
 // WaitWebhooks waits up to timeout for in-flight webhook deliveries.
@@ -106,6 +108,21 @@ func newSafeWebhookClient() *http.Client {
 	}
 }
 
+// IncidentAuditor records incidents the server resolved on its own.
+type IncidentAuditor interface {
+	Log(ctx context.Context, actorType, actorID, action, targetID string, details map[string]string) error
+}
+
+// WithAuditor makes system resolutions appear in the audit trail.
+func (e *Evaluator) WithAuditor(a IncidentAuditor) *Evaluator {
+	e.audit = a
+	return e
+}
+
+// DefaultOfflineMinutes is the threshold a device_offline rule uses when it
+// has none. Migration 0028 wrote it into rules stored with 0.
+const DefaultOfflineMinutes = 15
+
 func NewEvaluator(db *sqlx.DB, repo *Repository) *Evaluator {
 	return &Evaluator{
 		db:         db,
@@ -115,9 +132,10 @@ func NewEvaluator(db *sqlx.DB, repo *Repository) *Evaluator {
 }
 
 type EvalResult struct {
-	RulesEvaluated int `json:"rules_evaluated"`
-	IncidentsNew   int `json:"incidents_new"`
-	IncidentsDedup int `json:"incidents_dedup"`
+	RulesEvaluated    int `json:"rules_evaluated"`
+	IncidentsNew      int `json:"incidents_new"`
+	IncidentsDedup    int `json:"incidents_dedup"`
+	IncidentsResolved int `json:"incidents_resolved"`
 }
 
 func (e *Evaluator) EvaluateAll(ctx context.Context) (*EvalResult, error) {
@@ -134,17 +152,75 @@ func (e *Evaluator) EvaluateAll(ctx context.Context) (*EvalResult, error) {
 		}
 		result.RulesEvaluated++
 
+		var firing map[string]bool
+		var ok bool
 		switch rule.RuleType {
 		case "disk_low":
-			e.evalDiskLow(ctx, &rule, result)
+			firing, ok = e.evalDiskLow(ctx, &rule, result)
 		case "device_offline":
-			e.evalDeviceOffline(ctx, &rule, result)
+			firing, ok = e.evalDeviceOffline(ctx, &rule, result)
 		case "critical_patch":
-			e.evalCriticalPatches(ctx, &rule, result)
+			firing, ok = e.evalCriticalPatches(ctx, &rule, result)
+		default:
+			continue
+		}
+		// Only a query that answered can say a condition cleared. A failed
+		// one says nothing, and closing incidents on it would report every
+		// device healthy during a database hiccup.
+		if ok {
+			result.IncidentsResolved += e.resolveCleared(ctx, &rule, firing, "condition_cleared")
 		}
 	}
 
 	return result, nil
+}
+
+// resolveCleared closes the rule's active incidents whose device is no
+// longer firing. Incidents never closed on their own before: a disk that was
+// cleaned up, or a device that came back, left its incident open for good.
+func (e *Evaluator) resolveCleared(ctx context.Context, rule *AlertRule, firing map[string]bool, reason string) int {
+	active, err := e.repo.ActiveIncidentsForRule(ctx, rule.ID)
+	if err != nil {
+		log.Error().Err(err).Str("rule", rule.ID).Msg("list active incidents")
+		return 0
+	}
+	resolved := 0
+	for _, inc := range active {
+		if firing[inc.DeviceID] {
+			continue
+		}
+		if e.ResolveAsSystem(ctx, rule, inc.ID, reason) {
+			resolved++
+		}
+	}
+	return resolved
+}
+
+// ResolveAsSystem closes one incident as the server, records why, and tells
+// the rule's webhook. It reports whether the incident was still open.
+func (e *Evaluator) ResolveAsSystem(ctx context.Context, rule *AlertRule, incidentID, reason string) bool {
+	changed, err := e.repo.ResolveBySystem(ctx, incidentID)
+	if err != nil {
+		log.Error().Err(err).Str("incident", incidentID).Msg("auto-resolve incident")
+		return false
+	}
+	if !changed {
+		return false
+	}
+	if e.audit != nil {
+		_ = e.audit.Log(ctx, "system", SystemActor, "alert.incident_auto_resolved", incidentID, map[string]string{
+			"rule_id": rule.ID, "reason": reason,
+		})
+	}
+	if inc, err := e.repo.GetIncidentByID(ctx, incidentID); err == nil {
+		e.DispatchResolved(rule, inc, reason)
+	}
+	return true
+}
+
+// ResolveRule closes every active incident of a rule, as when it is disabled.
+func (e *Evaluator) ResolveRule(ctx context.Context, rule *AlertRule, reason string) int {
+	return e.resolveCleared(ctx, rule, nil, reason)
 }
 
 type diskTarget struct {
@@ -154,7 +230,7 @@ type diskTarget struct {
 	DiskFreePct *float64 `db:"hw_disk_free_pct"`
 }
 
-func (e *Evaluator) evalDiskLow(ctx context.Context, rule *AlertRule, res *EvalResult) {
+func (e *Evaluator) evalDiskLow(ctx context.Context, rule *AlertRule, res *EvalResult) (map[string]bool, bool) {
 	var targets []diskTarget
 	query := `
 		SELECT d.id as device_id, d.hostname, COALESCE(d.site, '') AS site, i.hw_disk_free_pct
@@ -164,10 +240,12 @@ func (e *Evaluator) evalDiskLow(ctx context.Context, rule *AlertRule, res *EvalR
 	`
 	if err := e.db.SelectContext(ctx, &targets, query, rule.ThresholdVal); err != nil {
 		log.Error().Err(err).Str("rule", rule.ID).Msg("eval disk_low query")
-		return
+		return nil, false
 	}
 
+	firing := map[string]bool{}
 	for _, t := range targets {
+		firing[t.DeviceID] = true
 		free := 0.0
 		if t.DiskFreePct != nil {
 			free = *t.DiskFreePct
@@ -176,7 +254,7 @@ func (e *Evaluator) evalDiskLow(ctx context.Context, rule *AlertRule, res *EvalR
 		msg := fmt.Sprintf("Device %s at site '%s' has only %.1f%% disk space remaining (threshold: %.1f%%)",
 			t.Hostname, t.Site, free, rule.ThresholdVal)
 
-		inc, isNew, err := e.repo.UpsertIncident(ctx, rule.ID, t.DeviceID, rule.Severity, title, msg)
+		inc, isNew, err := e.repo.UpsertIncident(ctx, rule.ID, t.DeviceID, rule.Severity, title, msg, free)
 		if err != nil {
 			log.Error().Err(err).Str("device", t.DeviceID).Msg("upsert disk_low incident")
 			continue
@@ -189,6 +267,7 @@ func (e *Evaluator) evalDiskLow(ctx context.Context, rule *AlertRule, res *EvalR
 			res.IncidentsDedup++
 		}
 	}
+	return firing, true
 }
 
 type offlineTarget struct {
@@ -203,28 +282,44 @@ type offlineTarget struct {
 	LastSeenAt *time.Time `db:"last_seen_at"`
 }
 
-func (e *Evaluator) evalDeviceOffline(ctx context.Context, rule *AlertRule, res *EvalResult) {
+func (e *Evaluator) evalDeviceOffline(ctx context.Context, rule *AlertRule, res *EvalResult) (map[string]bool, bool) {
+	// Offline for longer than the rule's threshold, in minutes. The threshold
+	// used to be ignored, so a laptop that slept through one heartbeat fired
+	// at once. A device never seen at all is a pending enrollment, not an
+	// outage, and is left out: it used to fire as "Last seen at never".
+	minutes := rule.ThresholdVal
+	if minutes <= 0 {
+		minutes = DefaultOfflineMinutes
+	}
+	now := time.Now().UTC()
+	cutoff := now.Add(-time.Duration(minutes * float64(time.Minute)))
+
 	var targets []offlineTarget
 	query := `
 		SELECT id, hostname, COALESCE(site, '') AS site, last_seen_at
 		FROM devices
 		WHERE retired_at IS NULL AND status = 'offline'
+		  AND last_seen_at IS NOT NULL AND last_seen_at < ?
 	`
-	if err := e.db.SelectContext(ctx, &targets, query); err != nil {
+	if err := e.db.SelectContext(ctx, &targets, query, cutoff); err != nil {
 		log.Error().Err(err).Str("rule", rule.ID).Msg("eval device_offline query")
-		return
+		return nil, false
 	}
 
+	firing := map[string]bool{}
 	for _, t := range targets {
+		firing[t.DeviceID] = true
+		offlineMins := 0.0
 		lastSeen := "never"
 		if t.LastSeenAt != nil {
 			lastSeen = t.LastSeenAt.Format(time.RFC3339)
+			offlineMins = now.Sub(*t.LastSeenAt).Minutes()
 		}
 		title := fmt.Sprintf("Device Offline: %s", t.Hostname)
 		msg := fmt.Sprintf("Device %s at site '%s' is offline. Last seen at %s",
 			t.Hostname, t.Site, lastSeen)
 
-		inc, isNew, err := e.repo.UpsertIncident(ctx, rule.ID, t.DeviceID, rule.Severity, title, msg)
+		inc, isNew, err := e.repo.UpsertIncident(ctx, rule.ID, t.DeviceID, rule.Severity, title, msg, offlineMins)
 		if err != nil {
 			log.Error().Err(err).Str("device", t.DeviceID).Msg("upsert offline incident")
 			continue
@@ -237,6 +332,7 @@ func (e *Evaluator) evalDeviceOffline(ctx context.Context, rule *AlertRule, res 
 			res.IncidentsDedup++
 		}
 	}
+	return firing, true
 }
 
 type patchTarget struct {
@@ -246,10 +342,10 @@ type patchTarget struct {
 	PatchCount int    `db:"patch_count"`
 }
 
-func (e *Evaluator) evalCriticalPatches(ctx context.Context, rule *AlertRule, res *EvalResult) {
+func (e *Evaluator) evalCriticalPatches(ctx context.Context, rule *AlertRule, res *EvalResult) (map[string]bool, bool) {
 	var targets []patchTarget
 	query := `
-		SELECT p.device_id, d.hostname, d.site, COUNT(*) as patch_count
+		SELECT p.device_id, d.hostname, COALESCE(d.site, '') AS site, COUNT(*) as patch_count
 		FROM device_patches p
 		JOIN devices d ON d.id = p.device_id
 		WHERE d.retired_at IS NULL AND p.severity = 'critical' AND p.installed_state = 'missing'
@@ -263,15 +359,17 @@ func (e *Evaluator) evalCriticalPatches(ctx context.Context, rule *AlertRule, re
 
 	if err := e.db.SelectContext(ctx, &targets, query, threshold); err != nil {
 		log.Error().Err(err).Str("rule", rule.ID).Msg("eval critical_patch query")
-		return
+		return nil, false
 	}
 
+	firing := map[string]bool{}
 	for _, t := range targets {
+		firing[t.DeviceID] = true
 		title := fmt.Sprintf("Critical Patches Missing: %s (%d patches)", t.Hostname, t.PatchCount)
 		msg := fmt.Sprintf("Device %s at site '%s' has %d uninstalled critical security patches",
 			t.Hostname, t.Site, t.PatchCount)
 
-		inc, isNew, err := e.repo.UpsertIncident(ctx, rule.ID, t.DeviceID, rule.Severity, title, msg)
+		inc, isNew, err := e.repo.UpsertIncident(ctx, rule.ID, t.DeviceID, rule.Severity, title, msg, float64(t.PatchCount))
 		if err != nil {
 			log.Error().Err(err).Str("device", t.DeviceID).Msg("upsert patch incident")
 			continue
@@ -284,9 +382,21 @@ func (e *Evaluator) evalCriticalPatches(ctx context.Context, rule *AlertRule, re
 			res.IncidentsDedup++
 		}
 	}
+	return firing, true
 }
 
 func (e *Evaluator) dispatchWebhook(rule *AlertRule, inc *AlertIncident) {
+	e.sendWebhook(rule, inc, "alert.incident", "")
+}
+
+// DispatchResolved tells the rule's webhook an incident was resolved, by an
+// operator or by the server. Receivers only ever heard about incidents
+// opening, so a pager stayed red after the problem was gone.
+func (e *Evaluator) DispatchResolved(rule *AlertRule, inc *AlertIncident, reason string) {
+	e.sendWebhook(rule, inc, "alert.resolved", reason)
+}
+
+func (e *Evaluator) sendWebhook(rule *AlertRule, inc *AlertIncident, event, reason string) {
 	if rule.WebhookURL == "" || inc == nil {
 		return
 	}
@@ -298,7 +408,7 @@ func (e *Evaluator) dispatchWebhook(rule *AlertRule, inc *AlertIncident) {
 	}
 
 	payload := map[string]any{
-		"event":         "alert.incident",
+		"event":         event,
 		"incident_id":   inc.ID,
 		"rule_id":       rule.ID,
 		"rule_name":     rule.Name,
@@ -311,6 +421,9 @@ func (e *Evaluator) dispatchWebhook(rule *AlertRule, inc *AlertIncident) {
 		"status":        inc.Status,
 		"trigger_count": inc.TriggerCount,
 		"timestamp":     inc.LastTriggeredAt.Format(time.RFC3339),
+	}
+	if reason != "" {
+		payload["reason"] = reason
 	}
 
 	e.webhooks.Add(1)
@@ -353,15 +466,23 @@ func (e *Evaluator) StartBackgroundEvaluator(ctx context.Context, interval time.
 		// evaluator silently evaluated nothing for the life of the process,
 		// while still looking alive and correctly stoppable.
 		defer ticker.Stop()
+		// Once at start, so a restart does not leave alerts 30 seconds stale.
+		e.runOnce(ctx)
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				evalCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-				_, _ = e.EvaluateAll(evalCtx)
-				cancel()
+				e.runOnce(ctx)
 			}
 		}
 	}()
+}
+
+func (e *Evaluator) runOnce(ctx context.Context) {
+	evalCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	if _, err := e.EvaluateAll(evalCtx); err != nil && ctx.Err() == nil {
+		log.Warn().Err(err).Msg("alert evaluation")
+	}
 }

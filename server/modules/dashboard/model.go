@@ -12,6 +12,13 @@ type Summary struct {
 	LowDiskAlerts      int     `json:"low_disk_alerts"`
 	RecentHWChanges24h int     `json:"recent_hw_changes_24h"`
 	SitesCount         int     `json:"sites_count"`
+	// PendingDevices are enrollment rows that have never checked in. They are
+	// not devices yet, so they are not in TotalDevices or OfflineDevices; they
+	// used to be counted offline and pulled the online percentage down.
+	PendingDevices int `json:"pending_devices"`
+	// AlertsTotal is every health alert, not the first page the alert list
+	// returns; the dashboard card used to stop at 30.
+	AlertsTotal int `json:"alerts_total"`
 }
 
 // SiteMetric breaks down fleet health per office or branch site.
@@ -40,6 +47,9 @@ type Alert struct {
 	Site      string    `json:"site"`
 	Message   string    `json:"message"`
 	Timestamp time.Time `json:"timestamp"`
+	// Value is the measured number behind the alert (free disk % for
+	// low_disk), so the console can word it in the reader's language.
+	Value *float64 `json:"value,omitempty"`
 }
 
 // ActivityItem represents a recent audit or lifecycle event for the activity stream.

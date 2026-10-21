@@ -92,7 +92,7 @@ func concurrentTriggers(t *testing.T, h *Handler, database *sqlx.DB) {
 		go func() {
 			defer wg.Done()
 			<-start
-			_, isNew, err := h.repo.UpsertIncident(ctx, rule.ID, "dev-1", "warning", "Disk low", "msg")
+			_, isNew, err := h.repo.UpsertIncident(ctx, rule.ID, "dev-1", "warning", "Disk low", "msg", 3)
 			if err != nil {
 				t.Error(err)
 				return

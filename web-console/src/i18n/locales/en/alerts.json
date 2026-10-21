@@ -41,5 +41,8 @@
   "ack_incident": "Acknowledge incident",
   "ack": "Ack",
   "resolve_incident": "Resolve incident",
-  "resolve": "Resolve"
+  "resolve": "Resolve",
+  "text_disk_low": "{host}: {free}% disk free (threshold {threshold}%)",
+  "text_offline": "{host}: offline for {minutes} minutes",
+  "text_patches": "{host}: {count} critical patches missing"
 }

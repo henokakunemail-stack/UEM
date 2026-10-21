@@ -715,6 +715,11 @@ export const api = {
     return { incidents: list || [], count: list?.length ?? 0 }
   },
 
+  // Open and acknowledged totals, not capped by the incident list's limit.
+  async getAlertIncidentCounts(): Promise<{ open: number; acknowledged: number }> {
+    return request<{ open: number; acknowledged: number }>('/api/alerts/incidents/counts')
+  },
+
   async getAlertRules(): Promise<AlertRuleDTO[]> {
     const res = await request<AlertRuleDTO[]>('/api/alerts/rules')
     return res || []

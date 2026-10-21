@@ -13,6 +13,7 @@ import { DataTable } from '../components/ui/DataTable'
 import { usePermission } from '../hooks/usePermission'
 import { api } from '../services/api'
 import { useToast } from '../context/ToastContext'
+import { incidentText } from '../services/alertText'
 import { useT } from '../i18n/core'
 import type { AlertIncidentDTO, AlertRuleDTO } from '../types/api'
 
@@ -51,24 +52,19 @@ export const AlertsPage: React.FC = () => {
   const loadData = useCallback(async () => {
     setLoading(true)
     try {
-      const [incResp, rList, openResp, ackResp] = await Promise.all([
+      const [incResp, rList, countResp] = await Promise.all([
         api.getAlertIncidents(statusFilter),
         // Rules are a side panel here; a rules failure must not blank the
         // incident table the operator came here to work through.
         api.getAlertRules().catch(() => null),
-        // Count cards are best-effort: a failure here leaves the previous
-        // numbers rather than failing the whole page.
-        api.getAlertIncidents('open').catch(() => null),
-        api.getAlertIncidents('acknowledged').catch(() => null),
+        // The counts come from the server's own totals. They used to be the
+        // length of two incident lists, each capped at 100. A failure leaves
+        // the previous numbers rather than failing the whole page.
+        api.getAlertIncidentCounts().catch(() => null),
       ])
       setIncidents(incResp.incidents || [])
       if (rList) setRules(rList)
-      if (openResp || ackResp) {
-        setCounts((prev) => ({
-          open: openResp ? openResp.count : prev.open,
-          acknowledged: ackResp ? ackResp.count : prev.acknowledged,
-        }))
-      }
+      if (countResp) setCounts(countResp)
     } catch (err: unknown) {
       setMsg({
         type: 'error',
@@ -184,7 +180,8 @@ export const AlertsPage: React.FC = () => {
             <span className="kpi-label">{t('alerts.kpi_rules')}</span>
             <Bell className="kpi-icon text-primary" size={20} />
           </div>
-          <div className="kpi-value">{rules.length}</div>
+          {/* Rules that are watching; a disabled rule raises nothing. */}
+          <div className="kpi-value">{rules.filter((r) => r.is_enabled).length}</div>
           <span className="kpi-hint">{t('alerts.kpi_rules_hint')}</span>
         </div>
       </div>
@@ -263,7 +260,7 @@ export const AlertsPage: React.FC = () => {
                     )}
                   </td>
                   <td data-label={t('alerts.col_rule')}>{i.rule_name || i.rule_id}</td>
-                  <td data-label={t('alerts.col_message')}>{i.title || i.message}</td>
+                  <td data-label={t('alerts.col_message')}>{incidentText(i, t)}</td>
                   <td data-label={t('alerts.col_status')}>
                     <span
                       className={`status-pill ${

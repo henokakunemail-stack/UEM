@@ -17,6 +17,7 @@ import (
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/audit"
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/auth"
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/rbac"
+	"github.com/rs/zerolog/log"
 )
 
 // inventoryHandler exposes the Phase 2 API: inventory storage and retrieval,
@@ -485,4 +486,47 @@ func (h *inventoryHandler) removeMember(w http.ResponseWriter, r *http.Request) 
 	_ = h.auditDB.Log(r.Context(), "user", auth.UserIDFromContext(r.Context()),
 		"group.members.remove", groupID, map[string]string{"device_id": deviceID})
 	writeJSON(w, http.StatusOK, map[string]string{"status": "removed"})
+}
+
+// RetireExpiredPending retires device rows whose enrollment never happened
+// and whose token expired more than PendingExpiryGrace ago, and returns how
+// many it retired. The rows stay in the database for the history.
+func (h *inventoryHandler) RetireExpiredPending(ctx context.Context) (int, error) {
+	ids, err := h.repo.expiredPending(ctx, PendingExpiryGrace)
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, id := range ids {
+		if err := h.repo.retire(ctx, id); err != nil {
+			if errors.Is(err, ErrNotFound) {
+				continue
+			}
+			return n, err
+		}
+		n++
+		_ = h.auditDB.Log(ctx, "system", "system", "device.pending_expired", id, map[string]string{
+			"reason": "enrollment token expired and the device never checked in",
+		})
+	}
+	return n, nil
+}
+
+// RunPendingSweep retires expired pending enrollments every interval until ctx
+// is cancelled. It runs on the leader only.
+func (h *inventoryHandler) RunPendingSweep(ctx context.Context, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if n, err := h.RetireExpiredPending(ctx); err != nil {
+				log.Warn().Err(err).Msg("pending enrollment sweep")
+			} else if n > 0 {
+				log.Info().Int("devices", n).Msg("retired enrollments that never checked in")
+			}
+		}
+	}
 }

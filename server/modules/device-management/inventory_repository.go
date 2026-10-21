@@ -81,14 +81,24 @@ func (r *inventoryRepository) getInventory(ctx context.Context, deviceID string)
 // retire removes a device from the fleet without deleting its row: the secret
 // and any unspent enrollment token are cleared, while audit references stay
 // resolvable. Returns ErrNotFound if the device does not exist.
+//
+// Its open alert incidents are resolved in the same transaction: nothing will
+// evaluate a retired device again, so they could never clear on their own and
+// used to stay on the alerts page for a machine that no longer exists.
 func (r *inventoryRepository) retire(ctx context.Context, id string) error {
-	res, err := r.db.ExecContext(ctx, `
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("retire device %s: %w", id, err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	now := time.Now().UTC()
+	res, err := tx.ExecContext(ctx, `
 		UPDATE devices
 		SET status = ?, retired_at = ?, device_secret_hash = '',
 		    enrollment_token_hash = NULL, enrollment_token_expires_at = NULL,
 		    updated_at = ?
 		WHERE id = ? AND retired_at IS NULL`,
-		StatusRetired, time.Now().UTC(), time.Now().UTC(), id)
+		StatusRetired, now, now, id)
 	if err != nil {
 		return fmt.Errorf("retire device %s: %w", id, err)
 	}
@@ -96,7 +106,33 @@ func (r *inventoryRepository) retire(ctx context.Context, id string) error {
 	if n == 0 {
 		return ErrNotFound
 	}
-	return nil
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE alert_incidents SET status = 'resolved', resolved_by = 'system', resolved_at = ?
+		WHERE device_id = ? AND status != 'resolved'`, now, id); err != nil {
+		return fmt.Errorf("resolve incidents of retired device %s: %w", id, err)
+	}
+	return tx.Commit()
+}
+
+// PendingExpiryGrace is how long after its enrollment token expired a device
+// row that never checked in is kept before it is retired.
+const PendingExpiryGrace = 7 * 24 * time.Hour
+
+// expiredPending lists device rows created for an enrollment that never
+// happened: the token expired more than grace ago and the device was never
+// seen. They were stored as 'offline' and counted as offline devices.
+func (r *inventoryRepository) expiredPending(ctx context.Context, grace time.Duration) ([]string, error) {
+	var ids []string
+	err := r.db.SelectContext(ctx, &ids, `
+		SELECT id FROM devices
+		WHERE retired_at IS NULL AND last_seen_at IS NULL
+		  AND enrollment_token_hash IS NOT NULL
+		  AND enrollment_token_expires_at IS NOT NULL AND enrollment_token_expires_at < ?`,
+		time.Now().UTC().Add(-grace))
+	if err != nil {
+		return nil, fmt.Errorf("list expired pending enrollments: %w", err)
+	}
+	return ids, nil
 }
 
 // restore returns a retired device to the fleet. The device secret stays empty,

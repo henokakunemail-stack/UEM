@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 
@@ -43,6 +45,7 @@ func (h *Handler) Register(r chi.Router) {
 
 	// Alert Incidents
 	r.With(h.authMiddleware).Get("/api/alerts/incidents", h.listIncidents)
+	r.With(h.authMiddleware).Get("/api/alerts/incidents/counts", h.countIncidents)
 	r.With(h.authMiddleware).Get("/api/alerts/incidents/{id}", h.getIncident)
 	r.With(h.authMiddleware, rbac.RequireRole(rbac.RoleTechnician)).Post("/api/alerts/incidents/{id}/acknowledge", h.acknowledgeIncident)
 	r.With(h.authMiddleware, rbac.RequireRole(rbac.RoleTechnician)).Post("/api/alerts/incidents/{id}/resolve", h.resolveIncident)
@@ -69,7 +72,52 @@ type createRuleReq struct {
 	ThresholdVal float64 `json:"threshold_val"`
 	Severity     string  `json:"severity"`
 	WebhookURL   string  `json:"webhook_url"`
-	IsEnabled    bool    `json:"is_enabled"`
+	// A pointer so an omitted flag means enabled, like the column default. A
+	// plain bool decoded a missing key as false, and a new rule was off.
+	IsEnabled *bool `json:"is_enabled"`
+}
+
+// ruleProblem is why a rule cannot be saved: a code the console translates
+// and a message for API callers.
+type ruleProblem struct{ code, msg string }
+
+// validateRule checks what the evaluator relies on. An unknown rule type was
+// stored and counted as evaluated while doing nothing; a threshold out of
+// range made a rule that could never fire, or fired on everything.
+func validateRule(rule *AlertRule) *ruleProblem {
+	if strings.TrimSpace(rule.Name) == "" {
+		return &ruleProblem{"invalid_name", "name is required"}
+	}
+	switch rule.RuleType {
+	case "disk_low":
+		if rule.ThresholdVal < 1 || rule.ThresholdVal > 99 {
+			return &ruleProblem{"invalid_threshold", "disk_low threshold is a free-space percentage from 1 to 99"}
+		}
+	case "device_offline":
+		if rule.ThresholdVal < 1 || rule.ThresholdVal > 10080 {
+			return &ruleProblem{"invalid_threshold", "device_offline threshold is minutes offline, from 1 to 10080 (7 days)"}
+		}
+	case "critical_patch":
+		if rule.ThresholdVal < 1 || rule.ThresholdVal != float64(int(rule.ThresholdVal)) {
+			return &ruleProblem{"invalid_threshold", "critical_patch threshold is a whole number of missing patches, at least 1"}
+		}
+	default:
+		return &ruleProblem{"invalid_rule_type", "rule_type must be disk_low, device_offline or critical_patch"}
+	}
+	switch rule.Severity {
+	case "info", "warning", "critical":
+	default:
+		return &ruleProblem{"invalid_severity", "severity must be info, warning or critical"}
+	}
+	if rule.WebhookURL != "" {
+		// The delivery client refuses private and loopback addresses at dial
+		// time; this only rejects what can never be delivered at all.
+		u, err := url.Parse(rule.WebhookURL)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			return &ruleProblem{"invalid_webhook_url", "webhook_url must be an http or https URL"}
+		}
+	}
+	return nil
 }
 
 func (h *Handler) createRule(w http.ResponseWriter, r *http.Request) {
@@ -78,19 +126,20 @@ func (h *Handler) createRule(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	if req.Name == "" || req.RuleType == "" || req.Severity == "" {
-		writeErr(w, http.StatusBadRequest, "name, rule_type, and severity are required")
-		return
-	}
 	userID := auth.UserIDFromContext(r.Context())
+	enabled := req.IsEnabled == nil || *req.IsEnabled
 	rule := &AlertRule{
 		Name:         req.Name,
 		RuleType:     req.RuleType,
 		ThresholdVal: req.ThresholdVal,
 		Severity:     req.Severity,
 		WebhookURL:   req.WebhookURL,
-		IsEnabled:    req.IsEnabled,
+		IsEnabled:    enabled,
 		CreatedBy:    userID,
+	}
+	if p := validateRule(rule); p != nil {
+		writeErrCode(w, http.StatusBadRequest, p.code, p.msg)
+		return
 	}
 	if err := h.repo.CreateRule(r.Context(), rule); err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
@@ -158,13 +207,23 @@ func (h *Handler) updateRule(w http.ResponseWriter, r *http.Request) {
 	if req.WebhookURL != nil {
 		rule.WebhookURL = *req.WebhookURL
 	}
+	wasEnabled := rule.IsEnabled
 	if req.IsEnabled != nil {
 		rule.IsEnabled = *req.IsEnabled
+	}
+	if p := validateRule(rule); p != nil {
+		writeErrCode(w, http.StatusBadRequest, p.code, p.msg)
+		return
 	}
 
 	if err := h.repo.UpdateRule(r.Context(), rule); err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
+	}
+	// A disabled rule is no longer watching, so its incidents cannot clear
+	// on their own any more; they are closed now rather than left open.
+	if wasEnabled && !rule.IsEnabled && h.evaluator != nil {
+		h.evaluator.ResolveRule(r.Context(), rule, "rule_disabled")
 	}
 
 	userID := auth.UserIDFromContext(r.Context())
@@ -244,6 +303,13 @@ func (h *Handler) resolveIncident(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_ = h.audit.Log(r.Context(), "user", userID, "alert.resolve", id, nil)
+	if h.evaluator != nil {
+		if inc, err := h.repo.GetIncidentByID(r.Context(), id); err == nil {
+			if rule, err := h.repo.GetRuleByID(r.Context(), inc.RuleID); err == nil {
+				h.evaluator.DispatchResolved(rule, inc, "resolved_by_operator")
+			}
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "resolved"})
 }
 
@@ -264,4 +330,20 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	_ = json.NewEncoder(w).Encode(v)
+}
+
+// countIncidents answers how many incidents are open and acknowledged. The
+// console's cards used to be the length of a list the server caps at 100.
+func (h *Handler) countIncidents(w http.ResponseWriter, r *http.Request) {
+	c, err := h.repo.CountIncidents(r.Context())
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, c)
+}
+
+// writeErrCode adds a machine-readable code the console translates.
+func writeErrCode(w http.ResponseWriter, status int, code, msg string) {
+	writeJSON(w, status, map[string]string{"error": msg, "code": code})
 }
