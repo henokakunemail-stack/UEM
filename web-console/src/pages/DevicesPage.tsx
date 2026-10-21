@@ -26,6 +26,10 @@ import { ConfirmDialog } from '../components/ui/ConfirmDialog'
 import { DataTable } from '../components/ui/DataTable'
 import { usePermission } from '../hooks/usePermission'
 import { useToast } from '../context/ToastContext'
+import { relativeTime } from '../services/relativeTime'
+
+// The server's filter value for devices with no site.
+const UNASSIGNED_SITE = '__unassigned__'
 import { api } from '../services/api'
 import type { DeviceDTO, DeviceGroupDTO, DeviceListResponse } from '../types/api'
 import { PAGE_SIZES, buildDevicesQuery, parseDevicesQuery } from './devicesQuery'
@@ -69,7 +73,7 @@ export const DevicesPage: React.FC<{
     null
   )
   const toast = useToast()
-  const { t } = useT()
+  const { t, lang } = useT()
 
   const { status, site, page, q, deviceId, tab, group } = query
   const offset = (page - 1) * pageSize
@@ -104,6 +108,22 @@ export const DevicesPage: React.FC<{
     [query, setSearchParams]
   )
 
+  const [siteOptions, setSiteOptions] = useState<string[]>([])
+  useEffect(() => {
+    let active = true
+    api.getDashboardSites().then(
+      (sites) => {
+        if (active) setSiteOptions(sites.map((m) => m.site))
+      },
+      () => {
+        // Without the list the filter still offers "all"; the table works.
+      },
+    )
+    return () => {
+      active = false
+    }
+  }, [])
+
   const fetchDevices = useCallback(async () => {
     setLoading(true)
     try {
@@ -128,9 +148,11 @@ export const DevicesPage: React.FC<{
   // A selection made before switching to the Groups tab, or before changing the
   // group filter, refers to rows the operator can no longer see. Leaving it
   // checked would make "add to group" act on invisible devices.
+  // The same goes for the page, status and site: the selection used to survive
+  // them, so a bulk action could reach rows on another page.
   useEffect(() => {
     setSelected(new Set())
-  }, [group, tab])
+  }, [group, tab, offset, status, site])
 
   const confirmAssign = async () => {
     if (!assignTarget || selected.size === 0) return
@@ -253,22 +275,33 @@ export const DevicesPage: React.FC<{
     }
   }
 
+  // Only the retired devices that are selected and on screen are deleted --
+  // the count the confirm dialog showed. It used to send every selected id and
+  // swallow each failure, then report success for whatever went through.
   const handleBulkDelete = async () => {
-    if (selected.size === 0) return
+    const ids = (data.devices || []).filter((d) => selected.has(d.id) && d.retired_at).map((d) => d.id)
+    if (ids.length === 0) return
     setBulkDeleting(true)
     try {
       let deleted = 0
-      for (const id of selected) {
+      let failed = 0
+      for (const id of ids) {
         try {
           await api.deleteDevice(id)
           deleted++
         } catch {
-          // ignore failures for non-retired or already deleted items
+          failed++
         }
       }
-      const successText = t('devices.bulk_deleted', { count: deleted })
-      setActionMsg({ type: 'success', text: successText })
-      toast.success(successText, t('devices.bulk_deleted_title'))
+      if (failed > 0) {
+        const text = t('devices.bulk_deleted_partial', { ok: deleted, failed })
+        setActionMsg({ type: 'error', text })
+        toast.error(text, t('devices.bulk_delete_failed_title'))
+      } else {
+        const successText = t('devices.bulk_deleted', { count: deleted })
+        setActionMsg({ type: 'success', text: successText })
+        toast.success(successText, t('devices.bulk_deleted_title'))
+      }
       setSelected(new Set())
       setBulkDeleteConfirmOpen(false)
       fetchDevices()
@@ -442,9 +475,12 @@ export const DevicesPage: React.FC<{
             aria-label={t('devices.filter_site')}
           >
             <option value="">{t('devices.site_all')}</option>
-            <option value="hq">{t('devices.site_hq')}</option>
-            <option value="branch-a">{t('devices.site_branch_a')}</option>
-            <option value="branch-b">{t('devices.site_branch_b')}</option>
+            {/* The sites devices actually report, not a fixed hq/branch list. */}
+            {siteOptions.map((s) => (
+              <option key={s} value={s === 'unassigned' ? UNASSIGNED_SITE : s}>
+                {s === 'unassigned' ? t('devices.site_unassigned') : s}
+              </option>
+            ))}
           </select>
 
           <select
@@ -658,14 +694,18 @@ export const DevicesPage: React.FC<{
                       </div>
                     </td>
                     <td data-label={t('devices.col_site')}>
-                      <span className="site-badge">{d.site || 'HQ'}</span>
+                      <span className="site-badge">{d.site || t('devices.site_unassigned')}</span>
                     </td>
                     <td data-label={t('devices.col_agent')}>
                       <span className="font-mono text-sm">{d.agent_version || '—'}</span>
                     </td>
                     <td data-label={t('devices.col_heartbeat')}>
                       <span className="timestamp-cell">
-                        {d.last_seen_at ? new Date(d.last_seen_at).toLocaleTimeString() : t('devices.never')}
+                        {d.last_seen_at ? (
+                          <span title={new Date(d.last_seen_at).toLocaleString()}>{relativeTime(d.last_seen_at, lang)}</span>
+                        ) : (
+                          t('devices.never')
+                        )}
                       </span>
                     </td>
                     <td className="text-right" data-label={t('devices.col_actions')}>

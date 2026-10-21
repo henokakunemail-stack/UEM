@@ -77,7 +77,7 @@ type AuditReportRow struct {
 	CreatedAt time.Time `json:"created_at" db:"created_at"`
 }
 
-func (r *Repository) GetDeviceInventoryReport(ctx context.Context, site, osName string) ([]DeviceInventoryRow, error) {
+func (r *Repository) GetDeviceInventoryReport(ctx context.Context, site, osName string) ([]DeviceInventoryRow, bool, error) {
 	query := `
 		SELECT
 			d.id, d.hostname, d.os_name,
@@ -98,16 +98,18 @@ func (r *Repository) GetDeviceInventoryReport(ctx context.Context, site, osName 
 		query += " AND d.os_name = ?"
 		args = append(args, osName)
 	}
-	query += " ORDER BY d.hostname ASC"
+	query += " ORDER BY d.hostname ASC LIMIT ?"
+	args = append(args, MaxReportRows+1)
 
 	var rows []DeviceInventoryRow
 	if err := r.db.SelectContext(ctx, &rows, query, args...); err != nil {
-		return nil, fmt.Errorf("device inventory report: %w", err)
+		return nil, false, fmt.Errorf("device inventory report: %w", err)
 	}
-	return rows, nil
+	rows, truncated := capRows(rows, MaxReportRows)
+	return rows, truncated, nil
 }
 
-func (r *Repository) GetPatchComplianceReport(ctx context.Context, severity, state string) ([]PatchComplianceRow, error) {
+func (r *Repository) GetPatchComplianceReport(ctx context.Context, severity, state string) ([]PatchComplianceRow, bool, error) {
 	query := `
 		SELECT
 			p.device_id, d.hostname, d.os_name, COALESCE(d.site, '') AS site, p.patch_id, p.title,
@@ -125,16 +127,18 @@ func (r *Repository) GetPatchComplianceReport(ctx context.Context, severity, sta
 		query += " AND p.installed_state = ?"
 		args = append(args, state)
 	}
-	query += " ORDER BY p.severity = 'critical' DESC, d.hostname ASC"
+	query += " ORDER BY p.severity = 'critical' DESC, d.hostname ASC LIMIT ?"
+	args = append(args, MaxReportRows+1)
 
 	var rows []PatchComplianceRow
 	if err := r.db.SelectContext(ctx, &rows, query, args...); err != nil {
-		return nil, fmt.Errorf("patch compliance report: %w", err)
+		return nil, false, fmt.Errorf("patch compliance report: %w", err)
 	}
-	return rows, nil
+	rows, truncated := capRows(rows, MaxReportRows)
+	return rows, truncated, nil
 }
 
-func (r *Repository) GetDeploymentHistoryReport(ctx context.Context) ([]DeploymentReportRow, error) {
+func (r *Repository) GetDeploymentHistoryReport(ctx context.Context) ([]DeploymentReportRow, bool, error) {
 	query := `
 		SELECT
 			d.id as deployment_id, d.name as deployment_name, p.name as package_name,
@@ -145,18 +149,26 @@ func (r *Repository) GetDeploymentHistoryReport(ctx context.Context) ([]Deployme
 		JOIN software_packages p ON p.id = t.package_id
 		JOIN devices dev ON dev.id = t.device_id
 		ORDER BY d.created_at DESC, dev.hostname ASC
-		LIMIT 1000
+		LIMIT ?
 	`
+	// This was LIMIT 1000 with nothing to say so: a fleet with more task rows
+	// than that got a file that looked complete and was not.
 	var rows []DeploymentReportRow
-	if err := r.db.SelectContext(ctx, &rows, query); err != nil {
-		return nil, fmt.Errorf("deployment history report: %w", err)
+	if err := r.db.SelectContext(ctx, &rows, query, MaxReportRows+1); err != nil {
+		return nil, false, fmt.Errorf("deployment history report: %w", err)
 	}
-	return rows, nil
+	rows, truncated := capRows(rows, MaxReportRows)
+	return rows, truncated, nil
 }
 
-func (r *Repository) GetAuditTrailReport(ctx context.Context, action string, limit int) ([]AuditReportRow, error) {
-	if limit <= 0 || limit > 5000 {
-		limit = 1000
+func (r *Repository) GetAuditTrailReport(ctx context.Context, action string, limit int) ([]AuditReportRow, bool, error) {
+	// Asking for more than the maximum gives the maximum. It used to give
+	// 1000, less than the caller asked for and less than the cap.
+	switch {
+	case limit <= 0:
+		limit = DefaultAuditRows
+	case limit > MaxAuditRows:
+		limit = MaxAuditRows
 	}
 	// actor_id is also nullable, so it is COALESCEd into a plain string to match
 	// AuditReportRow.ActorID. target_id and details stay nullable on purpose:
@@ -172,11 +184,31 @@ func (r *Repository) GetAuditTrailReport(ctx context.Context, action string, lim
 		args = append(args, action)
 	}
 	query += " ORDER BY created_at DESC LIMIT ?"
-	args = append(args, limit)
+	args = append(args, limit+1)
 
 	var rows []AuditReportRow
 	if err := r.db.SelectContext(ctx, &rows, query, args...); err != nil {
-		return nil, fmt.Errorf("audit trail report: %w", err)
+		return nil, false, fmt.Errorf("audit trail report: %w", err)
 	}
-	return rows, nil
+	rows, truncated := capRows(rows, limit)
+	return rows, truncated, nil
+}
+
+// MaxReportRows caps an inventory, patch or deployment export. A report that
+// reaches it says so (X-Truncated) instead of looking complete.
+const MaxReportRows = 50000
+
+// DefaultAuditRows and MaxAuditRows bound the audit export.
+const (
+	DefaultAuditRows = 1000
+	MaxAuditRows     = 5000
+)
+
+// capRows trims rows fetched with one extra and reports whether there were
+// more than max.
+func capRows[T any](rows []T, max int) ([]T, bool) {
+	if len(rows) > max {
+		return rows[:max], true
+	}
+	return rows, false
 }

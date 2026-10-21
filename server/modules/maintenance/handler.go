@@ -51,6 +51,7 @@ func (h *Handler) Register(r chi.Router) {
 		cr.Use(h.authMiddleware)
 		cr.With(rbac.RequireRole(rbac.RoleViewer)).Get("/api/maintenance/tasks", h.handleGetCatalog)
 		cr.With(rbac.RequireRole(rbac.RoleViewer)).Get("/api/maintenance/jobs", h.handleListJobs)
+		cr.With(rbac.RequireRole(rbac.RoleViewer)).Get("/api/maintenance/jobs/stats", h.handleJobStats)
 		cr.With(rbac.RequireRole(rbac.RoleViewer)).Get("/api/maintenance/jobs/{id}/progress", h.handleGetProgress)
 		cr.With(rbac.RequireRole(rbac.RoleViewer)).Get("/api/maintenance/jobs/{id}/tasks", h.handleListJobTasks)
 		cr.With(rbac.RequireRole(rbac.RoleTechnician)).Post("/api/maintenance/jobs", h.handleCreateJob)
@@ -90,6 +91,17 @@ func (h *Handler) handleListJobs(w http.ResponseWriter, r *http.Request) {
 	}
 	// Bare array, not an envelope: the console feeds it straight to setJobs.
 	writeJSON(w, http.StatusOK, jobs)
+}
+
+// handleJobStats answers the page's KPI cards from the whole table. They used
+// to be counted from the 50 jobs the list returns.
+func (h *Handler) handleJobStats(w http.ResponseWriter, r *http.Request) {
+	s, err := h.repo.JobStats(r.Context())
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, s)
 }
 
 func (h *Handler) handleGetProgress(w http.ResponseWriter, r *http.Request) {

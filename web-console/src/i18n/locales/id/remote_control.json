@@ -135,5 +135,6 @@
   "session_ended_title": "Sesi Jarak Jauh Berakhir",
   "session_ended_text": "Sesi siaran desktop ditutup oleh operator atau perangkat.",
   "badge_desktop_linux": "Desktop (X11) + Terminal",
-  "badge_desktop_linux_title": "Layar dan input lewat X11, plus terminal penuh. Desktop Wayland belum bisa di-capture: pengguna endpoint bisa login dengan sesi X11 (Xorg)."
+  "badge_desktop_linux_title": "Layar dan input lewat X11, plus terminal penuh. Desktop Wayland belum bisa di-capture: pengguna endpoint bisa login dengan sesi X11 (Xorg).",
+  "history_load_failed": "Riwayat sesi untuk perangkat ini gagal dimuat."
 }

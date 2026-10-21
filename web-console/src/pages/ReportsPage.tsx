@@ -50,6 +50,10 @@ const ReportCard: React.FC<ReportCardProps> = ({
         const detail = await res.text().catch(() => '')
         throw new Error(detail.trim() || t('reports.export_failed_http', { status: res.status }))
       }
+      // The server caps an export and says so; a capped file used to look
+      // complete.
+      const truncated = res.headers.get('X-Truncated') === 'true'
+      const rowCount = res.headers.get('X-Row-Count')
       const blob = await res.blob()
       objectUrl = URL.createObjectURL(blob)
       const link = document.createElement('a')
@@ -64,6 +68,9 @@ const ReportCard: React.FC<ReportCardProps> = ({
         t('reports.download_started', { title, format: format.toUpperCase(), size: formatBytes(blob.size) }),
         t('reports.export_started_title')
       )
+      if (truncated) {
+        toast.warning(t('reports.truncated', { rows: rowCount ?? '?' }), t('reports.truncated_title'))
+      }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : t('reports.export_request_failed')
       toast.error(msg, t('reports.export_failed_title'))
@@ -141,9 +148,9 @@ export const ReportsPage: React.FC = () => {
       <div className="alert-banner alert-success mb-6">
         <ShieldCheck size={18} />
         <div>
-          <span className="font-semibold block">{t('reports.streaming_title')}</span>
+          <span className="font-semibold block">{t('reports.limits_title')}</span>
           <span className="text-xs text-dim">
-            {t('reports.streaming_desc')}
+            {t('reports.limits_desc')}
           </span>
         </div>
       </div>

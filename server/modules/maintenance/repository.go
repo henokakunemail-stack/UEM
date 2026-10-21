@@ -701,3 +701,24 @@ func recomputeJobCounters(ctx context.Context, tx *sqlx.Tx, jobID string) error 
 	}
 	return nil
 }
+
+// JobStats are fleet-wide maintenance totals.
+type JobStats struct {
+	Total       int `json:"total" db:"total"`
+	Running     int `json:"running" db:"running"`
+	FailedTasks int `json:"failed_tasks" db:"failed_tasks"`
+}
+
+// JobStats counts every job, not one page of them.
+func (r *Repository) JobStats(ctx context.Context) (JobStats, error) {
+	var s JobStats
+	err := r.db.GetContext(ctx, &s, `SELECT
+		COUNT(*) AS total,
+		COALESCE(SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END), 0) AS running,
+		COALESCE(SUM(failed), 0) AS failed_tasks
+		FROM maintenance_jobs`)
+	if err != nil {
+		return s, fmt.Errorf("maintenance job stats: %w", err)
+	}
+	return s, nil
+}

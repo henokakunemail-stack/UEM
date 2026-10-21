@@ -18,6 +18,7 @@ import { DataTable } from '../components/ui/DataTable'
 import { ConfirmDialog } from '../components/ui/ConfirmDialog'
 import { Modal } from '../components/ui/Modal'
 import { useToast } from '../context/ToastContext'
+import { settleAll } from '../services/settled'
 import { useT } from '../i18n/core'
 import type {
   DeviceGroupDTO,
@@ -196,23 +197,27 @@ export const MaintenancePage: React.FC = () => {
   // loadData identity, the effect tore down, and its `return stopPolling` killed
   // the 3s poll openDetail had just started. House pattern is a plain async fn
   // with a []-dep effect; see PatchesPage.tsx:35-58.
+  const [stats, setStats] = useState<{ total: number; running: number; failed_tasks: number } | null>(null)
+  const [loadFailed, setLoadFailed] = useState<string[]>([])
+
   const loadData = async () => {
     setLoading(true)
     try {
-      const [jobList, catalogList, groupList, deviceList] = await Promise.all([
-        api.getMaintenanceJobs(50, 0).catch(() => []),
-        api.getMaintenanceTaskCatalog().catch(() => []),
-        api.getDeviceGroups().catch(() => []),
-        api.getDevices(200, 0).catch(() => ({ devices: [], count: 0, total: 0, limit: 200, offset: 0 })),
-      ])
-      setJobs(jobList)
-      setCatalog(catalogList)
-      setGroups(groupList)
-      setDevices(deviceList.devices || [])
-    } catch (err: any) {
-      const errMsg = err.message || t('maintenance.load_failed')
-      setMsg({ type: 'error', text: errMsg })
-      toast.error(errMsg, t('maintenance.load_failed_title'))
+      // Each section keeps what it had when it fails, and is named in a
+      // banner. A failure used to read as "no jobs" or an empty target list.
+      const { data, failed } = await settleAll({
+        jobs: () => api.getMaintenanceJobs(50, 0),
+        stats: () => api.getMaintenanceStats(),
+        catalog: () => api.getMaintenanceTaskCatalog(),
+        groups: () => api.getDeviceGroups(),
+        devices: () => api.getDevices(200, 0),
+      })
+      if (data.jobs) setJobs(data.jobs)
+      if (data.stats) setStats(data.stats)
+      if (data.catalog) setCatalog(data.catalog)
+      if (data.groups) setGroups(data.groups)
+      if (data.devices) setDevices(data.devices.devices || [])
+      setLoadFailed(failed.map((k) => t(`maintenance.section_${k}`)))
     } finally {
       setLoading(false)
     }
@@ -296,7 +301,8 @@ export const MaintenancePage: React.FC = () => {
     setSubmitting(true)
     try {
       const res = await api.runMaintenance({
-        name: newRun.name || selectedTask?.label || 'Maintenance Job',
+        // An empty name is named by the server from the task's own label.
+        name: newRun.name || selectedTask?.label || '',
         task_type: newRun.task_type,
         target_type: newRun.target_type as 'device' | 'group' | 'all',
         target_id: newRun.target_type === 'all' ? '' : newRun.target_id,
@@ -390,13 +396,20 @@ export const MaintenancePage: React.FC = () => {
         </div>
       )}
 
+      {loadFailed.length > 0 && (
+        <div className="alert-banner alert-warning" role="alert">
+          <span>{t('common.load_failed_sections', { sections: loadFailed.join(', ') })}</span>
+        </div>
+      )}
+
+      {/* Totals over every job, not the 50 the history table shows. */}
       <div className="kpi-grid">
         <div className="kpi-card">
           <div className="kpi-header">
             <span className="kpi-label">{t('maintenance.kpi_total')}</span>
             <ListChecks className="kpi-icon text-primary" size={20} />
           </div>
-          <div className="kpi-value">{jobs.length}</div>
+          <div className="kpi-value">{stats ? stats.total : '—'}</div>
           <span className="kpi-hint">{t('maintenance.kpi_total_hint')}</span>
         </div>
         <div className="kpi-card">
@@ -404,7 +417,7 @@ export const MaintenancePage: React.FC = () => {
             <span className="kpi-label">{t('maintenance.kpi_running')}</span>
             <Activity className="kpi-icon text-warning" size={20} />
           </div>
-          <div className="kpi-value text-warning">{jobs.filter((j) => j.status === 'running').length}</div>
+          <div className="kpi-value text-warning">{stats ? stats.running : '—'}</div>
           <span className="kpi-hint">{t('maintenance.kpi_running_hint')}</span>
         </div>
         <div className="kpi-card">
@@ -420,7 +433,7 @@ export const MaintenancePage: React.FC = () => {
             <span className="kpi-label">{t('maintenance.kpi_failed')}</span>
             <AlertTriangle className="kpi-icon text-danger" size={20} />
           </div>
-          <div className="kpi-value text-danger">{jobs.reduce((a, j) => a + (j.failed || 0), 0)}</div>
+          <div className="kpi-value text-danger">{stats ? stats.failed_tasks : '—'}</div>
           <span className="kpi-hint">{t('maintenance.kpi_failed_hint')}</span>
         </div>
       </div>
@@ -429,7 +442,7 @@ export const MaintenancePage: React.FC = () => {
       <div className="table-card">
         <div className="table-toolbar">
           <h3 className="section-title">{t('maintenance.history_title')}</h3>
-          <span className="last-sync">{t('maintenance.job_count', { count: jobs.length })}</span>
+          <span className="last-sync">{t('maintenance.job_count', { count: stats ? stats.total : jobs.length })}</span>
         </div>
         <DataTable label={t('maintenance.history_table_label')}>
           <table className="data-table">

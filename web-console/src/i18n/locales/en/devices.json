@@ -45,9 +45,6 @@
   "status_retired": "Retired Only",
   "filter_site": "Filter by site",
   "site_all": "All Sites",
-  "site_hq": "Headquarters (HQ)",
-  "site_branch_a": "Branch A",
-  "site_branch_b": "Branch B",
   "filter_group": "Filter by group",
   "group_all": "All Groups",
   "page_size_label": "Endpoints per page",
@@ -113,5 +110,7 @@
   "delete_confirm": "Delete permanently",
   "bulk_dialog_title": "Bulk Delete Retired Endpoints",
   "bulk_dialog_message": "Permanently delete {count} retired endpoint(s) from the database? This action CANNOT be undone.",
-  "bulk_confirm": "Delete {count} endpoint(s)"
+  "bulk_confirm": "Delete {count} endpoint(s)",
+  "site_unassigned": "Unassigned",
+  "bulk_deleted_partial": "{ok} deleted, {failed} could not be deleted. Check that they are retired and try again."
 }

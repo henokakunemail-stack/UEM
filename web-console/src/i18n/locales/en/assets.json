@@ -105,5 +105,10 @@
   "license_created": "License '{name}' created.",
   "toast_license_created": "License Created",
   "license_create_failed": "Failed to create license",
-  "toast_create_failed": "Creation Failed"
+  "toast_create_failed": "Creation Failed",
+  "section_assets": "assets",
+  "section_summary": "asset totals",
+  "section_licenses": "licenses",
+  "section_compliance": "license compliance",
+  "devices_load_failed": "The device list could not be loaded, so an endpoint cannot be linked right now. Close and reopen to try again."
 }

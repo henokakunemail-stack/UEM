@@ -102,5 +102,10 @@
   "all_devices": "all devices",
   "run_anyway": "Run anyway",
   "footer_offline": "Offline targets are recorded as skipped, not failed.",
-  "footer_refresh": "Running jobs refresh every 3 seconds."
+  "footer_refresh": "Running jobs refresh every 3 seconds.",
+  "section_jobs": "job history",
+  "section_stats": "totals",
+  "section_catalog": "task catalog",
+  "section_groups": "groups",
+  "section_devices": "devices"
 }

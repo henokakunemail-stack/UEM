@@ -105,5 +105,10 @@
   "license_created": "Lisensi '{name}' dibuat.",
   "toast_license_created": "Lisensi Dibuat",
   "license_create_failed": "Gagal membuat lisensi",
-  "toast_create_failed": "Pembuatan Gagal"
+  "toast_create_failed": "Pembuatan Gagal",
+  "section_assets": "aset",
+  "section_summary": "total aset",
+  "section_licenses": "lisensi",
+  "section_compliance": "kepatuhan lisensi",
+  "devices_load_failed": "Daftar perangkat gagal dimuat, jadi endpoint belum bisa ditautkan. Tutup dan buka lagi untuk mencoba ulang."
 }

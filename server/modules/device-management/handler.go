@@ -92,7 +92,7 @@ func (h *Handler) listDevices(w http.ResponseWriter, r *http.Request) {
 	// The group filter is inventory-domain knowledge; route it through the
 	// inventory repository rather than duplicating membership SQL here.
 	if groupID != "" {
-		h.listDevicesByGroup(w, r, groupID, limit, offset)
+		h.listDevicesByGroup(w, r, groupID, status, site, limit, offset)
 		return
 	}
 
@@ -114,13 +114,13 @@ func (h *Handler) listDevices(w http.ResponseWriter, r *http.Request) {
 
 // listDevicesByGroup is the group-filtered variant of listDevices, sharing the
 // response shape so the console can use one component for both lists.
-func (h *Handler) listDevicesByGroup(w http.ResponseWriter, r *http.Request, groupID string, limit, offset int) {
-	total, err := h.inventory.countGroupDevices(r.Context(), groupID)
+func (h *Handler) listDevicesByGroup(w http.ResponseWriter, r *http.Request, groupID, status, site string, limit, offset int) {
+	total, err := h.inventory.countGroupDevices(r.Context(), groupID, status, site)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	devices, err := h.inventory.listGroupDevices(r.Context(), groupID, limit, offset)
+	devices, err := h.inventory.listGroupDevices(r.Context(), groupID, status, site, limit, offset)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return

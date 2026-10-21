@@ -45,9 +45,6 @@
   "status_retired": "Hanya Dipensiunkan",
   "filter_site": "Saring berdasarkan site",
   "site_all": "Semua Site",
-  "site_hq": "Kantor Pusat (HQ)",
-  "site_branch_a": "Cabang A",
-  "site_branch_b": "Cabang B",
   "filter_group": "Saring berdasarkan grup",
   "group_all": "Semua Grup",
   "page_size_label": "Perangkat per halaman",
@@ -113,5 +110,7 @@
   "delete_confirm": "Hapus permanen",
   "bulk_dialog_title": "Hapus Massal Perangkat yang Dipensiunkan",
   "bulk_dialog_message": "Hapus permanen {count} perangkat yang dipensiunkan dari basis data? Tindakan ini TIDAK DAPAT dibatalkan.",
-  "bulk_confirm": "Hapus {count} perangkat"
+  "bulk_confirm": "Hapus {count} perangkat",
+  "site_unassigned": "Belum ditetapkan",
+  "bulk_deleted_partial": "{ok} terhapus, {failed} gagal dihapus. Pastikan perangkatnya sudah di-retire lalu coba lagi."
 }

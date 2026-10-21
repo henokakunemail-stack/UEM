@@ -16,6 +16,7 @@ import {
 } from 'lucide-react'
 import { api } from '../services/api'
 import { useToast } from '../context/ToastContext'
+import { settleAll } from '../services/settled'
 import { usePermission } from '../hooks/usePermission'
 import { useT } from '../i18n/core'
 import { DataTable } from '../components/ui/DataTable'
@@ -139,24 +140,26 @@ export const AssetLicensePage: React.FC<AssetLicensePageProps> = ({ activeTab: s
   // started on. `alive` is false once the page is gone, and every setState below
   // is behind that check — setting state on an unmounted component is a wasted
   // render at best and a React warning at worst.
+  const [loadFailed, setLoadFailed] = useState<string[]>([])
+  const [modalDevicesFailed, setModalDevicesFailed] = useState(false)
   const alive = useRef(true)
   const loadData = async () => {
     setLoading(true)
     try {
-      const [astList, sumData, licList, compData] = await Promise.all([
-        api.getAssets().catch(() => []),
-        api.getAssetSummary().catch(() => null),
-        api.getLicenses().catch(() => []),
-        api.getLicenseCompliance().catch(() => ({ audited_at: '', compliance: [] })),
-      ])
+      // A section that fails keeps what it had and is named in a banner. An
+      // empty compliance list used to read as "every license compliant".
+      const { data, failed } = await settleAll({
+        assets: () => api.getAssets(),
+        summary: () => api.getAssetSummary(),
+        licenses: () => api.getLicenses(),
+        compliance: () => api.getLicenseCompliance(),
+      })
       if (!alive.current) return
-      setAssets(astList)
-      setSummary(sumData)
-      setLicenses(licList)
-      setCompliance(compData.compliance || [])
-    } catch (err: any) {
-      if (!alive.current) return
-      setMsg({ type: 'error', text: err.message || t('assets.load_failed') })
+      if (data.assets) setAssets(data.assets)
+      if (data.summary) setSummary(data.summary)
+      if (data.licenses) setLicenses(data.licenses)
+      if (data.compliance) setCompliance(data.compliance.compliance || [])
+      setLoadFailed(failed.map((k) => t(`assets.section_${k}`)))
     } finally {
       if (alive.current) setLoading(false)
     }
@@ -176,9 +179,14 @@ export const AssetLicensePage: React.FC<AssetLicensePageProps> = ({ activeTab: s
     let stopped = false
     // Contacts are optional: before a directory sync has run there are none,
     // and the PIC field has to stay usable as free text in that state.
+    setModalDevicesFailed(false)
     api.getDevices(200, 0)
       .then((res) => { if (!stopped) setDevices(res.devices || []) })
-      .catch(() => { if (!stopped) setDevices([]) })
+      .catch(() => {
+        if (stopped) return
+        setDevices([])
+        setModalDevicesFailed(true)
+      })
     api.getDirectoryContacts()
       .then((list: DirectoryContactDTO[]) => { if (!stopped) setContacts(list || []) })
       .catch(() => { if (!stopped) setContacts([]) })
@@ -380,6 +388,12 @@ export const AssetLicensePage: React.FC<AssetLicensePageProps> = ({ activeTab: s
           )}
         </div>
       </div>
+
+      {loadFailed.length > 0 && (
+        <div className="alert-banner alert-warning" role="alert">
+          <span>{t('common.load_failed_sections', { sections: loadFailed.join(', ') })}</span>
+        </div>
+      )}
 
       {msg && (
         <div className={`alert-banner ${msg.type === 'error' ? 'alert-error' : 'alert-success'}`}>
@@ -650,6 +664,11 @@ export const AssetLicensePage: React.FC<AssetLicensePageProps> = ({ activeTab: s
         }
       >
         <form id="asset-form" onSubmit={handleSaveAsset}>
+          {modalDevicesFailed && (
+            <div className="alert-banner alert-warning" role="alert">
+              <span>{t('assets.devices_load_failed')}</span>
+            </div>
+          )}
           <div className="form-group">
             <label className="form-label" htmlFor="asset-device">
               {t('assets.field_linked_device')}

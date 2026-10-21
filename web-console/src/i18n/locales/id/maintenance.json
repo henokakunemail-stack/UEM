@@ -102,5 +102,10 @@
   "all_devices": "semua perangkat",
   "run_anyway": "Tetap jalankan",
   "footer_offline": "Target offline dicatat sebagai dilewati, bukan gagal.",
-  "footer_refresh": "Tugas yang berjalan dimuat ulang setiap 3 detik."
+  "footer_refresh": "Tugas yang berjalan dimuat ulang setiap 3 detik.",
+  "section_jobs": "riwayat job",
+  "section_stats": "total",
+  "section_catalog": "katalog tugas",
+  "section_groups": "grup",
+  "section_devices": "perangkat"
 }

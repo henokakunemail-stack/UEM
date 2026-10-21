@@ -921,6 +921,11 @@ export const api = {
     return res || []
   },
 
+  // Totals over every job; the list below is one page.
+  async getMaintenanceStats(): Promise<{ total: number; running: number; failed_tasks: number }> {
+    return request<{ total: number; running: number; failed_tasks: number }>('/api/maintenance/jobs/stats')
+  },
+
   async getMaintenanceJobs(limit = 50, offset = 0): Promise<MaintenanceJobDTO[]> {
     const res = await request<MaintenanceJobDTO[]>(`/api/maintenance/jobs?limit=${limit}&offset=${offset}`)
     return res || []

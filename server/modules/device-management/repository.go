@@ -54,17 +54,11 @@ func (r *Repository) GetByID(ctx context.Context, id string) (Device, error) {
 // including them would inflate every dashboard count. Use the audit trail to
 // review retired devices.
 func (r *Repository) List(ctx context.Context, status, site string) ([]Device, error) {
-	q := `SELECT * FROM devices WHERE retired_at IS NULL`
-	args := []any{}
-	if status != "" {
-		q += ` AND status = ?`
-		args = append(args, status)
+	if status == "retired" {
+		return []Device{}, nil // List never returns retired devices
 	}
-	if site != "" {
-		q += ` AND site = ?`
-		args = append(args, site)
-	}
-	q += ` ORDER BY hostname ASC`
+	cond, args := deviceFilter("", status, site)
+	q := `SELECT * FROM devices WHERE ` + cond + ` ORDER BY hostname ASC`
 	devices := []Device{}
 	if err := r.db.SelectContext(ctx, &devices, q, args...); err != nil {
 		return nil, fmt.Errorf("list devices: %w", err)
@@ -81,18 +75,8 @@ func (r *Repository) ListPaged(ctx context.Context, status, site string, limit, 
 	// the default `retired_at IS NULL` predicate ANDs a false pair, so the
 	// console's "Retired Only" filter and the dashboard's retired KPI link both
 	// returned zero rows no matter how many devices had been decommissioned.
-	where := `WHERE retired_at IS NULL`
-	args := []any{}
-	if status == "retired" {
-		where = `WHERE retired_at IS NOT NULL`
-	} else if status != "" {
-		where += ` AND status = ?`
-		args = append(args, status)
-	}
-	if site != "" {
-		where += ` AND site = ?`
-		args = append(args, site)
-	}
+	cond, args := deviceFilter("", status, site)
+	where := `WHERE ` + cond
 
 	// Total count first (same filters, no LIMIT).
 	var total int
@@ -500,4 +484,33 @@ func (r *Repository) ConsumeSharedEnrollmentTokenAndCreateDevice(ctx context.Con
 	}
 
 	return tx.Commit()
+}
+
+// UnassignedSite is the site filter value for devices with no site. A NULL
+// site and an empty one both mean "not assigned"; the console used to show
+// them as "HQ" while the hq filter matched neither.
+const UnassignedSite = "__unassigned__"
+
+// deviceFilter builds the WHERE condition shared by every device list:
+// retired devices only for status "retired" and never otherwise, an exact
+// status, and a site (UnassignedSite for none). prefix qualifies the columns
+// ("d.") when the query joins.
+func deviceFilter(prefix, status, site string) (string, []any) {
+	cond := prefix + "retired_at IS NULL"
+	var args []any
+	if status == "retired" {
+		cond = prefix + "retired_at IS NOT NULL"
+	} else if status != "" {
+		cond += " AND " + prefix + "status = ?"
+		args = append(args, status)
+	}
+	switch site {
+	case "":
+	case UnassignedSite:
+		cond += " AND (" + prefix + "site IS NULL OR " + prefix + "site = '')"
+	default:
+		cond += " AND " + prefix + "site = ?"
+		args = append(args, site)
+	}
+	return cond, args
 }

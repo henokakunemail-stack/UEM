@@ -42,11 +42,12 @@ func (h *Handler) exportInventory(w http.ResponseWriter, r *http.Request) {
 	site := r.URL.Query().Get("site")
 	osName := r.URL.Query().Get("os")
 
-	rows, err := h.repo.GetDeviceInventoryReport(r.Context(), site, osName)
+	rows, truncated, err := h.repo.GetDeviceInventoryReport(r.Context(), site, osName)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	markCount(w, len(rows), truncated)
 
 	if format == "csv" {
 		writeCSV(w, "device-inventory-"+time.Now().Format("20060102-150405")+".csv",
@@ -92,11 +93,12 @@ func (h *Handler) exportPatches(w http.ResponseWriter, r *http.Request) {
 	severity := r.URL.Query().Get("severity")
 	state := r.URL.Query().Get("state")
 
-	rows, err := h.repo.GetPatchComplianceReport(r.Context(), severity, state)
+	rows, truncated, err := h.repo.GetPatchComplianceReport(r.Context(), severity, state)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	markCount(w, len(rows), truncated)
 
 	if format == "csv" {
 		writeCSV(w, "patch-compliance-"+time.Now().Format("20060102-150405")+".csv",
@@ -122,11 +124,12 @@ func (h *Handler) exportPatches(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) exportDeployments(w http.ResponseWriter, r *http.Request) {
 	format := r.URL.Query().Get("format")
 
-	rows, err := h.repo.GetDeploymentHistoryReport(r.Context())
+	rows, truncated, err := h.repo.GetDeploymentHistoryReport(r.Context())
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	markCount(w, len(rows), truncated)
 
 	if format == "csv" {
 		writeCSV(w, "deployment-history-"+time.Now().Format("20060102-150405")+".csv",
@@ -172,11 +175,12 @@ func (h *Handler) exportAudit(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	rows, err := h.repo.GetAuditTrailReport(r.Context(), action, limit)
+	rows, truncated, err := h.repo.GetAuditTrailReport(r.Context(), action, limit)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	markCount(w, len(rows), truncated)
 
 	if format == "csv" {
 		writeCSV(w, "audit-trail-"+time.Now().Format("20060102-150405")+".csv",
@@ -262,4 +266,14 @@ func writeJSON(w http.ResponseWriter, data any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(data)
+}
+
+// markCount tells the client how many rows it got and whether the export hit
+// its cap. Set before the body, in the same header map writeCSV and writeJSON
+// send.
+func markCount(w http.ResponseWriter, n int, truncated bool) {
+	w.Header().Set("X-Row-Count", strconv.Itoa(n))
+	if truncated {
+		w.Header().Set("X-Truncated", "true")
+	}
 }

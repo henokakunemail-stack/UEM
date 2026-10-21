@@ -60,6 +60,7 @@ export const RemoteControlPage: React.FC<{
   const [query, setQuery] = useState('')
   const [sessions, setSessions] = useState<RemoteControlSessionDTO[]>([])
   const [sessionsLoading, setSessionsLoading] = useState(false)
+  const [sessionsFailed, setSessionsFailed] = useState(false)
 
   // Disambiguate duplicate hostnames across online fleet
   const hostnameCounts = React.useMemo(() => {
@@ -102,6 +103,7 @@ export const RemoteControlPage: React.FC<{
     }
     let active = true
     setSessionsLoading(true)
+    setSessionsFailed(false)
     api
       .getRemoteControlSessions(selected.id, 20)
       .then((rows) => {
@@ -109,8 +111,11 @@ export const RemoteControlPage: React.FC<{
       })
       .catch(() => {
         // History is supplementary. A failure here must not blank the page or
-        // block starting a session, so it degrades to an empty list.
-        if (active) setSessions([])
+        // block starting a session, but it is said as a failure: an empty
+        // list read as "this device was never controlled".
+        if (!active) return
+        setSessions([])
+        setSessionsFailed(true)
       })
       .finally(() => {
         if (active) setSessionsLoading(false)
@@ -426,7 +431,9 @@ export const RemoteControlPage: React.FC<{
                     <td colSpan={5} className="text-center py-8">
                       <div className="empty-state">
                         <History size={28} />
-                        <p>{t('remote_control.empty_history')}</p>
+                        <p role={sessionsFailed ? 'alert' : undefined}>
+                          {sessionsFailed ? t('remote_control.history_load_failed') : t('remote_control.empty_history')}
+                        </p>
                       </div>
                     </td>
                   </tr>

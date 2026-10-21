@@ -3,6 +3,7 @@ package devicemanagement
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -262,9 +263,10 @@ func (r *inventoryRepository) getGroupByName(ctx context.Context, name string) (
 func (r *inventoryRepository) listGroups(ctx context.Context) ([]GroupMemberCount, error) {
 	groups := []GroupMemberCount{}
 	err := r.db.SelectContext(ctx, &groups, `
-		SELECT g.*, COUNT(m.device_id) AS member_count
+		SELECT g.*, COUNT(d.id) AS member_count
 		FROM device_groups g
 		LEFT JOIN device_group_members m ON m.group_id = g.id
+		LEFT JOIN devices d ON d.id = m.device_id AND d.retired_at IS NULL
 		GROUP BY g.id, g.name, g.description, g.created_at, g.updated_at
 		ORDER BY g.name ASC`)
 	if err != nil {
@@ -376,14 +378,21 @@ func (r *inventoryRepository) removeMember(ctx context.Context, groupID, deviceI
 }
 
 // listGroupDevices returns the devices in a group with pagination.
-func (r *inventoryRepository) listGroupDevices(ctx context.Context, groupID string, limit, offset int) ([]Device, error) {
+//
+// The status and site filters apply here too, and retired members are left out
+// unless asked for: the group view used to drop both filters and list retired
+// devices as members.
+func (r *inventoryRepository) listGroupDevices(ctx context.Context, groupID, status, site string, limit, offset int) ([]Device, error) {
 	devices := []Device{}
+	cond, args := deviceFilter("d.", status, site)
+	args = append([]any{groupID}, args...)
+	args = append(args, limit, offset)
 	err := r.db.SelectContext(ctx, &devices, `
 		SELECT d.* FROM devices d
 		JOIN device_group_members m ON m.device_id = d.id
-		WHERE m.group_id = ?
+		WHERE m.group_id = ? AND `+cond+`
 		ORDER BY d.hostname ASC
-		LIMIT ? OFFSET ?`, groupID, limit, offset)
+		LIMIT ? OFFSET ?`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list group devices: %w", err)
 	}
@@ -391,12 +400,42 @@ func (r *inventoryRepository) listGroupDevices(ctx context.Context, groupID stri
 }
 
 // countGroupDevices returns the total member count of a group.
-func (r *inventoryRepository) countGroupDevices(ctx context.Context, groupID string) (int, error) {
+func (r *inventoryRepository) countGroupDevices(ctx context.Context, groupID, status, site string) (int, error) {
 	var count int
-	err := r.db.GetContext(ctx, &count,
-		`SELECT COUNT(*) FROM device_group_members WHERE group_id = ?`, groupID)
+	cond, args := deviceFilter("d.", status, site)
+	args = append([]any{groupID}, args...)
+	err := r.db.GetContext(ctx, &count, `SELECT COUNT(*) FROM device_group_members m
+		JOIN devices d ON d.id = m.device_id
+		WHERE m.group_id = ? AND `+cond, args...)
 	if err != nil {
 		return 0, fmt.Errorf("count group devices: %w", err)
 	}
 	return count, nil
+}
+
+// deletedDeviceDetails is what the audit entry for a deleted device keeps:
+// the row is gone afterwards, so an entry with only the id could never be
+// tied back to a machine.
+func (r *inventoryRepository) deletedDeviceDetails(ctx context.Context, id string) map[string]string {
+	var row struct {
+		Hostname string `db:"hostname"`
+		Site     string `db:"site"`
+		OSName   string `db:"os_name"`
+		HW       string `db:"hw"`
+	}
+	if err := r.db.GetContext(ctx, &row, `SELECT d.hostname, COALESCE(d.site, '') AS site, d.os_name,
+		COALESCE(i.hw, '') AS hw FROM devices d LEFT JOIN device_inventory i ON i.device_id = d.id
+		WHERE d.id = ?`, id); err != nil {
+		return nil
+	}
+	details := map[string]string{"hostname": row.Hostname, "site": row.Site, "os": row.OSName}
+	var hw struct {
+		Model struct {
+			Serial string `json:"serial_number"`
+		} `json:"model"`
+	}
+	if json.Unmarshal([]byte(row.HW), &hw) == nil && hw.Model.Serial != "" {
+		details["serial"] = hw.Model.Serial
+	}
+	return details
 }

@@ -2,8 +2,12 @@ package devicemanagement
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/go-chi/chi/v5"
 )
 
 func seedRetireFixture(t *testing.T) (*inventoryHandler, *recordingAudit, func(string) string) {
@@ -84,5 +88,27 @@ func TestExpiredPendingEnrollmentsAreRetired(t *testing.T) {
 	}
 	if len(audit.calls) != 1 || audit.calls[0].action != "device.pending_expired" {
 		t.Fatalf("audit = %+v, want one device.pending_expired", audit.calls)
+	}
+}
+
+// The device row is gone after a delete, so an audit entry with only the id
+// could never be tied back to a machine.
+func TestDeletingADeviceAuditsWhatItWas(t *testing.T) {
+	h, audit, _ := seedRetireFixture(t)
+	if err := h.repo.retire(context.Background(), "enrolled"); err != nil {
+		t.Fatal(err)
+	}
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", "enrolled")
+	req := httptest.NewRequest(http.MethodDelete, "/api/devices/enrolled", nil)
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	rec := httptest.NewRecorder()
+	h.deleteDevice(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("delete = %d %s", rec.Code, rec.Body.String())
+	}
+	last := audit.calls[len(audit.calls)-1]
+	if last.action != "device.deleted" || last.details["hostname"] != "enrolled" {
+		t.Fatalf("audit = %+v, want device.deleted with the hostname", last)
 	}
 }

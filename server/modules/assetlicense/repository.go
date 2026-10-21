@@ -4,7 +4,9 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jmoiron/sqlx"
@@ -347,14 +349,24 @@ func (r *Repository) ComputeCompliance(ctx context.Context) ([]*LicenseComplianc
 		Count     int    `db:"count"`
 	}
 	var allocRows []allocRow
-	_ = r.db.SelectContext(ctx, &allocRows, `
-		SELECT license_id, COUNT(*) as count
-		FROM license_allocations
-		GROUP BY license_id
-	`)
+	// Allocations to a retired device hold no seat.
+	if err := r.db.SelectContext(ctx, &allocRows, `
+		SELECT a.license_id, COUNT(*) as count
+		FROM license_allocations a
+		JOIN devices d ON d.id = a.device_id
+		WHERE d.retired_at IS NULL
+		GROUP BY a.license_id
+	`); err != nil {
+		return nil, fmt.Errorf("count license allocations: %w", err)
+	}
 	allocMap := make(map[string]int, len(allocRows))
 	for _, row := range allocRows {
 		allocMap[row.LicenseID] = row.Count
+	}
+
+	installed, err := r.installedSoftwareNames(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	summaries := make([]*LicenseComplianceSummary, 0, len(licenses))
@@ -362,15 +374,7 @@ func (r *Repository) ComputeCompliance(ctx context.Context) ([]*LicenseComplianc
 
 	for _, lic := range licenses {
 		allocatedCount := allocMap[lic.ID]
-
-		// Check detected installations from device inventory
-		var detectedCount int
-		pattern := "%" + lic.SoftwareName + "%"
-		_ = r.db.GetContext(ctx, &detectedCount, `
-			SELECT COUNT(DISTINCT device_id)
-			FROM device_inventory
-			WHERE LOWER(software) LIKE LOWER(?)
-		`, pattern)
+		detectedCount := countInstalls(installed, lic.SoftwareName)
 
 		effectiveUsed := allocatedCount
 		if detectedCount > effectiveUsed {
@@ -408,19 +412,28 @@ func (r *Repository) GetAssetSummary(ctx context.Context) (*AssetSummary, error)
 	var total, active int
 	var valuation float64
 
-	_ = r.db.GetContext(ctx, &total, `SELECT COUNT(*) FROM hardware_assets`)
-	_ = r.db.GetContext(ctx, &active, `SELECT COUNT(*) FROM hardware_assets WHERE status = 'in_use'`)
-	_ = r.db.GetContext(ctx, &valuation, `SELECT COALESCE(SUM(purchase_cost), 0.0) FROM hardware_assets WHERE status != 'disposed'`)
+	// A failed count is an error, not a zero the page shows as fact.
+	if err := r.db.GetContext(ctx, &total, `SELECT COUNT(*) FROM hardware_assets`); err != nil {
+		return nil, fmt.Errorf("count assets: %w", err)
+	}
+	if err := r.db.GetContext(ctx, &active, `SELECT COUNT(*) FROM hardware_assets WHERE status = 'in_use'`); err != nil {
+		return nil, fmt.Errorf("count active assets: %w", err)
+	}
+	if err := r.db.GetContext(ctx, &valuation, `SELECT COALESCE(SUM(purchase_cost), 0.0) FROM hardware_assets WHERE status != 'disposed'`); err != nil {
+		return nil, fmt.Errorf("sum asset valuation: %w", err)
+	}
 
 	var expiringCount int
 	in30Days := time.Now().UTC().AddDate(0, 0, 30)
 	now := time.Now().UTC()
-	_ = r.db.GetContext(ctx, &expiringCount, `
+	if err := r.db.GetContext(ctx, &expiringCount, `
 		SELECT COUNT(*) FROM hardware_assets
 		WHERE warranty_expires_at IS NOT NULL
 		  AND warranty_expires_at >= ?
 		  AND warranty_expires_at <= ?
-	`, now, in30Days)
+	`, now, in30Days); err != nil {
+		return nil, fmt.Errorf("count expiring warranties: %w", err)
+	}
 
 	return &AssetSummary{
 		TotalAssets:           total,
@@ -428,4 +441,59 @@ func (r *Repository) GetAssetSummary(ctx context.Context) (*AssetSummary, error)
 		TotalValuation:        valuation,
 		WarrantyExpiringCount: expiringCount,
 	}, nil
+}
+
+// installedSoftwareNames reads each active device's installed program names,
+// lower-cased, once for all licenses.
+//
+// The count used to be a LIKE over the whole software JSON per license: it
+// matched publisher, version and key text as well as names ("Microsoft"
+// matched every Microsoft product), treated % and _ in a license name as
+// wildcards, counted retired devices, ran one query per license, and turned a
+// failed query into 0.
+func (r *Repository) installedSoftwareNames(ctx context.Context) ([][]string, error) {
+	var rows []string
+	if err := r.db.SelectContext(ctx, &rows, `
+		SELECT i.software FROM device_inventory i
+		JOIN devices d ON d.id = i.device_id
+		WHERE d.retired_at IS NULL`); err != nil {
+		return nil, fmt.Errorf("read installed software: %w", err)
+	}
+	out := make([][]string, 0, len(rows))
+	for _, raw := range rows {
+		var items []struct {
+			Name string `json:"name"`
+		}
+		if err := json.Unmarshal([]byte(raw), &items); err != nil {
+			continue // a row that is not a software list ("null", legacy) has nothing installed
+		}
+		names := make([]string, 0, len(items))
+		for _, it := range items {
+			if n := strings.ToLower(strings.TrimSpace(it.Name)); n != "" {
+				names = append(names, n)
+			}
+		}
+		out = append(out, names)
+	}
+	return out, nil
+}
+
+// countInstalls counts devices with a program whose name contains the
+// license's software name, case-insensitively. "Microsoft Office" matches
+// "Microsoft Office Professional Plus 2021"; the publisher does not count.
+func countInstalls(devices [][]string, softwareName string) int {
+	needle := strings.ToLower(strings.TrimSpace(softwareName))
+	if needle == "" {
+		return 0
+	}
+	n := 0
+	for _, names := range devices {
+		for _, name := range names {
+			if strings.Contains(name, needle) {
+				n++
+				break
+			}
+		}
+	}
+	return n
 }
