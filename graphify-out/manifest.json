@@ -1056,9 +1056,9 @@
     "semantic_hash": ""
   },
   "scripts/e2e-task-scheduler.ps1": {
-    "mtime": 1792597958.656333,
-    "seen": 1792600670.4905336,
-    "ast_hash": "d05e8089ec0a1f8b9fd7eae126136061",
+    "mtime": 1792601299.6136785,
+    "seen": 1792601602.7750747,
+    "ast_hash": "b3daf0b47736b8d9139568132ce437a6",
     "semantic_hash": ""
   },
   "scripts/e2e-user-management.ps1": {
@@ -2034,9 +2034,9 @@
     "semantic_hash": ""
   },
   "server/modules/taskscheduler/run_rollup_test.go": {
-    "mtime": 1792597958.7571685,
-    "seen": 1792600670.4910038,
-    "ast_hash": "c58e6aade620a460182edfbc6ecebd0a",
+    "mtime": 1792601368.2163467,
+    "seen": 1792601602.7754924,
+    "ast_hash": "38cd94b38cc97afc0a86bdbd08a048ab",
     "semantic_hash": ""
   },
   "server/modules/taskscheduler/schedule_type_test.go": {
@@ -2046,9 +2046,9 @@
     "semantic_hash": "96851fe376fa48e60343856a4ba97381"
   },
   "server/modules/taskscheduler/scheduler.go": {
-    "mtime": 1792597958.7626936,
-    "seen": 1792600670.4910073,
-    "ast_hash": "d6aee83288bf4377a703d2142d290cbf",
+    "mtime": 1792601420.8774276,
+    "seen": 1792601602.7754955,
+    "ast_hash": "951e4141cbfbd9f0c973ff697668f1ce",
     "semantic_hash": ""
   },
   "server/modules/taskscheduler/script_validation_test.go": {
