@@ -1,14 +1,12 @@
 package patch
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
-	"fmt"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/henokakunemail-stack/Endpoint-Manager/agent/shared/reportretry"
 	"github.com/henokakunemail-stack/Endpoint-Manager/agent/shared/transport"
 )
 
@@ -37,59 +35,18 @@ func (e *Engine) Install(ctx context.Context, params InstallParams) (InstallResu
 	return installOS(ctx, params)
 }
 
-func (e *Engine) ReportScan(ctx context.Context, patches []PatchItem) error {
-	url := fmt.Sprintf("%s/api/agent/patches/scan-report", e.serverBase)
-	payload := map[string]any{
-		"patches": patches,
+// ReportScan sends the scanned patch list. rebootPending is nil when the OS
+// gives no answer; the server then leaves its reboot flag untouched.
+func (e *Engine) ReportScan(ctx context.Context, patches []PatchItem, rebootPending *bool) error {
+	payload := map[string]any{"patches": patches}
+	if rebootPending != nil {
+		payload["reboot_pending"] = *rebootPending
 	}
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return fmt.Errorf("marshal scan report: %w", err)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
-	if err != nil {
-		return fmt.Errorf("create report request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Device-Id", e.deviceID)
-	req.Header.Set("X-Device-Secret", e.secret)
-
-	resp, err := e.client.Do(req)
-	if err != nil {
-		return fmt.Errorf("send scan report: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("report scan failed with status %d", resp.StatusCode)
-	}
-	return nil
+	return reportretry.Post(ctx, e.client, e.serverBase+"/api/agent/patches/scan-report", e.deviceID, e.secret, payload)
 }
 
+// ReportInstall sends the outcome of an install job. The job stays
+// 'dispatched' on the server until this arrives, so it is retried.
 func (e *Engine) ReportInstall(ctx context.Context, res InstallResult) error {
-	url := fmt.Sprintf("%s/api/agent/patches/install-result", e.serverBase)
-	body, err := json.Marshal(res)
-	if err != nil {
-		return fmt.Errorf("marshal install result: %w", err)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
-	if err != nil {
-		return fmt.Errorf("create report request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Device-Id", e.deviceID)
-	req.Header.Set("X-Device-Secret", e.secret)
-
-	resp, err := e.client.Do(req)
-	if err != nil {
-		return fmt.Errorf("send install report: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("report install failed with status %d", resp.StatusCode)
-	}
-	return nil
+	return reportretry.Post(ctx, e.client, e.serverBase+"/api/agent/patches/install-result", e.deviceID, e.secret, res)
 }

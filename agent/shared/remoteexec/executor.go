@@ -1,18 +1,17 @@
 package remoteexec
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/rs/zerolog/log"
 
+	"github.com/henokakunemail-stack/Endpoint-Manager/agent/shared/reportretry"
 	"github.com/henokakunemail-stack/Endpoint-Manager/agent/shared/transport"
 )
 
@@ -65,35 +64,13 @@ func ToHTTPURL(serverURL string) string {
 // default. See ExecPayload.ReportURL for why the destination cannot be guessed
 // from the execution id alone.
 func ReportResult(ctx context.Context, serverURL, deviceID, deviceSecret, reportPath string, rep ExecReport) error {
-	apiBase := ToHTTPURL(serverURL)
-	b, err := json.Marshal(rep)
-	if err != nil {
-		return err
-	}
-
 	if reportPath == "" {
 		reportPath = "/api/agent/executions/" + rep.ExecutionID + "/result"
 	}
-	reqURL := apiBase + reportPath
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL, bytes.NewReader(b))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Device-Id", deviceID)
-	req.Header.Set("X-Device-Secret", deviceSecret)
-
+	// The result closes the run on the server. A single dropped POST used to
+	// leave it 'dispatched' for good, so a transient failure is retried.
 	client := transport.NewHTTPClient(15 * time.Second)
-	resp, err := client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 300 {
-		return fmt.Errorf("server rejected execution report: status %d", resp.StatusCode)
-	}
-	return nil
+	return reportretry.Post(ctx, client, ToHTTPURL(serverURL)+reportPath, deviceID, deviceSecret, rep)
 }
 
 // ExecuteAndReport runs a remote command in the background and reports results.

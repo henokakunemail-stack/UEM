@@ -50,6 +50,30 @@ type WSHandler struct {
 	filterSync FilterSyncer
 	// systemPolicySync pushes effective system policy (GPO) to a reconnected device.
 	systemPolicySync SystemPolicySyncer
+	// commandResults are asked, in order, to claim a command result before the
+	// agent_commands table is. Modules that dispatch work under their own row id
+	// (software tasks, patch jobs) register here; without it an agent that
+	// refused the work answered into a table with no matching row, the answer
+	// was logged and dropped, and the task claimed 'dispatched' forever.
+	commandResults []CommandResultReceiver
+	// reconnectQueues deliver module work left pending while the device was
+	// away. They run after hello, when capabilities and version are current.
+	reconnectQueues []ReconnectQueue
+}
+
+// CommandResultReceiver claims an agent's command result for a command it
+// dispatched. It returns true when id was one of its own, whether or not the
+// update changed anything, so the result is not also looked up in
+// agent_commands. errMsg is the agent's reason for a failed result, or "".
+type CommandResultReceiver interface {
+	HandleCommandResult(ctx context.Context, deviceID, id, status, errMsg string) bool
+}
+
+// ReconnectQueue delivers work a module queued for a device while it was
+// offline. FlushOnReconnect runs after the agent's hello has been stored, so a
+// module can check the capabilities the device just reported.
+type ReconnectQueue interface {
+	FlushOnReconnect(ctx context.Context, deviceID string) error
 }
 
 // SystemPolicySyncer re-sends compiled system policies to a device on reconnect.
@@ -143,6 +167,19 @@ func (h *WSHandler) WithFilterSync(s FilterSyncer) *WSHandler {
 // WithSystemPolicySync attaches the re-sync hook for system policies (GPO).
 func (h *WSHandler) WithSystemPolicySync(s SystemPolicySyncer) *WSHandler {
 	h.systemPolicySync = s
+	return h
+}
+
+// WithCommandResultReceiver adds a module that claims results for commands it
+// dispatched under its own ids.
+func (h *WSHandler) WithCommandResultReceiver(r CommandResultReceiver) *WSHandler {
+	h.commandResults = append(h.commandResults, r)
+	return h
+}
+
+// WithReconnectQueue adds a module whose pending work is flushed after hello.
+func (h *WSHandler) WithReconnectQueue(q ReconnectQueue) *WSHandler {
+	h.reconnectQueues = append(h.reconnectQueues, q)
 	return h
 }
 
@@ -479,6 +516,13 @@ func (h *WSHandler) handleHello(ctx context.Context, c *Conn, env Envelope) {
 	if h.updateQueue != nil && p.AgentVersion != "" {
 		_ = h.updateQueue.ReconcileDeviceVersion(ctx, c.DeviceID, p.AgentVersion)
 	}
+	// Queued work goes out after hello, not on connect: only now are the
+	// device's capabilities and agent version the ones it is actually running.
+	for _, q := range h.reconnectQueues {
+		if err := q.FlushOnReconnect(ctx, c.DeviceID); err != nil {
+			log.Warn().Err(err).Str("device", c.DeviceID).Msg("flush queued work on reconnect")
+		}
+	}
 	log.Info().Str("device", c.DeviceID).Str("agent", p.AgentVersion).
 		Str("os", name+" "+version).Str("hostname", p.Hostname).
 		Int("capabilities", len(p.Capabilities)).Msg("agent hello")
@@ -517,6 +561,11 @@ func (h *WSHandler) handleCommandResult(ctx context.Context, c *Conn, env Envelo
 	if env.Status == "failed" {
 		status = "failed"
 	}
+	for _, r := range h.commandResults {
+		if r.HandleCommandResult(ctx, c.DeviceID, env.ID, status, resultError(env.Result)) {
+			return
+		}
+	}
 	res, err := h.db.ExecContext(ctx, `
 		UPDATE agent_commands SET status = ?, completed_at = ?, result = ? WHERE id = ? AND device_id = ?`,
 		status, time.Now().UTC(), resultJSON, env.ID, c.DeviceID)
@@ -527,6 +576,20 @@ func (h *WSHandler) handleCommandResult(ctx context.Context, c *Conn, env Envelo
 	if rows, _ := res.RowsAffected(); rows == 0 {
 		log.Warn().Str("device", c.DeviceID).Str("cmd", env.ID).Msg("command result ignored: no matching command for device")
 	}
+}
+
+// resultError pulls the agent's reason out of a command result. Handlers answer
+// {"status":"rejected","error":"..."}; anything else has no reason to give.
+func resultError(result any) string {
+	switch m := result.(type) {
+	case map[string]any:
+		if e, ok := m["error"].(string); ok {
+			return e
+		}
+	case map[string]string:
+		return m["error"]
+	}
+	return ""
 }
 
 var _ = sql.ErrNoRows // kept for future repository error mapping

@@ -268,6 +268,7 @@ func TestTheMigrationsThatWidenATableAreNamedHere(t *testing.T) {
 		"0021_agent_update_signing.sql":             true,
 		"0023_network_filter_mode.sql":              true,
 		"0027_cluster.sql":                          true,
+		"0028_workflow_state.sql":                   true,
 	}
 	for name := range widening {
 		stmt, err := fs.ReadFile(migrations, "migrations/"+name)

@@ -580,7 +580,7 @@ func runAgent(serverURL, enrollToken, enrollSite, credsPath string, heartbeatSec
 				log.Error().Err(err).Msg("patch scan failed")
 				return
 			}
-			if err := patchEngine.ReportScan(context.Background(), patches); err != nil {
+			if err := patchEngine.ReportScan(context.Background(), patches, nil); err != nil {
 				log.Error().Err(err).Msg("report patch scan failed")
 			} else {
 				log.Info().Int("count", len(patches)).Msg("patch scan reported successfully")

@@ -10,5 +10,9 @@
   "save": "Save",
   "delete": "Delete",
   "confirm": "Confirm",
-  "retry": "Retry"
+  "retry": "Retry",
+  "status_partial": "Partial",
+  "status_cancelled": "Cancelled",
+  "status_queued": "Waiting for device",
+  "load_failed_sections": "Could not load: {sections}. Showing the last data that loaded."
 }

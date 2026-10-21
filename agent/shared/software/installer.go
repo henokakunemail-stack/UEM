@@ -1,7 +1,6 @@
 package software
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -17,6 +16,7 @@ import (
 
 	"github.com/rs/zerolog/log"
 
+	"github.com/henokakunemail-stack/Endpoint-Manager/agent/shared/reportretry"
 	"github.com/henokakunemail-stack/Endpoint-Manager/agent/shared/transport"
 )
 
@@ -54,34 +54,16 @@ func ToHTTPURL(serverURL string) string {
 	return strings.TrimRight(serverURL, "/")
 }
 
-// ReportProgress notifies the server about installation progress.
+// ReportProgress notifies the server about installation progress. A terminal
+// report (success, failed) closes the task, so a transient failure is retried;
+// a lost progress step is superseded by the next one and is sent once.
 func ReportProgress(ctx context.Context, serverURL, deviceID, deviceSecret string, rep ProgressReport) error {
-	apiBase := ToHTTPURL(serverURL)
-	b, err := json.Marshal(rep)
-	if err != nil {
-		return err
-	}
-
-	reqURL := fmt.Sprintf("%s/api/agent/tasks/%s/progress", apiBase, rep.TaskID)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL, bytes.NewReader(b))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Device-Id", deviceID)
-	req.Header.Set("X-Device-Secret", deviceSecret)
-
+	reqURL := fmt.Sprintf("%s/api/agent/tasks/%s/progress", ToHTTPURL(serverURL), rep.TaskID)
 	client := transport.NewHTTPClient(15 * time.Second)
-	resp, err := client.Do(req)
-	if err != nil {
-		return err
+	if rep.Status == "success" || rep.Status == "failed" {
+		return reportretry.Post(ctx, client, reqURL, deviceID, deviceSecret, rep)
 	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 300 {
-		return fmt.Errorf("server rejected progress report: status %d", resp.StatusCode)
-	}
-	return nil
+	return reportretry.PostOnce(ctx, client, reqURL, deviceID, deviceSecret, rep)
 }
 
 // ExecuteInstall downloads, verifies, and runs a software package.

@@ -24,6 +24,7 @@ import (
 
 	"github.com/rs/zerolog/log"
 
+	"github.com/henokakunemail-stack/Endpoint-Manager/agent/shared/reportretry"
 	"github.com/henokakunemail-stack/Endpoint-Manager/agent/shared/transport"
 )
 
@@ -463,76 +464,13 @@ func (e *Engine) reportBusy(ctx context.Context, taskID, taskType string) {
 	}
 }
 
-// errPermanent marks a report the server refused on purpose. A 4xx means the
-// same payload will be refused again, and a marshal or request-build failure
-// will never succeed on a retry — repeating those only burns the window the
-// step still has left.
-type errPermanent struct{ error }
-
-// reportAttempts and reportBackoff bound the retry of a TRANSIENT failure. One
-// dropped POST used to lose a step permanently: the row stayed 'dispatched',
-// the job stayed 'running', and the console polled both forever. Three tries
-// over ~700ms rides out a server restart or a single 502 without ever holding
-// the sweep for a second longer than that.
-const (
-	reportAttempts = 3
-)
-
-func reportBackoff(attempt int) time.Duration {
-	return 100 * time.Millisecond << (attempt - 1)
-}
-
-// report posts one step report, retrying only a transient failure.
+// report posts one step report. A transient failure (transport error, 5xx) is
+// retried a bounded number of times by reportretry; a 4xx is not, because the
+// same payload would be refused again. One dropped POST used to lose a step
+// permanently: the row stayed 'dispatched' and the job stayed 'running'.
 func (e *Engine) report(ctx context.Context, rep StepReport) error {
-	var last error
-	for attempt := 1; attempt <= reportAttempts; attempt++ {
-		if attempt > 1 {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-time.After(reportBackoff(attempt - 1)):
-			}
-		}
-		last = e.reportOnce(ctx, rep)
-		if last == nil {
-			return nil
-		}
-		var permanent *errPermanent
-		if errors.As(last, &permanent) {
-			return last
-		}
-	}
-	return last
-}
-
-func (e *Engine) reportOnce(ctx context.Context, rep StepReport) error {
 	url := e.serverBase + "/api/agent/maintenance/tasks/" + rep.TaskID + "/result"
-	body, err := json.Marshal(rep)
-	if err != nil {
-		return &errPermanent{fmt.Errorf("marshal maintenance report: %w", err)}
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
-	if err != nil {
-		return &errPermanent{fmt.Errorf("create report request: %w", err)}
-	}
-	req.Header.Set("Content-Type", "application/json")
-	// The per-device secret, not a user JWT. These header names are the ones
-	// devicemgmt.AuthenticateAgent reads.
-	req.Header.Set("X-Device-Id", e.deviceID)
-	req.Header.Set("X-Device-Secret", e.deviceSecret)
-
-	resp, err := e.client.Do(req)
-	if err != nil {
-		return fmt.Errorf("send maintenance report: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode >= 400 && resp.StatusCode < 500 {
-		return &errPermanent{fmt.Errorf("maintenance report rejected with status %d", resp.StatusCode)}
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("maintenance report rejected with status %d", resp.StatusCode)
-	}
-	return nil
+	return reportretry.Post(ctx, e.client, url, e.deviceID, e.deviceSecret, rep)
 }
 
 // commandTimeout is the per-command ceiling inside one step. The step timeout

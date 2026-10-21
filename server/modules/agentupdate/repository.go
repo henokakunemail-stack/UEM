@@ -112,6 +112,9 @@ type UpdateCampaign struct {
 	CreatedBy          string    `db:"created_by" json:"created_by"`
 	CreatedAt          time.Time `db:"created_at" json:"created_at"`
 	UpdatedAt          time.Time `db:"updated_at" json:"updated_at"`
+	// NextWaveAt is when the wave loop releases the next batch; nil when no
+	// wave is pending.
+	NextWaveAt *time.Time `db:"next_wave_at" json:"next_wave_at,omitempty"`
 }
 
 type UpdateCampaignDTO struct {
@@ -172,6 +175,11 @@ type DeviceUpdateTask struct {
 	DispatchedAt  *time.Time `db:"dispatched_at" json:"dispatched_at,omitempty"`
 	CompletedAt   *time.Time `db:"completed_at" json:"completed_at,omitempty"`
 	CreatedAt     time.Time  `db:"created_at" json:"created_at"`
+	// ReleasedAt is set when the task's wave let it go; a pending task without
+	// it is still waiting for its wave, not for its device.
+	ReleasedAt *time.Time `db:"released_at" json:"released_at,omitempty"`
+	// ProgressAt is the last report the agent sent for this task.
+	ProgressAt *time.Time `db:"progress_at" json:"progress_at,omitempty"`
 }
 
 type Repository struct {

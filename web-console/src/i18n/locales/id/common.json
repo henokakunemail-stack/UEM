@@ -10,5 +10,9 @@
   "save": "Simpan",
   "delete": "Hapus",
   "confirm": "Konfirmasi",
-  "retry": "Coba lagi"
+  "retry": "Coba lagi",
+  "status_partial": "Sebagian",
+  "status_cancelled": "Dibatalkan",
+  "status_queued": "Menunggu perangkat",
+  "load_failed_sections": "Gagal memuat: {sections}. Menampilkan data terakhir yang berhasil dimuat."
 }
