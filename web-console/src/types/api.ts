@@ -599,6 +599,8 @@ export interface SystemPolicySettingsDTO {
   admin_account_enabled?: boolean
   admin_account_username?: string
   admin_account_password?: string
+  /** Set by the server instead of returning the password: one is stored. */
+  admin_account_password_set?: boolean
   admin_account_full_name?: string
   admin_account_description?: string
   admin_account_never_expires?: boolean

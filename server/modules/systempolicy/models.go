@@ -70,9 +70,12 @@ type PolicySettings struct {
 	WindowsUpdateMode        WindowsUpdateMode `json:"windows_update_mode"` // "default", "auto_install", "notify_only"
 
 	// Managed Local Administrator Account
-	AdminAccountEnabled      bool   `json:"admin_account_enabled"`
-	AdminAccountUsername     string `json:"admin_account_username,omitempty"`
-	AdminAccountPassword     string `json:"admin_account_password,omitempty"`
+	AdminAccountEnabled  bool   `json:"admin_account_enabled"`
+	AdminAccountUsername string `json:"admin_account_username,omitempty"`
+	AdminAccountPassword string `json:"admin_account_password,omitempty"`
+	// AdminAccountPasswordSet is what the console sees instead of the password:
+	// whether one is stored. Never sent to agents as meaningful input.
+	AdminAccountPasswordSet  bool   `json:"admin_account_password_set,omitempty"`
 	AdminAccountFullName     string `json:"admin_account_full_name,omitempty"`
 	AdminAccountDescription  string `json:"admin_account_description,omitempty"`
 	AdminAccountNeverExpires bool   `json:"admin_account_never_expires"`

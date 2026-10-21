@@ -188,5 +188,9 @@
   "admin_never_expires": "Password Never Expires (Prevents account lockout on disconnected machines)",
   "delete_title": "Delete System Policy",
   "delete_message": "Are you sure you want to delete policy \"{name}\"? Endpoints will revert to lower precedence policy or default settings.",
-  "delete_confirm": "Delete Policy"
+  "delete_confirm": "Delete Policy",
+  "admin_password_label_optional": "Admin Password",
+  "admin_password_keep_placeholder": "Leave blank to keep the stored password",
+  "admin_password_stored_hint": "A password is stored. It is never shown; type a new one only to change it.",
+  "admin_password_required": "Enter a password for the managed admin account."
 }

@@ -122,8 +122,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
           headers.set('Authorization', `Bearer ${newTokens.access_token}`)
           const retryRes = await fetch(path, { ...options, headers })
           if (!retryRes.ok) {
-            const err = await retryRes.json().catch(() => ({}))
-            throw new Error(err.error || `HTTP ${retryRes.status}`)
+            throw await toApiError(retryRes, `HTTP ${retryRes.status}`)
           }
           return retryRes.json()
         }
@@ -137,11 +136,37 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   }
 
   if (!res.ok) {
-    const err = await res.json().catch(() => ({}))
-    throw new Error(err.error || `Request failed with HTTP ${res.status}`)
+    throw await toApiError(res, `Request failed with HTTP ${res.status}`)
   }
 
   return res.json()
+}
+
+/**
+ * An API failure with what the server said about it. The message stays the
+ * server's text, so callers that only read `.message` behave as before; `code`
+ * is the machine-readable reason ("last_admin", "account_disabled", ...) that a
+ * page maps to a translated message, and `retryAfter` comes from the body or
+ * the Retry-After header.
+ */
+export class ApiError extends Error {
+  status: number
+  code?: string
+  retryAfter?: number
+  constructor(message: string, status: number, code?: string, retryAfter?: number) {
+    super(message)
+    this.name = 'ApiError'
+    this.status = status
+    this.code = code
+    this.retryAfter = retryAfter
+  }
+}
+
+export async function toApiError(res: Response, fallback: string): Promise<ApiError> {
+  const body = (await res.json().catch(() => ({}))) as { error?: string; code?: string; retry_after?: number }
+  const header = Number(res.headers.get('Retry-After'))
+  const retryAfter = typeof body.retry_after === 'number' ? body.retry_after : Number.isFinite(header) && header > 0 ? header : undefined
+  return new ApiError(body.error || fallback, res.status, body.code, retryAfter)
 }
 
 /**
@@ -181,8 +206,7 @@ export const api = {
       body: JSON.stringify({ username, password }),
     })
     if (!res.ok) {
-      const err = await res.json().catch(() => ({}))
-      throw new Error(err.error || 'Invalid credentials')
+      throw await toApiError(res, 'Invalid credentials')
     }
     const tokens: UserToken = await res.json()
     setStoredTokens(tokens)

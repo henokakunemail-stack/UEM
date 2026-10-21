@@ -112,6 +112,9 @@ func (e *Engine) Apply(ctx context.Context, version string, settings PolicySetti
 
 func (e *Engine) Report(ctx context.Context, version string, status string, settings PolicySettings, errMsg string) error {
 	reportURL := fmt.Sprintf("%s/api/agent/devices/%s/system-policy/report", e.serverURL, e.deviceID)
+	// The server needs to know what was applied, not the managed admin
+	// password: it never stores that per device, so it does not travel back.
+	settings.AdminAccountPassword = ""
 
 	body, err := json.Marshal(map[string]any{
 		"policy_version": version,

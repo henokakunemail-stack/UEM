@@ -892,7 +892,10 @@ func buildServer(cfg config.Config, database *sqlx.DB) (*http.Server, *serverApp
 	wsH.WithFilterSync(filterH)
 
 	// Endpoint system policies (Active Directory GPO-like management).
-	sysPolicyRepo := systempolicy.NewRepository(database)
+	sysPolicyRepo := systempolicy.NewRepository(database).WithVersionKey(cfg.JWTSecret)
+	// Earlier versions stored the managed admin password in every device's
+	// state row; clear those once.
+	sysPolicyRepo.ScrubStoredStatePasswords(context.Background())
 	sysPolicyH := systempolicy.NewHandler(sysPolicyRepo, hub, deviceRepo, &auditAdapter{db: database}, jwtSvc.RequireAuth).
 		WithDataDir(cfg.DataDir)
 	sysPolicyH.Register(r)

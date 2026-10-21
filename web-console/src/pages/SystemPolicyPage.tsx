@@ -17,7 +17,7 @@ import {
   Terminal,
   UserCheck,
 } from 'lucide-react'
-import { api } from '../services/api'
+import { ApiError, api } from '../services/api'
 import { usePermission } from '../hooks/usePermission'
 import { DataTable } from '../components/ui/DataTable'
 import { ConfirmDialog } from '../components/ui/ConfirmDialog'
@@ -264,6 +264,10 @@ export const SystemPolicyPage: React.FC = () => {
 
   const handleSavePolicy = async (e: React.FormEvent) => {
     e.preventDefault()
+    // The flag is the server's to set; a blank password means "keep the stored
+    // one" when one is set, so only a typed password is sent.
+    const { admin_account_password_set: _passwordSet, ...settings } = formSettings
+    void _passwordSet
     try {
       if (editingPolicy) {
         await api.updateSystemPolicy(editingPolicy.id, {
@@ -273,7 +277,7 @@ export const SystemPolicyPage: React.FC = () => {
           target_id: formTargetId,
           priority: formPriority,
           is_enabled: formIsEnabled,
-          settings: formSettings,
+          settings,
         })
         toast.success(t('policy.updated'))
       } else {
@@ -284,14 +288,18 @@ export const SystemPolicyPage: React.FC = () => {
           target_id: formTargetId,
           priority: formPriority,
           is_enabled: formIsEnabled,
-          settings: formSettings,
+          settings,
         })
         toast.success(t('policy.created'))
       }
       setModalOpen(false)
       loadData()
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : t('policy.save_failed'))
+      toast.error(
+        err instanceof ApiError && err.code === 'admin_password_required'
+          ? t('policy.admin_password_required')
+          : err instanceof Error ? err.message : t('policy.save_failed'),
+      )
     }
   }
 
@@ -1394,14 +1402,21 @@ export const SystemPolicyPage: React.FC = () => {
                       </div>
 
                       <div className="form-group">
-                        <label className="form-label" htmlFor="admin-password">{t('policy.admin_password_label')}</label>
+                        <label className="form-label" htmlFor="admin-password">
+                          {formSettings.admin_account_password_set ? t('policy.admin_password_label_optional') : t('policy.admin_password_label')}
+                        </label>
                         <div className="relative">
                           <input
                             id="admin-password"
                             type={showAdminPassword ? 'text' : 'password'}
-                            required
+                            required={!formSettings.admin_account_password_set}
+                            autoComplete="new-password"
                             className="form-input pr-14"
-                            placeholder={t('policy.admin_password_placeholder')}
+                            placeholder={
+                              formSettings.admin_account_password_set
+                                ? t('policy.admin_password_keep_placeholder')
+                                : t('policy.admin_password_placeholder')
+                            }
                             value={formSettings.admin_account_password || ''}
                             onChange={(e) =>
                               setFormSettings({ ...formSettings, admin_account_password: e.target.value })
@@ -1415,7 +1430,9 @@ export const SystemPolicyPage: React.FC = () => {
                             {showAdminPassword ? t('policy.hide') : t('policy.show')}
                           </button>
                         </div>
-                        <span className="text-xs text-muted">{t('policy.admin_password_hint')}</span>
+                        <span className="text-xs text-muted">
+                          {formSettings.admin_account_password_set ? t('policy.admin_password_stored_hint') : t('policy.admin_password_hint')}
+                        </span>
                       </div>
                     </div>
 

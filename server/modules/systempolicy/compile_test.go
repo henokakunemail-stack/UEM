@@ -141,8 +141,8 @@ func TestCompileEffectivePolicy_Precedence(t *testing.T) {
 	}
 
 	// 4. Test version determinism
-	v1 := ComputePolicyVersion(compiledDevice.Settings)
-	v2 := ComputePolicyVersion(compiledDevice.Settings)
+	v1 := ComputePolicyVersion(compiledDevice.Settings, repo.versionKey)
+	v2 := ComputePolicyVersion(compiledDevice.Settings, repo.versionKey)
 	if v1 != v2 {
 		t.Errorf("version hash not deterministic: %s != %s", v1, v2)
 	}

@@ -2,6 +2,7 @@ package systempolicy
 
 import (
 	"context"
+	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"database/sql"
@@ -17,10 +18,28 @@ import (
 
 type Repository struct {
 	db *sqlx.DB
+	// versionKey keys the password's contribution to the policy version, so
+	// the version (visible to every console role) cannot be used to test
+	// password guesses offline.
+	versionKey []byte
 }
 
 func NewRepository(db *sqlx.DB) *Repository {
-	return &Repository{db: db}
+	// A random key until WithVersionKey sets the server's: versions are then
+	// only stable for this process, which costs a re-apply after a restart but
+	// never leaks anything.
+	key := make([]byte, 32)
+	_, _ = rand.Read(key)
+	return &Repository{db: db, versionKey: key}
+}
+
+// WithVersionKey derives the version key from a server secret (JWT_SECRET),
+// which every node of a cluster shares, so all nodes compute the same version.
+func (r *Repository) WithVersionKey(secret string) *Repository {
+	m := hmac.New(sha256.New, []byte(secret))
+	m.Write([]byte("systempolicy/admin-password/v1"))
+	r.versionKey = m.Sum(nil)
+	return r
 }
 
 func NewID() string {
@@ -166,7 +185,9 @@ func (r *Repository) UpdateDeviceState(ctx context.Context, state *DeviceSystemP
 	if state.LastAppliedAt.IsZero() {
 		state.LastAppliedAt = time.Now().UTC()
 	}
-	settingsBytes, err := json.Marshal(state.AppliedSettings)
+	// The managed admin password is never stored per device: the agent's
+	// report echoes the settings it applied, password included.
+	settingsBytes, err := json.Marshal(state.AppliedSettings.redacted())
 	if err != nil {
 		settingsBytes = []byte("{}")
 	}
@@ -317,7 +338,7 @@ func (r *Repository) CompileEffectivePolicy(ctx context.Context, deviceID string
 	if len(matched) == 0 {
 		return &CompiledPolicy{
 			DeviceID: deviceID,
-			Version:  ComputePolicyVersion(effective),
+			Version:  ComputePolicyVersion(effective, r.versionKey),
 			Settings: effective,
 		}, nil
 	}
@@ -401,7 +422,7 @@ func (r *Repository) CompileEffectivePolicy(ctx context.Context, deviceID string
 		}
 	}
 
-	version := ComputePolicyVersion(effective)
+	version := ComputePolicyVersion(effective, r.versionKey)
 
 	return &CompiledPolicy{
 		DeviceID: deviceID,
@@ -410,8 +431,17 @@ func (r *Repository) CompileEffectivePolicy(ctx context.Context, deviceID string
 	}, nil
 }
 
-// ComputePolicyVersion generates a deterministic SHA-256 hash (16 chars) for settings.
-func ComputePolicyVersion(s PolicySettings) string {
+// ComputePolicyVersion generates a deterministic SHA-256 hash (16 chars) for
+// settings. The managed admin password enters it only as an HMAC under key:
+// it still changes the version when it changes, but a version no longer lets
+// anyone who can read it check password guesses offline.
+func ComputePolicyVersion(s PolicySettings, key []byte) string {
+	if s.AdminAccountPassword != "" {
+		m := hmac.New(sha256.New, key)
+		m.Write([]byte(s.AdminAccountPassword))
+		s.AdminAccountPassword = hex.EncodeToString(m.Sum(nil))
+	}
+	s.AdminAccountPasswordSet = false
 	raw, _ := json.Marshal(s)
 	h := sha256.Sum256(raw)
 	return hex.EncodeToString(h[:8]) // 16 hex chars

@@ -82,6 +82,12 @@ func TestEngine_Report(t *testing.T) {
 		if payload.Settings.USBStorageMode != USBStorageBlock {
 			t.Errorf("unexpected usb mode: %s", payload.Settings.USBStorageMode)
 		}
+		if payload.Settings.AdminAccountPassword != "" {
+			t.Errorf("the report carried the managed admin password back to the server")
+		}
+		if payload.Settings.AdminAccountUsername != "sysadmin" {
+			t.Errorf("the other admin-account fields must survive: username %q", payload.Settings.AdminAccountUsername)
+		}
 
 		reported = true
 		w.WriteHeader(http.StatusOK)
@@ -90,7 +96,10 @@ func TestEngine_Report(t *testing.T) {
 
 	engine := NewEngine(ts.URL, "dev-123", "sec-456")
 	s := PolicySettings{
-		USBStorageMode: USBStorageBlock,
+		USBStorageMode:       USBStorageBlock,
+		AdminAccountEnabled:  true,
+		AdminAccountUsername: "sysadmin",
+		AdminAccountPassword: "S3cret-For-Endpoints!",
 	}
 	err := engine.Report(context.Background(), "ver-abc", "synced", s, "")
 	if err != nil {

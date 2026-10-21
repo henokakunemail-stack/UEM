@@ -115,13 +115,18 @@ func writeErr(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
 }
 
+// writeErrCode adds a machine-readable code the console translates.
+func writeErrCode(w http.ResponseWriter, status int, code, msg string) {
+	writeJSON(w, status, map[string]string{"error": msg, "code": code})
+}
+
 func (h *Handler) listPolicies(w http.ResponseWriter, r *http.Request) {
 	policies, err := h.repo.List(r.Context())
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"policies": policies, "count": len(policies)})
+	writeJSON(w, http.StatusOK, map[string]any{"policies": redactPolicies(policies), "count": len(policies)})
 }
 
 func (h *Handler) getPolicy(w http.ResponseWriter, r *http.Request) {
@@ -135,7 +140,7 @@ func (h *Handler) getPolicy(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, "system policy not found")
 		return
 	}
-	writeJSON(w, http.StatusOK, policy)
+	writeJSON(w, http.StatusOK, redactPolicy(policy))
 }
 
 type createPolicyReq struct {
@@ -187,6 +192,12 @@ func (h *Handler) createPolicy(w http.ResponseWriter, r *http.Request) {
 	if req.Settings.WindowsUpdateMode == "" {
 		req.Settings.WindowsUpdateMode = WindowsUpdateDefault
 	}
+	keepStoredPassword(&req.Settings, PolicySettings{})
+	if req.Settings.AdminAccountEnabled && req.Settings.AdminAccountPassword == "" {
+		writeErrCode(w, http.StatusBadRequest, "admin_password_required",
+			"admin_account_password is required when the managed admin account is enabled")
+		return
+	}
 
 	actorID := auth.UserIDFromContext(r.Context())
 	p := &SystemPolicy{
@@ -216,7 +227,7 @@ func (h *Handler) createPolicy(w http.ResponseWriter, r *http.Request) {
 		go h.dispatchAffected(context.Background(), p.TargetType, p.TargetID)
 	}
 
-	writeJSON(w, http.StatusCreated, p)
+	writeJSON(w, http.StatusCreated, redactPolicy(p))
 }
 
 type updatePolicyReq struct {
@@ -286,6 +297,12 @@ func (h *Handler) updatePolicy(w http.ResponseWriter, r *http.Request) {
 		if req.Settings.WindowsUpdateMode == "" {
 			req.Settings.WindowsUpdateMode = WindowsUpdateDefault
 		}
+		keepStoredPassword(req.Settings, p.Settings)
+		if req.Settings.AdminAccountEnabled && req.Settings.AdminAccountPassword == "" {
+			writeErrCode(w, http.StatusBadRequest, "admin_password_required",
+				"admin_account_password is required when the managed admin account is enabled")
+			return
+		}
 		p.Settings = *req.Settings
 	}
 
@@ -309,7 +326,7 @@ func (h *Handler) updatePolicy(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	writeJSON(w, http.StatusOK, p)
+	writeJSON(w, http.StatusOK, redactPolicy(p))
 }
 
 func (h *Handler) deletePolicy(w http.ResponseWriter, r *http.Request) {
@@ -376,8 +393,8 @@ func (h *Handler) getDeviceSystemPolicy(w http.ResponseWriter, r *http.Request) 
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"compiled": compiled,
-		"state":    state,
+		"compiled": redactCompiled(compiled),
+		"state":    redactState(state),
 	})
 }
 
@@ -410,7 +427,7 @@ func (h *Handler) listDeviceStates(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"states": states, "count": len(states)})
+	writeJSON(w, http.StatusOK, map[string]any{"states": redactStates(states), "count": len(states)})
 }
 
 func (h *Handler) agentReportPolicyState(w http.ResponseWriter, r *http.Request) {

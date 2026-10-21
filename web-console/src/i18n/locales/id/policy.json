@@ -188,5 +188,9 @@
   "admin_never_expires": "Kata Sandi Tidak Pernah Kedaluwarsa (Mencegah akun terkunci pada perangkat yang terputus)",
   "delete_title": "Hapus Kebijakan Sistem",
   "delete_message": "Yakin ingin menghapus kebijakan \"{name}\"? Perangkat akan kembali ke kebijakan dengan prioritas lebih rendah atau pengaturan default.",
-  "delete_confirm": "Hapus Kebijakan"
+  "delete_confirm": "Hapus Kebijakan",
+  "admin_password_label_optional": "Kata Sandi Admin",
+  "admin_password_keep_placeholder": "Kosongkan untuk tetap memakai kata sandi tersimpan",
+  "admin_password_stored_hint": "Kata sandi sudah tersimpan dan tidak pernah ditampilkan; isi yang baru hanya bila ingin menggantinya.",
+  "admin_password_required": "Isi kata sandi untuk akun admin yang dikelola."
 }
