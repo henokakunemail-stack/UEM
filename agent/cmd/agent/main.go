@@ -96,6 +96,9 @@ func main() {
 	// anyway — but ordering it first also means a misconfigured worker can never be
 	// mistaken for the daemon and end up enrolling a second device.
 	if rcWorkerArg != "" {
+		if f := setupFileLog(filepath.Dir(rcWorkerCreds), "rc-worker"); f != nil {
+			defer f.Close()
+		}
 		runRCWorker(rcWorkerArg, rcWorkerCreds)
 		return
 	}
@@ -110,6 +113,9 @@ func main() {
 	// the service never reaches RUNNING. runAgent blocks until shutdown, which
 	// is exactly the contract the SCM handler expects.
 	if service.RunAsService() {
+		if f := setupFileLog(filepath.Dir(credsPath), "agent"); f != nil {
+			defer f.Close()
+		}
 		if err := service.Serve("endpoint-agent", func() error {
 			runAgent(serverURL, enrollToken, enrollSite, credsPath, heartbeatSecs)
 			return nil
@@ -147,24 +153,17 @@ func runRCWorker(cfgArg, credsPath string) {
 		return
 	}
 
-	var deviceID, deviceSecret, serverURL string
+	// The worker runs as LocalSystem in the user's session, so it reads the
+	// credentials file the service reads. The secret is never on its command
+	// line: anything in the session can read a command line.
 	creds, err := enrollment.Load(credsPath)
-	if err == nil {
-		deviceID = creds.DeviceID
-		deviceSecret = creds.DeviceSecret
-		serverURL = creds.ServerURL
-	} else if cfg.DeviceID != "" && cfg.DeviceSecret != "" {
-		log.Warn().Err(err).Msg("rc worker cannot read credentials file from disk; falling back to session config credentials")
-		deviceID = cfg.DeviceID
-		deviceSecret = cfg.DeviceSecret
-		serverURL = cfg.ServerURL
-	} else {
-		// The secret was never passed on the command line, so this is the only
-		// way the worker can authenticate. Without it there is no session, and
-		// saying so here is the only trace: the service already logged that it
-		// handed the session off.
+	if err != nil {
 		log.Error().Err(err).Str("creds", credsPath).Msg("rc worker cannot load credentials")
 		return
+	}
+	deviceID, deviceSecret, serverURL := creds.DeviceID, creds.DeviceSecret, creds.ServerURL
+	if serverURL == "" {
+		serverURL = cfg.ServerURL
 	}
 
 	if serverURL == "" {
@@ -647,10 +646,9 @@ func runAgent(serverURL, enrollToken, enrollSite, credsPath string, heartbeatSec
 			return map[string]string{"status": "rejected", "error": "remote control request carried no relay url"}
 		}
 
-		// Include credentials in the session config so worker spawned across user session
-		// boundary has access to them even when local file DACL restricts access to SYSTEM.
+		// The worker reads its secret from the credentials file; only the
+		// identity and the server go in the config it is started with.
 		cfg.DeviceID = creds.DeviceID
-		cfg.DeviceSecret = creds.DeviceSecret
 		cfg.ServerURL = targetServerURL
 
 		rcMu.Lock()
@@ -662,40 +660,44 @@ func runAgent(serverURL, enrollToken, enrollSite, credsPath string, heartbeatSec
 			_ = remotecontrol.KillSessionWorker(activeRCWorker)
 			activeRCWorker = 0
 		}
+		rcMu.Unlock()
+
+		// A service in Session 0 has no desktop: GetDC cannot blit from it and
+		// SendInput reaches nobody through it. It hands the session to a worker
+		// in the logged-on user's session. An agent already on a user's desktop
+		// (run by hand) runs the session itself.
+		capturer := rcCapturer
+		if remotecontrol.WorkerRequired() {
+			exe, err := os.Executable()
+			if err == nil {
+				var pid uint32
+				pid, err = remotecontrol.SpawnSessionWorker(exe, credsPath, cfg)
+				if err == nil {
+					log.Info().Uint32("worker_pid", pid).Str("session", cfg.SessionID).
+						Msg("remote control session handed to the user session worker")
+					rcMu.Lock()
+					activeRCWorker = pid
+					rcMu.Unlock()
+					return map[string]string{"status": "starting", "session_id": cfg.SessionID}
+				}
+			}
+			// Falling back to running the session here used to stream Session
+			// 0's own desktop -- which a blit can succeed on -- and send input
+			// to it, where nobody would ever see it. The session still connects,
+			// but only to tell the console why there is no desktop.
+			log.Warn().Err(err).Str("session", cfg.SessionID).
+				Msg("could not start a session worker; the session cannot reach a desktop")
+			capturer = remotecontrol.NewUnavailableCapturer(
+				"no desktop to control: the agent could not start in the logged-on user's session (" + err.Error() + ")")
+		}
+
 		session := remotecontrol.NewSession(cfg, targetServerURL, remotecontrol.Credentials{
 			DeviceID:     creds.DeviceID,
 			DeviceSecret: creds.DeviceSecret,
-		}, rcCapturer)
+		}, capturer)
+		rcMu.Lock()
 		activeRCSession = session
 		rcMu.Unlock()
-
-		// Hand the session to a process on the user's desktop before giving up on
-		// it here. This service runs in Session 0, which has no desktop at all:
-		// GetDC cannot blit from it and SendInput cannot reach a human through it,
-		// so a session started here can never carry a frame. The worker is the
-		// same binary re-run in the logged-on user's session, which is what makes
-		// the ordinary capture path work without a single change to it.
-		//
-		// Failing to spawn is not fatal and must not be silent: a machine with
-		// nobody logged on has no session to attach to, and in that case falling
-		// back below is correct — the console gets an explanation instead of a
-		// connection that never produces a frame.
-		if exe, err := os.Executable(); err == nil {
-			pid, err := remotecontrol.SpawnSessionWorker(exe, credsPath, cfg)
-			if err == nil {
-				log.Info().Uint32("worker_pid", pid).Str("session", cfg.SessionID).
-					Msg("remote control session handed to the user session worker")
-				rcMu.Lock()
-				activeRCWorker = pid
-				activeRCSession = nil
-				rcMu.Unlock()
-				return map[string]string{"status": "starting", "session_id": cfg.SessionID}
-			}
-			log.Warn().Err(err).Str("session", cfg.SessionID).
-				Msg("could not start a session worker; falling back to the service process")
-		} else {
-			log.Warn().Err(err).Msg("cannot locate the agent executable for a session worker")
-		}
 
 		go func() {
 			if err := session.Start(context.Background()); err != nil {

@@ -29,8 +29,31 @@ const wtsCurrentVersion = 1
 // the same failure as not spawning it at all, only harder to notice.
 const interactiveDesktop = `winsta0\default`
 
+// WorkerRequired reports whether a remote control session has to be handed to
+// a worker in the user's session. Only a process in Session 0 -- the service --
+// needs one. An agent already running on an interactive desktop (started by
+// hand, or a worker itself) captures and injects where it is; trying to spawn
+// from there failed with "a required privilege is not held" and was logged as
+// a fallback to a service that did not exist.
+func WorkerRequired() bool {
+	var sessionID uint32
+	if err := windows.ProcessIdToSessionId(windows.GetCurrentProcessId(), &sessionID); err != nil {
+		return false
+	}
+	return sessionID == 0
+}
+
 // SpawnSessionWorker starts a second copy of the agent inside the logged-on
-// user's interactive session, running as that user.
+// user's interactive session.
+//
+// The worker runs as LocalSystem placed in the user's session, not as the
+// user. A worker with the user's own token is limited by UIPI: for an
+// administrator under UAC it holds the filtered, medium-integrity token, and
+// Windows silently discards its clicks and keystrokes aimed at any elevated
+// window (Task Manager, installers, admin consoles) and cannot reach the UAC
+// prompt or the lock screen at all. The cursor moved; nothing else happened.
+// A SYSTEM token in the user's session sits above every window there, and can
+// open the secure desktop.
 //
 // A Windows Service runs as LocalSystem in Session 0. Window stations belong to
 // a session, not to a user, so the service's own process can never be moved onto
@@ -54,31 +77,27 @@ func SpawnSessionWorker(exePath string, credsPath string, cfg SessionConfig) (pi
 		return 0, err
 	}
 
-	tok, err := sessionUserToken(sessionID)
-	if err != nil {
-		return 0, err
-	}
-	defer windows.CloseHandle(windows.Handle(tok))
-
-	// WTSQueryUserToken hands back an IMPERSONATION token. CreateProcessAsUser
-	// wants a PRIMARY one and rejects the impersonation flavour with an access
-	// error that names nothing helpful, so this duplication is the difference
-	// between spawning and not spawning. MAXIMUM_ALLOWED rather than a hand-built
-	// mask: the exact rights CreateProcessAsUser ends up exercising are not
-	// worth enumerating, and the token we start from is already privileged.
-	primary, err := primaryToken(tok)
+	primary, err := systemTokenInSession(sessionID)
 	if err != nil {
 		return 0, err
 	}
 	defer windows.CloseHandle(windows.Handle(primary))
 
-	// The service's own environment is LocalSystem's, not the operator's. A
-	// worker launched with it would be missing the user's TEMP, APPDATA and
-	// profile variables, and anything that resolves a per-user path on startup
-	// resolves it to the wrong place. CreateEnvironmentBlock is the only way to
-	// get the block that belongs to this token.
+	// The environment is still the user's: files sent to the endpoint land in
+	// the user's Downloads, which is resolved from USERPROFILE. The user's
+	// token is borrowed only to build that block.
+	tok, err := sessionUserToken(sessionID)
+	if err != nil {
+		return 0, err
+	}
+	defer windows.CloseHandle(windows.Handle(tok))
+	userPrimary, err := primaryToken(tok)
+	if err != nil {
+		return 0, err
+	}
+	defer windows.CloseHandle(windows.Handle(userPrimary))
 	var envBlock *uint16
-	if err := windows.CreateEnvironmentBlock(&envBlock, primary, false); err != nil {
+	if err := windows.CreateEnvironmentBlock(&envBlock, userPrimary, false); err != nil {
 		return 0, fmt.Errorf("spawn session worker: CreateEnvironmentBlock for session %d: %w", sessionID, err)
 	}
 	defer windows.DestroyEnvironmentBlock(envBlock)
@@ -209,6 +228,39 @@ func sessionUserToken(sessionID uint32) (windows.Token, error) {
 	return tok, nil
 }
 
+// systemTokenInSession returns a primary copy of this process's own LocalSystem
+// token, moved into sessionID. Setting TokenSessionId needs SeTcbPrivilege,
+// which only LocalSystem holds -- this is why the worker is spawned by the
+// service and never by an agent someone started by hand.
+func systemTokenInSession(sessionID uint32) (windows.Token, error) {
+	var self windows.Token
+	access := uint32(windows.TOKEN_DUPLICATE | windows.TOKEN_QUERY | windows.TOKEN_ASSIGN_PRIMARY |
+		windows.TOKEN_ADJUST_SESSIONID | windows.TOKEN_ADJUST_DEFAULT)
+	if err := windows.OpenProcessToken(windows.CurrentProcess(), access, &self); err != nil {
+		return 0, fmt.Errorf("spawn session worker: OpenProcessToken: %w", err)
+	}
+	defer self.Close()
+
+	user, err := self.GetTokenUser()
+	if err != nil {
+		return 0, fmt.Errorf("spawn session worker: read process token user: %w", err)
+	}
+	if !user.User.Sid.IsWellKnown(windows.WinLocalSystemSid) {
+		return 0, fmt.Errorf("spawn session worker: the agent is not running as LocalSystem; install it as a service to control other sessions")
+	}
+
+	var dup windows.Token
+	if err := windows.DuplicateTokenEx(self, windows.MAXIMUM_ALLOWED, nil, windows.SecurityImpersonation, windows.TokenPrimary, &dup); err != nil {
+		return 0, fmt.Errorf("spawn session worker: DuplicateTokenEx: %w", err)
+	}
+	sid := sessionID
+	if err := windows.SetTokenInformation(dup, windows.TokenSessionId, (*byte)(unsafe.Pointer(&sid)), uint32(unsafe.Sizeof(sid))); err != nil {
+		dup.Close()
+		return 0, fmt.Errorf("spawn session worker: move token to session %d: %w", sessionID, err)
+	}
+	return dup, nil
+}
+
 // primaryToken converts an impersonation token into a primary one.
 func primaryToken(tok windows.Token) (windows.Token, error) {
 	var primary windows.Token
@@ -224,13 +276,15 @@ func primaryToken(tok windows.Token) (windows.Token, error) {
 // lives under "Program Files" on a normal install, and an unquoted space there
 // splits argv[0] in half and the worker never starts.
 //
-// The DeviceSecret is deliberately absent. It travels in the credentials file
-// the worker opens for itself, because a command line is visible to every
-// process that can enumerate the session and is quoted in support logs by
-// anything that dumps them. Base64 here is encoding for argument transport, not
-// secrecy — the only thing it protects is characters that would otherwise break
-// argv parsing.
+// The DeviceSecret is removed here, whatever the caller put in cfg. It travels
+// in the credentials file the worker opens for itself (the worker runs as
+// LocalSystem, which the file's ACL admits), because a command line is visible
+// to every process that can enumerate the session and is quoted in support logs
+// by anything that dumps them. The service used to copy the secret into cfg,
+// and it went straight onto this command line. Base64 here is encoding for
+// argument transport, not secrecy.
 func workerCommandLine(exePath string, credsPath string, cfg SessionConfig) (string, error) {
+	cfg.DeviceSecret = ""
 	payload, err := json.Marshal(cfg)
 	if err != nil {
 		return "", fmt.Errorf("spawn session worker: encode session config: %w", err)

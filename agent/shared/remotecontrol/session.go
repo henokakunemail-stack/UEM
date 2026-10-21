@@ -74,6 +74,10 @@ type InputEvent struct {
 	Code int    `json:"code,omitempty"`
 	Key  string `json:"key,omitempty"`
 	Mode string `json:"mode,omitempty"`
+	// Location is KeyboardEvent.location: 1 left, 2 right, 3 numpad. keyCode
+	// alone cannot tell right Ctrl from left Ctrl or numpad Enter from Enter;
+	// absent from an older console, which keeps the old behaviour.
+	Location int `json:"location,omitempty"`
 
 	// Feature messages: monitor selection, key combinations, clipboard text
 	// and file upload. See handleFeatureMessage.
@@ -129,6 +133,10 @@ type Session struct {
 	mode             string
 	wakeChan         chan struct{}
 	refreshRequested atomic.Bool
+	// inputErrMu guards lastInputErr, the time of the last input_failed
+	// notice, so a run of refused input is reported once every few seconds.
+	inputErrMu   sync.Mutex
+	lastInputErr time.Time
 
 	files        *fileReceiver
 	progressMu   sync.Mutex
@@ -331,7 +339,58 @@ func (s *Session) wakeCapture() {
 	}
 }
 
+// inputFailureEvery throttles input_failed notices: a blocked injection fails
+// on every mouse move, and one message every few seconds says it.
+const inputFailureEvery = 5 * time.Second
+
+// reportInputError tells the console that input did not reach the endpoint.
+// Every injection error used to be discarded, so an operator whose clicks were
+// refused saw a live desktop that simply did not respond, and nothing anywhere
+// said why.
+func (s *Session) reportInputError(err error) {
+	if err == nil {
+		return
+	}
+	now := time.Now()
+	s.inputErrMu.Lock()
+	due := now.Sub(s.lastInputErr) >= inputFailureEvery
+	if due {
+		s.lastInputErr = now
+	}
+	s.inputErrMu.Unlock()
+	if !due {
+		return
+	}
+	log.Warn().Err(err).Str("session", s.config.SessionID).Msg("remote control input was not applied")
+	s.SendNotice("input_failed", err.Error())
+}
+
+// normalizeKey turns a generic modifier into its left or right virtual key
+// from the browser's location, so right Ctrl or right Alt (AltGr) arrive as
+// themselves rather than as the left key.
+func normalizeKey(in *InputEvent) {
+	sides := map[int][2]int{
+		0x10: {0xA0, 0xA1}, // Shift
+		0x11: {0xA2, 0xA3}, // Ctrl
+		0x12: {0xA4, 0xA5}, // Alt
+	}
+	if pair, ok := sides[in.Code]; ok {
+		switch in.Location {
+		case 1:
+			in.Code = pair[0]
+		case 2:
+			in.Code = pair[1]
+		}
+	}
+}
+
 func (s *Session) readInputLoop() {
+	// Injection is pinned to one OS thread. On Windows the thread's desktop is
+	// what SendInput targets, and it is moved to follow the input desktop
+	// (lock screen, UAC prompt); a goroutine that hops threads between events
+	// would inject from whichever thread it last landed on.
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
 	defer s.Stop()
 
 	for {
@@ -367,15 +426,16 @@ func (s *Session) readInputLoop() {
 
 		switch in.Type {
 		case "mouse":
-			_ = s.capturer.InjectMouseEvent(in)
+			s.reportInputError(s.capturer.InjectMouseEvent(in))
 			s.wakeCapture()
 		case "keyboard":
 			// A 'release' action carries no key: it means "lift everything you
 			// think is held", which is what the console sends on blur.
 			if in.Action == "release" {
-				_ = s.capturer.ReleaseAllKeys()
+				s.reportInputError(s.capturer.ReleaseAllKeys())
 			} else {
-				_ = s.capturer.InjectKeyboardEvent(in)
+				normalizeKey(&in)
+				s.reportInputError(s.capturer.InjectKeyboardEvent(in))
 			}
 			s.wakeCapture()
 		}
@@ -457,6 +517,13 @@ func (s *Session) streamFramesLoop() {
 				log.Debug().Err(err).Msg("capture screen error")
 				timer.Reset(interval)
 				continue
+			}
+			// Coming back from a reported failure (a UAC prompt or the lock
+			// screen went away) the desktop may look exactly as it did before,
+			// so the damage diff would send nothing and the console would keep
+			// its "no signal" overlay. A full frame tells it the desktop is back.
+			if captureFailures >= 3 {
+				damage.ForceKeyframe()
 			}
 			captureFailures = 0
 			s.pollEndpointState()

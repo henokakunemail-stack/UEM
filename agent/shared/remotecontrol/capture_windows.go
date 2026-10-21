@@ -19,9 +19,11 @@ var (
 	procGetCurrentProcessId  = kernel32.NewProc("GetCurrentProcessId")
 	procProcessIdToSessionId = kernel32.NewProc("ProcessIdToSessionId")
 
-	procOpenInputDesktop = user32.NewProc("OpenInputDesktop")
-	procSetThreadDesktop = user32.NewProc("SetThreadDesktop")
-	procCloseDesktop     = user32.NewProc("CloseDesktop")
+	procOpenInputDesktop          = user32.NewProc("OpenInputDesktop")
+	procSetThreadDesktop          = user32.NewProc("SetThreadDesktop")
+	procGetThreadDesktop          = user32.NewProc("GetThreadDesktop")
+	procGetUserObjectInformationW = user32.NewProc("GetUserObjectInformationW")
+	procCloseDesktop              = user32.NewProc("CloseDesktop")
 
 	procGetSystemMetrics   = user32.NewProc("GetSystemMetrics")
 	procGetDC              = user32.NewProc("GetDC")
@@ -69,12 +71,12 @@ const (
 	MOUSEEVENTF_MIDDLEDOWN = 0x0020
 	MOUSEEVENTF_MIDDLEUP   = 0x0040
 	MOUSEEVENTF_WHEEL      = 0x0800
+	MOUSEEVENTF_HWHEEL     = 0x1000
 
 	MAPVK_VK_TO_VSC_EX = 4
-	// VK_PACKET routes a key through the active keyboard layout's translation,
-	// which is what makes a non-US operator's own layout produce the right
-	// character on the endpoint instead of a US one.
-	VK_PACKET = 0xE7
+
+	// uoiName asks GetUserObjectInformation for an object's name.
+	uoiName = 2
 
 	// desktopAll is the access mask OpenInputDesktop asks for. Read/write on the
 	// object list is the documented mask for this call; the specific values
@@ -84,10 +86,13 @@ const (
 
 // win32Input matches tagINPUT on 64-bit Windows:
 // 4 bytes type, 4 bytes padding, 32 bytes union. Total size: 40 bytes.
+//
+// The union is declared as uint64s so it is 8-byte aligned: the mouse and
+// keyboard records written into it hold a uintptr.
 type win32Input struct {
 	Type uint32
 	_pad uint32
-	Data [32]byte
+	Data [4]uint64
 }
 
 type mouseInput struct {
@@ -228,6 +233,10 @@ type WindowsCapturer struct {
 	// administered.
 	mu   sync.Mutex
 	held map[uint16]bool
+	// buttons are the mouse buttons the operator pressed and has not released,
+	// so a release-all lifts them too. A button let go outside the console's
+	// canvas used to stay down on the endpoint, dragging everything after it.
+	buttons map[string]bool
 
 	// capMu guards surf. The surface is reused from frame to frame and is only
 	// rebuilt when the resolution changes; two captures blitting into the same
@@ -263,7 +272,7 @@ func NewPlatformCapturer() ScreenCapturer {
 	// capability as missing when the fix is a single call away.
 	_ = attachToInputDesktop()
 
-	return &WindowsCapturer{held: make(map[uint16]bool), selected: monitorPrimary}
+	return &WindowsCapturer{held: make(map[uint16]bool), buttons: make(map[string]bool), selected: monitorPrimary}
 }
 
 // attachToInputDesktop gives the calling thread a desktop to draw from.
@@ -340,6 +349,53 @@ func reattachInputDesktop() {
 			procCloseDesktop.Call(old)
 		}
 	}
+}
+
+// syncInputDesktop moves the calling thread onto the current input desktop if
+// it has changed since the thread was attached.
+//
+// Input used to attach once per thread and never again. When the input desktop
+// switched -- a UAC prompt, Ctrl+Alt+Del, the lock screen -- SendInput kept
+// targeting the old desktop and was silently ignored, so the operator could see
+// the prompt (capture re-attaches on a failed blit) but not click it. Comparing
+// names costs two calls per event, which is nothing at input rates.
+func syncInputDesktop() {
+	tid, _, _ := procGetCurrentThreadID.Call()
+	if _, done := attachedThreads.Load(tid); !done {
+		_ = attachToInputDesktop()
+		return
+	}
+	hInput, _, _ := procOpenInputDesktop.Call(0, 0, desktopAll)
+	if hInput == 0 {
+		return // a desktop this process may not open; stay where we are
+	}
+	cur, _, _ := procGetThreadDesktop.Call(tid)
+	if cur != 0 && desktopName(cur) == desktopName(hInput) {
+		procCloseDesktop.Call(hInput)
+		return
+	}
+	if ret, _, _ := procSetThreadDesktop.Call(hInput); ret == 0 {
+		procCloseDesktop.Call(hInput)
+		return
+	}
+	if prev, ok := attachedThreads.Swap(tid, hInput); ok {
+		if old, ok := prev.(uintptr); ok && old != 0 && old != hInput {
+			procCloseDesktop.Call(old)
+		}
+	}
+}
+
+// desktopName returns a desktop's name ("Default", "Winlogon", ...), or "" when
+// it cannot be read.
+func desktopName(h uintptr) string {
+	var buf [64]uint16
+	var needed uint32
+	r, _, _ := procGetUserObjectInformationW.Call(h, uoiName, uintptr(unsafe.Pointer(&buf[0])),
+		uintptr(len(buf)*2), uintptr(unsafe.Pointer(&needed)))
+	if r == 0 {
+		return ""
+	}
+	return syscall.UTF16ToString(buf[:])
 }
 
 // sessionZeroHint names the one cause of a failed blit that no retry fixes: the
@@ -488,7 +544,7 @@ func (c *WindowsCapturer) releaseCaptureResources() {
 }
 
 func (c *WindowsCapturer) InjectMouseEvent(e InputEvent) error {
-	_ = attachToInputDesktop()
+	syncInputDesktop()
 
 	// SetCursorPos for the move, SendInput for the button and wheel events.
 	// Both operate in the same virtual-desktop coordinate space the frame was
@@ -498,7 +554,11 @@ func (c *WindowsCapturer) InjectMouseEvent(e InputEvent) error {
 	// monitor left of the primary, at negative coordinates -- is selected.
 	if e.X >= 0 && e.Y >= 0 {
 		ox, oy := c.origin()
-		_, _, _ = procSetCursorPos.Call(uintptr(e.X+ox), uintptr(e.Y+oy))
+		// The result is checked: a cursor that cannot be placed means every
+		// click after it lands somewhere else, and that is worth reporting.
+		if r, _, callErr := procSetCursorPos.Call(uintptr(e.X+ox), uintptr(e.Y+oy)); r == 0 {
+			return fmt.Errorf("SetCursorPos(%d,%d) failed: %w", e.X+ox, e.Y+oy, cleanWin32Err(callErr))
+		}
 	}
 
 	var flags uint32
@@ -529,9 +589,26 @@ func (c *WindowsCapturer) InjectMouseEvent(e InputEvent) error {
 	case "wheel":
 		flags = MOUSEEVENTF_WHEEL
 		mouseData = uint32(int32(e.Delta))
+	case "hwheel":
+		// Positive is to the right, the same convention WM_MOUSEHWHEEL uses.
+		flags = MOUSEEVENTF_HWHEEL
+		mouseData = uint32(int32(e.Delta))
 	default:
 		return nil
 	}
+
+	button := e.Button
+	if button == "" {
+		button = "left"
+	}
+	c.mu.Lock()
+	switch e.Action {
+	case "down":
+		c.buttons[button] = true
+	case "up":
+		delete(c.buttons, button)
+	}
+	c.mu.Unlock()
 
 	// Dx=0, Dy=0 because cursor is already positioned exactly at (e.X, e.Y) by SetCursorPos.
 	mi := mouseInput{
@@ -549,19 +626,40 @@ func (c *WindowsCapturer) InjectMouseEvent(e InputEvent) error {
 // extended-ness, so an unflagged arrow key is delivered as the numpad arrow of
 // the same scan code, and right-hand modifiers cannot be distinguished from
 // left-hand ones at all.
+//
+// 0xBA used to be listed. It is VK_OEM_1 -- the ';:' key on a US layout -- and
+// sending it as E0 27 produced no character at all.
 func isExtendedVK(vk uint16) bool {
 	switch {
-	case vk >= 0x21 && vk <= 0x2E, // arrows, Insert/Delete/Home/End, PgUp/PgDn
+	case vk >= 0x21 && vk <= 0x2E, // PgUp/PgDn, End/Home, arrows, PrintScreen, Insert/Delete
 		vk == 0x5B || vk == 0x5C, // LWin, RWin
 		vk == 0x5D,               // Apps
 		vk == 0x6F,               // numpad divide
-		vk == 0x9B,               // numpad enter (extended Enter)
+		vk == 0x90,               // NumLock
 		vk == 0xA3, vk == 0xA5,   // RCtrl, RAlt
-		vk >= 0xAD && vk <= 0xB4, // numpad operators
-		vk == 0xBA:
+		vk >= 0xA6 && vk <= 0xB7: // browser, volume and media keys
 		return true
 	}
 	return false
+}
+
+// keyFlags builds the scan code and flags for one key record. numpad marks a
+// key the browser reported from the keypad (KeyboardEvent.location 3), which
+// is how numpad Enter is told apart from the main Enter: both are VK_RETURN.
+func keyFlags(vk uint16, numpad bool, layout uintptr) (uint16, uint32) {
+	var scan uint16
+	if ret, _, _ := procMapVirtualKeyExW.Call(uintptr(vk), uintptr(MAPVK_VK_TO_VSC_EX), layout); ret != 0 {
+		scan = uint16(ret)
+	}
+	flags := uint32(0)
+	if isExtendedVK(vk) || (numpad && vk == 0x0D) || (scan&0xFF00) == 0xE000 || (scan&0xFF00) == 0xE100 {
+		flags |= KEYEVENTF_EXTENDEDKEY
+		scan = scan & 0xFF
+	}
+	if scan != 0 {
+		flags |= KEYEVENTF_SCANCODE
+	}
+	return scan, flags
 }
 
 func (c *WindowsCapturer) InjectKeyboardEvent(e InputEvent) error {
@@ -569,27 +667,14 @@ func (c *WindowsCapturer) InjectKeyboardEvent(e InputEvent) error {
 		return nil
 	}
 	vk := uint16(e.Code)
+	syncInputDesktop()
 
-	// Scan code via VK_PACKET so the endpoint's active keyboard layout
-	// translates the operator's key the way that layout would locally. This is
-	// what keeps an AZERTY or Dvorak operator's keystrokes producing the same
-	// characters on the endpoint as they do on the operator's own machine.
+	// The virtual key is translated to a scan code through the endpoint's
+	// keyboard layout, so the key at the same physical position is pressed.
 	layout, _, _ := procGetKeyboardLayout.Call(0)
-	var scan uint16
-	if ret, _, _ := procMapVirtualKeyExW.Call(uintptr(vk), uintptr(MAPVK_VK_TO_VSC_EX), layout); ret != 0 {
-		scan = uint16(ret)
-	}
-
-	flags := uint32(0)
+	scan, flags := keyFlags(vk, e.Location == 3, layout)
 	if e.Action == "up" {
 		flags |= KEYEVENTF_KEYUP
-	}
-	if isExtendedVK(vk) || (scan&0xFF00) == 0xE000 || (scan&0xFF00) == 0xE100 {
-		flags |= KEYEVENTF_EXTENDEDKEY
-		scan = scan & 0xFF
-	}
-	if scan != 0 {
-		flags |= KEYEVENTF_SCANCODE
 	}
 
 	// Scan path when the layout produced one, virtual-key path otherwise. Both
@@ -619,32 +704,39 @@ func (c *WindowsCapturer) ReleaseAllKeys() error {
 		pending = append(pending, vk)
 	}
 	c.held = make(map[uint16]bool)
+	buttons := make([]string, 0, len(c.buttons))
+	for b := range c.buttons {
+		buttons = append(buttons, b)
+	}
+	c.buttons = make(map[string]bool)
 	c.mu.Unlock()
 
+	syncInputDesktop()
+	// Released with the same layout the keys were pressed with; layout 0 used
+	// to map some keys to a different scan code than their keydown had.
+	layout, _, _ := procGetKeyboardLayout.Call(0)
 	for _, vk := range pending {
-		scan := uint16(0)
-		if ret, _, _ := procMapVirtualKeyExW.Call(uintptr(vk), uintptr(MAPVK_VK_TO_VSC_EX), 0); ret != 0 {
-			scan = uint16(ret)
-		}
-		flags := uint32(KEYEVENTF_KEYUP)
-		if isExtendedVK(vk) || (scan&0xFF00) == 0xE000 || (scan&0xFF00) == 0xE100 {
-			flags |= KEYEVENTF_EXTENDEDKEY
-			scan = scan & 0xFF
-		}
-		if scan != 0 {
-			flags |= KEYEVENTF_SCANCODE
-		}
-		ki := keyboardInput{Vk: vk, Scan: scan, DwFlags: flags}
+		scan, flags := keyFlags(vk, false, layout)
+		ki := keyboardInput{Vk: vk, Scan: scan, DwFlags: flags | KEYEVENTF_KEYUP}
 		_ = c.sendKeyboardInput(ki)
+	}
+	for _, b := range buttons {
+		up := uint32(MOUSEEVENTF_LEFTUP)
+		switch b {
+		case "right":
+			up = MOUSEEVENTF_RIGHTUP
+		case "middle":
+			up = MOUSEEVENTF_MIDDLEUP
+		}
+		_ = c.sendMouseInput(mouseInput{DwFlags: up})
 	}
 	return nil
 }
 
 func (c *WindowsCapturer) sendMouseInput(mi mouseInput) error {
-	_ = attachToInputDesktop()
 	var in win32Input
 	in.Type = INPUT_MOUSE
-	*(*mouseInput)(unsafe.Pointer(&in.Data[0])) = mi
+	*(*mouseInput)(unsafe.Pointer(&in.Data)) = mi
 	ret, _, callErr := procSendInput.Call(1, uintptr(unsafe.Pointer(&in)), unsafe.Sizeof(in))
 	if ret == 0 {
 		return fmt.Errorf("SendInput mouse failed: %w", callErr)
@@ -653,10 +745,9 @@ func (c *WindowsCapturer) sendMouseInput(mi mouseInput) error {
 }
 
 func (c *WindowsCapturer) sendKeyboardInput(ki keyboardInput) error {
-	_ = attachToInputDesktop()
 	var in win32Input
 	in.Type = INPUT_KEYBOARD
-	*(*keyboardInput)(unsafe.Pointer(&in.Data[0])) = ki
+	*(*keyboardInput)(unsafe.Pointer(&in.Data)) = ki
 	ret, _, callErr := procSendInput.Call(1, uintptr(unsafe.Pointer(&in)), unsafe.Sizeof(in))
 	if ret == 0 {
 		return fmt.Errorf("SendInput keyboard failed: %w", callErr)

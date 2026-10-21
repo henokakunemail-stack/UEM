@@ -150,7 +150,7 @@ func (s *Session) handleFeatureMessage(in InputEvent) bool {
 			return true
 		}
 		for _, e := range events {
-			_ = s.capturer.InjectKeyboardEvent(e)
+			s.reportInputError(s.capturer.InjectKeyboardEvent(e))
 		}
 		s.wakeCapture()
 	case "clipboard":

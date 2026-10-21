@@ -509,6 +509,8 @@ button.site-row { width: 100%; border: 0; font: inherit; text-align: left; }
 /* "No signal" state: the socket is up but the endpoint is not streaming, which
    is exactly the case the old view hid behind an empty canvas. */
 .remote-overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--space-3); padding: var(--space-6); text-align: center; background: color-mix(in srgb, var(--console-bg) 88%, transparent); color: var(--console-fg); }
+.remote-overlay-banner { inset: 0 0 auto 0; flex-direction: row; flex-wrap: wrap; padding: var(--space-3) var(--space-4); pointer-events: none; }
+.remote-overlay-banner .btn { pointer-events: auto; }
 .remote-overlay-text { margin: 0; max-width: 52ch; color: var(--text-dim); line-height: 1.6; }
 .remote-hint { display: flex; align-items: center; justify-content: center; gap: var(--space-2); margin: 0; color: var(--text-dim); font-size: var(--text-sm); }
 .remote-control-page .filter-hint { display: flex; align-items: center; gap: var(--space-2); }

@@ -14,3 +14,7 @@ func SpawnSessionWorker(exePath string, credsPath string, cfg SessionConfig) (pi
 func KillSessionWorker(pid uint32) error {
 	return fmt.Errorf("session-0 worker is only available on Windows")
 }
+
+// WorkerRequired is false off Windows: only a Windows service in Session 0 has
+// to hand a session to another process.
+func WorkerRequired() bool { return false }

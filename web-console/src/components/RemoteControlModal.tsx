@@ -22,6 +22,7 @@ import type {
   RemoteControlCapabilities,
   RemoteControlMode,
 } from '../types/api'
+import { virtualKeyCode, wheelNotches } from './remoteInput'
 
 interface RemoteControlModalProps {
   device: DeviceDTO | null
@@ -120,20 +121,11 @@ const toBase64 = (buf: ArrayBuffer): string => {
 const formatBytes = (n: number): string =>
   n >= 1024 * 1024 ? `${(n / (1024 * 1024)).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`
 
-const PREVENT_DEFAULT_KEYS = new Set([
-  'Tab',
-  'Backspace',
-  'Space',
-  ' ',
-  'ArrowUp',
-  'ArrowDown',
-  'ArrowLeft',
-  'ArrowRight',
-  'PageUp',
-  'PageDown',
-  'Home',
-  'End',
-])
+// Keys the browser keeps for itself while the remote desktop has focus. Escape
+// still closes the dialog, and F11/F12 still work for the operator. Every
+// other key is the endpoint's: F5 or Ctrl+R used to reload the console and end
+// the session, and F6/F10/Alt moved focus away so typing stopped.
+const BROWSER_KEYS = new Set(['Escape', 'F11', 'F12'])
 
 const isSession0OrLocked = (msg: string): boolean => {
   const lower = msg.toLowerCase()
@@ -204,6 +196,16 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
   const moveTimerRef = useRef<number | null>(null)
   const lastMoveSentRef = useRef<number>(0)
   const statusRef = useRef<SessionStatus>(status)
+  // Buttons the operator is holding on the endpoint, released if focus leaves.
+  const pressedRef = useRef<Set<string>>(new Set())
+  const wheelCarryRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 })
+
+  // The remote desktop is the keyboard target. autoFocus on a <div> does
+  // nothing in React, so the dialog focused its close button instead: keys went
+  // nowhere and Enter or Space ended the session.
+  const focusViewport = useCallback(() => {
+    viewportRef.current?.focus({ preventScroll: true })
+  }, [])
 
   useEffect(() => {
     modeRef.current = mode
@@ -211,7 +213,8 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
 
   useEffect(() => {
     statusRef.current = status
-  }, [status])
+    if (status === 'connecting' || status === 'active') focusViewport()
+  }, [status, focusViewport])
 
   useEffect(() => {
     if (!device) return
@@ -484,6 +487,13 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
         )
         if (msg.type === 'file_saved') toast.success(t('remote_control.file_saved', { path: msg.path ?? '' }), t('remote_control.toast_file_sent'))
         if (msg.type === 'file_failed') toast.error(msg.reason || t('remote_control.file_refused'), t('remote_control.toast_file_not_sent'))
+      } else if (msg.type === 'input_failed') {
+        // The endpoint refused the input; the agent sends this at most once
+        // every few seconds.
+        toast.error(
+          t('remote_control.input_failed', { reason: msg.reason || '' }),
+          t('remote_control.toast_remote_control')
+        )
       } else if (msg.type === 'clipboard_failed' || msg.type === 'monitor_failed') {
         toast.error(msg.reason || t('remote_control.request_refused'), t('remote_control.toast_remote_control'))
       } else if (msg.type === 'capture_failed' && lastFrameAtRef.current > 0) {
@@ -574,7 +584,8 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
       // Nothing should stay pressed on the endpoint when control is handed back.
       ws.send(JSON.stringify({ type: 'keyboard', action: 'release' }))
     }
-  }, [])
+    focusViewport()
+  }, [focusViewport])
 
   // The Keys menu closes on a click anywhere else or on Escape, like any menu.
   // Escape is caught before it bubbles to the viewport, which would forward it
@@ -603,17 +614,18 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
   const selectMonitor = useCallback((index: number) => {
     const ws = wsRef.current
     setMonitorIndex(index)
+    focusViewport()
     if (!ws || ws.readyState !== WebSocket.OPEN) return
     ws.send(JSON.stringify({ type: 'monitor', index }))
-  }, [])
+  }, [focusViewport])
 
   const sendKeys = useCallback(
     (combo: string) => {
       setKeysOpen(false)
       send({ type: 'keys', combo })
-      viewportRef.current?.focus()
+      focusViewport()
     },
-    [send]
+    [send, focusViewport]
   )
 
   const sendClipboardText = useCallback(
@@ -696,7 +708,7 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
     [capabilities, toast, t]
   )
 
-  const getCanvasCoords = (e: React.MouseEvent<HTMLCanvasElement>) => {
+  const getCanvasCoords = (e: { clientX: number; clientY: number }) => {
     const canvas = canvasRef.current
     if (!canvas) return { x: 0, y: 0 }
     const rect = canvas.getBoundingClientRect()
@@ -743,26 +755,32 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
     [flushMove, send]
   )
 
-  const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
+  const buttonName = (b: number) => (b === 2 ? 'right' : b === 1 ? 'middle' : 'left')
+
+  const handlePointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const { x, y } = getCanvasCoords(e)
     queueMove(x, y)
   }
 
-  const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
+  const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     e.preventDefault()
     // Focus must follow the click, or the viewport stops receiving keystrokes
-    // the moment the operator clicks into the desktop — the most common way a
-    // remote session appears to "lose" the keyboard.
-    viewportRef.current?.focus()
+    // the moment the operator clicks into the desktop.
+    focusViewport()
+    // Capture the pointer so the release reaches us even outside the canvas.
+    // Without it a button let go outside stayed down on the endpoint.
+    e.currentTarget.setPointerCapture?.(e.pointerId)
     const { x, y } = getCanvasCoords(e)
     flushMove()
-    const button = e.button === 2 ? 'right' : e.button === 1 ? 'middle' : 'left'
+    const button = buttonName(e.button)
+    pressedRef.current.add(button)
     send({ type: 'mouse', action: 'down', x, y, button })
   }
 
-  const handleMouseUp = (e: React.MouseEvent<HTMLCanvasElement>) => {
+  const handlePointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const { x, y } = getCanvasCoords(e)
-    const button = e.button === 2 ? 'right' : e.button === 1 ? 'middle' : 'left'
+    const button = buttonName(e.button)
+    pressedRef.current.delete(button)
     send({ type: 'mouse', action: 'up', x, y, button })
   }
 
@@ -771,37 +789,56 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
     e.preventDefault()
   }
 
-  const handleWheel = (e: React.WheelEvent<HTMLCanvasElement>) => {
-    e.preventDefault()
-    const { x, y } = getCanvasCoords(e)
-    // Normalise to a fixed notch. Browsers report wildly different deltaY
-    // values for the same physical scroll, and passing that through raw makes
-    // one wheel click scroll the endpoint by 3 lines and the next by 40.
-    const delta = e.deltaY < 0 ? 120 : -120
-    send({ type: 'mouse', action: 'wheel', x, y, delta })
-  }
+  // The wheel listener is attached natively and non-passive: React's onWheel is
+  // passive, so preventDefault did nothing and the console page scrolled along
+  // with the endpoint. Deltas are accumulated into whole notches, vertical and
+  // horizontal; horizontal scrolling used to be sent as scrolling down.
+  const canvasLive = status !== 'error' && status !== 'ended'
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas || !canvasLive) return
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault()
+      const { x, y } = getCanvasCoords(e)
+      const carry = wheelCarryRef.current
+      const v = wheelNotches(-e.deltaY, e.deltaMode, carry.y)
+      const h = wheelNotches(e.deltaX, e.deltaMode, carry.x)
+      wheelCarryRef.current = { x: h.carry, y: v.carry }
+      if (v.notches !== 0) send({ type: 'mouse', action: 'wheel', x, y, delta: v.notches * 120 })
+      if (h.notches !== 0) send({ type: 'mouse', action: 'hwheel', x, y, delta: h.notches * 120 })
+    }
+    canvas.addEventListener('wheel', onWheel, { passive: false })
+    return () => canvas.removeEventListener('wheel', onWheel)
+    // getCanvasCoords reads refs only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canvasLive, send])
 
   // keyCode, not `key`. The agent translates a Windows virtual-key code, and
   // `key` is a layout-dependent string ("a", "A", "Dead", "Unidentified") that
-  // cannot be mapped back to a key code at all.
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (PREVENT_DEFAULT_KEYS.has(e.key)) e.preventDefault()
-    send({ type: 'keyboard', action: 'down', key: e.key, code: e.keyCode })
+  // cannot be mapped back to a key code at all. location tells left from right
+  // modifiers and numpad Enter from Enter, which keyCode cannot.
+  const sendKey = (e: React.KeyboardEvent, action: 'down' | 'up') => {
+    if (!BROWSER_KEYS.has(e.key)) e.preventDefault()
+    const code = virtualKeyCode(e.keyCode)
+    if (code === 0) return
+    send({ type: 'keyboard', action, key: e.key, code, location: e.location })
   }
+  const handleKeyDown = (e: React.KeyboardEvent) => sendKey(e, 'down')
+  const handleKeyUp = (e: React.KeyboardEvent) => sendKey(e, 'up')
 
-  const handleKeyUp = (e: React.KeyboardEvent) => {
-    if (PREVENT_DEFAULT_KEYS.has(e.key)) e.preventDefault()
-    send({ type: 'keyboard', action: 'up', key: e.key, code: e.keyCode })
-  }
-
-  // Losing focus while a key is held is how keys get stuck down. Tell the agent
-  // to lift everything rather than waiting for a keyup that will never come.
+  // Losing focus while a key or button is held is how they get stuck down.
+  // Tell the agent to lift everything rather than waiting for a release that
+  // will never come.
   const handleBlur = () => {
     flushMove()
     const ws = wsRef.current
     if (ws && ws.readyState === WebSocket.OPEN) {
+      for (const button of pressedRef.current) {
+        ws.send(JSON.stringify({ type: 'mouse', action: 'up', x: -1, y: -1, button }))
+      }
       ws.send(JSON.stringify({ type: 'keyboard', action: 'release' }))
     }
+    pressedRef.current.clear()
   }
 
   const toggleFullscreen = () => {
@@ -1127,7 +1164,6 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
         <div
           ref={viewportRef}
           tabIndex={0}
-          autoFocus
           onKeyDown={handleKeyDown}
           onKeyUp={handleKeyUp}
           onBlur={handleBlur}
@@ -1138,11 +1174,10 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
           {status !== 'error' && status !== 'ended' && (
             <canvas
               ref={canvasRef}
-              onMouseMove={handleMouseMove}
-              onMouseDown={handleMouseDown}
-              onMouseUp={handleMouseUp}
+              onPointerMove={handlePointerMove}
+              onPointerDown={handlePointerDown}
+              onPointerUp={handlePointerUp}
               onContextMenu={handleContextMenu}
-              onWheel={handleWheel}
               onMouseEnter={() => setPointerInside(true)}
               onMouseLeave={() => setPointerInside(false)}
               className={`remote-canvas ${mode === 'full_control' ? 'remote-canvas-control' : 'remote-canvas-view'}`}
@@ -1174,8 +1209,12 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
             </div>
           )}
 
+          {/* A banner, not a cover: the desktop stays visible and clickable.
+              The full overlay sat over the canvas and swallowed every click
+              until a new frame arrived, which on an unchanged desktop could be
+              never. */}
           {status === 'stalled' && (
-            <div className="remote-overlay" role="alert">
+            <div className="remote-overlay remote-overlay-banner" role="alert">
               <AlertCircle size={28} />
               <p className="remote-overlay-text">{errorMessage}</p>
               <button type="button" className="btn btn-secondary" onClick={onClose}>

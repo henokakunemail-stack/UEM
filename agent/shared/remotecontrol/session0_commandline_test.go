@@ -233,9 +233,17 @@ func TestWorkerFlagNamesMatchTheWorkerMain(t *testing.T) {
 // file, which the worker opens for itself.
 func TestWorkerCommandLineCarriesNoSecret(t *testing.T) {
 	line, err := workerCommandLine(`C:\a.exe`, `C:\ProgramData\EndpointAgent\creds.json`,
-		SessionConfig{SessionID: "s1", RelayURL: "/x"})
+		SessionConfig{SessionID: "s1", RelayURL: "/x", DeviceID: "d1", DeviceSecret: "s3cr3t-value"})
 	if err != nil {
 		t.Fatalf("workerCommandLine: %v", err)
+	}
+	// The service holds the secret in its config; the command line must not
+	// carry it even then. The payload is base64, so it is decoded to search.
+	for _, part := range strings.Fields(line) {
+		raw, err := base64.StdEncoding.DecodeString(strings.Trim(part, `"`))
+		if err == nil && strings.Contains(string(raw), "s3cr3t-value") {
+			t.Fatalf("the worker command line carries the device secret: %s", raw)
+		}
 	}
 	lowered := strings.ToLower(line)
 	for _, forbidden := range []string{"secret", "token", "password"} {

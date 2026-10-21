@@ -136,5 +136,6 @@
   "session_ended_text": "The desktop streaming session was closed by the operator or endpoint.",
   "badge_desktop_linux": "Desktop (X11) + Terminal",
   "badge_desktop_linux_title": "Screen and input over X11, plus a full terminal. A Wayland desktop cannot be captured yet: the endpoint user can log in with an X11 (Xorg) session instead.",
-  "history_load_failed": "Could not load the session history for this device."
+  "history_load_failed": "Could not load the session history for this device.",
+  "input_failed": "The endpoint did not accept the input: {reason}"
 }

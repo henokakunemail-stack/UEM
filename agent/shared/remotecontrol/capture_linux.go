@@ -312,13 +312,34 @@ func (c *LinuxCapturer) InjectMouseEvent(e InputEvent) error {
 		if notches > 10 {
 			notches = 10
 		}
-		for i := 0; i < notches; i++ {
-			if err := conn.FakeInput(x11.ButtonPress, b, 0, 0); err != nil {
-				return err
-			}
-			if err := conn.FakeInput(x11.ButtonRelease, b, 0, 0); err != nil {
-				return err
-			}
+		return c.clickNotches(conn, b, notches)
+	case "hwheel":
+		// Buttons 6 and 7 are one notch left and right; positive is right.
+		b := byte(7)
+		d := e.Delta
+		if d < 0 {
+			b, d = 6, -d
+		}
+		notches := d / 120
+		if notches < 1 {
+			notches = 1
+		}
+		if notches > 10 {
+			notches = 10
+		}
+		return c.clickNotches(conn, b, notches)
+	}
+	return nil
+}
+
+// clickNotches presses and releases a scroll button once per notch.
+func (c *LinuxCapturer) clickNotches(conn *x11.Conn, b byte, notches int) error {
+	for i := 0; i < notches; i++ {
+		if err := conn.FakeInput(x11.ButtonPress, b, 0, 0); err != nil {
+			return err
+		}
+		if err := conn.FakeInput(x11.ButtonRelease, b, 0, 0); err != nil {
+			return err
 		}
 	}
 	return nil
