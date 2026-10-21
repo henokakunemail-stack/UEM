@@ -67,7 +67,7 @@ jobs:
           $env:CGO_ENABLED = "0"
           $env:GOOS = "linux"
           $env:GOARCH = "amd64"
-          go build -ldflags "-s -w" -o dist/server-linux-amd64 ./server/cmd/server
+          go build -ldflags "-s -w -X main.serverVersion=$cleanVer" -o dist/server-linux-amd64 ./server/cmd/server
 
           # 2. Agent Linux amd64
           go build -ldflags "-s -w -X github.com/henokakunemail-stack/Endpoint-Manager/agent/shared/osinfo.Version=$cleanVer" -o dist/agent-linux-amd64 ./agent/cmd/agent
@@ -77,7 +77,7 @@ jobs:
 
           # 3. Server Windows amd64
           $env:GOOS = "windows"
-          go build -ldflags "-s -w" -o dist/server-windows-amd64.exe ./server/cmd/server
+          go build -ldflags "-s -w -X main.serverVersion=$cleanVer" -o dist/server-windows-amd64.exe ./server/cmd/server
 
           # 4. Agent Windows amd64
           go build -ldflags "-s -w -X github.com/henokakunemail-stack/Endpoint-Manager/agent/shared/osinfo.Version=$cleanVer" -o dist/agent-windows-amd64.exe ./agent/cmd/agent
@@ -96,10 +96,16 @@ jobs:
           while ($numeric.Count -lt 4) { $numeric += 0 }
           $versionNum = ($numeric[0..3] -join '.')
 
+          # choco does not put NSIS on this step's PATH; build.ps1 finds it the
+          # same way, which is why the setup installers built and this failed.
+          $nsis = (Get-Command makensis.exe -ErrorAction SilentlyContinue).Source
+          if (-not $nsis) { $nsis = "${env:ProgramFiles(x86)}\NSIS\makensis.exe" }
           Push-Location packaging\windows
           try {
-            & makensis.exe /DVERSION=$cleanVer /DVERSION_NUM=$versionNum agent-uninstall.nsi
-            & makensis.exe /DVERSION=$cleanVer /DVERSION_NUM=$versionNum server-uninstall.nsi
+            & $nsis /DVERSION=$cleanVer /DVERSION_NUM=$versionNum agent-uninstall.nsi
+            if ($LASTEXITCODE -ne 0) { throw "makensis agent-uninstall.nsi failed" }
+            & $nsis /DVERSION=$cleanVer /DVERSION_NUM=$versionNum server-uninstall.nsi
+            if ($LASTEXITCODE -ne 0) { throw "makensis server-uninstall.nsi failed" }
           } finally {
             Pop-Location
           }
