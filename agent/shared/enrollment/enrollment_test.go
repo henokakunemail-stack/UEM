@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -120,5 +121,28 @@ func TestLoadSave(t *testing.T) {
 	}
 	if info.Size() == 0 {
 		t.Errorf("expected non-empty file")
+	}
+}
+
+// The installer and the operator need the server's reason, not a bare status
+// code: "no uses left" and "expired" both used to read "HTTP 401".
+func TestExchangeReportsTheServerReason(t *testing.T) {
+	var gotToken string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]string
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		gotToken = body["enrollment_token"]
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"error":"enrollment token has no uses left","code":"token_used_up"}`))
+	}))
+	defer srv.Close()
+
+	_, err := Exchange(srv.URL, "  batch-token\n", "")
+	if err == nil || !strings.Contains(err.Error(), "token_used_up") || !strings.Contains(err.Error(), "no uses left") {
+		t.Fatalf("err = %v, want the server's reason and code", err)
+	}
+	if gotToken != "batch-token" {
+		t.Fatalf("token sent = %q, want it trimmed", gotToken)
 	}
 }

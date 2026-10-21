@@ -514,3 +514,61 @@ func deviceFilter(prefix, status, site string) (string, []any) {
 	}
 	return cond, args
 }
+
+// Enrollment failure codes. The agent prints them, and the installer and the
+// console show them, so an operator can tell "this token is used up" from
+// "this token was never valid".
+const (
+	EnrollTokenInvalid = "token_invalid"
+	EnrollTokenExpired = "token_expired"
+	EnrollTokenUsedUp  = "token_used_up"
+	EnrollTokenRevoked = "token_revoked"
+)
+
+// EnrollmentTokenFailure explains why a token was refused. It reads the token
+// without the validity conditions the enroll path applies, so a shared token
+// that ran out of uses, expired or was revoked says which; it returns the
+// shared token's id when there is one, for the audit entry. A single-device
+// token that was already spent no longer has a hash to find, so it reads as
+// invalid.
+func (r *Repository) EnrollmentTokenFailure(ctx context.Context, tokenHash string) (code, tokenID string, err error) {
+	now := time.Now().UTC()
+	var t struct {
+		ID        string     `db:"id"`
+		ExpiresAt time.Time  `db:"expires_at"`
+		MaxUses   int        `db:"max_uses"`
+		UseCount  int        `db:"use_count"`
+		RevokedAt *time.Time `db:"revoked_at"`
+	}
+	err = r.db.GetContext(ctx, &t, r.db.Rebind(`SELECT id, expires_at, max_uses, use_count, revoked_at
+		FROM enrollment_tokens WHERE token_hash = ?`), tokenHash)
+	switch {
+	case err == nil:
+		switch {
+		case t.RevokedAt != nil:
+			return EnrollTokenRevoked, t.ID, nil
+		case !now.Before(t.ExpiresAt):
+			return EnrollTokenExpired, t.ID, nil
+		case t.MaxUses > 0 && t.UseCount >= t.MaxUses:
+			return EnrollTokenUsedUp, t.ID, nil
+		default:
+			return EnrollTokenInvalid, t.ID, nil
+		}
+	case !errors.Is(err, sql.ErrNoRows):
+		return "", "", fmt.Errorf("explain enrollment token: %w", err)
+	}
+
+	var expires *time.Time
+	err = r.db.GetContext(ctx, &expires, r.db.Rebind(`SELECT enrollment_token_expires_at FROM devices
+		WHERE enrollment_token_hash = ? AND retired_at IS NULL`), tokenHash)
+	switch {
+	case err == nil:
+		if expires != nil && !now.Before(*expires) {
+			return EnrollTokenExpired, "", nil
+		}
+		return EnrollTokenInvalid, "", nil
+	case !errors.Is(err, sql.ErrNoRows):
+		return "", "", fmt.Errorf("explain enrollment token: %w", err)
+	}
+	return EnrollTokenInvalid, "", nil
+}

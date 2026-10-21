@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -32,7 +33,8 @@ type Credentials struct {
 func Exchange(serverURL, token, site string, info ...osinfo.Info) (Credentials, error) {
 	normURL := transport.NormalizeServerURL(serverURL)
 	payload := map[string]string{
-		"enrollment_token": token,
+		// A token pasted with a trailing space or newline is still the token.
+		"enrollment_token": strings.TrimSpace(token),
 	}
 	if s := strings.TrimSpace(site); s != "" {
 		payload["site"] = s
@@ -59,7 +61,7 @@ func Exchange(serverURL, token, site string, info ...osinfo.Info) (Credentials, 
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return Credentials{}, fmt.Errorf("enroll failed: HTTP %d", resp.StatusCode)
+		return Credentials{}, enrollError(resp)
 	}
 	var out struct {
 		DeviceID     string `json:"device_id"`
@@ -123,3 +125,24 @@ func restrictToSystemAndAdmins(path string) {
 
 // ErrNotEnrolled means the agent has not enrolled yet (no local credentials).
 var ErrNotEnrolled = errors.New("agent not enrolled")
+
+// enrollError says why the server refused. It used to report only the status
+// code, so a batch token with no uses left, an expired token and a rate limit
+// all read as "HTTP 401" or "HTTP 429" and the installer could only guess.
+func enrollError(resp *http.Response) error {
+	var body struct {
+		Error string `json:"error"`
+		Code  string `json:"code"`
+	}
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	if json.Unmarshal(raw, &body) == nil && body.Error != "" {
+		if body.Code != "" {
+			return fmt.Errorf("enroll failed: HTTP %d: %s (%s)", resp.StatusCode, body.Error, body.Code)
+		}
+		return fmt.Errorf("enroll failed: HTTP %d: %s", resp.StatusCode, body.Error)
+	}
+	if text := strings.TrimSpace(string(raw)); text != "" {
+		return fmt.Errorf("enroll failed: HTTP %d: %s", resp.StatusCode, text)
+	}
+	return fmt.Errorf("enroll failed: HTTP %d", resp.StatusCode)
+}

@@ -114,6 +114,8 @@ func (h *EnrollmentHandler) enroll(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
+	// A token pasted with a trailing space or newline is still the token.
+	req.EnrollmentToken = strings.TrimSpace(req.EnrollmentToken)
 	if req.EnrollmentToken == "" {
 		writeErr(w, http.StatusBadRequest, "enrollment_token is required")
 		return
@@ -128,9 +130,17 @@ func (h *EnrollmentHandler) enroll(w http.ResponseWriter, r *http.Request) {
 
 	tokenHash := HashToken(req.EnrollmentToken)
 
-	// 1. Check if token matches a reusable / multi-device shared token
+	// 1. Check if token matches a reusable / multi-device shared token.
+	// A lookup that fails is a server fault, not a bad token: it used to fall
+	// through to the single-device lookup and answer "invalid token", so a
+	// database problem read as the operator's mistake.
 	sharedToken, err := h.repo.FindValidSharedEnrollmentToken(r.Context(), tokenHash)
-	if err == nil && sharedToken != nil {
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		log.Error().Err(err).Msg("lookup shared enrollment token")
+		writeErr(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	if sharedToken != nil {
 		plain := GenerateToken()
 		devID := NewID()
 		now := time.Now().UTC()
@@ -175,8 +185,9 @@ func (h *EnrollmentHandler) enroll(w http.ResponseWriter, r *http.Request) {
 
 		if err := h.repo.ConsumeSharedEnrollmentTokenAndCreateDevice(r.Context(), tokenHash, newDev); err != nil {
 			if errors.Is(err, ErrNotFound) {
-				h.limiter.RecordFailure(clientIP)
-				writeErr(w, http.StatusUnauthorized, "invalid, expired, or fully utilized enrollment token")
+				// The token was valid a moment ago: another machine took
+				// the last use, or it expired in between.
+				h.refuseToken(w, r, clientIP, tokenHash)
 				return
 			}
 			log.Error().Err(err).Msg("consume shared enrollment token")
@@ -184,6 +195,7 @@ func (h *EnrollmentHandler) enroll(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		h.limiter.RecordSuccess(clientIP)
 		_ = audit.Log(r.Context(), h.db, "agent", devID, "device.enroll_shared", devID, map[string]string{
 			"token_id": sharedToken.ID, "token_name": sharedToken.Name,
 			"hostname": req.Hostname, "os_name": req.OSName, "site": newDev.SiteValue(),
@@ -196,11 +208,7 @@ func (h *EnrollmentHandler) enroll(w http.ResponseWriter, r *http.Request) {
 	// 2. Fallback to single-device pre-registration (devices.enrollment_token_hash)
 	dev, err := h.repo.findByEnrollmentTokenHash(r.Context(), tokenHash)
 	if errors.Is(err, ErrNotFound) {
-		h.limiter.RecordFailure(clientIP)
-		_ = audit.Log(r.Context(), h.db, "agent", "", "device.enroll_failed", "", map[string]string{
-			"reason": "invalid or expired enrollment token", "ip": clientIP,
-		})
-		writeErr(w, http.StatusUnauthorized, "invalid or expired enrollment token")
+		h.refuseToken(w, r, clientIP, tokenHash)
 		return
 	}
 	if err != nil {
@@ -212,10 +220,9 @@ func (h *EnrollmentHandler) enroll(w http.ResponseWriter, r *http.Request) {
 	plain := GenerateToken()
 	if err := h.repo.ConsumeEnrollmentToken(r.Context(), tokenHash, HashToken(plain)); err != nil {
 		if errors.Is(err, ErrNotFound) {
-			h.limiter.RecordFailure(clientIP)
 			// Lookup and consume are two statements: a token expiring between
 			// them lands here, so the deadline is real, not advisory.
-			writeErr(w, http.StatusUnauthorized, "invalid or expired enrollment token")
+			h.refuseToken(w, r, clientIP, tokenHash)
 			return
 		}
 		log.Error().Err(err).Msg("consume enrollment token")
@@ -229,9 +236,37 @@ func (h *EnrollmentHandler) enroll(w http.ResponseWriter, r *http.Request) {
 	if s := strings.TrimSpace(req.Site); s != "" && dev.Site == nil {
 		_ = h.repo.UpdateDevice(r.Context(), dev.ID, "", s)
 	}
+	h.limiter.RecordSuccess(clientIP)
 	_ = audit.Log(r.Context(), h.db, "agent", dev.ID, "device.enroll", dev.ID, map[string]string{
 		"hostname": req.Hostname, "os_name": req.OSName,
 	})
 
 	writeJSON(w, http.StatusOK, enrollResponse{DeviceID: dev.ID, DeviceSecret: plain})
+}
+
+// enrollRefusals are the messages for each refusal code.
+var enrollRefusals = map[string]string{
+	EnrollTokenInvalid: "invalid or already used enrollment token",
+	EnrollTokenExpired: "enrollment token has expired; create a new one in the console",
+	EnrollTokenUsedUp:  "enrollment token has no uses left; raise its limit or create a new one in the console",
+	EnrollTokenRevoked: "enrollment token was revoked in the console",
+}
+
+// refuseToken answers a token that cannot enroll, with the reason, and
+// records it. Every refusal used to read "invalid or expired", and a shared
+// token that ran out of uses was not audited at all, so an operator could not
+// tell a used-up batch token from a typo.
+func (h *EnrollmentHandler) refuseToken(w http.ResponseWriter, r *http.Request, clientIP, tokenHash string) {
+	h.limiter.RecordFailure(clientIP)
+	code, tokenID, err := h.repo.EnrollmentTokenFailure(r.Context(), tokenHash)
+	if err != nil {
+		log.Warn().Err(err).Msg("explain refused enrollment token")
+		code = EnrollTokenInvalid
+	}
+	details := map[string]string{"reason": code, "ip": clientIP}
+	if tokenID != "" {
+		details["token_id"] = tokenID
+	}
+	_ = audit.Log(r.Context(), h.db, "agent", "", "device.enroll_failed", tokenID, details)
+	writeErrCode(w, http.StatusUnauthorized, code, enrollRefusals[code])
 }
