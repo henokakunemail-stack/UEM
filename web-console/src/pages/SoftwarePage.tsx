@@ -31,6 +31,7 @@ import type {
   DeviceGroupDTO,
 } from '../types/api'
 import { useT } from '../i18n/core'
+import { settleAll } from '../services/settled'
 
 // descKey is a dictionary key, looked up with t() at render time.
 const INSTALL_ARG_PRESETS = [
@@ -58,7 +59,6 @@ const TARGET_KEYS: Record<string, string> = {
 }
 const TASK_STATUS_KEYS: Record<string, string> = {
   pending: 'software.task_pending',
-  queued: 'software.task_queued',
   dispatched: 'software.task_dispatched',
   downloading: 'software.task_downloading',
   installing: 'software.task_installing',
@@ -168,22 +168,25 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
   const [packagePendingDelete, setPackagePendingDelete] = useState<{ id: string; name: string } | null>(null)
   const [deletingPackage, setDeletingPackage] = useState(false)
 
+  // Each section loads on its own. One that fails keeps what it had and is
+  // named in a banner, instead of the whole page failing or an empty device
+  // list reading as "no endpoints".
+  const [loadFailed, setLoadFailed] = useState<string[]>([])
+
   const fetchData = useCallback(async () => {
     setLoading(true)
     try {
-      const [pkgs, deps, devListRes, grpList] = await Promise.all([
-        api.getPackages(),
-        api.getDeployments(),
-        api.getDevices(100).catch(() => ({ devices: [] as DeviceDTO[] })),
-        api.getDeviceGroups().catch(() => [] as DeviceGroupDTO[]),
-      ])
-      setPackages(pkgs)
-      setDeployments(deps)
-      setDevices(devListRes.devices || [])
-      setGroups(grpList || [])
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : t('software.fetch_failed')
-      setStatusMsg({ type: 'error', text: msg })
+      const { data, failed } = await settleAll({
+        packages: () => api.getPackages(),
+        deployments: () => api.getDeployments(),
+        devices: () => api.getDevices(100),
+        groups: () => api.getDeviceGroups(),
+      })
+      if (data.packages) setPackages(data.packages)
+      if (data.deployments) setDeployments(data.deployments)
+      if (data.devices) setDevices(data.devices.devices || [])
+      if (data.groups) setGroups(data.groups || [])
+      setLoadFailed(failed.map((k) => t(`software.section_${k}`)))
     } finally {
       setLoading(false)
     }
@@ -192,6 +195,23 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
   useEffect(() => {
     fetchData()
   }, [fetchData])
+
+  // A running deployment moves on its own -- devices come online, agents
+  // report -- so the list refreshes while one runs.
+  const anyRunning = deployments.some((d) => d.status === 'running')
+  useEffect(() => {
+    if (!anyRunning) return
+    const timer = setInterval(() => {
+      api.getDeployments().then(
+        (deps) => {
+          setDeployments(deps)
+          setLoadFailed((f) => f.filter((s) => s !== t('software.section_deployments')))
+        },
+        () => setLoadFailed([t('software.section_deployments')]),
+      )
+    }, 5000)
+    return () => clearInterval(timer)
+  }, [anyRunning])
 
   const handleUpload = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -337,6 +357,7 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
       const successText = t(isRemoval ? 'software.removal_initiated' : 'software.deployment_initiated', {
         total: res.tasks_total,
         live: res.dispatched_live,
+        queued: res.queued ?? res.tasks_total - res.dispatched_live,
       })
       setStatusMsg({
         type: 'success',
@@ -444,6 +465,12 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
       </div>
 
       {/* Notifications */}
+      {loadFailed.length > 0 && (
+        <div className="alert-banner alert-warning" role="alert">
+          <span>{t('common.load_failed_sections', { sections: loadFailed.join(', ') })}</span>
+        </div>
+      )}
+
       {statusMsg && (
         <div className={`alert-banner ${statusMsg.type === 'error' ? 'alert-error' : 'alert-success'}`}>
           <span>
@@ -732,10 +759,21 @@ export const SoftwarePage: React.FC<SoftwarePageProps> = ({ activeTab, onTabChan
                             <span className="status-pill primary">
                               <Clock size={12} className="spinning" /> {t('software.status_in_progress')}
                             </span>
-                          ) : (
+                          ) : dep.status === 'partial' ? (
+                            <span className="status-pill partial">{t('common.status_partial')}</span>
+                          ) : dep.status === 'cancelled' ? (
+                            <span className="status-pill offline">{t('common.status_cancelled')}</span>
+                          ) : dep.status === 'failed' ? (
                             <span className="status-pill danger">
                               <XCircle size={12} /> {t('software.status_failed')}
                             </span>
+                          ) : (
+                            <span className="status-pill offline">{dep.status}</span>
+                          )}
+                          {dep.status === 'running' && dep.pending_tasks > 0 && (
+                            <div className="text-xs text-muted">
+                              {t('software.waiting_devices', { count: dep.pending_tasks })}
+                            </div>
                           )}
                         </td>
                         <td>

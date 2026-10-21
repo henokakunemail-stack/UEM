@@ -109,6 +109,8 @@ type SoftwareDeployment struct {
 	TotalTasks     int    `db:"total_tasks" json:"total_tasks"`
 	SuccessTasks   int    `db:"success_tasks" json:"success_tasks"`
 	FailedTasks    int    `db:"failed_tasks" json:"failed_tasks"`
+	// PendingTasks wait for their device to come online.
+	PendingTasks int `db:"pending_tasks" json:"pending_tasks"`
 }
 
 type DeploymentTask struct {

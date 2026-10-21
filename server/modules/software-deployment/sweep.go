@@ -25,6 +25,15 @@ const SweepInterval = 15 * time.Second
 // will still be running its installer.
 const AbandonGrace = 5 * time.Minute
 
+// NoProgressTimeout is how long a sent task may go without any report on a
+// device that is still online. The agent enforces a 20-minute install
+// deadline and reports it, so an hour of silence means the command was lost
+// or the agent died without dropping its socket.
+const NoProgressTimeout = 60 * time.Minute
+
+// QueuedTaskExpiry is how long a task waits for its device to come online.
+const QueuedTaskExpiry = 7 * 24 * time.Hour
+
 // AbandonOrphanedTasks moves tasks stuck in a running state on an offline
 // device to 'failed_lost', and rolls up any deployment that was waiting on them.
 //
@@ -34,11 +43,15 @@ const AbandonGrace = 5 * time.Minute
 // write transactions per sweep, which is the SQLite write-lock contention the
 // rest of this server is built to avoid.
 //
-// A task is only reaped when BOTH conditions hold: the device is not currently
-// connected, and the task has not been updated within AbandonGrace. A live
-// device is never touched, so a long install on a healthy machine cannot be
-// reaped out from under the agent that is still running it -- a task in
-// 'installing' is not evidence of anything until the machine is gone.
+// Three things are reaped:
+//   - a sent task on a device that is not connected and has not reported
+//     within AbandonGrace;
+//   - a sent task with no report for NoProgressTimeout even though the device
+//     is online -- the command was lost, or the agent died holding its socket;
+//   - a task still pending after QueuedTaskExpiry: the device never came back.
+//
+// An online device's task gets an hour, not five minutes: a long install on a
+// healthy machine must not be reaped out from under the agent running it.
 //
 // ponytail: liveness is taken from the device row, which the offline sweeper
 // updates on the same cadence, rather than from the hub directly. That means a
@@ -51,20 +64,37 @@ func (r *Repository) AbandonOrphanedTasks(ctx context.Context, grace time.Durati
 	now := time.Now().UTC()
 
 	const msg = "agent stopped reporting before this task finished; the endpoint went offline mid-deployment. The package may be partially installed - check inventory and re-deploy if needed."
+	const stuckMsg = "no_progress: the agent sent no report for an hour while online; the command may not have reached it. The package may be partially installed - check inventory and re-deploy if needed."
+	const neverMsg = "never_connected: the device did not come online within 7 days, so the task was never sent."
 
-	res, err := r.db.ExecContext(ctx, `
+	var n int64
+	for _, rule := range []struct {
+		where string
+		msg   string
+		args  []any
+	}{
+		{`status IN ('dispatched', 'downloading', 'installing', 'uninstalling') AND updated_at < ?
+		  AND device_id IN (SELECT id FROM devices WHERE status != 'online')`, msg, []any{cutoff}},
+		{`status IN ('dispatched', 'downloading', 'installing', 'uninstalling') AND updated_at < ?`,
+			stuckMsg, []any{now.Add(-NoProgressTimeout)}},
+		{`status = 'pending' AND created_at < ?`, neverMsg, []any{now.Add(-QueuedTaskExpiry)}},
+	} {
+		args := append([]any{TaskStatusFailedLost, rule.msg, now, now}, rule.args...)
+		res, err := r.db.ExecContext(ctx, `
 		UPDATE deployment_tasks
 		SET status = ?, error_message = ?, updated_at = ?, completed_at = ?
-		WHERE status IN ('dispatched', 'downloading', 'installing', 'uninstalling')
-		  AND updated_at < ?
-		  AND device_id IN (SELECT id FROM devices WHERE status != 'online')
-		  AND completed_at IS NULL`, TaskStatusFailedLost, msg, now, now, cutoff)
-	if err != nil {
-		return 0, err
+		WHERE `+rule.where+` AND completed_at IS NULL`, args...)
+		if err != nil {
+			return n, err
+		}
+		reaped, err := res.RowsAffected()
+		if err != nil {
+			return n, err
+		}
+		n += reaped
 	}
-	n, err := res.RowsAffected()
-	if err != nil || n == 0 {
-		return 0, err
+	if n == 0 {
+		return 0, nil
 	}
 
 	// The rollup lives in syncDeploymentStatus, which needs a task id, so the

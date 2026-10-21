@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -443,11 +444,20 @@ func (h *Handler) createDeployment(w http.ResponseWriter, r *http.Request) {
 	if req.Action == ActionUninstall {
 		command = "software.uninstall"
 	}
+	//
+	// A device that has never reported capabilities is not refused here: it
+	// is offline or has not reconnected since capabilities existed, and the
+	// answer arrives with its next hello. Its task waits, and the reconnect
+	// flush checks again before sending; refusing the whole rollout over one
+	// laptop that has not been switched on is what this used to do.
 	missing, err := h.repo.DevicesWithoutCapability(r.Context(), deviceIDs, command)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "failed to check endpoint capabilities: "+err.Error())
 		return
 	}
+	missing = slices.DeleteFunc(missing, func(d DeviceCapability) bool {
+		return d.Capabilities == nil || *d.Capabilities == ""
+	})
 	if len(missing) > 0 {
 		names := make([]string, 0, len(missing))
 		for _, d := range missing {
@@ -504,47 +514,15 @@ func (h *Handler) createDeployment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Dispatch tasks to online agents immediately via WebSocket command
+	// Online devices are sent their task now; the rest stay pending and are
+	// sent after their next hello, or by the sweep's retry.
 	dispatchedCount := 0
 	for _, task := range tasks {
-		if h.hub != nil && h.hub.Online(task.DeviceID) {
-			cmdPayload := map[string]any{
-				"task_id":      task.ID,
-				"package_id":   pkg.ID,
-				"package_name": pkg.Name,
-			}
-			if req.Action == ActionUninstall {
-				// No download_url, no sha256, no file_name: the installer is
-				// already on the endpoint and the agent re-derives its own
-				// uninstall command from what it finds installed there. Sending
-				// an installer path would be sending a file that should not exist.
-				cmdPayload["package_type"] = pkg.PackageType
-				cmdPayload["uninstall_args"] = pkg.UninstallArgs
-			} else {
-				cmdPayload["download_url"] = fmt.Sprintf("/api/agent/packages/%s/download", pkg.ID)
-				cmdPayload["file_name"] = pkg.FileName
-				cmdPayload["package_type"] = pkg.PackageType
-				cmdPayload["sha256"] = pkg.SHA256
-				cmdPayload["install_args"] = pkg.InstallArgs
-			}
-			env := transport.Envelope{
-				Type:    transport.TypeCommand,
-				ID:      NewID(),
-				Command: command,
-				Payload: cmdPayload,
-			}
-			envBytes, _ := json.Marshal(env)
-
-			if h.hub.SendTo(task.DeviceID, envBytes) {
-				// task.DeviceID is the owner of this row, not the operator's
-				// device: the dispatch was aimed at it, so it is the only
-				// identity allowed to mark it dispatched.
-				_ = h.repo.UpdateTaskProgress(r.Context(), task.DeviceID, TaskProgressReport{
-					TaskID: task.ID,
-					Status: TaskStatusDispatched,
-				})
-				dispatchedCount++
-			}
+		if h.hub == nil || !h.hub.Online(task.DeviceID) {
+			continue
+		}
+		if h.sendTask(r.Context(), QueuedTask{DeploymentTask: task, Action: req.Action}, pkg) {
+			dispatchedCount++
 		}
 	}
 
@@ -558,6 +536,7 @@ func (h *Handler) createDeployment(w http.ResponseWriter, r *http.Request) {
 		"deployment":      dep,
 		"tasks_total":     len(tasks),
 		"dispatched_live": dispatchedCount,
+		"queued":          len(tasks) - dispatchedCount,
 	})
 }
 
@@ -767,6 +746,12 @@ func (h *Handler) reportProgress(w http.ResponseWriter, r *http.Request) {
 	rep.TaskID = taskID
 
 	if err := h.repo.UpdateTaskProgress(r.Context(), deviceID, rep); err != nil {
+		if errors.Is(err, ErrTaskFinished) {
+			// The task is already closed; this report is a retry or a late
+			// step. Acknowledge it so the agent stops retrying.
+			writeJSON(w, http.StatusOK, map[string]string{"status": "ignored"})
+			return
+		}
 		if errors.Is(err, ErrNotFound) {
 			writeErr(w, http.StatusNotFound, "task not found")
 			return
@@ -787,4 +772,147 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 
 func writeErr(w http.ResponseWriter, code int, msg string) {
 	writeJSON(w, code, map[string]string{"error": msg})
+}
+
+// commandFor is the agent command for a deployment action.
+func commandFor(action string) string {
+	if action == ActionUninstall {
+		return "software.uninstall"
+	}
+	return "software.install"
+}
+
+// sendTask delivers one pending task and reports whether it went out.
+//
+// The envelope id is the task id. The agent answers a command it refuses --
+// queue full, payload it cannot use -- with a failed command result under
+// that id, and HandleCommandResult turns it into a failed task. With a random
+// id the refusal landed in agent_commands, matched nothing, and the task said
+// 'dispatched' forever on a healthy endpoint.
+func (h *Handler) sendTask(ctx context.Context, task QueuedTask, pkg SoftwarePackage) bool {
+	command := commandFor(task.Action)
+	caps, err := h.repo.DevicesWithoutCapability(ctx, []string{task.DeviceID}, command)
+	if err != nil {
+		log.Warn().Err(err).Str("task_id", task.ID).Msg("check capability before send")
+		return false
+	}
+	if len(caps) > 0 {
+		reason := fmt.Sprintf("unsupported_agent: the agent on this device cannot handle %q; update the agent and deploy again", command)
+		if _, err := h.repo.FailTask(ctx, task.ID, task.DeviceID, reason); err != nil {
+			log.Warn().Err(err).Str("task_id", task.ID).Msg("fail task for unsupported agent")
+		}
+		return false
+	}
+
+	cmdPayload := map[string]any{
+		"task_id":      task.ID,
+		"package_id":   pkg.ID,
+		"package_name": pkg.Name,
+		"package_type": pkg.PackageType,
+	}
+	if task.Action == ActionUninstall {
+		// No download_url, no sha256, no file_name: the installer is already
+		// on the endpoint and the agent re-derives its own uninstall command
+		// from what it finds installed there. The arguments are the task's
+		// snapshot, taken when the deployment was created.
+		cmdPayload["uninstall_args"] = task.Args
+	} else {
+		cmdPayload["download_url"] = fmt.Sprintf("/api/agent/packages/%s/download", pkg.ID)
+		cmdPayload["file_name"] = pkg.FileName
+		cmdPayload["sha256"] = pkg.SHA256
+		cmdPayload["install_args"] = pkg.InstallArgs
+	}
+	envBytes, err := json.Marshal(transport.Envelope{
+		Type:    transport.TypeCommand,
+		ID:      task.ID,
+		Command: command,
+		Payload: cmdPayload,
+	})
+	if err != nil {
+		return false
+	}
+
+	sent, err := h.repo.MarkTaskSent(ctx, task.ID)
+	if err != nil || !sent {
+		return false // someone else sent it, or it is no longer pending
+	}
+	if !h.hub.SendTo(task.DeviceID, envBytes) {
+		if err := h.repo.RequeueTask(ctx, task.ID); err != nil {
+			log.Warn().Err(err).Str("task_id", task.ID).Msg("requeue deployment task")
+		}
+		return false
+	}
+	return true
+}
+
+// FlushOnReconnect sends the tasks queued for a device while it was away. It
+// is a transport.ReconnectQueue, called after hello, when the capabilities
+// the device just reported are stored.
+func (h *Handler) FlushOnReconnect(ctx context.Context, deviceID string) error {
+	tasks, err := h.repo.PendingTasksForDevice(ctx, deviceID)
+	if err != nil || len(tasks) == 0 {
+		return err
+	}
+	pkgs := map[string]SoftwarePackage{}
+	for _, task := range tasks {
+		pkg, ok := pkgs[task.PackageID]
+		if !ok {
+			pkg, err = h.repo.GetPackage(ctx, task.PackageID)
+			if err != nil {
+				if _, ferr := h.repo.FailTask(ctx, task.ID, deviceID,
+					"package_missing: the package was deleted before the device came online"); ferr != nil {
+					log.Warn().Err(ferr).Str("task_id", task.ID).Msg("fail task for missing package")
+				}
+				continue
+			}
+			pkgs[task.PackageID] = pkg
+		}
+		if h.sendTask(ctx, task, pkg) && h.audit != nil {
+			_ = h.audit.Log(ctx, "system", deviceID, "software.queued_flushed", task.DeploymentID,
+				map[string]string{"task_id": task.ID, "device_id": deviceID})
+		}
+	}
+	return nil
+}
+
+// ResendQueued retries pending tasks for devices that are online. A send can
+// fail on a busy socket, and a device that stays connected never reconnects.
+func (h *Handler) ResendQueued(ctx context.Context) {
+	if h.hub == nil {
+		return
+	}
+	devices, err := h.repo.DevicesWithPendingTasks(ctx)
+	if err != nil {
+		log.Warn().Err(err).Msg("list devices with queued deployment tasks")
+		return
+	}
+	for _, id := range devices {
+		if !h.hub.Online(id) {
+			continue
+		}
+		if err := h.FlushOnReconnect(ctx, id); err != nil {
+			log.Warn().Err(err).Str("device", id).Msg("resend queued deployment tasks")
+		}
+	}
+}
+
+// HandleCommandResult claims the agent's answer to a deployment command. An
+// accepted command needs nothing -- progress arrives over HTTP -- but a
+// refusal means the work never started, and the task is closed with the
+// agent's reason. It is a transport.CommandResultReceiver.
+func (h *Handler) HandleCommandResult(ctx context.Context, deviceID, id, status, errMsg string) bool {
+	owned, err := h.repo.TaskOwned(ctx, id, deviceID)
+	if err != nil || !owned {
+		return false
+	}
+	if status != "failed" {
+		return true
+	}
+	if errMsg == "" {
+		errMsg = "the agent refused the command"
+	}
+	if _, err := h.repo.FailTask(ctx, id, deviceID, "rejected: "+errMsg); err != nil {
+		log.Warn().Err(err).Str("task_id", id).Msg("record refused deployment command")
+	}
+	return true
 }

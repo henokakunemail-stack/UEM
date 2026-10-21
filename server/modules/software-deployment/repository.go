@@ -306,7 +306,8 @@ func (r *Repository) ListDeployments(ctx context.Context) ([]SoftwareDeployment,
 			p.version AS package_version,
 			COUNT(t.id) AS total_tasks,
 			COALESCE(SUM(CASE WHEN t.status = 'success' THEN 1 ELSE 0 END), 0) AS success_tasks,
-			COALESCE(SUM(CASE WHEN t.status IN ('failed', 'failed_lost') THEN 1 ELSE 0 END), 0) AS failed_tasks
+			COALESCE(SUM(CASE WHEN t.status IN ('failed', 'failed_lost') THEN 1 ELSE 0 END), 0) AS failed_tasks,
+			COALESCE(SUM(CASE WHEN t.status = 'pending' THEN 1 ELSE 0 END), 0) AS pending_tasks
 		FROM software_deployments d
 		LEFT JOIN software_packages p ON d.package_id = p.id
 		LEFT JOIN deployment_tasks t ON d.id = t.deployment_id
@@ -384,7 +385,8 @@ func (r *Repository) ListDeploymentTasks(ctx context.Context, deploymentID strin
 func (r *Repository) UpdateTaskProgress(ctx context.Context, deviceID string, report TaskProgressReport) error {
 	now := time.Now().UTC()
 	var completedAt *time.Time
-	if report.Status == TaskStatusSuccess || report.Status == TaskStatusFailed {
+	terminal := isTerminalTaskStatus(report.Status)
+	if terminal {
 		completedAt = &now
 	}
 
@@ -392,6 +394,12 @@ func (r *Repository) UpdateTaskProgress(ctx context.Context, deviceID string, re
 		UPDATE deployment_tasks
 		SET status = ?, exit_code = ?, output_log = ?, error_message = ?, updated_at = ?, completed_at = COALESCE(?, completed_at)
 		WHERE id = ? AND device_id = ?`
+	if !terminal {
+		// A progress step never moves a finished task back. Without this a
+		// retried 'installing' report that arrived after 'success' reopened
+		// the task, and the deployment showed running again.
+		query += ` AND status NOT IN ('success', 'failed', 'failed_lost')`
+	}
 
 	res, err := r.db.ExecContext(ctx, query,
 		report.Status, report.ExitCode, report.OutputLog, report.ErrorMessage, now, completedAt,
@@ -402,6 +410,13 @@ func (r *Repository) UpdateTaskProgress(ctx context.Context, deviceID string, re
 	}
 	n, _ := res.RowsAffected()
 	if n == 0 {
+		if !terminal {
+			var owned int
+			if err := r.db.GetContext(ctx, &owned, `SELECT COUNT(*) FROM deployment_tasks WHERE id = ? AND device_id = ?`,
+				report.TaskID, deviceID); err == nil && owned == 1 {
+				return ErrTaskFinished
+			}
+		}
 		return ErrNotFound
 	}
 
@@ -410,7 +425,95 @@ func (r *Repository) UpdateTaskProgress(ctx context.Context, deviceID string, re
 	return nil
 }
 
-// syncDeploymentStatus checks if all tasks for a deployment are done and marks it completed.
+// ErrTaskFinished is a progress report for a task that already finished. It
+// is not a failure of the report: the agent's work is recorded.
+var ErrTaskFinished = errors.New("task already finished")
+
+func isTerminalTaskStatus(s string) bool {
+	return s == TaskStatusSuccess || s == TaskStatusFailed || s == TaskStatusFailedLost
+}
+
+// MarkTaskSent moves a pending task to dispatched and reports whether this
+// caller did it. The mark goes before the socket write, so two senders -- a
+// reconnect racing the sweep's retry -- cannot both send the same command.
+// It replaced an unconditional progress write after the send, which could
+// land after the agent's own 'downloading' report and move the task back.
+func (r *Repository) MarkTaskSent(ctx context.Context, taskID string) (bool, error) {
+	res, err := r.db.ExecContext(ctx, `UPDATE deployment_tasks SET status = ?, updated_at = ?
+		WHERE id = ? AND status = ?`, TaskStatusDispatched, time.Now().UTC(), taskID, TaskStatusPending)
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n == 1, nil
+}
+
+// RequeueTask hands back a task whose send failed, so it is sent again.
+func (r *Repository) RequeueTask(ctx context.Context, taskID string) error {
+	_, err := r.db.ExecContext(ctx, `UPDATE deployment_tasks SET status = ?, updated_at = ?
+		WHERE id = ? AND status = ?`, TaskStatusPending, time.Now().UTC(), taskID, TaskStatusDispatched)
+	return err
+}
+
+// FailTask closes a task that never started, with the reason, and rolls up
+// its deployment. Only a task that has not progressed is touched: a refusal
+// that arrives after the agent already reported work is stale.
+func (r *Repository) FailTask(ctx context.Context, taskID, deviceID, reason string) (bool, error) {
+	now := time.Now().UTC()
+	res, err := r.db.ExecContext(ctx, `UPDATE deployment_tasks
+		SET status = ?, error_message = ?, updated_at = ?, completed_at = ?
+		WHERE id = ? AND device_id = ? AND status IN (?, ?)`,
+		TaskStatusFailed, reason, now, now, taskID, deviceID, TaskStatusPending, TaskStatusDispatched)
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	if n == 1 {
+		_ = r.syncDeploymentStatus(ctx, taskID)
+	}
+	return n == 1, nil
+}
+
+// TaskOwned reports whether id is a deployment task of deviceID.
+func (r *Repository) TaskOwned(ctx context.Context, taskID, deviceID string) (bool, error) {
+	var n int
+	err := r.db.GetContext(ctx, &n, `SELECT COUNT(*) FROM deployment_tasks WHERE id = ? AND device_id = ?`, taskID, deviceID)
+	return n == 1, err
+}
+
+// QueuedTask is a pending task with what its command needs.
+type QueuedTask struct {
+	DeploymentTask
+	Action string `db:"action"`
+}
+
+// PendingTasksForDevice returns a device's tasks still waiting to be sent,
+// oldest first.
+func (r *Repository) PendingTasksForDevice(ctx context.Context, deviceID string) ([]QueuedTask, error) {
+	var tasks []QueuedTask
+	err := r.db.SelectContext(ctx, &tasks, `
+		SELECT t.id, t.deployment_id, t.package_id, t.device_id, t.status, t.args,
+			t.created_at, t.updated_at, d.action
+		FROM deployment_tasks t
+		JOIN software_deployments d ON d.id = t.deployment_id
+		WHERE t.device_id = ? AND t.status = ?
+		ORDER BY t.created_at`, deviceID, TaskStatusPending)
+	if err != nil {
+		return nil, fmt.Errorf("pending deployment tasks: %w", err)
+	}
+	return tasks, nil
+}
+
+// DevicesWithPendingTasks lists devices that still have a task to be sent.
+func (r *Repository) DevicesWithPendingTasks(ctx context.Context) ([]string, error) {
+	var ids []string
+	err := r.db.SelectContext(ctx, &ids, `SELECT DISTINCT device_id FROM deployment_tasks WHERE status = ?`, TaskStatusPending)
+	if err != nil {
+		return nil, fmt.Errorf("devices with pending deployment tasks: %w", err)
+	}
+	return ids, nil
+}
+
 func (r *Repository) syncDeploymentStatus(ctx context.Context, taskID string) error {
 	query := `
 		SELECT deployment_id FROM deployment_tasks WHERE id = ?`
@@ -448,8 +551,13 @@ func (r *Repository) syncDeploymentStatusByID(ctx context.Context, depID string)
 
 	if counts.Total > 0 && counts.Total == counts.Done {
 		now := time.Now().UTC()
-		status := "completed"
-		if counts.Succeeded == 0 {
+		// completed means every device took the package; a rollout that
+		// reached some of them is partial, not completed.
+		status := "partial"
+		switch counts.Succeeded {
+		case counts.Total:
+			status = "completed"
+		case 0:
 			status = "failed"
 		}
 		updateDep := `UPDATE software_deployments SET status = ?, completed_at = ? WHERE id = ?`

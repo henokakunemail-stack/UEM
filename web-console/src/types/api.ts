@@ -192,7 +192,8 @@ export interface SoftwareDeploymentDTO {
   target_type: 'device' | 'group' | 'all'
   target_id: string
   created_by: string
-  status: 'running' | 'completed' | 'failed' | 'cancelled'
+  // partial: some devices took the package and some did not.
+  status: 'running' | 'completed' | 'partial' | 'failed' | 'cancelled'
   created_at: string
   completed_at?: string | null
   package_name?: string
@@ -200,6 +201,8 @@ export interface SoftwareDeploymentDTO {
   total_tasks: number
   success_tasks: number
   failed_tasks: number
+  // Tasks waiting for their device to come online.
+  pending_tasks: number
 }
 
 export interface DeploymentTaskDTO {

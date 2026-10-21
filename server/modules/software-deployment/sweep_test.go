@@ -34,6 +34,7 @@ func sweepFixture(t *testing.T) *sqlx.DB {
 			status TEXT NOT NULL,
 			error_message TEXT,
 			updated_at DATETIME NOT NULL,
+			created_at DATETIME,
 			completed_at DATETIME
 		);
 		INSERT INTO devices (id, status) VALUES ('dev-online', 'online'), ('dev-offline', 'offline');
@@ -44,9 +45,10 @@ func sweepFixture(t *testing.T) *sqlx.DB {
 
 func addTask(t *testing.T, db *sqlx.DB, id, device, status string, age time.Duration) {
 	t.Helper()
+	at := time.Now().UTC().Add(-age)
 	mustExec(t, db, `INSERT INTO deployment_tasks
-		(id, deployment_id, device_id, status, updated_at) VALUES (?, 'dep1', ?, ?, ?)`,
-		id, device, status, time.Now().UTC().Add(-age))
+		(id, deployment_id, device_id, status, updated_at, created_at) VALUES (?, 'dep1', ?, ?, ?, ?)`,
+		id, device, status, at, at)
 }
 
 // The reaper is the only thing standing between an agent that died mid-install
@@ -79,9 +81,26 @@ func TestAbandonOrphanedTasks(t *testing.T) {
 			age: AbandonGrace + time.Minute, want: TaskStatusFailedLost, wantReap: true,
 		},
 		{
-			name:   "a live device's long install is never touched",
+			name:   "a live device's long install is left alone within the hour",
 			taskID: "t4", device: "dev-online", status: "installing",
-			age: AbandonGrace + time.Hour, want: "installing",
+			age: 30 * time.Minute, want: "installing",
+		},
+		{
+			// The command was lost or the agent died holding its socket; the
+			// task used to say 'dispatched' forever on a healthy endpoint.
+			name:   "a live device silent past the no-progress timeout is reaped",
+			taskID: "t8", device: "dev-online", status: "dispatched",
+			age: NoProgressTimeout + time.Minute, want: TaskStatusFailedLost, wantReap: true,
+		},
+		{
+			name:   "a task queued for an offline device waits",
+			taskID: "t9", device: "dev-offline", status: "pending",
+			age: AbandonGrace + time.Hour, want: "pending",
+		},
+		{
+			name:   "a task queued for a week is reaped as never connected",
+			taskID: "t10", device: "dev-offline", status: "pending",
+			age: QueuedTaskExpiry + time.Hour, want: TaskStatusFailedLost, wantReap: true,
 		},
 		{
 			name:   "an offline device that reported recently is given the grace window",
@@ -179,8 +198,8 @@ func TestAbandonOrphanedTasksRollsUpDeployment(t *testing.T) {
 	}
 }
 
-// A deployment that mixed a real success with a lost agent is completed, not
-// failed: the operator needs to know the rollout partially worked.
+// A deployment that mixed a real success with a lost agent is partial: not
+// failed, because some of it worked, and not completed, because some did not.
 func TestAbandonOrphanedTasksPartialRollup(t *testing.T) {
 	db := sweepFixture(t)
 	mustExec(t, db, `INSERT INTO deployment_tasks
@@ -197,8 +216,8 @@ func TestAbandonOrphanedTasksPartialRollup(t *testing.T) {
 	if err := db.Get(&status, `SELECT status FROM software_deployments WHERE id = 'dep1'`); err != nil {
 		t.Fatal(err)
 	}
-	if status != "completed" {
-		t.Errorf("deployment status = %q, want %q", status, "completed")
+	if status != "partial" {
+		t.Errorf("deployment status = %q, want %q", status, "partial")
 	}
 }
 

@@ -898,6 +898,9 @@ func buildServer(cfg config.Config, database *sqlx.DB) (*http.Server, *serverApp
 	// operator presses Dispatch again. Wired here rather than at construction
 	// because the update handler is built below the agent websocket handler.
 	wsH.WithUpdateQueue(updateH)
+	// Software tasks: refusals come back under the task id, and tasks queued
+	// for an offline device are sent after its next hello.
+	wsH.WithCommandResultReceiver(softH).WithReconnectQueue(softH)
 	// Same for the filter policy: a sync clicked against a device that was offline
 	// wrote status='pending' and nothing ever re-read the row, so the endpoint
 	// stayed unfiltered until someone pressed Sync a second time.
@@ -1003,7 +1006,7 @@ func buildServer(cfg config.Config, database *sqlx.DB) (*http.Server, *serverApp
 	// the agent posts progress over HTTP from a goroutine, and a logout, an
 	// agent update, or a pulled power cord all end that goroutine silently. This
 	// reaps them so a rollout does not read as 'still running' forever.
-	leaderOnly = append(leaderOnly, func(ctx context.Context) { go runDeploymentSweep(ctx, softRepo) })
+	leaderOnly = append(leaderOnly, func(ctx context.Context) { go runDeploymentSweep(ctx, softRepo, softH) })
 
 	// Maintenance tasks stranded by an agent that took the command and then
 	// never reported. Nothing else closes them: the job status is written only
@@ -1264,7 +1267,7 @@ func runOfflineSweep(ctx context.Context, d *sqlx.DB, hub *transport.Hub, thresh
 //
 // The sweep runs on the same cadence as the offline sweep and after it, so a
 // device is marked offline first and its tasks are reaped on a later tick.
-func runDeploymentSweep(ctx context.Context, repo *softwaredeployment.Repository) {
+func runDeploymentSweep(ctx context.Context, repo *softwaredeployment.Repository, h *softwaredeployment.Handler) {
 	ticker := time.NewTicker(softwaredeployment.SweepInterval)
 	defer ticker.Stop()
 	for {
@@ -1273,6 +1276,10 @@ func runDeploymentSweep(ctx context.Context, repo *softwaredeployment.Repository
 			return
 		case <-ticker.C:
 			sweepCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+			// Queued tasks for devices that are online are retried first: a
+			// send can fail on a busy socket, and a device that stays
+			// connected never reconnects to trigger the flush.
+			h.ResendQueued(sweepCtx)
 			n, err := repo.AbandonOrphanedTasks(sweepCtx, softwaredeployment.AbandonGrace)
 			cancel()
 			if err != nil {

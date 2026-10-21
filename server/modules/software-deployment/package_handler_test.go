@@ -538,10 +538,9 @@ func TestADeploymentToAnAgentThatCannotRunItIsRefused(t *testing.T) {
 	f := newPackageFixture(t, &liveHub{})
 	seedPackage(t, f, "pkg-1", "/quiet", "/x {ProductCode}")
 
-	// A device whose stored capability list does not name the command. NULL and
-	// unparseable are both treated as lacking everything, so NULL is what a
-	// device that has never reconnected with a capability-reporting build has.
-	f.db.MustExec(`UPDATE devices SET capabilities = NULL WHERE id = 'dev-1'`)
+	// A device whose stored capability list does not name the command: the
+	// agent said what it can do, and this is not it.
+	f.db.MustExec(`UPDATE devices SET capabilities = '["inventory.collect"]' WHERE id = 'dev-1'`)
 
 	rec := f.do(t, http.MethodPost, "/api/software/deployments",
 		`{"name":"rollout","package_id":"pkg-1","target_type":"device","target_id":"dev-1"}`)

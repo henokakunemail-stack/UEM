@@ -7,8 +7,7 @@
   "target_all_short": "semua",
   "target_group_short": "grup",
   "target_device_short": "perangkat",
-  "task_pending": "menunggu",
-  "task_queued": "dalam antrean",
+  "task_pending": "menunggu perangkat",
   "task_dispatched": "terkirim",
   "task_downloading": "mengunduh",
   "task_installing": "menginstal",
@@ -35,8 +34,8 @@
   "select_group_error": "Silakan pilih grup perangkat",
   "no_uninstall_args": "{name} tidak memiliki argumen uninstall. Uninstaller tanpa switch senyap akan membuka jendela di perangkat. Edit paket dan atur argumennya terlebih dahulu.",
   "cannot_uninstall": "Tidak Dapat Uninstall",
-  "deployment_initiated": "Penerapan dimulai! {total} target dalam antrean, {live} langsung dikirim.",
-  "removal_initiated": "Penghapusan dimulai! {total} target dalam antrean, {live} langsung dikirim.",
+  "deployment_initiated": "Penerapan dimulai: {live} dari {total} target dikirim sekarang, {queued} menunggu perangkatnya online.",
+  "removal_initiated": "Penghapusan dimulai: {live} dari {total} target dikirim sekarang, {queued} menunggu perangkatnya online.",
   "deployment_dispatched": "Penerapan Dikirim",
   "removal_dispatched": "Penghapusan Dikirim",
   "deploy_failed": "Gagal memulai penerapan",
@@ -167,5 +166,10 @@
   "view_logs": "Lihat Log",
   "exit_code": "Kode Keluar:",
   "delete_title": "Hapus paket",
-  "delete_confirm": "Hapus paket \"{name}\"? Tindakan ini tidak dapat dibatalkan."
+  "delete_confirm": "Hapus paket \"{name}\"? Tindakan ini tidak dapat dibatalkan.",
+  "waiting_devices": "{count} menunggu perangkatnya",
+  "section_packages": "paket",
+  "section_deployments": "penerapan",
+  "section_devices": "endpoint",
+  "section_groups": "grup"
 }

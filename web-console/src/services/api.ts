@@ -434,8 +434,8 @@ export const api = {
     // 'install' or 'uninstall'. Omitting it means install, which is what every
     // caller sent before uninstall existed.
     action?: 'install' | 'uninstall'
-  }): Promise<{ deployment: SoftwareDeploymentDTO; tasks_total: number; dispatched_live: number }> {
-    return request<{ deployment: SoftwareDeploymentDTO; tasks_total: number; dispatched_live: number }>(
+  }): Promise<{ deployment: SoftwareDeploymentDTO; tasks_total: number; dispatched_live: number; queued?: number }> {
+    return request<{ deployment: SoftwareDeploymentDTO; tasks_total: number; dispatched_live: number; queued?: number }>(
       '/api/software/deployments',
       {
         method: 'POST',

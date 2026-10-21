@@ -20,7 +20,7 @@ func TestSyncDeploymentStatusRollsUpFailedWhenNothingSucceeded(t *testing.T) {
 		want  string
 	}{
 		{name: "all succeeded", tasks: [][2]string{{"success", "0"}, {"success", "0"}}, want: "completed"},
-		{name: "partial failure keeps completed", tasks: [][2]string{{"success", "0"}, {"failed", "1603"}}, want: "completed"},
+		{name: "a mix is partial, not completed", tasks: [][2]string{{"success", "0"}, {"failed", "1603"}}, want: "partial"},
 		{name: "all failed is failed", tasks: [][2]string{{"failed", "1603"}}, want: "failed"},
 		{name: "still running stays running", tasks: [][2]string{{"success", "0"}, {"installing", ""}}, want: "running"},
 	}

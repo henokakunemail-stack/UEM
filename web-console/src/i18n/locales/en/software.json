@@ -7,8 +7,7 @@
   "target_all_short": "all",
   "target_group_short": "group",
   "target_device_short": "device",
-  "task_pending": "pending",
-  "task_queued": "queued",
+  "task_pending": "waiting for device",
   "task_dispatched": "dispatched",
   "task_downloading": "downloading",
   "task_installing": "installing",
@@ -35,8 +34,8 @@
   "select_group_error": "Please select a device group",
   "no_uninstall_args": "{name} has no uninstall arguments. An uninstaller with no silent switches opens a window on the endpoint. Edit the package and set them first.",
   "cannot_uninstall": "Cannot Uninstall",
-  "deployment_initiated": "Deployment initiated! {total} target(s) queued, {live} dispatched live.",
-  "removal_initiated": "Removal initiated! {total} target(s) queued, {live} dispatched live.",
+  "deployment_initiated": "Deployment started: {live} of {total} target(s) sent now, {queued} waiting for their device to come online.",
+  "removal_initiated": "Removal started: {live} of {total} target(s) sent now, {queued} waiting for their device to come online.",
   "deployment_dispatched": "Deployment Dispatched",
   "removal_dispatched": "Removal Dispatched",
   "deploy_failed": "Failed to trigger deployment",
@@ -167,5 +166,10 @@
   "view_logs": "View Logs",
   "exit_code": "Exit Code:",
   "delete_title": "Delete package",
-  "delete_confirm": "Delete package \"{name}\"? This action cannot be undone."
+  "delete_confirm": "Delete package \"{name}\"? This action cannot be undone.",
+  "waiting_devices": "{count} waiting for their device",
+  "section_packages": "packages",
+  "section_deployments": "deployments",
+  "section_devices": "endpoints",
+  "section_groups": "groups"
 }
