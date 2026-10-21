@@ -133,5 +133,11 @@
   "scope_all": "Entire Fleet (All Connected Agents)",
   "scope_group": "Branch Site / Device Group",
   "batch_size": "Batch Size (Devices / Wave)",
-  "stagger_interval": "Stagger Interval (Seconds)"
+  "stagger_interval": "Stagger Interval (Seconds)",
+  "start_confirm_title": "Start rollout",
+  "start_confirm_message": "Start \"{name}\"? Agent v{version} will be sent to {target}, in waves.",
+  "start_confirm_label": "Start rollout",
+  "cancel_confirm_title": "Cancel rollout",
+  "error_not_startable": "This campaign has already started, finished or been cancelled.",
+  "error_not_cancellable": "This campaign has already finished or been cancelled."
 }

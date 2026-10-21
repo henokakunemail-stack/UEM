@@ -14,11 +14,12 @@ import {
   Monitor,
   Terminal,
 } from 'lucide-react'
-import { api } from '../services/api'
+import { ApiError, api } from '../services/api'
 import { useToast } from '../context/ToastContext'
 import { usePermission } from '../hooks/usePermission'
 import { DataTable } from '../components/ui/DataTable'
 import { Modal } from '../components/ui/Modal'
+import { ConfirmDialog } from '../components/ui/ConfirmDialog'
 import type { AgentReleaseDTO, UpdateCampaignDTO, CampaignTaskDetail, CampaignLogItem } from '../types/api'
 import { useT } from '../i18n/core'
 
@@ -64,6 +65,11 @@ export const AgentUpdatesPage: React.FC<AgentUpdatesPageProps> = ({ activeTab: s
   const [isCampaignModalOpen, setIsCampaignModalOpen] = useState(false)
   const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false)
   const [selectedCampaign, setSelectedCampaign] = useState<UpdateCampaignDTO | null>(null)
+  // Starting a rollout sends an update to every targeted device, so it is
+  // confirmed like cancelling is, and the dialog stays busy until the server
+  // answers -- a second click cannot send a second start.
+  const [confirmAction, setConfirmAction] = useState<{ kind: 'start' | 'cancel'; campaign: UpdateCampaignDTO } | null>(null)
+  const [actionPending, setActionPending] = useState(false)
   const [campaignTasks, setCampaignTasks] = useState<CampaignTaskDetail[]>([])
   const [campaignLogs, setCampaignLogs] = useState<CampaignLogItem[]>([])
   const [detailsLoading, setDetailsLoading] = useState(false)
@@ -223,6 +229,13 @@ export const AgentUpdatesPage: React.FC<AgentUpdatesPageProps> = ({ activeTab: s
     }
   }
 
+  // A refusal the server explains with a code is shown translated.
+  const campaignError = (err: unknown, fallbackKey: string) => {
+    if (err instanceof ApiError && err.code === 'campaign_not_startable') return t('updates.error_not_startable')
+    if (err instanceof ApiError && err.code === 'campaign_not_cancellable') return t('updates.error_not_cancellable')
+    return err instanceof Error && err.message ? err.message : t(fallbackKey)
+  }
+
   const handleStartCampaign = async (id: string, name: string) => {
     try {
       const res = await api.startUpdateCampaign(id)
@@ -233,17 +246,14 @@ export const AgentUpdatesPage: React.FC<AgentUpdatesPageProps> = ({ activeTab: s
       if (selectedCampaign?.id === id) {
         fetchCampaignDetails(id)
       }
-    } catch (err: any) {
-      const errorText = err.message || t('updates.start_failed')
+    } catch (err: unknown) {
+      const errorText = campaignError(err, 'updates.start_failed')
       setMsg({ type: 'error', text: errorText })
       toast.error(errorText, t('updates.start_failed_title'))
     }
   }
 
   const handleCancelCampaign = async (id: string, name: string) => {
-    if (!window.confirm(t('updates.cancel_confirm', { name }))) {
-      return
-    }
     try {
       await api.cancelUpdateCampaign(id)
       toast.success(t('updates.campaign_cancelled', { name }), t('updates.campaign_cancelled_title'))
@@ -251,8 +261,21 @@ export const AgentUpdatesPage: React.FC<AgentUpdatesPageProps> = ({ activeTab: s
       if (selectedCampaign?.id === id) {
         fetchCampaignDetails(id)
       }
-    } catch (err: any) {
-      toast.error(err.message || t('updates.cancel_failed'), t('updates.cancel_failed_title'))
+    } catch (err: unknown) {
+      toast.error(campaignError(err, 'updates.cancel_failed'), t('updates.cancel_failed_title'))
+    }
+  }
+
+  const runConfirmedAction = async () => {
+    if (!confirmAction) return
+    setActionPending(true)
+    try {
+      const { kind, campaign } = confirmAction
+      if (kind === 'start') await handleStartCampaign(campaign.id, campaign.name)
+      else await handleCancelCampaign(campaign.id, campaign.name)
+    } finally {
+      setActionPending(false)
+      setConfirmAction(null)
     }
   }
 
@@ -523,7 +546,8 @@ export const AgentUpdatesPage: React.FC<AgentUpdatesPageProps> = ({ activeTab: s
                               <button
                                 type="button"
                                 className="btn-action"
-                                onClick={() => handleStartCampaign(c.id, c.name)}
+                                onClick={() => setConfirmAction({ kind: 'start', campaign: c })}
+                                disabled={actionPending}
                                 title={t('updates.start_title')}
                               >
                                 <Play size={14} />
@@ -535,7 +559,8 @@ export const AgentUpdatesPage: React.FC<AgentUpdatesPageProps> = ({ activeTab: s
                               <button
                                 type="button"
                                 className="btn-action text-danger"
-                                onClick={() => handleCancelCampaign(c.id, c.name)}
+                                onClick={() => setConfirmAction({ kind: 'cancel', campaign: c })}
+                                disabled={actionPending}
                                 title={t('updates.cancel_title')}
                               >
                                 <XCircle size={14} />
@@ -587,7 +612,8 @@ export const AgentUpdatesPage: React.FC<AgentUpdatesPageProps> = ({ activeTab: s
                   <button
                     type="button"
                     className="btn btn-danger-outline"
-                    onClick={() => handleCancelCampaign(selectedCampaign.id, selectedCampaign.name)}
+                    onClick={() => setConfirmAction({ kind: 'cancel', campaign: selectedCampaign })}
+                    disabled={actionPending}
                   >
                     <XCircle size={14} />
                     <span>{t('updates.cancel_rollout')}</span>
@@ -1039,6 +1065,28 @@ export const AgentUpdatesPage: React.FC<AgentUpdatesPageProps> = ({ activeTab: s
           </div>
         </form>
       </Modal>
+
+      <ConfirmDialog
+        open={confirmAction !== null}
+        title={confirmAction?.kind === 'start' ? t('updates.start_confirm_title') : t('updates.cancel_confirm_title')}
+        message={
+          confirmAction
+            ? confirmAction.kind === 'start'
+              ? t('updates.start_confirm_message', {
+                  name: confirmAction.campaign.name,
+                  version: confirmAction.campaign.target_version,
+                  target: TARGET_KEYS[confirmAction.campaign.target_type]
+                    ? t(TARGET_KEYS[confirmAction.campaign.target_type])
+                    : confirmAction.campaign.target_type,
+                })
+              : t('updates.cancel_confirm', { name: confirmAction.campaign.name })
+            : ''
+        }
+        confirmLabel={confirmAction?.kind === 'start' ? t('updates.start_confirm_label') : t('updates.cancel_rollout')}
+        pending={actionPending}
+        onConfirm={runConfirmedAction}
+        onCancel={() => setConfirmAction(null)}
+      />
     </div>
   )
 }

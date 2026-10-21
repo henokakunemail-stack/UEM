@@ -133,5 +133,11 @@
   "scope_all": "Seluruh Armada (Semua Agen Terhubung)",
   "scope_group": "Site Cabang / Grup Perangkat",
   "batch_size": "Ukuran Batch (Perangkat / Gelombang)",
-  "stagger_interval": "Interval Jeda (Detik)"
+  "stagger_interval": "Interval Jeda (Detik)",
+  "start_confirm_title": "Mulai rollout",
+  "start_confirm_message": "Mulai \"{name}\"? Agent v{version} akan dikirim ke {target} secara bertahap.",
+  "start_confirm_label": "Mulai rollout",
+  "cancel_confirm_title": "Batalkan rollout",
+  "error_not_startable": "Kampanye ini sudah dimulai, selesai, atau dibatalkan.",
+  "error_not_cancellable": "Kampanye ini sudah selesai atau dibatalkan."
 }

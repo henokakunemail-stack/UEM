@@ -154,8 +154,8 @@ func TestCancelCampaignCancelsTasksAndStatus(t *testing.T) {
 		t.Fatalf("create update task: %v", err)
 	}
 
-	if err := repo.CancelCampaign(context.Background(), campaign.ID); err != nil {
-		t.Fatalf("cancel campaign: %v", err)
+	if ok, err := repo.CancelCampaign(context.Background(), campaign.ID); err != nil || !ok {
+		t.Fatalf("cancel campaign: ok=%v err=%v", ok, err)
 	}
 
 	c, err := repo.GetCampaign(context.Background(), campaign.ID)

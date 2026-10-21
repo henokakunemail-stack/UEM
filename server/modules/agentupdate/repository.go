@@ -369,24 +369,43 @@ func (r *Repository) ListCampaigns(ctx context.Context) ([]*UpdateCampaignDTO, e
 	return list, nil
 }
 
-func (r *Repository) CancelCampaign(ctx context.Context, campaignID string) error {
+// CancelCampaign cancels a campaign that has not finished and fails its open
+// tasks, reporting whether it cancelled anything. Both writes are one
+// transaction, and the tasks are touched only when the campaign itself was
+// cancelled: a cancel that lost a race with completion used to fail the tasks
+// of a campaign that had already finished.
+func (r *Repository) CancelCampaign(ctx context.Context, campaignID string) (bool, error) {
 	now := time.Now().UTC()
-	_, err := r.db.ExecContext(ctx, `
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return false, fmt.Errorf("cancel campaign: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	res, err := tx.ExecContext(ctx, `
 		UPDATE update_campaigns
 		SET status = 'cancelled', updated_at = ?
 		WHERE id = ? AND status IN ('draft', 'pending', 'in_progress')
 	`, now, campaignID)
 	if err != nil {
-		return fmt.Errorf("cancel campaign: %w", err)
+		return false, fmt.Errorf("cancel campaign: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n != 1 {
+		return false, nil
 	}
 
 	const cancelMsg = "Campaign cancelled by administrator"
-	_, err = r.db.ExecContext(ctx, `
+	if _, err := tx.ExecContext(ctx, `
 		UPDATE device_update_tasks
 		SET status = 'failed', error_message = ?, completed_at = ?
 		WHERE campaign_id = ? AND status IN ('pending', 'dispatched', 'downloading', 'verifying', 'swapping')
-	`, cancelMsg, now, campaignID)
-	return err
+	`, cancelMsg, now, campaignID); err != nil {
+		return false, fmt.Errorf("cancel campaign tasks: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return false, fmt.Errorf("cancel campaign: %w", err)
+	}
+	return true, nil
 }
 
 func (r *Repository) ListCampaignTasks(ctx context.Context, campaignID string) ([]*CampaignTaskDetail, error) {
@@ -431,10 +450,28 @@ func (r *Repository) ListCampaignLogs(ctx context.Context, campaignID string) ([
 	return list, nil
 }
 
-func (r *Repository) UpdateCampaignStatus(ctx context.Context, id string, status string) error {
-	now := time.Now().UTC()
-	_, err := r.db.ExecContext(ctx, `UPDATE update_campaigns SET status = ?, updated_at = ? WHERE id = ?`, status, now, id)
-	return err
+// TransitionCampaignStatus moves a campaign to `to` only from one of the
+// `from` statuses, and reports whether it did. Starting a campaign used to
+// write in_progress whatever the campaign was, so a double click, or a POST
+// for a running, finished or cancelled campaign, ran the whole rollout again
+// and gave every device a second task.
+func (r *Repository) TransitionCampaignStatus(ctx context.Context, id, to string, from ...string) (bool, error) {
+	if len(from) == 0 {
+		return false, fmt.Errorf("transition campaign: no source status")
+	}
+	args := []any{to, time.Now().UTC(), id}
+	marks := make([]string, len(from))
+	for i, f := range from {
+		marks[i] = "?"
+		args = append(args, f)
+	}
+	res, err := r.db.ExecContext(ctx, `UPDATE update_campaigns SET status = ?, updated_at = ?
+		WHERE id = ? AND status IN (`+strings.Join(marks, ", ")+`)`, args...)
+	if err != nil {
+		return false, fmt.Errorf("transition campaign: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	return n == 1, nil
 }
 
 func (r *Repository) CreateUpdateTask(ctx context.Context, t *DeviceUpdateTask) error {
@@ -651,15 +688,14 @@ func (r *Repository) SyncCampaignStatusByID(ctx context.Context, campaignID stri
 		return err
 	}
 
+	// Both writes below only finish a campaign that is running. A cancelled
+	// one fails its tasks, and a late agent report or the sweeper calling this
+	// afterwards used to see every task done and overwrite 'cancelled'.
 	if counts.Total == 0 {
-		var currentStatus string
-		_ = r.db.GetContext(ctx, &currentStatus, `SELECT status FROM update_campaigns WHERE id = ?`, campaignID)
-		if currentStatus == "in_progress" {
-			now := time.Now().UTC()
-			_, err := r.db.ExecContext(ctx, `UPDATE update_campaigns SET status = 'completed', updated_at = ? WHERE id = ?`, now, campaignID)
-			return err
-		}
-		return nil
+		now := time.Now().UTC()
+		_, err := r.db.ExecContext(ctx, `UPDATE update_campaigns SET status = 'completed', updated_at = ?
+			WHERE id = ? AND status = 'in_progress'`, now, campaignID)
+		return err
 	}
 
 	if counts.Total != counts.Done {
@@ -671,8 +707,8 @@ func (r *Repository) SyncCampaignStatusByID(ctx context.Context, campaignID stri
 		status = "failed"
 	}
 	now := time.Now().UTC()
-	_, err := r.db.ExecContext(ctx, `UPDATE update_campaigns SET status = ?, updated_at = ? WHERE id = ?`,
-		status, now, campaignID)
+	_, err := r.db.ExecContext(ctx, `UPDATE update_campaigns SET status = ?, updated_at = ?
+		WHERE id = ? AND status = 'in_progress'`, status, now, campaignID)
 	return err
 }
 

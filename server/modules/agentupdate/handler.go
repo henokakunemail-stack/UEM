@@ -502,14 +502,18 @@ func (h *Handler) handleCancelCampaign(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "campaign not found"})
 		return
 	}
-	if c.Status == "completed" || c.Status == "cancelled" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("cannot cancel campaign with status %s", c.Status)})
+	actorID := auth.UserIDFromContext(r.Context())
+	cancelled, err := h.repo.CancelCampaign(r.Context(), id)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-
-	actorID := auth.UserIDFromContext(r.Context())
-	if err := h.repo.CancelCampaign(r.Context(), id); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	if !cancelled {
+		writeJSON(w, http.StatusConflict, map[string]string{
+			"error":  fmt.Sprintf("cannot cancel campaign with status %s", c.Status),
+			"code":   "campaign_not_cancellable",
+			"status": c.Status,
+		})
 		return
 	}
 
@@ -549,8 +553,27 @@ func (h *Handler) handleStartCampaign(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// The claim happens at the branch, after the read-only pre-flight, so a
+	// failed target lookup cannot leave a campaign stuck in in_progress. Only a
+	// campaign that has not started can be started.
+	notStartable := func() {
+		writeJSON(w, http.StatusConflict, map[string]string{
+			"error":  fmt.Sprintf("campaign cannot be started from status %s", campaign.Status),
+			"code":   "campaign_not_startable",
+			"status": campaign.Status,
+		})
+	}
+
 	if len(deviceIDs) > 0 && devicesNeedingUpdate == 0 {
-		_ = h.repo.UpdateCampaignStatus(r.Context(), id, "completed")
+		claimed, err := h.repo.TransitionCampaignStatus(r.Context(), id, "completed", "draft", "pending")
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		if !claimed {
+			notStartable()
+			return
+		}
 		_ = h.auditor.Log(r.Context(), "user", actorID, "agent_update.campaign_start", id, map[string]string{
 			"campaign_id": id,
 			"status":      "completed",
@@ -565,7 +588,15 @@ func (h *Handler) handleStartCampaign(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_ = h.repo.UpdateCampaignStatus(r.Context(), id, "in_progress")
+	claimed, err := h.repo.TransitionCampaignStatus(r.Context(), id, "in_progress", "draft", "pending")
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if !claimed {
+		notStartable()
+		return
+	}
 
 	batchSize := campaign.BatchSize
 	if batchSize <= 0 {
