@@ -28,4 +28,4 @@ type Provider interface {
 // while seven E2E scripts passed "-X main.agentVersion=...", so every one of
 // them built a binary that still reported 0.1.0 and the versioning path was
 // never actually exercised. Keep the default in sync with the release tag.
-var Version = "1.5.3"
+var Version = "1.5.4"
