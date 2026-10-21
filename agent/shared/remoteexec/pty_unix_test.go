@@ -83,16 +83,16 @@ func TestPTYSessionHasTheRequestedSizeAndFollowsResize(t *testing.T) {
 // byte, and an operator who started something long had no way to stop it.
 func TestPTYSessionDeliversCtrlCToTheForegroundJob(t *testing.T) {
 	h := startPTY(t, 80, 24)
-	h.send("sleep 30; echo SLEPT\n")
+	// The proof is time: while "sleep 30" holds the shell, the next command
+	// cannot print its (shell-computed) marker. Seeing it within 5 seconds
+	// means the sleep was interrupted. A text check is not usable here: the pty
+	// echoes the typed command line, and some shells still run the rest of a
+	// list after an interrupted command.
+	h.send("sleep 30\n")
 	time.Sleep(300 * time.Millisecond)
 	h.send("\x03")
 	h.send("echo AFTER_$((20+1))\n")
 	h.waitFor("AFTER_21", 5*time.Second)
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	if strings.Contains(h.out.String(), "SLEPT\r\n") {
-		t.Fatal("sleep ran to completion: Ctrl+C was not delivered as SIGINT")
-	}
 }
 
 func TestPTYSessionReportsCloseWhenTheShellExits(t *testing.T) {
