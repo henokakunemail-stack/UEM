@@ -131,7 +131,11 @@ Kalau komputer tetap offline:
 
 | Gejala | Penyebab |
 |---|---|
-| `invalid or expired enrollment token` | Token lewat masa berlaku. Buat token baru. |
+| `token_expired` | Token lewat masa berlaku. Buat token baru. |
+| `token_used_up` | Kuota token multi-device habis. Naikkan batasnya dengan token baru, atau cek di Devices → Token enrollment. |
+| `token_revoked` | Token sudah dicabut di console. |
+| `token_invalid` | Token salah ketik, atau token single-device yang sudah terpakai. |
+| `flag provided but not defined: -site` | Binary agent terlalu lama. Pakai installer atau binary dari rilis terbaru. |
 | Koneksi ditolak / timeout | URL server salah, atau firewall keluar memblokir. |
 | Service jalan tapi device tidak pernah muncul | `-creds` di baris `-service install` tidak sama dengan file yang dipakai saat enrollment. |
 | Console bilang online tapi filter/patch tidak aktif | Agen tidak berjalan sebagai administrator. |
@@ -142,5 +146,13 @@ Kalau komputer tetap offline:
 
 Untuk jumlah lebih dari beberapa dozen mesin, jangan pakai langkah manual.
 `packaging/windows/agent.nsi` membangun `EndpointAgent-Setup.exe` yang
-menerima `-server` dan `-enroll` dan mendaftarkan service-nya sendiri. Lihat
+menerima `/SERVER=`, `/TOKEN=` dan `/SITE=` (opsional), melakukan enroll, lalu
+mendaftarkan dan menyalakan service-nya sendiri:
+
+```cmd
+EndpointAgent-Setup.exe /S /SERVER=https://server:8443 /TOKEN=<TOKEN>
+```
+
+Gunakan token **multi-device**. Menjalankan installer lagi di mesin yang sudah
+terdaftar tidak memakai kuota token. Lihat
 [`packaging/README.md`](../../packaging/README.md).

@@ -145,9 +145,12 @@ volumes:
 | OS Platform | Installation Method | Command / Procedure |
 |---|---|---|
 | **Windows 10 / 11 / Server** | GUI Setup Wizard | Run `EndpointAgent-Setup.exe` → Enter Server URL and Token. |
-| **Windows (Silent / GPO)** | Mass CLI Deployment | `endpoint-agent.exe -server https://server:8443 -enroll <TOKEN> -site "Jakarta HQ" -service install -service start` |
-| **Linux (Ubuntu / Debian)** | Debian Package | `sudo dpkg -i endpoint-agent_amd64.deb`<br>`sudo endpoint-agent -server https://server:8443 -enroll <TOKEN> -site "Branch-A"` |
-| **macOS (Intel & Apple Silicon)** | Installer Package | Run `EndpointAgent.pkg` then enroll via terminal:<br>`sudo endpoint-agent -server https://server:8443 -enroll <TOKEN>` |
+| **Windows (Silent / GPO)** | Mass Deployment | `EndpointAgent-Setup.exe /S /SERVER=https://server:8443 /TOKEN=<TOKEN> [/SITE=Jakarta-HQ]` |
+| **Linux (one line)** | Served by your server | `curl -fsSL https://server:8443/install/linux.sh \| sudo bash -s -- --server https://server:8443 --token <TOKEN>` |
+| **Linux (Ubuntu / Debian)** | Debian Package | `sudo dpkg -i endpoint-agent_amd64.deb`<br>`sudo endpoint-agent -server https://server:8443 -enroll <TOKEN> -enroll-only -creds /etc/endpoint-agent/creds.json`<br>`sudo systemctl start endpoint-agent` |
+| **macOS (Intel & Apple Silicon)** | Installer Package | Run `EndpointAgent.pkg`, then:<br>`sudo endpoint-agent -server https://server:8443 -enroll <TOKEN> -enroll-only -creds /etc/endpoint-agent/creds.json`<br>`sudo launchctl kickstart -k system/com.endpoint-mgmt.agent` |
+
+The site chosen when the token is created is applied to every machine that enrolls with it; `/SITE=` (installer) or `-site` (agent) only overrides it per machine. Running an installer or `-enroll-only` again on an enrolled machine keeps its identity, so it does not use up a multi-device token; pass `-reenroll` to force a new identity. Devices → **Enrollment tokens** shows how many machines each multi-device token has enrolled, and revokes it.
 
 ---
 
