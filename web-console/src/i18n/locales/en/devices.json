@@ -112,5 +112,6 @@
   "bulk_dialog_message": "Permanently delete {count} retired endpoint(s) from the database? This action CANNOT be undone.",
   "bulk_confirm": "Delete {count} endpoint(s)",
   "site_unassigned": "Unassigned",
-  "bulk_deleted_partial": "{ok} deleted, {failed} could not be deleted. Check that they are retired and try again."
+  "bulk_deleted_partial": "{ok} deleted, {failed} could not be deleted. Check that they are retired and try again.",
+  "tab_tokens": "Enrollment tokens"
 }

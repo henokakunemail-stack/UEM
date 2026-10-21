@@ -572,3 +572,55 @@ func (r *Repository) EnrollmentTokenFailure(ctx context.Context, tokenHash strin
 	}
 	return EnrollTokenInvalid, "", nil
 }
+
+const sharedTokenCols = `id, token_hash, name, site, created_at, expires_at, max_uses, use_count, created_by, revoked_at`
+
+// ListSharedEnrollmentTokens returns every shared token, newest first. Nothing
+// read use_count or revoked_at before, so an operator could not tell a token
+// that ran out of uses from one that never worked, or stop a leaked one.
+func (r *Repository) ListSharedEnrollmentTokens(ctx context.Context) ([]EnrollmentTokenRecord, error) {
+	list := []EnrollmentTokenRecord{}
+	if err := r.db.SelectContext(ctx, &list, `SELECT `+sharedTokenCols+` FROM enrollment_tokens ORDER BY created_at DESC`); err != nil {
+		return nil, fmt.Errorf("list shared enrollment tokens: %w", err)
+	}
+	return list, nil
+}
+
+// GetSharedEnrollmentToken returns one shared token by id.
+func (r *Repository) GetSharedEnrollmentToken(ctx context.Context, id string) (*EnrollmentTokenRecord, error) {
+	var t EnrollmentTokenRecord
+	err := r.db.GetContext(ctx, &t, r.db.Rebind(`SELECT `+sharedTokenCols+` FROM enrollment_tokens WHERE id = ?`), id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get shared enrollment token: %w", err)
+	}
+	return &t, nil
+}
+
+// RevokeSharedEnrollmentToken stops a shared token from enrolling anything
+// more. It reports whether this call revoked it.
+func (r *Repository) RevokeSharedEnrollmentToken(ctx context.Context, id string) (bool, error) {
+	res, err := r.db.ExecContext(ctx, r.db.Rebind(`UPDATE enrollment_tokens SET revoked_at = ?
+		WHERE id = ? AND revoked_at IS NULL`), time.Now().UTC(), id)
+	if err != nil {
+		return false, fmt.Errorf("revoke shared enrollment token: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	return n == 1, nil
+}
+
+// Status is what the token can do now: active, used_up, expired or revoked.
+func (t EnrollmentTokenRecord) Status(now time.Time) string {
+	switch {
+	case t.RevokedAt != nil:
+		return "revoked"
+	case !now.Before(t.ExpiresAt):
+		return "expired"
+	case t.MaxUses > 0 && t.UseCount >= t.MaxUses:
+		return "used_up"
+	default:
+		return "active"
+	}
+}

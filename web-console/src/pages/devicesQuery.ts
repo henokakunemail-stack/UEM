@@ -19,7 +19,7 @@ export const PAGE_SIZES = [10, 25, 50] as const
 export type PageSize = (typeof PAGE_SIZES)[number]
 
 /** Which panel of the Devices page is showing. */
-export const DEVICE_TABS = ['devices', 'groups'] as const
+export const DEVICE_TABS = ['devices', 'groups', 'tokens'] as const
 export type DeviceTab = (typeof DEVICE_TABS)[number]
 
 /** Upper bound on the page number. Beyond this the offset overflows into

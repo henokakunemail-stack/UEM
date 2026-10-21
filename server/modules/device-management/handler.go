@@ -38,6 +38,9 @@ func (h *Handler) Register(r chi.Router) {
 		// Creating enrollment tokens is admin-only.
 		r.With(h.jwt.RequireAuth, rbac.RequireRole(rbac.RoleAdmin)).Post("/devices/enroll-token", h.createEnrollToken)
 		r.With(h.jwt.RequireAuth, rbac.RequireRole(rbac.RoleAdmin)).Post("/devices/{id}/enroll-token", h.enrollExisting)
+		r.With(h.jwt.RequireAuth, rbac.RequireRole(rbac.RoleAdmin)).Get("/devices/enroll-tokens", h.listSharedTokens)
+		r.With(h.jwt.RequireAuth, rbac.RequireRole(rbac.RoleAdmin)).Get("/devices/enroll-tokens/{id}", h.getSharedToken)
+		r.With(h.jwt.RequireAuth, rbac.RequireRole(rbac.RoleAdmin)).Post("/devices/enroll-tokens/{id}/revoke", h.revokeSharedToken)
 		r.With(h.jwt.RequireAuth, rbac.RequireRole(rbac.RoleAdmin)).Post("/devices/{id}/rotate-secret", h.rotateDeviceSecret)
 		r.With(h.jwt.RequireAuth, rbac.RequireRole(rbac.RoleAdmin)).Post("/devices/{id}/uninstall-token", h.createUninstallToken)
 		r.With(h.jwt.RequireAuth, rbac.RequireRole(rbac.RoleTechnician)).Post("/devices/{id}/verify-uninstall-token", h.verifyUninstallTokenConsole)
@@ -502,4 +505,78 @@ func (h *Handler) agentVerifyUninstall(w http.ResponseWriter, r *http.Request) {
 		"valid":   true,
 		"message": "uninstallation authorized",
 	})
+}
+
+// sharedTokenDTO is a shared enrollment token as the console sees it. The
+// token itself is never stored, so it is never returned; only its hash is kept.
+type sharedTokenDTO struct {
+	ID        string     `json:"id"`
+	Name      string     `json:"name"`
+	Site      *string    `json:"site,omitempty"`
+	CreatedAt time.Time  `json:"created_at"`
+	ExpiresAt time.Time  `json:"expires_at"`
+	MaxUses   int        `json:"max_uses"`
+	UseCount  int        `json:"use_count"`
+	CreatedBy string     `json:"created_by"`
+	RevokedAt *time.Time `json:"revoked_at,omitempty"`
+	Status    string     `json:"status"`
+}
+
+func toSharedTokenDTO(t EnrollmentTokenRecord, now time.Time) sharedTokenDTO {
+	return sharedTokenDTO{
+		ID: t.ID, Name: t.Name, Site: t.Site, CreatedAt: t.CreatedAt, ExpiresAt: t.ExpiresAt,
+		MaxUses: t.MaxUses, UseCount: t.UseCount, CreatedBy: t.CreatedBy, RevokedAt: t.RevokedAt,
+		Status: t.Status(now),
+	}
+}
+
+func (h *Handler) listSharedTokens(w http.ResponseWriter, r *http.Request) {
+	list, err := h.repo.ListSharedEnrollmentTokens(r.Context())
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	now := time.Now().UTC()
+	out := make([]sharedTokenDTO, 0, len(list))
+	for _, t := range list {
+		out = append(out, toSharedTokenDTO(t, now))
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (h *Handler) getSharedToken(w http.ResponseWriter, r *http.Request) {
+	t, err := h.repo.GetSharedEnrollmentToken(r.Context(), chi.URLParam(r, "id"))
+	if errors.Is(err, ErrNotFound) {
+		writeErr(w, http.StatusNotFound, "enrollment token not found")
+		return
+	}
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, toSharedTokenDTO(*t, time.Now().UTC()))
+}
+
+func (h *Handler) revokeSharedToken(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	revoked, err := h.repo.RevokeSharedEnrollmentToken(r.Context(), id)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if !revoked {
+		if _, err := h.repo.GetSharedEnrollmentToken(r.Context(), id); errors.Is(err, ErrNotFound) {
+			writeErr(w, http.StatusNotFound, "enrollment token not found")
+			return
+		}
+		writeErrCode(w, http.StatusConflict, "token_already_revoked", "enrollment token is already revoked")
+		return
+	}
+	_ = audit.Log(r.Context(), h.db, "user", auth.UserIDFromContext(r.Context()), "device.enroll_token_revoked", id, nil)
+	t, err := h.repo.GetSharedEnrollmentToken(r.Context(), id)
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]string{"status": "revoked"})
+		return
+	}
+	writeJSON(w, http.StatusOK, toSharedTokenDTO(*t, time.Now().UTC()))
 }
