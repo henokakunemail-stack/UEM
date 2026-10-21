@@ -922,7 +922,8 @@ func buildServer(cfg config.Config, database *sqlx.DB) (*http.Server, *serverApp
 	backupH.Register(r)
 
 	// Automated 40-point pre-launch security posture auditor.
-	secAuditH := securityaudit.NewHandler(&cfg, database, &auditAdapter{db: database}, jwtSvc.RequireAuth)
+	secAuditH := securityaudit.NewHandler(&cfg, database, &auditAdapter{db: database}, jwtSvc.RequireAuth).
+		WithSetupPassword(os.Getenv("ADMIN_PASSWORD"))
 	secAuditH.Register(r)
 
 	// Command dispatch demo endpoint: send "ping" to a device's live connection.

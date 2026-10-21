@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"math"
 	"os"
-	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -17,6 +17,8 @@ import (
 type Evaluator struct {
 	cfg *config.Config
 	db  *sqlx.DB
+	// setupPassword is ADMIN_PASSWORD, for the default-credential check.
+	setupPassword string
 }
 
 func NewEvaluator(cfg *config.Config, db *sqlx.DB) *Evaluator {
@@ -483,21 +485,7 @@ func (e *Evaluator) checkDBNotPublic() CheckItem {
 }
 
 func (e *Evaluator) checkDBFilePermissions() CheckItem {
-	status := StatusPass
-	var evidence string
-	remediation := "Maintain strict file permissions (0600 on UNIX, LocalSystem/Admin ACLs on Windows)."
-
-	dbPath := e.cfg.DBPath
-	if dbPath == "" {
-		dbPath = config.DBPathOrDefault()
-	}
-
-	if fi, err := os.Stat(dbPath); err == nil {
-		mode := fi.Mode().Perm()
-		evidence = fmt.Sprintf("Database file %s has permissions: %04o.", filepath.Base(dbPath), mode)
-	} else {
-		evidence = fmt.Sprintf("Database at %s (managed by local service process).", filepath.Base(dbPath))
-	}
+	status, evidence, remediation := e.dbFilePermissionFindings(runtime.GOOS)
 
 	return CheckItem{
 		ID:          15,
@@ -747,20 +735,7 @@ func (e *Evaluator) checkAdminRouteSecurity() CheckItem {
 }
 
 func (e *Evaluator) checkDefaultPasswordChanged(ctx context.Context) CheckItem {
-	status := StatusPass
-	var evidence string
-	remediation := "Change administrator passwords on first login."
-
-	var count int
-	// Check if user 'admin' exists with default password hash if applicable
-	err := e.db.GetContext(ctx, &count, `SELECT COUNT(*) FROM users WHERE username = 'admin' AND password_hash = '$2a$12$e80y9iIu6i09y81...'`)
-	if err == nil && count > 0 {
-		status = StatusWarn
-		evidence = "Default administrator password may still be in use."
-		remediation = "Change the admin account password immediately via Users page."
-	} else {
-		evidence = "No known default administrator credentials detected."
-	}
+	status, evidence, remediation := e.adminCredentialFindings(ctx)
 
 	return CheckItem{
 		ID:          29,

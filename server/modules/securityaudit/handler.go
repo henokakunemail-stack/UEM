@@ -40,6 +40,12 @@ func NewHandler(cfg *config.Config, db *sqlx.DB, auditor Auditor, authMw func(ht
 	}
 }
 
+// WithSetupPassword passes ADMIN_PASSWORD to the default-credential check.
+func (h *Handler) WithSetupPassword(p string) *Handler {
+	h.evaluator.WithSetupPassword(p)
+	return h
+}
+
 func (h *Handler) Register(r chi.Router) {
 	r.Group(func(cr chi.Router) {
 		cr.Use(h.authMw)

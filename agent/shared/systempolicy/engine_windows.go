@@ -281,7 +281,7 @@ func applyWallpaper(client *http.Client, serverURL, wallpaperURL string, style W
 
 	// Style code:
 	// Fill: 10, Fit: 6, Stretch: 2, Center: 0, Tile: 1 (with TileWallpaper="1")
-	styleCode := "10"
+	var styleCode string
 	tileCode := "0"
 	switch style {
 	case WallpaperFit:
@@ -500,51 +500,63 @@ func applyWindowsUpdate(mode WindowsUpdateMode) error {
 	return nil
 }
 
-// applyFirewall enforces Windows Defender Firewall across all network profiles
+// applyFirewall enforces Windows Defender Firewall across all network profiles.
+//
+// This and the three policy functions below used to discard every registry and
+// netsh error and return nil, so a write refused for lack of rights reached the
+// console as an applied policy. Failures are now returned; Apply already
+// reports them as degraded.
 func applyFirewall(enabled bool) error {
+	var errs regErrs
 	for _, profile := range []string{"StandardProfile", "DomainProfile", "PublicProfile"} {
 		keyPath := fmt.Sprintf(`SOFTWARE\Policies\Microsoft\WindowsFirewall\%s`, profile)
-		if k, _, err := registry.CreateKey(registry.LOCAL_MACHINE, keyPath, registry.SET_VALUE); err == nil {
-			if enabled {
-				_ = k.SetDWordValue("EnableFirewall", 1)
-			} else {
-				_ = k.DeleteValue("EnableFirewall")
-			}
-			k.Close()
+		k, _, err := registry.CreateKey(registry.LOCAL_MACHINE, keyPath, registry.SET_VALUE)
+		if err != nil {
+			errs.add("open "+profile, err)
+			continue
 		}
+		if enabled {
+			errs.add(profile+" EnableFirewall", k.SetDWordValue("EnableFirewall", 1))
+		} else {
+			errs.add(profile+" EnableFirewall", k.DeleteValue("EnableFirewall"))
+		}
+		k.Close()
 	}
 	if enabled {
-		_ = exec.Command("netsh", "advfirewall", "set", "allprofiles", "state", "on").Run()
+		if out, err := exec.Command("netsh", "advfirewall", "set", "allprofiles", "state", "on").CombinedOutput(); err != nil {
+			errs.add("netsh advfirewall", fmt.Errorf("%w: %s", err, strings.TrimSpace(string(out))))
+		}
 	}
-	return nil
+	return errs.err()
 }
 
 // applyDefenderProtection prevents disabling Windows Defender real-time antivirus protection
 func applyDefenderProtection(enabled bool) error {
-	kDef, _, err := registry.CreateKey(registry.LOCAL_MACHINE, `SOFTWARE\Policies\Microsoft\Windows Defender`, registry.SET_VALUE)
-	if err == nil {
+	var errs regErrs
+	if kDef, _, err := registry.CreateKey(registry.LOCAL_MACHINE, `SOFTWARE\Policies\Microsoft\Windows Defender`, registry.SET_VALUE); err != nil {
+		errs.add("open Windows Defender policy", err)
+	} else {
 		if enabled {
-			_ = kDef.SetDWordValue("DisableAntiSpyware", 0)
+			errs.add("DisableAntiSpyware", kDef.SetDWordValue("DisableAntiSpyware", 0))
 		} else {
-			_ = kDef.DeleteValue("DisableAntiSpyware")
+			errs.add("DisableAntiSpyware", kDef.DeleteValue("DisableAntiSpyware"))
 		}
 		kDef.Close()
 	}
 
-	kReal, _, err := registry.CreateKey(registry.LOCAL_MACHINE, `SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection`, registry.SET_VALUE)
-	if err == nil {
-		if enabled {
-			_ = kReal.SetDWordValue("DisableRealtimeMonitoring", 0)
-			_ = kReal.SetDWordValue("DisableBehaviorMonitoring", 0)
-			_ = kReal.SetDWordValue("DisableOnAccessProtection", 0)
-		} else {
-			_ = kReal.DeleteValue("DisableRealtimeMonitoring")
-			_ = kReal.DeleteValue("DisableBehaviorMonitoring")
-			_ = kReal.DeleteValue("DisableOnAccessProtection")
+	if kReal, _, err := registry.CreateKey(registry.LOCAL_MACHINE, `SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection`, registry.SET_VALUE); err != nil {
+		errs.add("open Real-Time Protection policy", err)
+	} else {
+		for _, name := range []string{"DisableRealtimeMonitoring", "DisableBehaviorMonitoring", "DisableOnAccessProtection"} {
+			if enabled {
+				errs.add(name, kReal.SetDWordValue(name, 0))
+			} else {
+				errs.add(name, kReal.DeleteValue(name))
+			}
 		}
 		kReal.Close()
 	}
-	return nil
+	return errs.err()
 }
 
 // applyPowerShellPolicy restricts interactive PowerShell script execution
@@ -555,34 +567,39 @@ func applyPowerShellPolicy(disabled bool) error {
 	}
 	defer k.Close()
 
+	var errs regErrs
 	if disabled {
-		_ = k.SetDWordValue("EnableScripts", 0)
-		_ = k.SetStringValue("ExecutionPolicy", "Restricted")
+		errs.add("EnableScripts", k.SetDWordValue("EnableScripts", 0))
+		errs.add("ExecutionPolicy", k.SetStringValue("ExecutionPolicy", "Restricted"))
 	} else {
-		_ = k.DeleteValue("EnableScripts")
-		_ = k.DeleteValue("ExecutionPolicy")
+		errs.add("EnableScripts", k.DeleteValue("EnableScripts"))
+		errs.add("ExecutionPolicy", k.DeleteValue("ExecutionPolicy"))
 	}
-	return nil
+	return errs.err()
 }
 
 // applyAutoplayPolicy restricts media and USB autorun/autoplay
 func applyAutoplayPolicy(disabled bool) error {
+	var errs regErrs
 	for _, p := range []string{
 		`SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer`,
 		`SOFTWARE\Policies\Microsoft\Windows\Explorer`,
 	} {
-		if k, _, err := registry.CreateKey(registry.LOCAL_MACHINE, p, registry.SET_VALUE); err == nil {
-			if disabled {
-				_ = k.SetDWordValue("NoDriveTypeAutoRun", 0xFF) // 255 = disable for all drives
-				_ = k.SetDWordValue("NoAutoplayfornonVolume", 1)
-			} else {
-				_ = k.DeleteValue("NoDriveTypeAutoRun")
-				_ = k.DeleteValue("NoAutoplayfornonVolume")
-			}
-			k.Close()
+		k, _, err := registry.CreateKey(registry.LOCAL_MACHINE, p, registry.SET_VALUE)
+		if err != nil {
+			errs.add("open "+p, err)
+			continue
 		}
+		if disabled {
+			errs.add("NoDriveTypeAutoRun", k.SetDWordValue("NoDriveTypeAutoRun", 0xFF)) // 255 = disable for all drives
+			errs.add("NoAutoplayfornonVolume", k.SetDWordValue("NoAutoplayfornonVolume", 1))
+		} else {
+			errs.add("NoDriveTypeAutoRun", k.DeleteValue("NoDriveTypeAutoRun"))
+			errs.add("NoAutoplayfornonVolume", k.DeleteValue("NoAutoplayfornonVolume"))
+		}
+		k.Close()
 	}
-	return nil
+	return errs.err()
 }
 
 // applyScreenSaverPolicy configures screen saver security and password protection on resume
@@ -622,7 +639,7 @@ func applyAdminAccountPolicy(s PolicySettings) error {
 
 	username := strings.TrimSpace(s.AdminAccountUsername)
 	for _, r := range username {
-		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '-' || r == '.') {
+		if (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && (r < '0' || r > '9') && r != '_' && r != '-' && r != '.' {
 			return fmt.Errorf("invalid admin username: '%s'", username)
 		}
 	}
