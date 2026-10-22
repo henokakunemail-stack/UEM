@@ -263,6 +263,13 @@ func (r *Repository) DeleteRule(ctx context.Context, id string) error {
 // (group_id, device_id), not device_id), and taking an arbitrary single group meant
 // a device in three groups silently ignored two of the policies aimed at it -- with
 // no error anywhere, because the query succeeded and returned a short list.
+// ruleCountColumn is a correlated subquery, portable to SQLite and PostgreSQL,
+// counting the rules of a filter_policies row that apply in its own mode.
+const ruleCountColumn = `(SELECT COUNT(*) FROM filter_rules fr
+		WHERE fr.policy_id = filter_policies.id
+		  AND fr.action = CASE WHEN COALESCE(filter_policies.mode, 'blacklist') = 'whitelist'
+		                       THEN 'allow' ELSE 'block' END) AS rule_count`
+
 func (r *Repository) CompileEffectiveRules(ctx context.Context, deviceID string) (*CompiledRules, error) {
 	var groupIDs []string
 	// Not _ =: a failure here would silently degrade the device to "no groups" and
@@ -280,10 +287,14 @@ func (r *Repository) CompileEffectiveRules(ctx context.Context, deviceID string)
 		TargetType string    `db:"target_type"`
 		Priority   int       `db:"priority"`
 		CreatedAt  time.Time `db:"created_at"`
+		// RuleCount counts only rules that can take effect in the policy's own
+		// mode (block rules for a blacklist, allow rules for a whitelist).
+		RuleCount int `db:"rule_count"`
 	}
 	var policies []policyHead
 	policyQuery := `
-		SELECT id, COALESCE(mode, 'blacklist') as mode, target_type, priority, created_at
+		SELECT id, COALESCE(mode, 'blacklist') as mode, target_type, priority, created_at,
+		       ` + ruleCountColumn + `
 		FROM filter_policies
 		WHERE is_enabled = 1
 		  AND (
@@ -297,7 +308,8 @@ func (r *Repository) CompileEffectiveRules(ctx context.Context, deviceID string)
 
 	if len(groupIDs) > 0 {
 		groupPolicyQuery, args, err := sqlx.In(`
-			SELECT id, COALESCE(mode, 'blacklist') as mode, target_type, priority, created_at
+			SELECT id, COALESCE(mode, 'blacklist') as mode, target_type, priority, created_at,
+			       `+ruleCountColumn+`
 			FROM filter_policies
 			WHERE is_enabled = 1
 			  AND target_type = 'group' AND target_id IN (?)
@@ -311,6 +323,19 @@ func (r *Repository) CompileEffectiveRules(ctx context.Context, deviceID string)
 		}
 		policies = append(policies, groupPolicies...)
 	}
+
+	// A policy with no rules does not take part. It used to decide the mode like
+	// any other: a whitelist created a moment before its first rule ranked first,
+	// compiled to "whitelist, allow nothing", and the agent then removed every
+	// block -- the fleet's blacklist was gone the second the policy was saved, and
+	// the device reported synced.
+	withRules := policies[:0]
+	for _, p := range policies {
+		if p.RuleCount > 0 {
+			withRules = append(withRules, p)
+		}
+	}
+	policies = withRules
 
 	// If no policies target this device, return default clean state.
 	if len(policies) == 0 {
