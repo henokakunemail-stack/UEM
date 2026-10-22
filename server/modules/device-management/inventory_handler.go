@@ -28,6 +28,8 @@ type inventoryHandler struct {
 	auditDB auditWriter
 	hub     hubSender
 	authMW  func(http.Handler) http.Handler
+	// observers re-dispatch group-targeted policies when membership changes.
+	observers []MembershipObserver
 }
 
 // auditWriter is the subset of the audit package this handler needs.
@@ -470,6 +472,7 @@ func (h *inventoryHandler) addMembers(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = h.auditDB.Log(r.Context(), "user", auth.UserIDFromContext(r.Context()),
 		"group.members.add", groupID, map[string]string{"added": strconv.Itoa(added)})
+	h.notifyRegrouped(req.DeviceIDs)
 	writeJSON(w, http.StatusOK, map[string]any{"added": added})
 }
 
@@ -486,6 +489,7 @@ func (h *inventoryHandler) removeMember(w http.ResponseWriter, r *http.Request) 
 	}
 	_ = h.auditDB.Log(r.Context(), "user", auth.UserIDFromContext(r.Context()),
 		"group.members.remove", groupID, map[string]string{"device_id": deviceID})
+	h.notifyRegrouped([]string{deviceID})
 	writeJSON(w, http.StatusOK, map[string]string{"status": "removed"})
 }
 

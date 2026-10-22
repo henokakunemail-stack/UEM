@@ -528,6 +528,20 @@ func (h *Handler) dispatchDevice(ctx context.Context, deviceID string) error {
 	return nil
 }
 
+// DevicesRegrouped satisfies devicemgmt.MembershipObserver. A device that joined
+// or left a group may now fall under a different set of filter policies, so it
+// gets its recompiled rules now. An offline device is caught on reconnect,
+// because its compiled version no longer matches the stored one.
+func (h *Handler) DevicesRegrouped(ctx context.Context, deviceIDs []string) {
+	for _, id := range deviceIDs {
+		if err := h.dispatchDevice(ctx, id); err != nil {
+			log.Warn().Err(err).Str("device", id).Msg("re-dispatch filter policy after group change failed")
+		}
+	}
+}
+
+var _ devicemgmt.MembershipObserver = (*Handler)(nil)
+
 func (h *Handler) dispatchAffected(ctx context.Context, targetType, targetID string) {
 	if h.hub == nil {
 		return

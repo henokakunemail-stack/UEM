@@ -917,6 +917,9 @@ func buildServer(cfg config.Config, database *sqlx.DB) (*http.Server, *serverApp
 		WithDataDir(cfg.DataDir)
 	sysPolicyH.Register(r)
 	wsH.WithSystemPolicySync(sysPolicyH)
+	// Group membership changes re-dispatch both policy kinds that can target a
+	// group; the inventory module only knows the interface.
+	invH.WithMembershipObservers(filterH, sysPolicyH)
 
 	// Phase 14: asset & license management.
 	assetRepo := assetlicense.NewRepository(database)
