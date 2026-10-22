@@ -56,8 +56,10 @@ if errorlevel 1 (
 
 rem 3. Silent install + enrollment. /S must be upper case.
 set "SITEARG="
-if defined SITE set "SITEARG=/SITE=%SITE%"
-start "" /wait "%LOCAL%" /S /SERVER=%SERVER% /TOKEN=%TOKEN% %SITEARG%
+rem    The values are quoted on purpose: the installer splits its options on
+rem    every "/", so an unquoted /SERVER=https://host reaches it as "https:".
+if defined SITE set "SITEARG=/SITE="%SITE%""
+start "" /wait "%LOCAL%" /S /SERVER="%SERVER%" /TOKEN="%TOKEN%" %SITEARG%
 set "RC=%errorlevel%"
 del /f /q "%LOCAL%" >nul 2>&1
 
