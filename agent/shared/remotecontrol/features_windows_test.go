@@ -92,34 +92,3 @@ func TestClipboardRoundTripsAndReportsItsOwnSequence(t *testing.T) {
 		t.Fatalf("clipboard holds %q, want %q", got, want)
 	}
 }
-
-// The banner runs a window on a thread of its own. Opening and closing it must
-// not hang the session or leak its thread.
-func TestBannerOpensAndCloses(t *testing.T) {
-	if !NewPlatformCapturer().Capabilities().Capture {
-		t.Skip("this host has no desktop to show a banner on")
-	}
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		b := showSessionBanner(bannerText("test", "view_only")).(*winBanner)
-		b.SetText(bannerText("test", "full_control"))
-		time.Sleep(300 * time.Millisecond)
-		b.mu.Lock()
-		hwnd := b.hwnd
-		b.mu.Unlock()
-		if hwnd == 0 {
-			t.Error("the banner window was never created")
-			return
-		}
-		if r, _, _ := user32.NewProc("IsWindowVisible").Call(hwnd); r == 0 {
-			t.Error("the banner window exists but is not visible")
-		}
-		b.Close()
-	}()
-	select {
-	case <-done:
-	case <-time.After(5 * time.Second):
-		t.Fatal("banner open/close did not return")
-	}
-}

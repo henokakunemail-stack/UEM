@@ -24,9 +24,7 @@ type SessionConfig struct {
 	DeviceID     string `json:"device_id,omitempty"`
 	DeviceSecret string `json:"device_secret,omitempty"`
 	ServerURL    string `json:"server_url,omitempty"`
-	// Operator is the console user's name, shown to the person at the endpoint
-	// in the session banner. Empty from an older server, which the banner reads
-	// as "an administrator".
+	// Operator is the console user's name initiating the remote session.
 	Operator string `json:"operator,omitempty"`
 }
 
@@ -153,8 +151,6 @@ type Session struct {
 	lastCursorVisible bool
 	quality           *qualityController
 	lastStats         time.Time
-
-	banner sessionBanner
 }
 
 func NewSession(cfg SessionConfig, serverBaseURL string, creds Credentials, capturer ScreenCapturer) *Session {
@@ -224,10 +220,7 @@ func (s *Session) Start(ctx context.Context) error {
 		return fmt.Errorf("send rc hello: %w", err)
 	}
 
-	// Told before the first frame, not after: the person at the endpoint should
-	// know their screen is shared from the moment it is.
-	s.banner = showSessionBanner(bannerText(s.config.Operator, s.mode))
-
+	// ponytail: session banner removed per requirement. If endpoint overlay needed later, re-implement platform-specific window.
 	go s.readInputLoop()
 	go s.streamFramesLoop()
 
@@ -240,9 +233,6 @@ func (s *Session) Stop() {
 		// the operator is holding Ctrl must not leave it held on the endpoint.
 		_ = s.capturer.ReleaseAllKeys()
 		s.files.closeAll()
-		if s.banner != nil {
-			s.banner.Close()
-		}
 
 		// The close frame is a write like any other and has to take the same
 		// lock. gorilla/websocket permits exactly one concurrent writer: two
@@ -295,9 +285,6 @@ func (s *Session) setMode(m string) {
 	s.modeMu.Lock()
 	s.mode = m
 	s.modeMu.Unlock()
-	if s.banner != nil {
-		s.banner.SetText(bannerText(s.config.Operator, m))
-	}
 	if m == "view_only" {
 		_ = s.capturer.ReleaseAllKeys()
 	}

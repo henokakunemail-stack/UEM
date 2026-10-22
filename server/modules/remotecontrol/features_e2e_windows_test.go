@@ -20,7 +20,7 @@ import (
 )
 
 // TestRemoteControlFeaturesEndToEnd drives the real agent session -- real screen
-// capture, real clipboard, real banner -- through the real relay handlers, with
+// capture, real clipboard -- through the real relay handlers, with
 // a scripted console on the operator socket. It is the path an operator's click
 // takes, minus the browser: hello, frames, monitor switching, clipboard and a
 // file upload, each answered by the endpoint.

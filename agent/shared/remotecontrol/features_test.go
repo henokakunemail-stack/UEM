@@ -48,12 +48,3 @@ func TestClipboardTextIsCappedOnACharacterBoundary(t *testing.T) {
 		t.Fatalf("truncated to %d bytes ending %q", len(got), got[len(got)-2:])
 	}
 }
-
-func TestBannerNamesTheOperatorAndTheMode(t *testing.T) {
-	if got := bannerText("henok", "view_only"); got != "Your screen is being viewed by henok" {
-		t.Fatalf("view banner: %q", got)
-	}
-	if got := bannerText("", "full_control"); got != "Your screen is being controlled by an administrator" {
-		t.Fatalf("control banner without a name: %q", got)
-	}
-}
