@@ -217,12 +217,16 @@ func (r *Repository) UpdateDevice(ctx context.Context, id, hostname, site string
 // lookup. This statement is what actually mints the secret, and a token that
 // expired between the two must not be spendable.
 func (r *Repository) ConsumeEnrollmentToken(ctx context.Context, tokenHash, secretHash string) error {
+	// enrolled_at becomes the moment the agent exchanged the token. The row was
+	// written when the token was issued, which can be days earlier, and the
+	// console marks a device as new by when it enrolled.
+	now := time.Now().UTC()
 	res, err := r.db.ExecContext(ctx, `
 		UPDATE devices SET device_secret_hash = ?, enrollment_token_hash = NULL,
-		                   status = 'offline', updated_at = ?
+		                   status = 'offline', enrolled_at = ?, updated_at = ?
 		WHERE enrollment_token_hash = ? AND retired_at IS NULL
 		  AND (enrollment_token_expires_at IS NULL OR enrollment_token_expires_at > ?)`,
-		secretHash, time.Now().UTC(), tokenHash, time.Now().UTC())
+		secretHash, now, now, tokenHash, now)
 	if err != nil {
 		return fmt.Errorf("consume enrollment token: %w", err)
 	}
