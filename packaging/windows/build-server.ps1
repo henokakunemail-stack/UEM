@@ -8,7 +8,11 @@
 
 param(
     [string]$Version = "",
-    [switch]$SkipCompile = $false
+    [switch]$SkipCompile = $false,
+    # Directory holding the agents the installer bundles (agent-windows-amd64.exe,
+    # agent-linux-amd64, ...). The release scripts pass the dist/ they already
+    # built; any agent missing there is compiled here.
+    [string]$AgentDir = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -74,7 +78,10 @@ try {
         }
         # -X stamps the same compiled-in version build.ps1 gives the agent, so an
         # endpoint and its server report consistent version strings.
-        $Ldflags = "-s -w -X github.com/henokakunemail-stack/Endpoint-Manager/agent/shared/osinfo.Version=$Version"
+        # main.serverVersion is what the server reports in /healthz and lends to
+        # a bundled agent built without a stamped version; without it the
+        # installed server reported "dev".
+        $Ldflags = "-s -w -X main.serverVersion=$Version -X github.com/henokakunemail-stack/Endpoint-Manager/agent/shared/osinfo.Version=$Version"
         & go build -ldflags="$Ldflags" -o $ServerExe ./server/cmd/server
         if ($LASTEXITCODE -ne 0) {
             throw "Go build failed with exit code $LASTEXITCODE"
@@ -83,6 +90,36 @@ try {
     } else {
         Write-Host "[1/2] Reusing existing server binary: $ServerExe" -ForegroundColor Yellow
     }
+
+    # The installer carries the agents for every platform in agents/ next to
+    # the server, as the Linux and macOS server packages do: the one-line Linux
+    # installer hands them out, and Agent Updates registers them as releases
+    # so enrolled devices can be moved onto them.
+    $AgentStage = Join-Path $ScriptRoot "server-agents"
+    if (Test-Path $AgentStage) { Remove-Item -Recurse -Force $AgentStage }
+    New-Item -ItemType Directory -Force -Path $AgentStage | Out-Null
+    $AgentTargets = @(
+        @{ Name = "agent-windows-amd64.exe"; GOOS = "windows"; GOARCH = "amd64" },
+        @{ Name = "agent-linux-amd64"; GOOS = "linux"; GOARCH = "amd64" },
+        @{ Name = "agent-linux-arm64"; GOOS = "linux"; GOARCH = "arm64" },
+        @{ Name = "agent-darwin-amd64"; GOOS = "darwin"; GOARCH = "amd64" },
+        @{ Name = "agent-darwin-arm64"; GOOS = "darwin"; GOARCH = "arm64" }
+    )
+    foreach ($a in $AgentTargets) {
+        $dest = Join-Path $AgentStage $a.Name
+        $src = if ($AgentDir) { Join-Path $AgentDir $a.Name } else { $null }
+        if ($src -and (Test-Path $src)) {
+            Copy-Item $src $dest -Force
+        } else {
+            Write-Host "      Compiling bundled agent $($a.Name)..." -ForegroundColor DarkGray
+            $env:CGO_ENABLED = "0"
+            $env:GOOS = $a.GOOS
+            $env:GOARCH = $a.GOARCH
+            & go build -ldflags="-s -w -X github.com/henokakunemail-stack/Endpoint-Manager/agent/shared/osinfo.Version=$Version" -o $dest ./agent/cmd/agent
+            if ($LASTEXITCODE -ne 0) { throw "Go build of $($a.Name) failed with exit code $LASTEXITCODE" }
+        }
+    }
+    Remove-Item Env:GOOS, Env:GOARCH -ErrorAction SilentlyContinue
 
     Write-Host "[2/2] Compiling NSIS Installer..." -ForegroundColor Cyan
     # Windows PowerShell 5.1 is what ships with the OS and has no null-

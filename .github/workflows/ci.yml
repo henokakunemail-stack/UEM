@@ -87,7 +87,7 @@ jobs:
     needs: windows-test
     # Each script builds a server and an agent, runs them, and asserts over
     # real HTTP and WebSocket. They are independent: every script binds its own
-    # port in the 18443-18457 range, so the matrix runs fully parallel.
+    # port in the 18443-18458 range, so the matrix runs fully parallel.
     runs-on: windows-latest
     strategy:
       fail-fast: false
@@ -107,6 +107,7 @@ jobs:
           - e2e-asset-license
           - e2e-remote-control
           - e2e-agent-update
+          - e2e-agent-selfupdate
           - e2e-system-policy
     steps:
       - uses: actions/checkout@v4
@@ -151,11 +152,84 @@ jobs:
         run: |
           CGO_ENABLED=0 GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} \
             go build -o agent-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }} ./agent/cmd/agent
-      - name: Build server (linux amd64 only)
-        if: matrix.goos == 'linux' && matrix.goarch == 'amd64'
+      - name: Build server
+        # Every platform the release publishes a server for, so a change that
+        # only breaks the darwin or arm64 server build fails here rather than
+        # in the release job.
         run: |
-          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
-            go build -o endpoint-mgmt-server-linux-amd64 ./server/cmd/server
+          CGO_ENABLED=0 GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} \
+            go build -o server-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }} ./server/cmd/server
+
+  release-archives:
+    # The release archives are produced by scripts/build-release.ps1, the same
+    # script the release workflow runs. This checks their layout and Unix modes
+    # on every change, since a tarball whose install.sh lost its execute bit is
+    # only discovered by an operator.
+    name: Release archives (Linux & macOS)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Shell syntax
+        run: |
+          for f in packaging/linux/scripts/*.sh packaging/darwin/scripts/*.sh \
+                   packaging/darwin/build.sh packaging/darwin/pkg/scripts/*; do
+            bash -n "$f" || exit 1
+          done
+      - name: Build archives
+        shell: pwsh
+        run: ./scripts/build-release.ps1 -SkipFrontend -SkipInstallers
+      - name: Check archive layout and modes
+        run: |
+          set -euo pipefail
+          for os in linux darwin; do
+            for arch in amd64 arm64; do
+              s="dist/endpoint-server-$os-$arch.tar.gz"
+              tar -tvzf "$s"
+              tar -tvzf "$s" | grep -qE '^-rwxr-xr-x .* endpoint-server$'
+              tar -tvzf "$s" | grep -qE '^-rwxr-xr-x .* install-server.sh$'
+              for a in agent-windows-amd64.exe agent-linux-amd64 agent-linux-arm64 agent-darwin-amd64 agent-darwin-arm64; do
+                tar -tvzf "$s" | grep -qE " agents/$a\$"
+              done
+              tar -tvzf "dist/endpoint-agent-$os-$arch.tar.gz" | grep -qE '^-rwxr-xr-x .* install-agent.sh$'
+            done
+          done
+          unzip -l dist/endpoint-server-windows-amd64.zip | grep -q 'agents/agent-darwin-arm64'
+          file dist/server-darwin-arm64 | grep -q 'Mach-O'
+          file dist/server-linux-arm64 | grep -q 'aarch64'
+          test -s dist/checksums.txt
+
+  macos-pkg:
+    # pkgbuild only exists on macOS; build the agent package on every change
+    # so the release job is not the first place it is tried.
+    name: macOS agent package
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Build EndpointAgent.pkg
+        run: |
+          mkdir -p pkg-out
+          PKG_OUTPUT="$PWD/pkg-out/EndpointAgent-macOS.pkg" bash packaging/darwin/build.sh
+      - name: Check the package
+        run: |
+          pkgutil --payload-files pkg-out/EndpointAgent-macOS.pkg | tee payload.txt
+          grep -q 'usr/local/bin/endpoint-agent$' payload.txt
+          pkgutil --expand-full pkg-out/EndpointAgent-macOS.pkg expanded
+          lipo -info expanded/*.pkg/Payload/usr/local/bin/endpoint-agent | tee lipo.txt
+          grep -q arm64 lipo.txt && grep -q x86_64 lipo.txt
+          test -x expanded/*.pkg/Scripts/postinstall
+          # The darwin agent installer script installs a binary it finds next
+          # to itself; run its syntax through the macOS bash as well.
+          bash -n packaging/darwin/scripts/install-agent.sh
 
   frontend:
     name: Frontend lint & build

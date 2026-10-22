@@ -274,12 +274,19 @@ func (r *Repository) GetRelease(ctx context.Context, id string) (*AgentRelease, 
 
 func (r *Repository) GetActiveReleaseForDevice(ctx context.Context, targetVersion, osName, arch string) (*AgentRelease, error) {
 	var rel AgentRelease
-	query := `
+	// os_name is compared through its aliases: a macOS agent reports "macos",
+	// and releases uploaded before uploads were normalised are stored under
+	// "darwin", the value the console's upload form used to send. An exact
+	// match never paired the two, so every macOS device in a rollout got
+	// no_release.
+	osName, legacy := osNameAliases(osName)
+	query := r.db.Rebind(`
 		SELECT * FROM agent_releases
-		WHERE version = ? AND os_name = ? AND arch = ? AND is_active = 1
+		WHERE version = ? AND LOWER(os_name) IN (?, ?) AND LOWER(arch) = ? AND is_active = 1
+		ORDER BY created_at DESC
 		LIMIT 1
-	`
-	err := r.db.GetContext(ctx, &rel, query, targetVersion, osName, arch)
+	`)
+	err := r.db.GetContext(ctx, &rel, query, targetVersion, osName, legacy, strings.ToLower(arch))
 	if err != nil {
 		return nil, fmt.Errorf("get release for %s/%s/%s: %w", targetVersion, osName, arch, err)
 	}
@@ -290,11 +297,12 @@ func (r *Repository) GetActiveReleaseForDevice(ctx context.Context, targetVersio
 // architecture, whatever its version: what a fresh install should get.
 func (r *Repository) LatestActiveRelease(ctx context.Context, osName, arch string) (*AgentRelease, error) {
 	var rel AgentRelease
+	norm, legacy := osNameAliases(osName)
 	err := r.db.GetContext(ctx, &rel, r.db.Rebind(`
 		SELECT * FROM agent_releases
-		WHERE LOWER(os_name) = ? AND LOWER(arch) = ? AND is_active = 1
+		WHERE LOWER(os_name) IN (?, ?) AND LOWER(arch) = ? AND is_active = 1
 		ORDER BY created_at DESC
-		LIMIT 1`), strings.ToLower(osName), strings.ToLower(arch))
+		LIMIT 1`), norm, legacy, strings.ToLower(arch))
 	if err != nil {
 		return nil, fmt.Errorf("latest release for %s/%s: %w", osName, arch, err)
 	}
@@ -1039,4 +1047,30 @@ func normalizeArch(raw string) string {
 		}
 		return "amd64"
 	}
+}
+
+// NormalizeOSName maps the spellings an operator or a build tool uses for a
+// platform to the os_name agents report in their hello: windows, linux, macos.
+// GOOS says "darwin" where the agent says "macos", and the release table has to
+// agree with the agent, because that is the value a rollout matches against.
+func NormalizeOSName(raw string) string {
+	switch r := strings.ToLower(strings.TrimSpace(raw)); r {
+	case "darwin", "macos", "mac", "osx", "macosx":
+		return "macos"
+	case "win", "windows":
+		return "windows"
+	default:
+		return r
+	}
+}
+
+// osNameAliases returns the normalised os_name and the legacy spelling a
+// release row may still carry for it. The pair is the same value twice for
+// every platform but macOS.
+func osNameAliases(raw string) (norm, legacy string) {
+	norm = NormalizeOSName(raw)
+	if norm == "macos" {
+		return norm, "darwin"
+	}
+	return norm, norm
 }

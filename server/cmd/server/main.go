@@ -886,6 +886,9 @@ func buildServer(cfg config.Config, database *sqlx.DB) (*http.Server, *serverApp
 	if exe, err := os.Executable(); err == nil {
 		exeAgents = filepath.Join(filepath.Dir(exe), "agents")
 	}
+	// The same bundle is what the console registers as releases, so an
+	// enrolled fleet can be moved onto the agents a server update brought.
+	updateH.WithBundledAgents(serverVersion, bundleDir, exeAgents)
 	agentinstall.NewHandler(deviceRepo, func(ctx context.Context, osName, arch string) (string, error) {
 		rel, err := updateRepo.LatestActiveRelease(ctx, osName, arch)
 		if err != nil {

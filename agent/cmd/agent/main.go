@@ -1142,29 +1142,10 @@ func triggerRestart() {
 			os.Exit(0)
 		}
 
-		svcName := service.DefaultConfig(nil).Name
 		restarted := false
-
-		switch runtime.GOOS {
-		case "windows":
-			if service.RunAsService() {
-				// ponytail: cmd.exe timeout bridge avoids SCM deadlock; replace with service restarter worker binary if cmd.exe disabled.
-				_ = exec.Command("cmd.exe", "/C", fmt.Sprintf("timeout /t 2 /nobreak > NUL && sc.exe stop %s && sc.exe start %s", svcName, svcName)).Start()
+		if argv := serviceRestartCommand(runtime.GOOS, os.Getenv, service.RunAsService(), service.DefaultConfig(nil).Name); argv != nil {
+			if err := exec.Command(argv[0], argv[1:]...).Start(); err == nil {
 				restarted = true
-			}
-		case "linux":
-			if os.Getenv("INVOCATION_ID") != "" {
-				cmd := exec.Command("systemctl", "restart", svcName)
-				if err := cmd.Start(); err == nil {
-					restarted = true
-				}
-			}
-		case "darwin":
-			if os.Getenv("XPC_SERVICE_NAME") != "" {
-				cmd := exec.Command("launchctl", "kickstart", "-k", "system/"+svcName)
-				if err := cmd.Start(); err == nil {
-					restarted = true
-				}
 			}
 		}
 
@@ -1177,4 +1158,34 @@ func triggerRestart() {
 		log.Info().Msg("exiting process to allow updated binary to run")
 		os.Exit(0)
 	}()
+}
+
+// serviceRestartCommand is the command that has the service manager restart
+// this agent onto its updated binary, or nil when no service manager runs it
+// and the process has to re-spawn itself.
+//
+// On macOS the job is addressed by its launchd label, which launchd hands the
+// process in XPC_SERVICE_NAME. The label used to be the service name,
+// "endpoint-agent", but no job has that label: the pkg installs
+// com.endpoint-mgmt.agent and -service install writes
+// com.endpoint-mgmt.endpoint-agent. And a shell has XPC_SERVICE_NAME=0, which
+// read as "under launchd", so an agent run from Terminal kickstarted a job that
+// did not exist, skipped the re-spawn, and exited for good after an update.
+func serviceRestartCommand(goos string, getenv func(string) string, runAsService bool, svcName string) []string {
+	switch goos {
+	case "windows":
+		if runAsService {
+			// ponytail: cmd.exe timeout bridge avoids SCM deadlock; replace with service restarter worker binary if cmd.exe disabled.
+			return []string{"cmd.exe", "/C", fmt.Sprintf("timeout /t 2 /nobreak > NUL && sc.exe stop %s && sc.exe start %s", svcName, svcName)}
+		}
+	case "linux":
+		if getenv("INVOCATION_ID") != "" {
+			return []string{"systemctl", "restart", svcName}
+		}
+	case "darwin":
+		if label := getenv("XPC_SERVICE_NAME"); label != "" && label != "0" {
+			return []string{"launchctl", "kickstart", "-k", "system/" + label}
+		}
+	}
+	return nil
 }

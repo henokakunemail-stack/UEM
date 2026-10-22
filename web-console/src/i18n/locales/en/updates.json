@@ -145,5 +145,22 @@
   "progress_done": "{done}/{total} finished ({percent}%)",
   "poll_failed": "Could not refresh progress. Retrying...",
   "section_releases": "releases",
-  "section_campaigns": "campaigns"
+  "section_campaigns": "campaigns",
+  "import_bundled": "Import from Server Package",
+  "bundled_modal_title": "Import Agents Bundled with This Server",
+  "bundled_intro": "The server's release package carries agent builds for every platform. Importing registers them as releases, with the version and platform read from each binary, so a campaign can move enrolled agents onto them.",
+  "bundled_empty": "No agent binaries were found in this server's package (agents/ next to the server binary, or DATA_DIR/agents).",
+  "bundled_col_file": "File",
+  "bundled_col_platform": "Platform",
+  "bundled_col_version": "Version",
+  "bundled_col_state": "State",
+  "bundled_ready": "Ready to import",
+  "bundled_registered": "Already a release",
+  "bundled_import_selected": "Import {count} Selected",
+  "bundled_importing": "Importing...",
+  "bundled_imported": "Imported {count} agent release(s)",
+  "bundled_imported_title": "Bundled Agents Imported",
+  "bundled_skipped": "{count} skipped: {files}",
+  "bundled_failed": "Could not read the server's agent bundle",
+  "bundled_import_failed": "Import failed"
 }

@@ -36,6 +36,8 @@ import type {
   SoftwareLicenseDTO,
   LicenseComplianceSummaryDTO,
   AgentReleaseDTO,
+  BundledAgentDTO,
+  BundledImportResult,
   UpdateCampaignDTO,
   CampaignTaskDetail,
   CampaignLogItem,
@@ -875,6 +877,18 @@ export const api = {
     return request<AgentReleaseDTO>('/api/agent-updates/releases', {
       method: 'POST',
       body: formData,
+    })
+  },
+
+  async getBundledAgents(): Promise<BundledAgentDTO[]> {
+    const res = await request<BundledAgentDTO[]>('/api/agent-updates/bundled')
+    return res || []
+  },
+
+  async importBundledAgents(files: string[]): Promise<BundledImportResult> {
+    return request<BundledImportResult>('/api/agent-updates/bundled/import', {
+      method: 'POST',
+      body: JSON.stringify({ files }),
     })
   },
 

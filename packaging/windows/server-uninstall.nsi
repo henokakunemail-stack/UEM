@@ -144,6 +144,7 @@ Section "Remove Server" SecRemoveServer
     DetailPrint "Removing server binary..."
     Delete "$TARGET_INSTDIR\endpoint-server.exe"
     Delete "$TARGET_INSTDIR\uninstall.exe"
+    RMDir /r "$TARGET_INSTDIR\agents"
 
     ; Clean config and logs if checked
     ${If} $CheckboxPurgeConfigState == ${BST_CHECKED}

@@ -6,7 +6,7 @@ PLIST="/Library/LaunchDaemons/com.endpoint-mgmt.agent.plist"
 
 # If previous daemon is active, unload it before upgrade
 if [ -f "$PLIST" ]; then
-    launchctl unload -w "$PLIST" 2>/dev/null || true
+    launchctl bootout system/com.endpoint-mgmt.agent 2>/dev/null || launchctl unload -w "$PLIST" 2>/dev/null || true
 fi
 
 exit 0

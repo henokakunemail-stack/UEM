@@ -59,6 +59,10 @@ type Handler struct {
 	// endpoint refuses rather than storing a signature it has no way to check.
 	publicKey           ed25519.PublicKey
 	minimumAgentVersion string
+	// bundleDirs are where the server's release package keeps the agents it
+	// ships with; serverVersion is the version those agents were built as.
+	bundleDirs    []string
+	serverVersion string
 }
 
 func NewHandler(
@@ -147,6 +151,9 @@ func (h *Handler) Register(r chi.Router) {
 		// console, and the signature comes from the signing host that holds the
 		// private key. Neither grant implies the other.
 		cr.With(rbac.RequireRole(rbac.RoleAdmin)).Post("/api/agent-updates/releases/{id}/sign", h.handleSignRelease)
+		// The agents shipped inside the server's release package.
+		cr.With(rbac.RequireRole(rbac.RoleViewer)).Get("/api/agent-updates/bundled", h.handleListBundled)
+		cr.With(rbac.RequireRole(rbac.RoleAdmin)).Post("/api/agent-updates/bundled/import", h.handleImportBundled)
 
 		// Campaigns
 		cr.With(rbac.RequireRole(rbac.RoleViewer)).Get("/api/agent-updates/campaigns", h.handleListCampaigns)
@@ -171,7 +178,9 @@ func (h *Handler) handleUploadRelease(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	version := r.FormValue("version")
+	// Agents report their version without a "v", and a campaign compares the
+	// two as strings, so a release typed as "v1.6.0" would never be reached.
+	version := strings.TrimPrefix(strings.TrimSpace(r.FormValue("version")), "v")
 	osName := r.FormValue("os_name")
 	arch := r.FormValue("arch")
 	changelog := r.FormValue("changelog")
@@ -180,6 +189,11 @@ func (h *Handler) handleUploadRelease(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "version, os_name, and arch are required"})
 		return
 	}
+	// Stored as the agent reports it, so a rollout can match it: "darwin" from
+	// a build script or an older console becomes "macos", "x86_64" becomes
+	// "amd64".
+	osName = NormalizeOSName(osName)
+	arch = normalizeArch(arch)
 
 	file, header, err := r.FormFile("file")
 	if err != nil {
@@ -206,10 +220,34 @@ func (h *Handler) handleUploadRelease(w http.ResponseWriter, r *http.Request) {
 	writer := io.MultiWriter(destFile, hasher)
 
 	written, err := io.Copy(writer, file)
+	if cerr := destFile.Close(); err == nil {
+		err = cerr
+	}
 	if err != nil {
 		_ = os.Remove(destPath)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to write release file"})
 		return
+	}
+
+	// A Go binary says what it was built for and, from a release build, which
+	// version it is. A file whose own build disagrees with the form is refused:
+	// a Linux build registered as Windows fails every device's format check
+	// after the download, and a binary whose stamped version is not the
+	// release version reports that other version when it reconnects, so the
+	// device never reaches the campaign's target and the rollout cannot finish.
+	if facts := inspectBinary(destPath); facts.IsGo {
+		var mismatch string
+		switch {
+		case facts.OSName != osName || facts.Arch != arch:
+			mismatch = fmt.Sprintf("the file is built for %s/%s, not %s/%s", facts.OSName, facts.Arch, osName, arch)
+		case facts.Version != "" && facts.Version != version:
+			mismatch = fmt.Sprintf("the file reports agent version %s, not %s", facts.Version, version)
+		}
+		if mismatch != "" {
+			_ = os.Remove(destPath)
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": mismatch, "code": "release_binary_mismatch"})
+			return
+		}
 	}
 
 	checksum := hex.EncodeToString(hasher.Sum(nil))
@@ -429,6 +467,7 @@ func (h *Handler) handleCreateCampaign(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	req.TargetVersion = strings.TrimPrefix(strings.TrimSpace(req.TargetVersion), "v")
 	if req.Name == "" || req.TargetVersion == "" || req.TargetType == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name, target_version, and target_type are required"})
 		return
@@ -784,6 +823,7 @@ func (h *Handler) handleDispatchDeviceUpdate(w http.ResponseWriter, r *http.Requ
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
 		return
 	}
+	req.TargetVersion = strings.TrimPrefix(strings.TrimSpace(req.TargetVersion), "v")
 	if req.TargetVersion == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "target_version is required"})
 		return

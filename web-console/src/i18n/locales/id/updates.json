@@ -145,5 +145,22 @@
   "progress_done": "{done}/{total} selesai ({percent}%)",
   "poll_failed": "Gagal memperbarui progres. Mencoba lagi...",
   "section_releases": "rilis",
-  "section_campaigns": "kampanye"
+  "section_campaigns": "kampanye",
+  "import_bundled": "Impor dari Paket Server",
+  "bundled_modal_title": "Impor Agen yang Dibundel dengan Server Ini",
+  "bundled_intro": "Paket rilis server membawa build agen untuk setiap platform. Impor mendaftarkannya sebagai rilis, dengan versi dan platform dibaca dari tiap biner, sehingga kampanye dapat memperbarui agen yang sudah terdaftar.",
+  "bundled_empty": "Tidak ada biner agen di paket server ini (agents/ di samping biner server, atau DATA_DIR/agents).",
+  "bundled_col_file": "Berkas",
+  "bundled_col_platform": "Platform",
+  "bundled_col_version": "Versi",
+  "bundled_col_state": "Status",
+  "bundled_ready": "Siap diimpor",
+  "bundled_registered": "Sudah menjadi rilis",
+  "bundled_import_selected": "Impor {count} Terpilih",
+  "bundled_importing": "Mengimpor...",
+  "bundled_imported": "{count} rilis agen diimpor",
+  "bundled_imported_title": "Agen Bundel Diimpor",
+  "bundled_skipped": "{count} dilewati: {files}",
+  "bundled_failed": "Gagal membaca bundel agen server",
+  "bundled_import_failed": "Impor gagal"
 }

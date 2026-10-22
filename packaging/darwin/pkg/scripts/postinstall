@@ -16,6 +16,32 @@ if [ -f "$BIN" ]; then
     chmod 755 "$BIN"
 fi
 
+# Unattended enrollment. An MDM (or an operator) that drops
+# /etc/endpoint-agent/enroll.conf before installing the package gets an
+# enrolled device with no second step:
+#
+#   SERVER_URL=https://mgmt.example.com
+#   ENROLL_TOKEN=<token from the console>
+#   SITE=<optional site label>
+#
+# The token is single-use, so the file is deleted whatever the outcome; a
+# failed enrollment is logged and the device can be enrolled by hand later.
+ENROLL_CONF="$CONFIG_DIR/enroll.conf"
+if [ -f "$ENROLL_CONF" ] && [ ! -f "$CREDS_FILE" ] && [ -x "$BIN" ]; then
+    SERVER_URL=$(sed -n 's/^SERVER_URL=//p' "$ENROLL_CONF" | head -n1)
+    ENROLL_TOKEN=$(sed -n 's/^ENROLL_TOKEN=//p' "$ENROLL_CONF" | head -n1)
+    SITE=$(sed -n 's/^SITE=//p' "$ENROLL_CONF" | head -n1)
+    if [ -n "$SERVER_URL" ] && [ -n "$ENROLL_TOKEN" ]; then
+        set -- -server "$SERVER_URL" -enroll "$ENROLL_TOKEN" -enroll-only -creds "$CREDS_FILE"
+        if [ -n "$SITE" ]; then
+            set -- "$@" -site "$SITE"
+        fi
+        "$BIN" "$@" >>/var/log/endpoint-agent-install.log 2>&1 ||
+            echo "enrollment failed; see /var/log/endpoint-agent-install.log"
+    fi
+    rm -f "$ENROLL_CONF"
+fi
+
 # Write launchd daemon plist if not already present
 cat <<'EOF' > "$PLIST"
 <?xml version="1.0" encoding="UTF-8"?>
@@ -52,6 +78,6 @@ chmod 644 "$PLIST"
 chown root:wheel "$PLIST"
 
 # Load daemon into launchd
-launchctl load -w "$PLIST" 2>/dev/null || true
+launchctl bootstrap system "$PLIST" 2>/dev/null || launchctl load -w "$PLIST" 2>/dev/null || true
 
 exit 0
