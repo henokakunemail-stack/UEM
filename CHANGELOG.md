@@ -10,6 +10,23 @@ Riwayat sebelum v1.5.4 ada di `git log`.
 
 ## [Unreleased]
 
+### Ditambahkan
+- **Status join domain di detail perangkat.** Tab Hardware punya kartu baru, **Keanggotaan Domain**. Kartu ini
+  menunjukkan apakah perangkat sudah join domain, nama domainnya, dan jenisnya: Active Directory, Microsoft Entra ID,
+  Hybrid, FreeIPA, atau Workgroup.
+  - Windows membaca status join, domain DNS, dan join Entra ID. Linux membaca konfigurasi sssd (realmd, ipa-client)
+    dan winbind. macOS membaca binding Active Directory (`dsconfigad`). Semuanya dibaca lokal, tanpa menghubungi
+    domain controller.
+  - Data dikirim sebagai field baru `os.domain` di laporan inventory. Server menyimpannya tanpa migrasi database.
+- **Audit perubahan domain.** Perangkat yang join, keluar, atau pindah domain tercatat di audit trail sebagai
+  `inventory.hw_changed` (`changed: domain`).
+- Dokumentasi alur pengumpulan inventory: `docs/architecture/inventory-collection.md`.
+
+### Catatan upgrade
+- Status domain baru muncul setelah agent diperbarui ke versi ini dan mengirim inventory berikutnya. Itu terjadi saat
+  agent start, setiap 4 jam, atau saat tombol **Collect** ditekan. Agent lama ditampilkan "Tidak diketahui", bukan
+  "Belum join".
+
 ## [1.5.6] - 2026-10-22
 
 ### Diubah
