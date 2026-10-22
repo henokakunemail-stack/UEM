@@ -315,6 +315,17 @@ try {
     Copy-Item -Path $stagedBin -Destination $destExe -Force
     Write-Host "[+] New binary successfully deployed in-place." -ForegroundColor Green
 
+    # The release zip carries the agents for every platform in agents\. The
+    # server hands them to the one-line Linux installer and registers them as
+    # releases from Agent Updates; it looks for them next to its binary.
+    $stagedAgents = Join-Path $stagingDir "agents"
+    if (Test-Path $stagedAgents) {
+        $agentsDir = Join-Path (Split-Path $destExe -Parent) "agents"
+        New-Item -ItemType Directory -Path $agentsDir -Force | Out-Null
+        Copy-Item -Path (Join-Path $stagedAgents "agent-*") -Destination $agentsDir -Force
+        Write-Host "[+] Updated bundled agent binaries in $agentsDir" -ForegroundColor Green
+    }
+
     # 8. Restart Windows Service
     Write-Host "[*] Starting Windows Service '$serviceName'..." -ForegroundColor Cyan
     Start-Service -Name $serviceName -ErrorAction SilentlyContinue

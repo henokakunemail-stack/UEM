@@ -202,6 +202,15 @@ Section "Install Server" SecInstall
     SetOutPath "$INSTDIR"
     File "/oname=endpoint-server.exe" "..\..\server-windows-amd64.exe"
 
+    ; The agents for every platform, which the server looks for in agents\ next
+    ; to its binary: the one-line Linux installer hands them out, and Agent
+    ; Updates registers them as releases for enrolled devices. build-server.ps1
+    ; stages them in server-agents\.
+    RMDir /r "$INSTDIR\agents"
+    SetOutPath "$INSTDIR\agents"
+    File "server-agents\agent-*"
+    SetOutPath "$INSTDIR"
+
     CreateDirectory "$DATADIR"
     CreateDirectory "$INSTDIR\data"
 
@@ -335,6 +344,7 @@ AfterPurgeDecision:
     ; whatever the graceful shutdown was still holding. uninstall.exe is absent
     ; on purpose: it is this process.
     Delete "$0\endpoint-server.exe"
+    RMDir /r "$0\agents"
     ${If} $2 == "1"
         RMDir /r "$0\data"
     ${EndIf}

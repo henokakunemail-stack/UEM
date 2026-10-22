@@ -52,6 +52,11 @@ while [ $# -gt 0 ]; do
     esac
 done
 
+case "$(uname -m)" in
+    aarch64|arm64) ARCH=arm64 ;;
+    *) ARCH=amd64 ;;
+esac
+
 if [ "$(id -u)" -ne 0 ]; then
     echo "[-] This updater requires root privileges. Please run with sudo: sudo $0" >&2
     exit 1
@@ -147,7 +152,7 @@ else
     RELEASE_JSON=$(curl -sSL -H "User-Agent: UEM-Server-Updater" "${AUTH_HEADER[@]}" "$API_URL" || true)
 
     # Find download URL for Linux amd64 tarball or binary
-    DOWNLOAD_URL=$(printf '%s\n' "$RELEASE_JSON" | grep -E '"browser_download_url":.*(endpoint-server.*linux.*amd64\.tar\.gz|server-linux-amd64|endpoint-server-linux-amd64)' | head -n1 | sed -E 's/.*"browser_download_url": *"([^"]+)".*/\1/' || true)
+    DOWNLOAD_URL=$(printf '%s\n' "$RELEASE_JSON" | grep -E "\"browser_download_url\":.*(endpoint-server.*linux.*${ARCH}\.tar\.gz|server-linux-${ARCH}|endpoint-server-linux-${ARCH})" | head -n1 | sed -E 's/.*"browser_download_url": *"([^"]+)".*/\1/' || true)
 
     # Fallback to direct URL if API rate-limited
     if [ -z "$DOWNLOAD_URL" ]; then
@@ -156,7 +161,7 @@ else
         if [ "$VERSION" != "latest" ]; then
             TAG_NAME="$VERSION"
         fi
-        DOWNLOAD_URL="https://github.com/$REPO/releases/download/$TAG_NAME/endpoint-server-linux-amd64.tar.gz"
+        DOWNLOAD_URL="https://github.com/$REPO/releases/download/$TAG_NAME/endpoint-server-linux-${ARCH}.tar.gz"
     fi
 
     echo "[+] Downloading release asset: $DOWNLOAD_URL..."
@@ -169,7 +174,7 @@ else
     if [[ "$DL_FILE" == *.tar.gz ]]; then
         echo "[*] Extracting tar archive..."
         tar -xzf "$DL_FILE" -C "$STAGING_DIR"
-        for cand in "$STAGING_DIR/endpoint-server" "$STAGING_DIR/server-linux-amd64" "$STAGING_DIR/endpoint-mgmt-server"; do
+        for cand in "$STAGING_DIR/endpoint-server" "$STAGING_DIR/server-linux-${ARCH}" "$STAGING_DIR/endpoint-mgmt-server"; do
             if [ -f "$cand" ]; then STAGED_BIN="$cand"; break; fi
         done
         if [ -z "$STAGED_BIN" ]; then
@@ -227,14 +232,16 @@ cp -p "$INSTALL_BIN" "$BAK_BIN"
 cp -p "$STAGED_BIN" "$INSTALL_BIN"
 chmod 0755 "$INSTALL_BIN"
 
-# Agent binaries for the one-line Linux installer (/install/linux.sh) travel in
-# the same package; the server looks for them in agents/ next to its binary.
+# The agents for every platform travel in the same package: the one-line Linux
+# installer (/install/linux.sh) hands them out, and Agent Updates registers
+# them as releases for enrolled devices. The server looks in agents/ next to
+# its binary.
 if [ -n "${STAGING_DIR:-}" ] && [ -d "${STAGING_DIR}/agents" ]; then
     AGENTS_DIR="$(dirname "$INSTALL_BIN")/agents"
     mkdir -p "$AGENTS_DIR"
-    cp -p "$STAGING_DIR"/agents/agent-linux-* "$AGENTS_DIR"/ 2>/dev/null || true
-    chmod 0755 "$AGENTS_DIR"/agent-linux-* 2>/dev/null || true
-    echo "[+] Updated agent installer binaries in $AGENTS_DIR"
+    cp -p "$STAGING_DIR"/agents/agent-* "$AGENTS_DIR"/ 2>/dev/null || true
+    chmod 0755 "$AGENTS_DIR"/agent-* 2>/dev/null || true
+    echo "[+] Updated bundled agent binaries in $AGENTS_DIR"
 fi
 
 # Maintain file ownership if dedicated system user exists

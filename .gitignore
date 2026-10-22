@@ -71,3 +71,6 @@ progress.md
 
 # Log files
 *.log
+
+# Agents build-server.ps1 stages for the server installer
+packaging/windows/server-agents/

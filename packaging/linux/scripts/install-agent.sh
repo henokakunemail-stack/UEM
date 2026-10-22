@@ -20,13 +20,17 @@ echo "   Enterprise Endpoint Management Agent - Linux Installer"
 echo "=========================================================="
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+case "$(uname -m)" in
+    aarch64|arm64) ARCH=arm64 ;;
+    *) ARCH=amd64 ;;
+esac
 BIN_SRC=""
-for cand in "$SCRIPT_DIR/endpoint-agent" "$SCRIPT_DIR/agent-linux-amd64" "$SCRIPT_DIR/../../agent-linux-amd64" /tmp/agent-linux-amd64; do
+for cand in "$SCRIPT_DIR/endpoint-agent" "$SCRIPT_DIR/agent-linux-$ARCH" "$SCRIPT_DIR/../../agent-linux-$ARCH" "/tmp/agent-linux-$ARCH"; do
     if [ -f "$cand" ]; then BIN_SRC="$cand"; break; fi
 done
 
 if [ -z "$BIN_SRC" ]; then
-    echo "[-] Agent binary not found. Place 'agent-linux-amd64' or 'endpoint-agent' alongside this script."
+    echo "[-] Agent binary not found. Place 'agent-linux-$ARCH' or 'endpoint-agent' alongside this script."
     exit 1
 fi
 

@@ -21,13 +21,17 @@ echo "   Enterprise Endpoint Management Server - Linux Installer"
 echo "=========================================================="
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+case "$(uname -m)" in
+    aarch64|arm64) ARCH=arm64 ;;
+    *) ARCH=amd64 ;;
+esac
 BIN_SRC=""
-for cand in "$SCRIPT_DIR/endpoint-server" "$SCRIPT_DIR/server-linux-amd64" "$SCRIPT_DIR/../../../server-linux-amd64" "$SCRIPT_DIR/../../server-linux-amd64" "$(pwd)/server-linux-amd64" "$(pwd)/endpoint-server" /tmp/server-linux-amd64; do
+for cand in "$SCRIPT_DIR/endpoint-server" "$SCRIPT_DIR/server-linux-$ARCH" "$SCRIPT_DIR/../../../server-linux-$ARCH" "$SCRIPT_DIR/../../server-linux-$ARCH" "$(pwd)/server-linux-$ARCH" "$(pwd)/endpoint-server" "/tmp/server-linux-$ARCH"; do
     if [ -f "$cand" ]; then BIN_SRC="$cand"; break; fi
 done
 
 if [ -z "$BIN_SRC" ]; then
-    echo "[-] Server binary not found. Place 'server-linux-amd64' or 'endpoint-server' alongside this script."
+    echo "[-] Server binary not found. Place 'server-linux-$ARCH' or 'endpoint-server' alongside this script."
     exit 1
 fi
 
@@ -36,6 +40,16 @@ echo "[+] Using binary: $BIN_SRC"
 mkdir -p /usr/local/bin "$DATA_DIR/backups" "$CONF_DIR"
 cp "$BIN_SRC" "$INSTALL_BIN"
 chmod 0755 "$INSTALL_BIN"
+
+# The release package carries the agents for every platform in agents/. The
+# server hands them to the one-line installer and registers them as releases
+# from Agent Updates; it looks for them next to its own binary.
+if [ -d "$SCRIPT_DIR/agents" ]; then
+    mkdir -p "$(dirname "$INSTALL_BIN")/agents"
+    cp -p "$SCRIPT_DIR"/agents/agent-* "$(dirname "$INSTALL_BIN")/agents/"
+    chmod 0755 "$(dirname "$INSTALL_BIN")"/agents/agent-*
+    echo "[+] Installed bundled agents to $(dirname "$INSTALL_BIN")/agents"
+fi
 
 if [ -f "$ENV_FILE" ]; then
     echo "[*] Configuration file exists ($ENV_FILE); preserving existing settings and JWT_SECRET."

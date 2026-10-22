@@ -10,7 +10,7 @@ Repositori ini menyediakan berkas sumber installer dan uninstaller berbasis anta
 |---|---|---|---|
 | **Windows** (x64) | `EndpointAgent-Setup.exe` (NSIS Wizard) | Windows Settings / Control Panel *Installed Apps* (`uninstall.exe`) | [`packaging/windows/`](windows/) |
 | **Linux** (amd64, arm64) | `install-gui.sh` (Zenity / KDialog GUI) & `.deb` | `endpoint-agent-uninstall.desktop` / GUI Applet | [`packaging/linux/`](linux/) |
-| **macOS** (Apple Silicon + Intel) | `EndpointAgent-1.0.0.pkg` (Apple Installer) | `Uninstall.command` (AppleScript Native GUI) | [`packaging/darwin/`](darwin/) |
+| **macOS** (Apple Silicon + Intel) | `EndpointAgent-macOS.pkg` (Apple Installer) & `endpoint-agent-darwin-<arch>.tar.gz` (`install-agent.sh`) | `endpoint-agent-uninstall` / `Uninstall.command` (AppleScript Native GUI) | [`packaging/darwin/`](darwin/) |
 
 ---
 
@@ -33,6 +33,24 @@ Repositori ini menyediakan berkas sumber installer dan uninstaller berbasis anta
 - Paket installer `.pkg` standar Apple yang mendukung arsitektur Universal (ARM64 M-series dan Intel).
 - Mendaftarkan LaunchDaemon di `/Library/LaunchDaemons/com.endpoint-mgmt.agent.plist`.
 - Menyertakan `Uninstall.command` yang memicu dialog otentikasi Touch ID / Admin AppleScript untuk uninstalasi bersih.
+
+---
+
+## Paket Server
+
+| Sistem Operasi | Aset rilis |
+|---|---|
+| Windows (x64) | `EndpointServer-Setup.exe` (NSIS), `endpoint-server-windows-amd64.zip` (untuk `update-server.ps1`) |
+| Linux (amd64, arm64) | `endpoint-server-linux-<arch>.tar.gz` (`install-server.sh`, `update-server.sh`) |
+| macOS (amd64, arm64) | `endpoint-server-darwin-<arch>.tar.gz` (`install-server.sh`, LaunchDaemon) |
+
+Setiap paket server membawa `agents/` berisi agen untuk kelima platform. Server memakainya untuk
+installer satu baris Linux dan untuk **Agent Updates → Impor dari Paket Server**, sehingga agen yang
+sudah terdaftar dapat di-update ke versi yang dibawa server tanpa unggah manual.
+
+Semua aset dibangun oleh `scripts/build-release.ps1` (dipakai `scripts/publish-release.ps1` dan
+`.github/workflows/release.yml`); hanya `EndpointAgent-macOS.pkg` yang dibangun di runner macOS.
+`checksums.txt` mencakup semua aset.
 
 ---
 
