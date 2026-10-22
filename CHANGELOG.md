@@ -10,6 +10,8 @@ Riwayat sebelum v1.5.4 ada di `git log`.
 
 ## [Unreleased]
 
+## [1.5.6] - 2026-10-22
+
 ### Diubah
 - **Remote Control:** Menghilangkan banner notifikasi sesi pada layar endpoint agent (`Your screen is being controlled by...` / `Your screen is being viewed by...`).
 
@@ -21,8 +23,8 @@ Riwayat sebelum v1.5.4 ada di `git log`.
 - **Perangkat yang di-retire ikut menjadi target kampanye update.** Ini termasuk baris pending enrollment yang di-retire otomatis. Perangkat seperti ini mendapat tugas yang tidak akan pernah selesai.
 
 ### Catatan upgrade
-- Perubahan kampanye hanya di server dan console; agen tidak perlu di-update untuk perbaikan kampanye. Agen v1.5.5 dan sebelumnya bekerja seperti biasa.
-- Penghapusan banner remote control memerlukan biner agen yang diperbarui di endpoint agar banner tidak lagi muncul saat remote session.
+- Perubahan kampanye ada di server dan console.
+- Penghapusan banner remote control memerlukan agen v1.5.6 di endpoint agar banner tidak lagi muncul saat sesi remote.
 - Kampanye yang dimulai sebelum server diperbarui tidak mencatat perangkat yang sudah di versi target. Untuk kampanye lama seperti itu, jumlah perangkat yang dicek ada di **Rollout Activity Logs**.
 
 ## [1.5.5] - 2026-10-22

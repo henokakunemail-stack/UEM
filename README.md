@@ -2,7 +2,7 @@
 
 <div align="center">
 
-[![Release](https://img.shields.io/badge/Release-v1.5.5+-brightgreen.svg?style=for-the-badge&logo=github)](https://github.com/henokakunemail-stack/UEM/releases)
+[![Release](https://img.shields.io/badge/Release-v1.5.6+-brightgreen.svg?style=for-the-badge&logo=github)](https://github.com/henokakunemail-stack/UEM/releases)
 [![Go Version](https://img.shields.io/badge/Go-1.23%2B%20%7C%201.26%2B-blue.svg?style=for-the-badge&logo=go)](https://golang.org)
 [![Pure Go](https://img.shields.io/badge/CGO-Disabled%20(Zero%20CGO)-success.svg?style=for-the-badge&logo=linux)](https://golang.org)
 [![Web Console](https://img.shields.io/badge/Frontend-React%2019%20%2B%20TypeScript%20%2B%20Vite-blueviolet.svg?style=for-the-badge&logo=react)](web-console)
