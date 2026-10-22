@@ -180,6 +180,11 @@ func (h *Handler) handleUploadRelease(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "version, os_name, and arch are required"})
 		return
 	}
+	// Stored as the agent reports it, so a rollout can match it: "darwin" from
+	// a build script or an older console becomes "macos", "x86_64" becomes
+	// "amd64".
+	osName = NormalizeOSName(osName)
+	arch = normalizeArch(arch)
 
 	file, header, err := r.FormFile("file")
 	if err != nil {

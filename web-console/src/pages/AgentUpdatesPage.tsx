@@ -968,7 +968,7 @@ export const AgentUpdatesPage: React.FC<AgentUpdatesPageProps> = ({ activeTab: s
               <select id="rel-os" className="form-select" value={relOS} onChange={(e) => setRelOS(e.target.value)}>
                 <option value="windows">Windows</option>
                 <option value="linux">Linux</option>
-                <option value="darwin">macOS (Darwin)</option>
+                <option value="macos">macOS</option>
               </select>
             </div>
             <div className="form-field">

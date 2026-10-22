@@ -272,7 +272,7 @@ func (e *Engine) verifyManifest(sm SignedManifest, params UpdateParams) error {
 		return fmt.Errorf("manifest size %d does not match the downloaded artifact %d",
 			sm.Manifest.Size, params.FileSize)
 	}
-	if sm.Manifest.OSName != releaseOSName() || sm.Manifest.Arch != releaseArch() {
+	if canonicalOSName(sm.Manifest.OSName) != releaseOSName() || sm.Manifest.Arch != releaseArch() {
 		return fmt.Errorf("manifest is for %s/%s, this agent runs %s/%s",
 			sm.Manifest.OSName, sm.Manifest.Arch, releaseOSName(), releaseArch())
 	}
@@ -291,6 +291,19 @@ func releaseOSName() string {
 		return "windows"
 	default:
 		return runtime.GOOS
+	}
+}
+
+// canonicalOSName folds the spellings a release row may carry into the one
+// releaseOSName returns. Rows uploaded before the server normalised os_name say
+// "darwin" for macOS, and a signed manifest covers that stored value, so a
+// literal comparison would refuse a correctly signed macOS release.
+func canonicalOSName(name string) string {
+	switch n := strings.ToLower(strings.TrimSpace(name)); n {
+	case "darwin", "macos":
+		return "macos"
+	default:
+		return n
 	}
 }
 
