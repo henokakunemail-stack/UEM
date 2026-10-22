@@ -48,10 +48,10 @@
     "semantic_hash": "aa373d858bc9d2cf276f063118971f94"
   },
   "agent/linux/inventory_linux.go": {
-    "mtime": 1791274632.1853075,
-    "seen": 1792650332.948999,
-    "ast_hash": "758ac82a75bb0635c84b156f96404ec5",
-    "semantic_hash": "758ac82a75bb0635c84b156f96404ec5"
+    "mtime": 1792652290.672768,
+    "seen": 1792653260.8192356,
+    "ast_hash": "ff381051967908f7128e5881de47d45a",
+    "semantic_hash": ""
   },
   "agent/linux/osinfo_linux.go": {
     "mtime": 1790751127.727764,
@@ -60,10 +60,10 @@
     "semantic_hash": "6616b122365a1e068812c2054e955d0e"
   },
   "agent/macos/inventory_darwin.go": {
-    "mtime": 1790730423.5677705,
-    "seen": 1792650332.9490042,
-    "ast_hash": "91eedee3cce1e4e05b331a46da5cc848",
-    "semantic_hash": "91eedee3cce1e4e05b331a46da5cc848"
+    "mtime": 1792652297.3108895,
+    "seen": 1792653260.8192413,
+    "ast_hash": "fe6b843ab9b8a0cfe07ea3cf8747006a",
+    "semantic_hash": ""
   },
   "agent/macos/osinfo_darwin.go": {
     "mtime": 1790751127.727764,
@@ -96,10 +96,10 @@
     "semantic_hash": "596e8778081b41eac9ad87eb1fd32e5f"
   },
   "agent/shared/inventory/inventory.go": {
-    "mtime": 1790730423.7661626,
-    "seen": 1792650332.9490201,
-    "ast_hash": "c686e4f4b3d74377756b10ccc5b2ca85",
-    "semantic_hash": "c686e4f4b3d74377756b10ccc5b2ca85"
+    "mtime": 1792652247.8090856,
+    "seen": 1792653260.8192608,
+    "ast_hash": "2ee545db7ee7aa6aa99242804372369a",
+    "semantic_hash": ""
   },
   "agent/shared/inventory/scheduler.go": {
     "mtime": 1792036195.1908996,
@@ -762,10 +762,10 @@
     "semantic_hash": "d785418ca949087c2126be9b6ec59d8f"
   },
   "agent/windows/inventory_windows.go": {
-    "mtime": 1791791974.2131362,
-    "seen": 1792650332.949474,
-    "ast_hash": "b0628dff40efec4cb0650e3899086b51",
-    "semantic_hash": "b0628dff40efec4cb0650e3899086b51"
+    "mtime": 1792652318.4390614,
+    "seen": 1792653260.8197386,
+    "ast_hash": "0502f3f55a8ea71a46a4a5cef6550dbe",
+    "semantic_hash": ""
   },
   "agent/windows/inventory_windows_test.go": {
     "mtime": 1791791974.2137134,
@@ -1626,10 +1626,10 @@
     "semantic_hash": "ebefaf9fa3ea586c043016f1b8e78a84"
   },
   "server/modules/device-management/inventory_diff.go": {
-    "mtime": 1790749738.7180529,
-    "seen": 1792650332.9502022,
-    "ast_hash": "1d133cd8ad086ad2483986d244d0175b",
-    "semantic_hash": "1d133cd8ad086ad2483986d244d0175b"
+    "mtime": 1792652429.7435477,
+    "seen": 1792653260.8202841,
+    "ast_hash": "99fcb89f2f4cb5a4dea722164df39db8",
+    "semantic_hash": ""
   },
   "server/modules/device-management/inventory_handler.go": {
     "mtime": 1792640422.3463557,
@@ -2262,9 +2262,9 @@
     "semantic_hash": ""
   },
   "web-console/src/components/DeviceDetailModal.tsx": {
-    "mtime": 1792471829.5747952,
-    "seen": 1792650332.950673,
-    "ast_hash": "2d39eec4796d93298796b4e0c486365e",
+    "mtime": 1792652555.7633317,
+    "seen": 1792653260.8206334,
+    "ast_hash": "f28388b08d861edc102150b26b5b91ce",
     "semantic_hash": ""
   },
   "web-console/src/components/EnrollTokenModal.tsx": {
@@ -2502,9 +2502,9 @@
     "semantic_hash": ""
   },
   "web-console/src/types/api.ts": {
-    "mtime": 1792650135.6750255,
-    "seen": 1792650332.951108,
-    "ast_hash": "5127db67d2d58c40b7574294b49e653e",
+    "mtime": 1792652486.4509041,
+    "seen": 1792653260.8209646,
+    "ast_hash": "eac2d97bb9af3f6abef80dfd5674a1ff",
     "semantic_hash": ""
   },
   "web-console/tsconfig.app.json": {
@@ -3516,9 +3516,9 @@
     "semantic_hash": ""
   },
   "web-console/src/i18n/locales/en/device_detail.json": {
-    "mtime": 1792471392.6345203,
-    "seen": 1792650332.9508052,
-    "ast_hash": "380502b0b443f3222ba584ba0deff20b",
+    "mtime": 1792652486.4498913,
+    "seen": 1792653260.8207412,
+    "ast_hash": "2767f2982da29bb2c38f76925cfc6a83",
     "semantic_hash": ""
   },
   "web-console/src/i18n/locales/en/devices.json": {
@@ -3678,9 +3678,9 @@
     "semantic_hash": ""
   },
   "web-console/src/i18n/locales/id/device_detail.json": {
-    "mtime": 1792471392.6345203,
-    "seen": 1792650332.9508665,
-    "ast_hash": "b08ecd70e71bc1c79fbb756883395008",
+    "mtime": 1792652486.4498913,
+    "seen": 1792653260.820803,
+    "ast_hash": "86742f47e7af29023bfea76b653f56d0",
     "semantic_hash": ""
   },
   "web-console/src/i18n/locales/id/devices.json": {
@@ -4650,9 +4650,9 @@
     "semantic_hash": ""
   },
   "CHANGELOG.md": {
-    "mtime": 1792651128.4441311,
-    "seen": 1792651152.6589992,
-    "ast_hash": "abfbf59b7fab692293529d3421f94935",
+    "mtime": 1792652697.1961918,
+    "seen": 1792653260.8209896,
+    "ast_hash": "2c6eb343b86adb94d5885a32a9ec9c0b",
     "semantic_hash": ""
   },
   "docs/architecture/policy-resolution.md": {
@@ -4665,6 +4665,48 @@
     "mtime": 1792650135.4751751,
     "seen": 1792650332.9499733,
     "ast_hash": "7570641fabcfcd75e69c6a1e9a4d13c4",
+    "semantic_hash": ""
+  },
+  "agent/shared/inventory/domain.go": {
+    "mtime": 1792652375.5505748,
+    "seen": 1792653260.8192558,
+    "ast_hash": "aaf2f414e7417a46650ca6c3cdcb145e",
+    "semantic_hash": ""
+  },
+  "agent/shared/inventory/domain_test.go": {
+    "mtime": 1792652370.1580794,
+    "seen": 1792653260.8192582,
+    "ast_hash": "627de12a4e527737ac00db6c5fa4e269",
+    "semantic_hash": ""
+  },
+  "agent/windows/domain_windows.go": {
+    "mtime": 1792652318.0971684,
+    "seen": 1792653260.8197289,
+    "ast_hash": "df06cd562c29e33e02dc637828fd7348",
+    "semantic_hash": ""
+  },
+  "agent/windows/domain_windows_test.go": {
+    "mtime": 1792652333.3890674,
+    "seen": 1792653260.8197315,
+    "ast_hash": "602e837a0baac74ab74df3391144e896",
+    "semantic_hash": ""
+  },
+  "server/modules/device-management/inventory_diff_domain_test.go": {
+    "mtime": 1792652417.056187,
+    "seen": 1792653260.8202863,
+    "ast_hash": "420665333cabfbb0d2b0e09e804774c3",
+    "semantic_hash": ""
+  },
+  "web-console/src/components/DeviceDetailModal.test.tsx": {
+    "mtime": 1792652516.5481925,
+    "seen": 1792653260.820631,
+    "ast_hash": "5e31dd45618073e2c905e26ed104f043",
+    "semantic_hash": ""
+  },
+  "docs/architecture/inventory-collection.md": {
+    "mtime": 1792652682.3670685,
+    "seen": 1792653260.8210127,
+    "ast_hash": "80c7a81c2a6a9cde6f308c74e4439a61",
     "semantic_hash": ""
   }
 }
