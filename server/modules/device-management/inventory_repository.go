@@ -174,30 +174,7 @@ func (r *inventoryRepository) deleteDevice(ctx context.Context, id string) error
 		return ErrNotFound
 	}
 
-	// Cascading child cleanup
-	childQueries := []string{
-		`DELETE FROM device_inventory WHERE device_id = ?`,
-		`DELETE FROM device_uninstall_tokens WHERE device_id = ?`,
-		`DELETE FROM device_group_members WHERE device_id = ?`,
-		`DELETE FROM agent_commands WHERE device_id = ?`,
-		`DELETE FROM remote_executions WHERE device_id = ?`,
-		`DELETE FROM terminal_sessions WHERE device_id = ?`,
-		`DELETE FROM deployment_tasks WHERE device_id = ?`,
-		`DELETE FROM scheduled_task_device_runs WHERE device_id = ?`,
-		`DELETE FROM device_patches WHERE device_id = ?`,
-		`DELETE FROM patch_install_jobs WHERE device_id = ?`,
-		`DELETE FROM alert_incidents WHERE device_id = ?`,
-		`DELETE FROM remote_control_sessions WHERE device_id = ?`,
-		`DELETE FROM device_update_tasks WHERE device_id = ?`,
-		`DELETE FROM maintenance_tasks WHERE device_id = ?`,
-		`DELETE FROM network_filter_device_profiles WHERE device_id = ?`,
-		`DELETE FROM license_allocations WHERE device_id = ?`,
-		`DELETE FROM device_policy_states WHERE device_id = ?`,
-		`UPDATE hardware_assets SET device_id = NULL WHERE device_id = ?`,
-		`DELETE FROM devices WHERE id = ? AND retired_at IS NOT NULL`,
-	}
-
-	for _, q := range childQueries {
+	for _, q := range devicePurgeQueries {
 		if _, err := tx.ExecContext(ctx, q, id); err != nil {
 			// Some optional tables may not be created in minimal test databases
 			if !strings.Contains(err.Error(), "no such table") {
@@ -207,6 +184,34 @@ func (r *inventoryRepository) deleteDevice(ctx context.Context, id string) error
 	}
 
 	return tx.Commit()
+}
+
+// devicePurgeQueries is the cascading child cleanup for a hard-deleted device,
+// in order. Every table named here must exist: the list used to name
+// network_filter_device_profiles and device_policy_states, which never did.
+// SQLite's "no such table" was skipped below, but PostgreSQL reports a missing
+// relation differently and aborts the transaction, so purging a device failed
+// there outright.
+var devicePurgeQueries = []string{
+	`DELETE FROM device_inventory WHERE device_id = ?`,
+	`DELETE FROM device_uninstall_tokens WHERE device_id = ?`,
+	`DELETE FROM device_group_members WHERE device_id = ?`,
+	`DELETE FROM agent_commands WHERE device_id = ?`,
+	`DELETE FROM remote_executions WHERE device_id = ?`,
+	`DELETE FROM terminal_sessions WHERE device_id = ?`,
+	`DELETE FROM deployment_tasks WHERE device_id = ?`,
+	`DELETE FROM scheduled_task_device_runs WHERE device_id = ?`,
+	`DELETE FROM device_patches WHERE device_id = ?`,
+	`DELETE FROM patch_install_jobs WHERE device_id = ?`,
+	`DELETE FROM alert_incidents WHERE device_id = ?`,
+	`DELETE FROM remote_control_sessions WHERE device_id = ?`,
+	`DELETE FROM device_update_tasks WHERE device_id = ?`,
+	`DELETE FROM maintenance_tasks WHERE device_id = ?`,
+	`DELETE FROM device_filter_states WHERE device_id = ?`,
+	`DELETE FROM license_allocations WHERE device_id = ?`,
+	`DELETE FROM device_system_policy_states WHERE device_id = ?`,
+	`UPDATE hardware_assets SET device_id = NULL WHERE device_id = ?`,
+	`DELETE FROM devices WHERE id = ? AND retired_at IS NOT NULL`,
 }
 
 // setCapabilities records which command types the agent supports, so the server
@@ -283,12 +288,13 @@ var groupUsers = []struct{ table, label string }{
 	{"software_deployments", "a software deployment"},
 	{"task_schedules", "a scheduled task"},
 	{"filter_policies", "a filter policy"},
+	{"system_policies", "a system policy"},
 	{"update_campaigns", "an update campaign"},
 	{"maintenance_jobs", "a maintenance job"},
 }
 
 // groupInUse returns the first feature still targeting this group, or an empty
-// string when nothing references it. The five tables are checked in a fixed
+// string when nothing references it. The tables are checked in a fixed
 // order so the message names the same feature every time for the same group.
 func (r *inventoryRepository) groupInUse(ctx context.Context, id string) (string, error) {
 	for _, u := range groupUsers {
