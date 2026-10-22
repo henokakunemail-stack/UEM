@@ -65,14 +65,31 @@ try {
         if ($LASTEXITCODE -eq 0) { $ReleaseExists = $true }
     } catch {}
 
+    # The release notes are the CHANGELOG.md section headed "## [<version>]",
+    # the same section the release workflow publishes.
     $Notes = "Release " + $Tag + ": Cross-platform server, agent, and setup installers."
+    $Changelog = Join-Path $RepoRoot "CHANGELOG.md"
+    if (Test-Path $Changelog) {
+        $Pattern = "(?ms)^## \[" + [regex]::Escape($CleanVer) + "\][^\n]*\n(.*?)(?=^## \[|\z)"
+        $Section = [regex]::Match((Get-Content $Changelog -Raw -Encoding UTF8), $Pattern)
+        if ($Section.Success -and $Section.Groups[1].Value.Trim()) {
+            $Notes = $Section.Groups[1].Value.Trim()
+        } else {
+            Write-Warning "CHANGELOG.md has no section for $CleanVer; using a generic release note."
+        }
+    }
+    $NotesFile = Join-Path $env:TEMP "release-notes-$CleanVer.md"
+    [IO.File]::WriteAllText($NotesFile, $Notes, (New-Object System.Text.UTF8Encoding $false))
+
     if (-not $ReleaseExists) {
         Write-Host "Creating new GitHub release for $Tag..." -ForegroundColor Cyan
-        & gh release create "$Tag" $Assets --title "Enterprise Endpoint Management $Tag" --notes $Notes @DraftFlag
+        & gh release create "$Tag" $Assets --title "Enterprise Endpoint Management $Tag" --notes-file $NotesFile @DraftFlag
     } else {
         Write-Host "Release $Tag already exists, uploading/clobbering assets..." -ForegroundColor Yellow
         & gh release upload "$Tag" $Assets --clobber
+        & gh release edit "$Tag" --notes-file $NotesFile
     }
+    Remove-Item $NotesFile -ErrorAction SilentlyContinue
 
     Write-Host "==========================================================" -ForegroundColor Green
     Write-Host "   [+] Successfully published $Tag to GitHub Releases!" -ForegroundColor Green

@@ -127,6 +127,9 @@ jobs:
     needs: [build, macos-pkg]
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
       - name: Download release assets
         uses: actions/download-artifact@v4
         with:
@@ -148,16 +151,34 @@ jobs:
           sha256sum -- * | sort -k2 > checksums.txt
           cat checksums.txt
 
+      - name: Release notes from CHANGELOG.md
+        # The section headed "## [<version>]" is the release's notes, so what
+        # changed is on the release page rather than only in the commit log.
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+          TAG: ${{ needs.build.outputs.tag }}
+        run: |
+          awk -v head="## [$VERSION]" '/^## \[/ { on = (index($0, head) == 1); next } on' CHANGELOG.md > release-notes.md
+          if ! grep -q '[^[:space:]]' release-notes.md; then
+            echo "CHANGELOG.md has no section for $VERSION; using a generic note." >&2
+            echo "Automated release $TAG with server and agent installers for Windows, Linux and macOS." > release-notes.md
+          fi
+          cat release-notes.md
+
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.build.outputs.tag }}
         run: |
           echo "Publishing release for $TAG..."
-          gh release create "$TAG" dist/* \
-            --repo "${{ github.repository }}" \
-            --title "Enterprise Endpoint Management $TAG" \
-            --notes "Automated release $TAG with server and agent installers for Windows, Linux and macOS." \
-            --draft=false \
-            --prerelease=false || \
-          gh release upload "$TAG" dist/* --repo "${{ github.repository }}" --clobber
+          if gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/* --repo "${{ github.repository }}" --clobber
+            gh release edit "$TAG" --repo "${{ github.repository }}" --notes-file release-notes.md
+          else
+            gh release create "$TAG" dist/* \
+              --repo "${{ github.repository }}" \
+              --title "Enterprise Endpoint Management $TAG" \
+              --notes-file release-notes.md \
+              --draft=false \
+              --prerelease=false
+          fi
