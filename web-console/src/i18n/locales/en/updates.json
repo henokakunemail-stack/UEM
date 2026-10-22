@@ -165,7 +165,7 @@
   "already_current": "Already on version",
   "note_up_to_date": "Was already running v{version}; nothing sent",
   "no_targets_title": "No device matched this campaign's target.",
-  "no_targets_hint": "Check the target group or device. Campaigns started before v1.5.6 did not record devices that were already on the target version; their Rollout Activity Logs show how many were checked.",
+  "no_targets_hint": "Check the target group or device. Campaigns started before the server recorded devices already on the target version show none here; their Rollout Activity Logs say how many were checked.",
   "started_no_targets": "Campaign '{name}' matched no device. Check its target.",
   "started_all_current": "Campaign '{name}': all {count} target device(s) already run this version. Nothing was sent."
 }

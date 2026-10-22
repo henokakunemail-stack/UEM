@@ -18,7 +18,8 @@ Riwayat sebelum v1.5.4 ada di `git log`.
 - **Perangkat yang di-retire ikut menjadi target kampanye update.** Ini termasuk baris pending enrollment yang di-retire otomatis. Perangkat seperti ini mendapat tugas yang tidak akan pernah selesai.
 
 ### Catatan upgrade
-- Kampanye yang dimulai sebelum versi ini tidak mencatat perangkat yang sudah di versi target. Untuk kampanye lama seperti itu, jumlah perangkat yang dicek ada di **Rollout Activity Logs**.
+- Perubahan ini hanya di server dan console; agen tidak perlu di-update. Agen v1.5.5 dan sebelumnya bekerja seperti biasa.
+- Kampanye yang dimulai sebelum server diperbarui tidak mencatat perangkat yang sudah di versi target. Untuk kampanye lama seperti itu, jumlah perangkat yang dicek ada di **Rollout Activity Logs**.
 
 ## [1.5.5] - 2026-10-22
 

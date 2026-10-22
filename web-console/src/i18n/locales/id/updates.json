@@ -165,7 +165,7 @@
   "already_current": "Sudah di versi ini",
   "note_up_to_date": "Sudah menjalankan v{version}; tidak ada yang dikirim",
   "no_targets_title": "Tidak ada perangkat yang cocok dengan target kampanye ini.",
-  "no_targets_hint": "Periksa grup atau perangkat targetnya. Kampanye yang dimulai sebelum v1.5.6 tidak mencatat perangkat yang sudah di versi target; lihat Rollout Activity Logs untuk jumlah perangkat yang dicek.",
+  "no_targets_hint": "Periksa grup atau perangkat targetnya. Kampanye yang dimulai sebelum server mencatat perangkat yang sudah di versi target tidak menampilkannya di sini; lihat Rollout Activity Logs untuk jumlah perangkat yang dicek.",
   "started_no_targets": "Kampanye '{name}' tidak menemukan perangkat yang cocok. Periksa targetnya.",
   "started_all_current": "Kampanye '{name}': semua {count} perangkat target sudah menjalankan versi ini. Tidak ada yang dikirim."
 }
