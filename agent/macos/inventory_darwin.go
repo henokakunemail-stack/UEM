@@ -3,6 +3,7 @@
 package macos
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/henokakunemail-stack/Endpoint-Manager/agent/shared/inventory"
 )
@@ -196,7 +198,22 @@ func (c *macCollector) collectOSDetail() inventory.OSDetail {
 	if arch, err := macSysctl("hw.machine"); err == nil {
 		osd.Architecture = arch
 	}
+	osd.Domain = macDomain()
 	return osd
+}
+
+// macDomain reports an Active Directory binding from `dsconfigad -show`. It is
+// local (it reads the binding configuration, it does not contact the domain),
+// but it is still bounded so a wedged opendirectoryd cannot hold up the
+// collection. A failure to run it leaves the membership unknown.
+func macDomain() *inventory.DomainMembership {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "dsconfigad", "-show").Output()
+	if err != nil {
+		return nil
+	}
+	return inventory.MacDomain(string(out))
 }
 
 // collectSoftware lists .app bundles and their Info.plist versions. Applications

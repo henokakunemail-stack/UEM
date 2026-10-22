@@ -243,6 +243,7 @@ func (c *linuxCollector) collectModel() *inventory.Model {
 // than approximated.
 func (c *linuxCollector) collectOSDetail() inventory.OSDetail {
 	var osd inventory.OSDetail
+	osd.Domain = collectDomain()
 	f, err := os.Open("/etc/os-release")
 	if err != nil {
 		return osd
@@ -269,6 +270,16 @@ func (c *linuxCollector) collectOSDetail() inventory.OSDetail {
 		osd.Architecture = utsString(u.Machine)
 	}
 	return osd
+}
+
+// collectDomain reports an sssd (realmd, ipa-client) or winbind join. Both are
+// read from their configuration files rather than by running `realm list`,
+// which starts realmd over D-Bus and can stall a collection that must not
+// block. A missing file is simply "not configured that way".
+func collectDomain() *inventory.DomainMembership {
+	sssd, _ := os.ReadFile("/etc/sssd/sssd.conf")
+	smb, _ := os.ReadFile("/etc/samba/smb.conf")
+	return inventory.LinuxDomain(string(sssd), string(smb))
 }
 
 // utsString converts a fixed-size [65]int8 array from uname to a Go string.

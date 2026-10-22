@@ -73,6 +73,10 @@ type OSDetail struct {
 	InstallDate      string `json:"install_date,omitempty"`
 	LastBootUTC      string `json:"last_boot_utc,omitempty"`
 	InstallTimestamp int64  `json:"install_timestamp,omitempty"`
+	// Domain is the machine's directory membership. Nil means this agent could
+	// not tell (or predates the field), which the console shows as unknown
+	// rather than as "not joined".
+	Domain *DomainMembership `json:"domain,omitempty"`
 }
 
 // Report is the full collection result sent to the server.

@@ -243,6 +243,7 @@ func (c *winCollector) collectOSDetail() (inventory.OSDetail, error) {
 	if osd.Architecture == "" {
 		osd.Architecture = archName() // process bitness: accurate for a 64-bit agent
 	}
+	osd.Domain = collectDomain()
 	// InstallDate in this key is a Unix timestamp written by setup.
 	if ts, _, err := k.GetIntegerValue("InstallDate"); err == nil {
 		osd.InstallTimestamp = int64(ts)
