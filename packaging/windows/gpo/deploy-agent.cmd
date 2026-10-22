@@ -36,6 +36,14 @@ if not errorlevel 1 if exist "%DATADIR%\creds.json" exit /b 0
 if not exist "%DATADIR%" mkdir "%DATADIR%"
 call :log "starting deployment on %COMPUTERNAME% (server %SERVER%, site %SITE%)"
 
+rem A TOKEN line that lost its "TOKEN=" leaves the variable undefined, and the
+rem installer would then install an agent that is never enrolled. (This check
+rem must not itself contain the text of the TOKEN line, or an edit that
+rem rewrites that line would rewrite this one too.)
+if not defined TOKEN (
+    call :log "ERROR: TOKEN is empty - check the TOKEN line at the top of deploy-agent.cmd"
+    exit /b 0
+)
 if "%TOKEN%"=="PASTE_MULTI_DEVICE_TOKEN_HERE" (
     call :log "ERROR: TOKEN is not configured in deploy-agent.cmd"
     exit /b 0
