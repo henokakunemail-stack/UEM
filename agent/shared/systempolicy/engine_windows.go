@@ -15,6 +15,8 @@ import (
 
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/registry"
+
+	"github.com/henokakunemail-stack/Endpoint-Manager/protocol"
 )
 
 type winBackend struct{}
@@ -23,176 +25,153 @@ func newPlatformBackend() platformBackend {
 	return &winBackend{}
 }
 
-func (w *winBackend) Apply(ctx context.Context, client *http.Client, serverURL string, s PolicySettings) (int, string, error) {
-	applied := 0
-	var degraded []string
+// policyKey is the part of a registry key the policy writers use.
+// registry.Key satisfies it; tests substitute a fake, so the failure paths are
+// exercised without touching this machine's registry.
+type policyKey interface {
+	SetDWordValue(name string, value uint32) error
+	SetStringValue(name, value string) error
+	DeleteValue(name string) error
+	Close() error
+}
 
-	// 1. USB Storage Restriction
-	// Strictly restricts Mass Storage Devices while leaving HID mice and keyboards fully functional
-	if err := applyUSBStoragePolicy(s.USBStorageMode); err != nil {
-		degraded = append(degraded, "usb: "+err.Error())
-	} else {
-		applied++
+// openPolicyKey opens (creating if needed) a key for writing.
+var openPolicyKey = func(root registry.Key, path string) (policyKey, error) {
+	k, _, err := registry.CreateKey(root, path, registry.SET_VALUE)
+	if err != nil {
+		return nil, err
 	}
+	return k, nil
+}
 
-	// 2. Wallpaper Policy
+// openExistingKey opens a key that must already exist (a driver's service key).
+var openExistingKey = func(root registry.Key, path string) (policyKey, error) {
+	k, err := registry.OpenKey(root, path, registry.SET_VALUE)
+	if err != nil {
+		return nil, err
+	}
+	return k, nil
+}
+
+// runCmd and ejectUSB are the side effects beyond the registry, replaceable in
+// tests for the same reason.
+var (
+	runCmd   = func(name string, args ...string) error { return exec.Command(name, args...).Run() }
+	ejectUSB = ejectMountedUSBStorage
+)
+
+func (w *winBackend) Apply(ctx context.Context, client *http.Client, serverURL string, s PolicySettings) ([]protocol.SettingResult, error) {
+	var out []protocol.SettingResult
+
+	// USB storage: mass storage only; HID mice and keyboards are untouched.
+	out = append(out, outcome(protocol.SettingUSBStorageMode, applyUSBStoragePolicy(s.USBStorageMode)))
+
 	if s.WallpaperEnabled && s.WallpaperURL != "" {
-		if err := applyWallpaper(client, serverURL, s.WallpaperURL, s.WallpaperStyle, s.WallpaperLocked); err != nil {
-			degraded = append(degraded, "wallpaper: "+err.Error())
-		} else {
-			applied++
-		}
+		out = append(out, outcome(protocol.SettingWallpaperEnabled,
+			applyWallpaper(client, serverURL, s.WallpaperURL, s.WallpaperStyle, s.WallpaperLocked)))
 	} else {
 		revertWallpaper()
+		out = append(out, applied(protocol.SettingWallpaperEnabled))
 	}
 
-	// 3. Inactivity Screen Lock
-	if err := applyInactivityLock(s.InactivityTimeoutMinutes); err != nil {
-		degraded = append(degraded, "inactivity: "+err.Error())
-	} else {
-		applied++
+	out = append(out, outcome(protocol.SettingInactivityTimeoutMinutes, applyInactivityLock(s.InactivityTimeoutMinutes)))
+
+	// Each restriction is its own setting, so one refused value no longer
+	// marks the other three as failed too.
+	restrictions := applyRestrictions(s)
+	for _, key := range []string{protocol.SettingDisableTaskMgr, protocol.SettingDisableCMD,
+		protocol.SettingDisableRegistryTools, protocol.SettingDisableControlPanel} {
+		out = append(out, outcome(key, restrictions[key]))
 	}
 
-	// 4. Administrative Restrictions (GPO)
-	if err := applyRestrictions(s); err != nil {
-		degraded = append(degraded, "restrictions: "+err.Error())
-	} else {
-		applied++
-	}
+	out = append(out,
+		outcome(protocol.SettingWindowsUpdateMode, applyWindowsUpdate(s.WindowsUpdateMode)),
+		outcome(protocol.SettingFirewallEnabled, applyFirewall(s.FirewallEnabled)),
+		outcome(protocol.SettingDefenderProtectionEnabled, applyDefenderProtection(s.DefenderProtectionEnabled)),
+		outcome(protocol.SettingDisablePowerShell, applyPowerShellPolicy(s.DisablePowerShell)),
+		outcome(protocol.SettingDisableAutoplay, applyAutoplayPolicy(s.DisableAutoplay)),
+	)
 
-	// 5. Windows Update
-	if err := applyWindowsUpdate(s.WindowsUpdateMode); err != nil {
-		degraded = append(degraded, "update: "+err.Error())
-	} else {
-		applied++
-	}
+	screensaver := applyScreenSaverPolicy(s.ScreenSaverTimeoutMinutes, s.ScreenSaverPasswordRequired)
+	out = append(out,
+		outcome(protocol.SettingScreenSaverTimeoutMinutes, screensaver),
+		outcome(protocol.SettingScreenSaverPasswordRequired, screensaver),
+	)
 
-	// 6. Windows Firewall Enforcement
-	if err := applyFirewall(s.FirewallEnabled); err != nil {
-		degraded = append(degraded, "firewall: "+err.Error())
-	} else if s.FirewallEnabled {
-		applied++
-	}
-
-	// 7. Windows Defender Real-time Protection
-	if err := applyDefenderProtection(s.DefenderProtectionEnabled); err != nil {
-		degraded = append(degraded, "defender: "+err.Error())
-	} else if s.DefenderProtectionEnabled {
-		applied++
-	}
-
-	// 8. PowerShell Script Restriction
-	if err := applyPowerShellPolicy(s.DisablePowerShell); err != nil {
-		degraded = append(degraded, "powershell: "+err.Error())
-	} else if s.DisablePowerShell {
-		applied++
-	}
-
-	// 9. Autoplay / Autorun Restriction
-	if err := applyAutoplayPolicy(s.DisableAutoplay); err != nil {
-		degraded = append(degraded, "autoplay: "+err.Error())
-	} else if s.DisableAutoplay {
-		applied++
-	}
-
-	// 10. Screen Saver Security Policy
-	if err := applyScreenSaverPolicy(s.ScreenSaverTimeoutMinutes, s.ScreenSaverPasswordRequired); err != nil {
-		degraded = append(degraded, "screensaver: "+err.Error())
-	} else if s.ScreenSaverTimeoutMinutes > 0 || s.ScreenSaverPasswordRequired {
-		applied++
-	}
-
-	// 11. Managed Local Administrator Account
 	if s.AdminAccountEnabled && s.AdminAccountUsername != "" && s.AdminAccountPassword != "" {
-		if err := applyAdminAccountPolicy(s); err != nil {
-			degraded = append(degraded, "admin_account: "+err.Error())
-		} else {
-			applied++
-		}
+		out = append(out, outcome(protocol.SettingAdminAccountEnabled, applyAdminAccountPolicy(s)))
+	} else {
+		out = append(out, applied(protocol.SettingAdminAccountEnabled))
 	}
-
-	degradedMsg := ""
-	if len(degraded) > 0 {
-		degradedMsg = strings.Join(degraded, "; ")
-	}
-
-	return applied, degradedMsg, nil
+	return out, nil
 }
 
 // applyUSBStoragePolicy configures USB mass storage driver and Removable Storage Group Policy.
 // Mouse and keyboard use hidusb.sys, kbdclass.sys, mouclass.sys and remain 100% active.
 func applyUSBStoragePolicy(mode USBStorageMode) error {
-	var errs []string
+	var errs regErrs
 
 	// A. Service driver Start: 3=Demand/Enabled, 4=Disabled
-	usbstorKey, err := registry.OpenKey(registry.LOCAL_MACHINE, `SYSTEM\CurrentControlSet\Services\USBSTOR`, registry.SET_VALUE)
-	if err != nil {
-		errs = append(errs, "open USBSTOR key: "+err.Error())
+	if usbstorKey, err := openExistingKey(registry.LOCAL_MACHINE, `SYSTEM\CurrentControlSet\Services\USBSTOR`); err != nil {
+		errs.add("open USBSTOR key", err)
 	} else {
-		defer usbstorKey.Close()
+		start := uint32(3)
 		if mode == USBStorageBlock {
-			if err := usbstorKey.SetDWordValue("Start", 4); err != nil {
-				errs = append(errs, "set USBSTOR Start=4: "+err.Error())
-			}
-		} else {
-			if err := usbstorKey.SetDWordValue("Start", 3); err != nil {
-				errs = append(errs, "set USBSTOR Start=3: "+err.Error())
-			}
+			start = 4
 		}
+		errs.add(fmt.Sprintf("set USBSTOR Start=%d", start), usbstorKey.SetDWordValue("Start", start))
+		usbstorKey.Close()
 	}
 
-	// B. RemovableStorageDevices policy for Disk Drives GUID {53f5630d-b6bf-11d0-94f2-00a0c91efb8b}
-	removableKey, _, err := registry.CreateKey(
-		registry.LOCAL_MACHINE,
-		`SOFTWARE\Policies\Microsoft\Windows\RemovableStorageDevices\{53f5630d-b6bf-11d0-94f2-00a0c91efb8b}`,
-		registry.SET_VALUE,
-	)
-	if err != nil {
-		errs = append(errs, "create RemovableStorageDevices key: "+err.Error())
+	// B. RemovableStorageDevices policy for Disk Drives GUID {53f5630d-b6bf-11d0-94f2-00a0c91efb8b}.
+	// These writes were discarded, so a refused Deny_Write still reported the
+	// read-only mode as applied.
+	if removableKey, err := openPolicyKey(registry.LOCAL_MACHINE,
+		`SOFTWARE\Policies\Microsoft\Windows\RemovableStorageDevices\{53f5630d-b6bf-11d0-94f2-00a0c91efb8b}`); err != nil {
+		errs.add("create RemovableStorageDevices key", err)
 	} else {
-		defer removableKey.Close()
+		deny := map[string]uint32{}
 		switch mode {
 		case USBStorageBlock:
-			_ = removableKey.SetDWordValue("Deny_Read", 1)
-			_ = removableKey.SetDWordValue("Deny_Write", 1)
-			_ = removableKey.SetDWordValue("Deny_Execute", 1)
+			deny = map[string]uint32{"Deny_Read": 1, "Deny_Write": 1, "Deny_Execute": 1}
 		case USBStorageReadOnly:
-			_ = removableKey.SetDWordValue("Deny_Read", 0)
-			_ = removableKey.SetDWordValue("Deny_Write", 1)
-			_ = removableKey.SetDWordValue("Deny_Execute", 0)
-		default: // USBStorageAllow
-			_ = removableKey.DeleteValue("Deny_Read")
-			_ = removableKey.DeleteValue("Deny_Write")
-			_ = removableKey.DeleteValue("Deny_Execute")
+			deny = map[string]uint32{"Deny_Read": 0, "Deny_Write": 1, "Deny_Execute": 0}
 		}
+		for _, name := range []string{"Deny_Read", "Deny_Write", "Deny_Execute"} {
+			if v, ok := deny[name]; ok {
+				errs.add(name, removableKey.SetDWordValue(name, v))
+			} else {
+				errs.add(name, removableKey.DeleteValue(name))
+			}
+		}
+		removableKey.Close()
 	}
 
 	// C. StorageDevicePolicies WriteProtect (for USB read-only mode)
-	storageKey, _, err := registry.CreateKey(
-		registry.LOCAL_MACHINE,
-		`SYSTEM\CurrentControlSet\Control\StorageDevicePolicies`,
-		registry.SET_VALUE,
-	)
-	if err == nil {
-		defer storageKey.Close()
+	if storageKey, err := openPolicyKey(registry.LOCAL_MACHINE, `SYSTEM\CurrentControlSet\Control\StorageDevicePolicies`); err != nil {
+		errs.add("open StorageDevicePolicies key", err)
+	} else {
+		protect := uint32(0)
 		if mode == USBStorageReadOnly {
-			_ = storageKey.SetDWordValue("WriteProtect", 1)
-		} else {
-			_ = storageKey.SetDWordValue("WriteProtect", 0)
+			protect = 1
 		}
+		errs.add("WriteProtect", storageKey.SetDWordValue("WriteProtect", protect))
+		storageKey.Close()
+	}
+
+	if err := errs.err(); err != nil {
+		return err
 	}
 
 	// D. Force Group Policy refresh so RemovableStorageDevices takes effect immediately
-	// (without this, policy only applies on next GP cycle ~90 min or reboot)
-	_ = exec.Command("gpupdate", "/force", "/wait:0").Run()
+	// (without this, policy only applies on next GP cycle ~90 min or reboot). Only
+	// once the policy is actually written: refreshing a half-written policy
+	// enforces whatever half got through.
+	_ = runCmd("gpupdate", "/force", "/wait:0")
 
 	// E. Eject currently mounted USB storage drives so block is enforced instantly
 	if mode == USBStorageBlock {
-		ejectMountedUSBStorage()
-	}
-
-	if len(errs) > 0 {
-		return fmt.Errorf("usb policy partial failure: %s", strings.Join(errs, "; "))
+		ejectUSB()
 	}
 	return nil
 }
@@ -297,16 +276,17 @@ func applyWallpaper(client *http.Client, serverURL, wallpaperURL string, style W
 		styleCode = "10" // Fill
 	}
 
+	// The registry writes below used to be discarded, so a wallpaper the policy
+	// key refused still reported as enforced.
+	var errs regErrs
+
 	// Set GPO Group Policy registry key in Policies\System
-	sysPolKey, _, err := registry.CreateKey(
-		registry.LOCAL_MACHINE,
-		`SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System`,
-		registry.SET_VALUE,
-	)
-	if err == nil {
-		defer sysPolKey.Close()
-		_ = sysPolKey.SetStringValue("Wallpaper", destPath)
-		_ = sysPolKey.SetStringValue("WallpaperStyle", styleCode)
+	if sysPolKey, err := openPolicyKey(registry.LOCAL_MACHINE, `SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System`); err != nil {
+		errs.add("open Policies\\System", err)
+	} else {
+		errs.add("Wallpaper", sysPolKey.SetStringValue("Wallpaper", destPath))
+		errs.add("WallpaperStyle", sysPolKey.SetStringValue("WallpaperStyle", styleCode))
+		sysPolKey.Close()
 	}
 
 	// Lock or unlock wallpaper changes via GPO
@@ -314,29 +294,32 @@ func applyWallpaper(client *http.Client, serverURL, wallpaperURL string, style W
 		`SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\ActiveDesktop`,
 		`SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System`,
 	} {
-		if k, _, err := registry.CreateKey(registry.LOCAL_MACHINE, keyPath, registry.SET_VALUE); err == nil {
-			if locked {
-				_ = k.SetDWordValue("NoChangingWallPaper", 1)
-				_ = k.SetDWordValue("NoChangingWallpaper", 1)
-			} else {
-				_ = k.DeleteValue("NoChangingWallPaper")
-				_ = k.DeleteValue("NoChangingWallpaper")
-			}
-			k.Close()
+		k, err := openPolicyKey(registry.LOCAL_MACHINE, keyPath)
+		if err != nil {
+			errs.add("open "+keyPath, err)
+			continue
 		}
+		for _, name := range []string{"NoChangingWallPaper", "NoChangingWallpaper"} {
+			if locked {
+				errs.add(name, k.SetDWordValue(name, 1))
+			} else {
+				errs.add(name, k.DeleteValue(name))
+			}
+		}
+		k.Close()
 	}
 
 	// Set Default user desktop for new logins
-	defDesktopKey, _, err := registry.CreateKey(
-		registry.USERS,
-		`.DEFAULT\Control Panel\Desktop`,
-		registry.SET_VALUE,
-	)
-	if err == nil {
-		defer defDesktopKey.Close()
-		_ = defDesktopKey.SetStringValue("Wallpaper", destPath)
-		_ = defDesktopKey.SetStringValue("WallpaperStyle", styleCode)
-		_ = defDesktopKey.SetStringValue("TileWallpaper", tileCode)
+	if defDesktopKey, err := openPolicyKey(registry.USERS, `.DEFAULT\Control Panel\Desktop`); err != nil {
+		errs.add("open .DEFAULT desktop", err)
+	} else {
+		errs.add("default Wallpaper", defDesktopKey.SetStringValue("Wallpaper", destPath))
+		errs.add("default WallpaperStyle", defDesktopKey.SetStringValue("WallpaperStyle", styleCode))
+		errs.add("default TileWallpaper", defDesktopKey.SetStringValue("TileWallpaper", tileCode))
+		defDesktopKey.Close()
+	}
+	if err := errs.err(); err != nil {
+		return err
 	}
 
 	// Live refresh interactive desktop wallpaper via Win32 API
@@ -399,53 +382,49 @@ func revertWallpaper() {
 }
 
 func applyInactivityLock(minutes int) error {
-	k, _, err := registry.CreateKey(
-		registry.LOCAL_MACHINE,
-		`SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System`,
-		registry.SET_VALUE,
-	)
+	k, err := openPolicyKey(registry.LOCAL_MACHINE, `SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System`)
 	if err != nil {
 		return err
 	}
 	defer k.Close()
 
+	var errs regErrs
 	if minutes > 0 {
-		secs := uint32(minutes * 60)
-		return k.SetDWordValue("InactivityTimeoutSecs", secs)
+		errs.add("InactivityTimeoutSecs", k.SetDWordValue("InactivityTimeoutSecs", uint32(minutes*60)))
+	} else {
+		errs.add("InactivityTimeoutSecs", k.DeleteValue("InactivityTimeoutSecs"))
 	}
-
-	_ = k.DeleteValue("InactivityTimeoutSecs")
-	return nil
+	return errs.err()
 }
 
-func applyRestrictions(s PolicySettings) error {
-	var errs []string
+// applyRestrictions writes the four restriction settings and returns the
+// error of each by setting key (nil when it applied). Every write used to be
+// discarded through setOrDeleteDWord, so a refused DisableTaskMgr reported the
+// restrictions as enforced.
+func applyRestrictions(s PolicySettings) map[string]error {
+	errs := map[string]*regErrs{
+		protocol.SettingDisableTaskMgr:       {},
+		protocol.SettingDisableRegistryTools: {},
+		protocol.SettingDisableCMD:           {},
+		protocol.SettingDisableControlPanel:  {},
+	}
 
 	// 1. Task Manager & Registry Editor
-	kSys, _, err := registry.CreateKey(
-		registry.LOCAL_MACHINE,
-		`SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System`,
-		registry.SET_VALUE,
-	)
-	if err != nil {
-		errs = append(errs, "policies/system: "+err.Error())
+	if kSys, err := openPolicyKey(registry.LOCAL_MACHINE, `SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System`); err != nil {
+		errs[protocol.SettingDisableTaskMgr].add("open Policies\\System", err)
+		errs[protocol.SettingDisableRegistryTools].add("open Policies\\System", err)
 	} else {
-		defer kSys.Close()
-		setOrDeleteDWord(kSys, "DisableTaskMgr", s.DisableTaskMgr, 1)
-		setOrDeleteDWord(kSys, "DisableRegistryTools", s.DisableRegistryTools, 1)
+		errs[protocol.SettingDisableTaskMgr].add("DisableTaskMgr", setOrDeleteDWord(kSys, "DisableTaskMgr", s.DisableTaskMgr, 1))
+		errs[protocol.SettingDisableRegistryTools].add("DisableRegistryTools", setOrDeleteDWord(kSys, "DisableRegistryTools", s.DisableRegistryTools, 1))
+		kSys.Close()
 	}
 
 	// 2. Command Prompt (value 2 = disable interactive CMD, allow batch files so agent scripts continue)
-	kCmd, _, err := registry.CreateKey(
-		registry.LOCAL_MACHINE,
-		`SOFTWARE\Policies\Microsoft\Windows\System`,
-		registry.SET_VALUE,
-	)
-	if err != nil {
-		errs = append(errs, "policies/system cmd: "+err.Error())
+	if kCmd, err := openPolicyKey(registry.LOCAL_MACHINE, `SOFTWARE\Policies\Microsoft\Windows\System`); err != nil {
+		errs[protocol.SettingDisableCMD].add("open Policies\\Windows\\System", err)
 	} else {
-		defer kCmd.Close()
-		setOrDeleteDWord(kCmd, "DisableCMD", s.DisableCMD, 2)
+		errs[protocol.SettingDisableCMD].add("DisableCMD", setOrDeleteDWord(kCmd, "DisableCMD", s.DisableCMD, 2))
+		kCmd.Close()
 	}
 
 	// 3. Control Panel & PC Settings (set both keys for classic and modern Windows 10/11 coverage)
@@ -453,51 +432,51 @@ func applyRestrictions(s PolicySettings) error {
 		`SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer`,
 		`SOFTWARE\Policies\Microsoft\Windows\Explorer`,
 	} {
-		kExp, _, err := registry.CreateKey(registry.LOCAL_MACHINE, p, registry.SET_VALUE)
-		if err == nil {
-			defer kExp.Close()
-			setOrDeleteDWord(kExp, "NoControlPanel", s.DisableControlPanel, 1)
+		kExp, err := openPolicyKey(registry.LOCAL_MACHINE, p)
+		if err != nil {
+			errs[protocol.SettingDisableControlPanel].add("open "+p, err)
+			continue
 		}
+		errs[protocol.SettingDisableControlPanel].add("NoControlPanel", setOrDeleteDWord(kExp, "NoControlPanel", s.DisableControlPanel, 1))
+		kExp.Close()
 	}
 
-	if len(errs) > 0 {
-		return fmt.Errorf("restrictions: %s", strings.Join(errs, "; "))
+	out := make(map[string]error, len(errs))
+	for key, e := range errs {
+		out[key] = e.err()
 	}
-	return nil
+	return out
 }
 
-func setOrDeleteDWord(k registry.Key, name string, enable bool, val uint32) {
+func setOrDeleteDWord(k policyKey, name string, enable bool, val uint32) error {
 	if enable {
-		_ = k.SetDWordValue(name, val)
-	} else {
-		_ = k.DeleteValue(name)
+		return k.SetDWordValue(name, val)
 	}
+	return k.DeleteValue(name)
 }
 
 func applyWindowsUpdate(mode WindowsUpdateMode) error {
-	k, _, err := registry.CreateKey(
-		registry.LOCAL_MACHINE,
-		`SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU`,
-		registry.SET_VALUE,
-	)
+	k, err := openPolicyKey(registry.LOCAL_MACHINE, `SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU`)
 	if err != nil {
 		return err
 	}
 	defer k.Close()
 
+	// These writes were discarded: a refused AUOptions still reported the
+	// update policy as applied.
+	var errs regErrs
 	switch mode {
 	case WindowsUpdateAutoInstall:
-		_ = k.SetDWordValue("NoAutoUpdate", 0)
-		_ = k.SetDWordValue("AUOptions", 4) // Auto download and schedule install
+		errs.add("NoAutoUpdate", k.SetDWordValue("NoAutoUpdate", 0))
+		errs.add("AUOptions", k.SetDWordValue("AUOptions", 4)) // Auto download and schedule install
 	case WindowsUpdateNotifyOnly:
-		_ = k.SetDWordValue("NoAutoUpdate", 0)
-		_ = k.SetDWordValue("AUOptions", 2) // Notify before download
+		errs.add("NoAutoUpdate", k.SetDWordValue("NoAutoUpdate", 0))
+		errs.add("AUOptions", k.SetDWordValue("AUOptions", 2)) // Notify before download
 	default:
-		_ = k.DeleteValue("NoAutoUpdate")
-		_ = k.DeleteValue("AUOptions")
+		errs.add("NoAutoUpdate", k.DeleteValue("NoAutoUpdate"))
+		errs.add("AUOptions", k.DeleteValue("AUOptions"))
 	}
-
-	return nil
+	return errs.err()
 }
 
 // applyFirewall enforces Windows Defender Firewall across all network profiles.
@@ -604,30 +583,33 @@ func applyAutoplayPolicy(disabled bool) error {
 
 // applyScreenSaverPolicy configures screen saver security and password protection on resume
 func applyScreenSaverPolicy(timeoutMinutes int, passwordRequired bool) error {
-	k, _, err := registry.CreateKey(registry.LOCAL_MACHINE, `SOFTWARE\Policies\Microsoft\Windows\Control Panel\Desktop`, registry.SET_VALUE)
+	k, err := openPolicyKey(registry.LOCAL_MACHINE, `SOFTWARE\Policies\Microsoft\Windows\Control Panel\Desktop`)
 	if err != nil {
 		return err
 	}
 	defer k.Close()
 
+	// These writes were discarded, so a refused ScreenSaverIsSecure reported
+	// the password-on-resume rule as enforced.
+	var errs regErrs
 	if timeoutMinutes > 0 {
-		_ = k.SetStringValue("ScreenSaveActive", "1")
-		_ = k.SetStringValue("ScreenSaveTimeOut", fmt.Sprintf("%d", timeoutMinutes*60))
+		errs.add("ScreenSaveActive", k.SetStringValue("ScreenSaveActive", "1"))
+		errs.add("ScreenSaveTimeOut", k.SetStringValue("ScreenSaveTimeOut", fmt.Sprintf("%d", timeoutMinutes*60)))
 	} else {
-		_ = k.DeleteValue("ScreenSaveTimeOut")
+		errs.add("ScreenSaveTimeOut", k.DeleteValue("ScreenSaveTimeOut"))
 	}
 
 	if passwordRequired {
-		_ = k.SetStringValue("ScreenSaveActive", "1")
-		_ = k.SetStringValue("ScreenSaverIsSecure", "1")
+		errs.add("ScreenSaveActive", k.SetStringValue("ScreenSaveActive", "1"))
+		errs.add("ScreenSaverIsSecure", k.SetStringValue("ScreenSaverIsSecure", "1"))
 	} else {
-		_ = k.DeleteValue("ScreenSaverIsSecure")
+		errs.add("ScreenSaverIsSecure", k.DeleteValue("ScreenSaverIsSecure"))
 	}
 
 	if timeoutMinutes == 0 && !passwordRequired {
-		_ = k.DeleteValue("ScreenSaveActive")
+		errs.add("ScreenSaveActive", k.DeleteValue("ScreenSaveActive"))
 	}
-	return nil
+	return errs.err()
 }
 
 // applyAdminAccountPolicy provisions or updates a managed local administrator account.

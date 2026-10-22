@@ -101,7 +101,7 @@ func TestEngine_Report(t *testing.T) {
 		AdminAccountUsername: "sysadmin",
 		AdminAccountPassword: "S3cret-For-Endpoints!",
 	}
-	err := engine.Report(context.Background(), "ver-abc", "synced", s, "")
+	err := engine.Report(context.Background(), "ver-abc", "synced", s, "", nil)
 	if err != nil {
 		t.Fatalf("engine report failed: %v", err)
 	}

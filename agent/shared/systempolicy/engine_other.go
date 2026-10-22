@@ -10,8 +10,9 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
-	"strconv"
 	"strings"
+
+	"github.com/henokakunemail-stack/Endpoint-Manager/protocol"
 )
 
 type nonWinBackend struct{}
@@ -20,51 +21,27 @@ func newPlatformBackend() platformBackend {
 	return &nonWinBackend{}
 }
 
-func (n *nonWinBackend) Apply(ctx context.Context, client *http.Client, serverURL string, s PolicySettings) (int, string, error) {
-	applied := 0
-	var degraded []string
+// Apply runs the Linux/macOS decisions (unix_policy.go) against the real
+// machine.
+func (n *nonWinBackend) Apply(ctx context.Context, _ *http.Client, _ string, s PolicySettings) ([]protocol.SettingResult, error) {
+	return unixResults(ctx, s, runtime.GOOS, realUnixSys{}), nil
+}
 
-	// Linux USB Storage Restriction
-	switch s.USBStorageMode {
-	case USBStorageBlock:
-		// Blacklist usb-storage and uas kernel modules to block flash drives and external disks
-		_ = os.WriteFile("/etc/modprobe.d/endpoint-block-usb.conf", []byte("blacklist usb_storage\nblacklist uas\n"), 0644)
-		_ = exec.CommandContext(ctx, "modprobe", "-r", "uas").Run()
-		_ = exec.CommandContext(ctx, "modprobe", "-r", "usb_storage").Run()
-		applied++
-	case USBStorageAllow:
-		_ = os.Remove("/etc/modprobe.d/endpoint-block-usb.conf")
+// realUnixSys is unixSys on the actual machine.
+type realUnixSys struct{}
+
+func (realUnixSys) WriteFile(path string, data []byte) error { return os.WriteFile(path, data, 0o644) }
+func (realUnixSys) Remove(path string) error                 { return os.Remove(path) }
+
+func (realUnixSys) Run(ctx context.Context, name string, args ...string) error {
+	if out, err := exec.CommandContext(ctx, name, args...).CombinedOutput(); err != nil {
+		return fmt.Errorf("%s: %w (%s)", name, err, strings.TrimSpace(string(out)))
 	}
+	return nil
+}
 
-	// Linux / GNOME desktop background (if gsettings available)
-	if s.WallpaperEnabled && s.WallpaperURL != "" {
-		_ = exec.CommandContext(ctx, "gsettings", "set", "org.gnome.desktop.background", "picture-uri", s.WallpaperURL).Run()
-		applied++
-	}
-
-	// Linux / GNOME inactivity lock (if gsettings available)
-	if s.InactivityTimeoutMinutes > 0 {
-		idleSecs := strconv.Itoa(s.InactivityTimeoutMinutes * 60)
-		_ = exec.CommandContext(ctx, "gsettings", "set", "org.gnome.desktop.session", "idle-delay", idleSecs).Run()
-		_ = exec.CommandContext(ctx, "gsettings", "set", "org.gnome.desktop.screensaver", "lock-enabled", "true").Run()
-		applied++
-	}
-
-	// Managed Local Administrator Account (Linux & macOS)
-	if s.AdminAccountEnabled && s.AdminAccountUsername != "" && s.AdminAccountPassword != "" {
-		if err := applyAdminAccountNonWindows(ctx, s); err != nil {
-			degraded = append(degraded, "admin_account: "+err.Error())
-		} else {
-			applied++
-		}
-	}
-
-	degradedMsg := ""
-	if len(degraded) > 0 {
-		degradedMsg = strings.Join(degraded, "; ")
-	}
-
-	return applied, degradedMsg, nil
+func (realUnixSys) ProvisionAdmin(ctx context.Context, s PolicySettings) error {
+	return applyAdminAccountNonWindows(ctx, s)
 }
 
 func applyAdminAccountNonWindows(ctx context.Context, s PolicySettings) error {

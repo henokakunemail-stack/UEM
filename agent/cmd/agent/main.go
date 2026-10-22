@@ -887,17 +887,18 @@ func runAgent(serverURL, enrollToken, enrollSite, credsPath string, heartbeatSec
 
 		go func() {
 			defer guardAgentGoroutine("system_policy.apply")
-			_, degraded, err := sysPolicyEngine.Apply(context.Background(), p.PolicyVersion, p.Settings)
-			status, errMsg := "synced", ""
-			switch {
-			case err != nil:
+			results, err := sysPolicyEngine.Apply(context.Background(), p.PolicyVersion, p.Settings)
+			// The summary is for servers that predate per-setting results;
+			// a current server derives the status from the results.
+			status, errMsg := systempolicy.Summarize(results)
+			if err != nil {
 				status, errMsg = "failed", err.Error()
 				log.Error().Err(err).Msg("apply system policy failed")
-			case degraded != "":
-				status, errMsg = "failed", degraded
-				log.Warn().Str("reason", degraded).Msg("system policy applied with degraded items")
 			}
-			_ = sysPolicyEngine.Report(context.Background(), p.PolicyVersion, status, p.Settings, errMsg)
+			// A lost report used to be discarded, leaving the device pending.
+			if rerr := sysPolicyEngine.Report(context.Background(), p.PolicyVersion, status, p.Settings, errMsg, results); rerr != nil {
+				log.Warn().Err(rerr).Str("version", p.PolicyVersion).Msg("report system policy result")
+			}
 		}()
 
 		return map[string]string{"status": "applying", "version": p.PolicyVersion}
