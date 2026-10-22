@@ -98,12 +98,22 @@ export interface SoftwareInfo {
   product_code?: string
 }
 
+// Directory membership the agent reports in the inventory's os section.
+// Absent when the agent could not tell or predates the field.
+export interface DomainMembership {
+  joined: boolean
+  type: 'active_directory' | 'entra_id' | 'hybrid' | 'freeipa' | 'other' | 'workgroup' | 'none'
+  name?: string
+  tenant?: string
+}
+
 export interface OSDetailInfo {
   edition?: string
   build_number?: string
   install_date?: string
   last_boot_utc?: string
   architecture?: string
+  domain?: DomainMembership
 }
 
 export interface DeviceInventorySnapshot {

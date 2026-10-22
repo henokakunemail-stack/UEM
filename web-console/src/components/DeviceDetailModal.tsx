@@ -5,6 +5,7 @@ import {
   Database,
   HardDrive,
   Info,
+  Landmark,
   Layers,
   Network,
   RefreshCw,
@@ -346,6 +347,7 @@ export const DeviceDetailModal: React.FC<DeviceDetailModalProps> = ({ device, on
   }
 
   const hw = inventory?.hw || inventory?.hardware
+  const domain = (inventory?.os || inventory?.os_detail)?.domain
   const snapshotAge = inventory?.collected_at
     ? now - new Date(inventory.collected_at).getTime()
     : null
@@ -533,6 +535,36 @@ export const DeviceDetailModal: React.FC<DeviceDetailModalProps> = ({ device, on
                     <div className="spec-meta">
                       <span>{t('device_detail.serial', { value: hw?.model?.serial_number || t('device_detail.na') })}</span>
                     </div>
+                  </div>
+
+                  <div className="spec-card" data-testid="domain-card">
+                    <div className="spec-header">
+                      <Landmark size={16} />
+                      <h4>{t('device_detail.domain')}</h4>
+                    </div>
+                    {domain ? (
+                      <>
+                        <p className="spec-val">
+                          <span className={`status-pill ${domain.joined ? 'online' : 'offline'}`}>
+                            {domain.joined ? t('device_detail.domain_joined') : t('device_detail.domain_not_joined')}
+                          </span>{' '}
+                          {domain.joined ? domain.name : ''}
+                        </p>
+                        <div className="spec-meta">
+                          <span>{t(`device_detail.domain_type_${domain.type}`, { name: domain.name || '' })}</span>
+                          {domain.tenant && domain.type === 'hybrid' && (
+                            <span>{t('device_detail.domain_tenant', { name: domain.tenant })}</span>
+                          )}
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <p className="spec-val">{t('device_detail.domain_unknown')}</p>
+                        <div className="spec-meta">
+                          <span>{t('device_detail.domain_unknown_hint')}</span>
+                        </div>
+                      </>
+                    )}
                   </div>
                 </div>
 
