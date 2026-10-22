@@ -413,6 +413,22 @@ export interface FilterRuleDTO {
   created_at: string
 }
 
+// One submitted line of a bulk import, in input order. reason is a stable code
+// (filter.reason_<code>), never English text.
+export interface BulkRuleResultDTO {
+  input: string
+  pattern?: string
+  status: 'added' | 'duplicate' | 'invalid'
+  reason?: string
+}
+
+export interface BulkRuleResponseDTO {
+  added: number
+  duplicates: number
+  invalid: number
+  results: BulkRuleResultDTO[]
+}
+
 export interface DeviceFilterStateDTO {
   device_id: string
   policy_version: string

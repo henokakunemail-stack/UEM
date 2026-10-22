@@ -107,6 +107,9 @@ func (h *Handler) Register(r chi.Router) {
 		Post("/api/filter/policies/{id}/rules", h.addRule)
 
 	r.With(h.authMiddleware, rbac.RequireRole(rbac.RoleAdmin)).
+		Post("/api/filter/policies/{id}/rules/bulk", h.addRulesBulk)
+
+	r.With(h.authMiddleware, rbac.RequireRole(rbac.RoleAdmin)).
 		Delete("/api/filter/rules/{ruleId}", h.deleteRule)
 
 	// Device Filter Sync & Status
@@ -423,8 +426,18 @@ func (h *Handler) addRule(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	if req.Pattern == "" {
-		writeErr(w, http.StatusBadRequest, "pattern is required")
+	pattern, reason := NormalizeDomainPattern(req.Pattern)
+	if reason != "" {
+		writeErrCode(w, http.StatusBadRequest, reason, "pattern is not a domain the agent can enforce: "+reason)
+		return
+	}
+	existing, err := h.existingPatterns(r.Context(), policyID)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if existing[pattern] {
+		writeErrCode(w, http.StatusConflict, ReasonDuplicate, pattern+" is already in this policy")
 		return
 	}
 	var action string
@@ -452,7 +465,7 @@ func (h *Handler) addRule(w http.ResponseWriter, r *http.Request) {
 	rule := &FilterRule{
 		PolicyID: policyID,
 		RuleType: "domain",
-		Pattern:  req.Pattern,
+		Pattern:  pattern,
 		Action:   action,
 		Category: req.Category,
 	}
@@ -472,6 +485,131 @@ func (h *Handler) addRule(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusCreated, rule)
+}
+
+// existingPatterns is the policy's rules in the form the agent enforces them,
+// so "Example.com" already in the list is a duplicate of "example.com". Rules
+// stored before patterns were validated may not normalize; those are compared
+// as stored, lower-cased.
+func (h *Handler) existingPatterns(ctx context.Context, policyID string) (map[string]bool, error) {
+	rules, err := h.repo.ListRulesByPolicy(ctx, policyID)
+	if err != nil {
+		return nil, err
+	}
+	seen := make(map[string]bool, len(rules))
+	for _, r := range rules {
+		if p, reason := NormalizeDomainPattern(r.Pattern); reason == "" {
+			seen[p] = true
+		} else {
+			seen[strings.ToLower(strings.TrimSpace(r.Pattern))] = true
+		}
+	}
+	return seen, nil
+}
+
+// Bulk import limits. A pasted list or an exported blocklist file is a few
+// thousand lines at most; anything larger is a mistake, not a policy.
+const (
+	maxBulkPatterns  = 5000
+	maxBulkBodyBytes = 1 << 20
+)
+
+type bulkRuleReq struct {
+	Patterns []string `json:"patterns"`
+	Category string   `json:"category"`
+}
+
+// BulkRuleResult reports what happened to one submitted line, in input order.
+type BulkRuleResult struct {
+	Input   string `json:"input"`
+	Pattern string `json:"pattern,omitempty"`
+	Status  string `json:"status"` // added | duplicate | invalid
+	Reason  string `json:"reason,omitempty"`
+}
+
+// addRulesBulk stores many domains at once. Adding them one at a time re-sent
+// the policy to every affected device after each domain -- a hundred domains
+// were a hundred full re-applies on every endpoint -- and stored whatever text
+// was typed. Here every line is normalized and checked, the valid ones are
+// stored in one transaction, and the affected devices get one dispatch.
+func (h *Handler) addRulesBulk(w http.ResponseWriter, r *http.Request) {
+	policyID := chi.URLParam(r, "id")
+	policy, err := h.repo.GetPolicyByID(r.Context(), policyID)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, "policy not found")
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxBulkBodyBytes)
+	var req bulkRuleReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if len(req.Patterns) == 0 {
+		writeErrCode(w, http.StatusBadRequest, ReasonEmpty, "patterns is required")
+		return
+	}
+	if len(req.Patterns) > maxBulkPatterns {
+		writeErrCode(w, http.StatusBadRequest, "too_many_patterns",
+			fmt.Sprintf("at most %d patterns per request", maxBulkPatterns))
+		return
+	}
+
+	action := "block"
+	if policy.Mode == "whitelist" {
+		action = "allow"
+	}
+	existing, err := h.existingPatterns(r.Context(), policyID)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	results := make([]BulkRuleResult, 0, len(req.Patterns))
+	batch := map[string]bool{}
+	var toAdd []*FilterRule
+	var added, duplicates, invalid int
+	for _, in := range req.Patterns {
+		res := BulkRuleResult{Input: in}
+		p, reason := NormalizeDomainPattern(in)
+		switch {
+		case reason != "":
+			res.Status, res.Reason = "invalid", reason
+			invalid++
+		case existing[p]:
+			res.Pattern, res.Status, res.Reason = p, "duplicate", ReasonDuplicate
+			duplicates++
+		case batch[p]:
+			res.Pattern, res.Status, res.Reason = p, "duplicate", ReasonDuplicateBatch
+			duplicates++
+		default:
+			batch[p] = true
+			res.Pattern, res.Status = p, "added"
+			added++
+			toAdd = append(toAdd, &FilterRule{
+				PolicyID: policyID, RuleType: "domain", Pattern: p, Action: action, Category: req.Category,
+			})
+		}
+		results = append(results, res)
+	}
+
+	if len(toAdd) > 0 {
+		if err := h.repo.AddRules(r.Context(), toAdd); err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		_ = h.audit.Log(r.Context(), "user", auth.UserIDFromContext(r.Context()), "filter.rules_bulk_add", policyID,
+			map[string]string{"added": strconv.Itoa(added), "duplicates": strconv.Itoa(duplicates),
+				"invalid": strconv.Itoa(invalid)})
+		if policy.IsEnabled {
+			h.dispatchAffected(context.Background(), policy.TargetType, policy.TargetID)
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"added": added, "duplicates": duplicates, "invalid": invalid, "results": results,
+	})
 }
 
 func (h *Handler) deleteRule(w http.ResponseWriter, r *http.Request) {
@@ -815,6 +953,11 @@ func (h *Handler) agentReportFilterState(w http.ResponseWriter, r *http.Request)
 
 func writeErr(w http.ResponseWriter, code int, msg string) {
 	writeJSON(w, code, map[string]string{"error": msg})
+}
+
+// writeErrCode adds a stable code the console translates.
+func writeErrCode(w http.ResponseWriter, status int, code, msg string) {
+	writeJSON(w, status, map[string]string{"error": msg, "code": code})
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {

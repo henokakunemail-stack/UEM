@@ -23,6 +23,7 @@ import type {
   DeviceRunDTO,
   FilterPolicyDTO,
   FilterRuleDTO,
+  BulkRuleResponseDTO,
   DeviceFilterStateDTO,
   FilterSyncResultDTO,
   AlertIncidentDTO,
@@ -695,6 +696,18 @@ export const api = {
     data: { pattern: string; category: string; action?: 'block' | 'allow' }
   ): Promise<FilterRuleDTO> {
     return request<FilterRuleDTO>(`/api/filter/policies/${policyId}/rules`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    })
+  },
+
+  // Many domains in one request: the server validates every line, stores the
+  // valid ones together and re-sends the policy once.
+  async bulkAddFilterRules(
+    policyId: string,
+    data: { patterns: string[]; category: string }
+  ): Promise<BulkRuleResponseDTO> {
+    return request<BulkRuleResponseDTO>(`/api/filter/policies/${policyId}/rules/bulk`, {
       method: 'POST',
       body: JSON.stringify(data),
     })

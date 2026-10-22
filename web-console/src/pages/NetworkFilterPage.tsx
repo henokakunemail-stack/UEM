@@ -4,6 +4,7 @@ import {
   CloudUpload,
   Globe,
   Layers,
+  ListPlus,
   Plus,
   Power,
   RefreshCw,
@@ -19,6 +20,8 @@ import { ConfirmDialog } from '../components/ui/ConfirmDialog'
 import { Modal } from '../components/ui/Modal'
 import { useToast } from '../context/ToastContext'
 import { useT } from '../i18n/core'
+import { apiErrorMessage } from '../services/apiErrorMessage'
+import { FILTER_REASON_KEYS, FilterBulkAddModal } from '../components/FilterBulkAddModal'
 import type { DeviceDTO, DeviceFilterStateDTO, DeviceGroupDTO, FilterPolicyDTO, FilterRuleDTO } from '../types/api'
 
 // The agent reports one of five states, and two of them mean the endpoint is NOT
@@ -183,6 +186,8 @@ export const NetworkFilterPage: React.FC = () => {
   const [retargeting, setRetargeting] = useState<FilterPolicyDTO | null>(null)
   const [retargetForm, setRetargetForm] = useState({ target_type: 'all', target_id: '' })
   const [isRuleModalOpen, setIsRuleModalOpen] = useState(false)
+  // The policy a bulk import is adding to; null while the dialog is closed.
+  const [bulkPolicy, setBulkPolicy] = useState<FilterPolicyDTO | null>(null)
   const [msg, setMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
   const [policyPendingDelete, setPolicyPendingDelete] = useState<{
     id: string
@@ -380,8 +385,10 @@ export const NetworkFilterPage: React.FC = () => {
       })
       await loadRules(selected.id)
       await loadPolicies()
-    } catch (err: any) {
-      const text = err.message || t('filter.rule_create_failed')
+    } catch (err) {
+      // The server names why a pattern was refused (not a domain, an IP, a
+      // duplicate); its English message is not shown.
+      const text = apiErrorMessage(err, t, FILTER_REASON_KEYS, 'filter.rule_create_failed')
       setMsg({ type: 'error', text })
       toast.error(text)
     }
@@ -526,6 +533,18 @@ export const NetworkFilterPage: React.FC = () => {
             >
               <Plus size={16} />
               <span>{selected?.mode === 'whitelist' ? t('filter.add_allowed_domain') : t('filter.add_rule')}</span>
+            </button>
+          )}
+          {canAdmin && (
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => selected && setBulkPolicy(selected)}
+              disabled={!selected}
+              title={selected ? undefined : t('filter.create_policy_first')}
+            >
+              <ListPlus size={16} />
+              <span>{t('filter.bulk_open')}</span>
             </button>
           )}
         </div>
@@ -1000,11 +1019,9 @@ export const NetworkFilterPage: React.FC = () => {
               value={newRule.pattern}
               onChange={(e) => setNewRule({ ...newRule, pattern: e.target.value })}
             />
-            {selected?.mode === 'whitelist' && (
-              <p className="form-hint">
-                {t('filter.subdomain_tip')}
-              </p>
-            )}
+            <p className="form-hint">
+              {selected?.mode === 'whitelist' ? t('filter.subdomain_tip') : t('filter.blacklist_subdomain_tip')}
+            </p>
           </div>
           <div className="form-group">
             <label className="form-label" htmlFor="filter-rule-category">
@@ -1036,6 +1053,33 @@ export const NetworkFilterPage: React.FC = () => {
           </div>
         </form>
       </Modal>
+
+      <FilterBulkAddModal
+        key={bulkPolicy?.id ?? 'closed'}
+        policy={bulkPolicy}
+        categories={
+          bulkPolicy?.mode === 'whitelist'
+            ? [
+                { value: 'Business & Productivity', label: t('filter.cat_business') },
+                { value: 'Corporate Portal & Tools', label: t('filter.cat_corporate') },
+                { value: 'Educational & Reference', label: t('filter.cat_education') },
+                { value: 'General Whitelist', label: t('filter.cat_general_whitelist') },
+              ]
+            : [
+                { value: 'Security & Phishing', label: t('filter.cat_security') },
+                { value: 'Adult & Gambling', label: t('filter.cat_adult') },
+                { value: 'Bandwidth Heavy / Streaming', label: t('filter.cat_streaming') },
+                { value: 'Social Media', label: t('filter.cat_social') },
+                { value: 'Custom Policy', label: t('filter.cat_custom') },
+              ]
+        }
+        onClose={() => setBulkPolicy(null)}
+        onImported={(summary) => {
+          if (summary.added > 0) toast.success(t('filter.bulk_toast', { count: summary.added }))
+          if (bulkPolicy) void loadRules(bulkPolicy.id)
+          void loadPolicies()
+        }}
+      />
 
       <ConfirmDialog
         open={policyPendingDelete !== null}

@@ -207,6 +207,42 @@ func (r *Repository) AddRule(ctx context.Context, rule *FilterRule) error {
 	return nil
 }
 
+// AddRules inserts a batch in one transaction: a bulk import is either stored
+// whole or not at all, so a failure halfway never leaves an operator guessing
+// which half of a pasted list is now being enforced.
+func (r *Repository) AddRules(ctx context.Context, rules []*FilterRule) error {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin add filter rules: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	now := time.Now().UTC()
+	for _, rule := range rules {
+		if rule.ID == "" {
+			rule.ID = NewID()
+		}
+		rule.CreatedAt = now
+		if rule.RuleType == "" {
+			rule.RuleType = "domain"
+		}
+		if rule.Category == "" {
+			rule.Category = "custom"
+		}
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO filter_rules (id, policy_id, rule_type, pattern, action, category, created_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?)`,
+			rule.ID, rule.PolicyID, rule.RuleType, rule.Pattern, rule.Action, rule.Category, rule.CreatedAt,
+		); err != nil {
+			return fmt.Errorf("add filter rule %q: %w", rule.Pattern, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit filter rules: %w", err)
+	}
+	return nil
+}
+
 func (r *Repository) ListRulesByPolicy(ctx context.Context, policyID string) ([]FilterRule, error) {
 	rules := []FilterRule{}
 	query := `
