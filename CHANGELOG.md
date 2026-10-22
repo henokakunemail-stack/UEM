@@ -10,6 +10,8 @@ Riwayat sebelum v1.5.4 ada di `git log`.
 
 ## [Unreleased]
 
+## [1.5.5] - 2026-10-22
+
 ### Ditambahkan
 - **Installer macOS.**
   - `EndpointAgent-macOS.pkg` (universal Apple Silicon + Intel), dibangun di runner macOS.
