@@ -1668,9 +1668,9 @@
     "semantic_hash": ""
   },
   "server/modules/device-management/repository.go": {
-    "mtime": 1792599744.9710255,
-    "seen": 1792650332.950259,
-    "ast_hash": "c1413ca3f4a6fff17ebaa2911bc07ec9",
+    "mtime": 1792660965.9812014,
+    "seen": 1792661423.3764098,
+    "ast_hash": "906655671584be0ae1a4b5678b51f663",
     "semantic_hash": ""
   },
   "server/modules/directory/diff.go": {
@@ -2412,9 +2412,9 @@
     "semantic_hash": ""
   },
   "web-console/src/pages/DevicesPage.tsx": {
-    "mtime": 1792599875.250598,
-    "seen": 1792650332.9509418,
-    "ast_hash": "bab1dd0ce677afcd137f46fd52a49ab8",
+    "mtime": 1792661026.953375,
+    "seen": 1792661423.3772402,
+    "ast_hash": "35496b128e1138b2c63a4f83bcc7d061",
     "semantic_hash": ""
   },
   "web-console/src/pages/GroupMembersModal.tsx": {
@@ -2814,9 +2814,9 @@
     "semantic_hash": ""
   },
   "docs/installation/README.md": {
-    "mtime": 1791795288.3353698,
-    "seen": 1792650332.9512992,
-    "ast_hash": "538592909936637271a574ce85b9e610",
+    "mtime": 1792654002.4264677,
+    "seen": 1792654039.5517821,
+    "ast_hash": "854f1b9d08cea6a218533f7c9c10098b",
     "semantic_hash": ""
   },
   "docs/installation/agent-linux.md": {
@@ -2964,9 +2964,9 @@
     "semantic_hash": ""
   },
   "packaging/windows/README.md": {
-    "mtime": 1792600077.5976372,
-    "seen": 1792650332.951364,
-    "ast_hash": "91b7b4dc21a71f044effbe1d9a5d0171",
+    "mtime": 1792654002.4264677,
+    "seen": 1792654039.5518396,
+    "ast_hash": "de97ff2dfe96bd17c08497158aba1f60",
     "semantic_hash": ""
   },
   "web-console/README.md": {
@@ -3522,9 +3522,9 @@
     "semantic_hash": ""
   },
   "web-console/src/i18n/locales/en/devices.json": {
-    "mtime": 1792599875.2521389,
-    "seen": 1792650332.9508078,
-    "ast_hash": "cb800df0e7d6e730e2d82ce4f364efc4",
+    "mtime": 1792661011.652114,
+    "seen": 1792661423.3769639,
+    "ast_hash": "cf1d9d0c8b5bf8752524ef90d73aa7f6",
     "semantic_hash": ""
   },
   "web-console/src/i18n/locales/en/enroll.json": {
@@ -3684,9 +3684,9 @@
     "semantic_hash": ""
   },
   "web-console/src/i18n/locales/id/devices.json": {
-    "mtime": 1792599875.253148,
-    "seen": 1792650332.950869,
-    "ast_hash": "5a6bd74668b066d1dbad8396867c3caf",
+    "mtime": 1792661011.6541135,
+    "seen": 1792661423.3770952,
+    "ast_hash": "7ab6cd90430718dacf5d4ae502658f37",
     "semantic_hash": ""
   },
   "web-console/src/i18n/locales/id/enroll.json": {
@@ -4650,9 +4650,9 @@
     "semantic_hash": ""
   },
   "CHANGELOG.md": {
-    "mtime": 1792652697.1961918,
-    "seen": 1792653260.8209896,
-    "ast_hash": "2c6eb343b86adb94d5885a32a9ec9c0b",
+    "mtime": 1792661083.19395,
+    "seen": 1792661423.3774855,
+    "ast_hash": "6a3151931a5ddce5c7ecbb7329ed5d8d",
     "semantic_hash": ""
   },
   "docs/architecture/policy-resolution.md": {
@@ -4707,6 +4707,30 @@
     "mtime": 1792652682.3670685,
     "seen": 1792653260.8210127,
     "ast_hash": "80c7a81c2a6a9cde6f308c74e4439a61",
+    "semantic_hash": ""
+  },
+  "docs/installation/agent-gpo.md": {
+    "mtime": 1792653992.4311516,
+    "seen": 1792654039.551785,
+    "ast_hash": "db5696b1f6ed38465773bba121143c18",
+    "semantic_hash": ""
+  },
+  "server/modules/device-management/enrolled_at_test.go": {
+    "mtime": 1792660947.402846,
+    "seen": 1792661423.3762994,
+    "ast_hash": "3e3137c7693e65c72c424efebbcf6078",
+    "semantic_hash": ""
+  },
+  "web-console/src/pages/newDevice.test.ts": {
+    "mtime": 1792661011.508217,
+    "seen": 1792661423.377339,
+    "ast_hash": "a2e1c6f6a51c4e944554c3596dff6087",
+    "semantic_hash": ""
+  },
+  "web-console/src/pages/newDevice.ts": {
+    "mtime": 1792661070.183546,
+    "seen": 1792661423.3773432,
+    "ast_hash": "12ff35c8cdccc63f512542bc68e85e3a",
     "semantic_hash": ""
   }
 }
