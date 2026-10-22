@@ -31,8 +31,43 @@ Riwayat sebelum v1.5.4 ada di `git log`.
   `checksums.txt` mencakup semua aset, termasuk `.pkg`.
 - CI memeriksa build server untuk 5 platform, isi dan mode file arsip rilis, paket `.pkg` macOS, dan menjalankan E2E
   update agen nyata (`scripts/e2e-agent-selfupdate.ps1`).
+- **System Policy: setiap setting bisa "Tidak diatur", "Izinkan", atau "Blokir" per kebijakan** (USB juga "Read-only").
+  - Kebijakan hanya menentukan setting yang diisi.
+  - Jika beberapa kebijakan mengisi setting yang sama, cakupan paling spesifik yang menang (perangkat > grup > semua), lalu
+    prioritas.
+  - "Izinkan" eksplisit di tingkat perangkat bisa menjadi pengecualian dari blokir armada.
+- **Tab "Kebijakan efektif"** di System Policy: untuk satu perangkat, nilai setiap setting dan kebijakan yang
+  menentukannya. API: `sources` dan `matched_policies` di `GET /api/devices/{id}/system-policy`.
+- **Status "Sebagian diterapkan".**
+  - Agen melaporkan hasil per setting: diterapkan, gagal, atau tidak didukung di OS ini.
+  - Console menampilkan setting yang tidak diterapkan beserta alasannya.
+- **Network Filter: tambah domain massal.**
+  - Tempel banyak baris atau impor `.txt`/`.csv` (format file hosts dikenali), sampai 5000 baris.
+  - Ada laporan per baris, dan perangkat menerima kebijakan baru satu kali.
+  - API: `POST /api/filter/policies/{id}/rules/bulk`.
+- **Dokumentasi** `docs/architecture/policy-resolution.md`: urutan penentuan kebijakan dan dukungan setiap setting per OS.
 
 ### Diperbaiki
+- **Blokir USB tertimpa diam-diam.** Setiap kebijakan menyimpan USB "allow" secara otomatis, sehingga kebijakan yang hanya
+  mengatur wallpaper pun membuka blokir USB. Nilai otomatis pada kebijakan lama kini dibaca sebagai "Tidak diatur".
+- **Whitelist kosong mematikan blacklist.** Kebijakan filter tanpa rule tidak lagi ikut menentukan mode perangkat.
+- **Whitelist hilang setelah agen restart.**
+  - Agen menyimpan kebijakan filter terakhir dan menerapkannya lagi saat start.
+  - Setting DNS adapter disimpan sebelum diubah, sehingga agen yang mati mendadak tidak lagi meninggalkan DNS di
+    `127.0.0.1`.
+  - Entri firewall Linux yang kedaluwarsa setiap jam dipasang ulang.
+- **Perubahan anggota grup tidak memicu sinkron ulang.** Menambah atau mengeluarkan perangkat dari grup kini langsung
+  mengirim ulang system policy dan filter. Grup yang masih dipakai system policy tidak bisa dihapus.
+- **Linux/macOS melapor "synced" untuk setting yang tidak diterapkan.**
+  - Setting khusus Windows, wallpaper, dan kunci layar di Linux/macOS, USB di macOS, serta whitelist di macOS kini
+    dilaporkan "tidak didukung" atau "gagal".
+  - Di Windows, penulisan registry yang ditolak (Windows Update, screen saver, restriksi, USB, wallpaper) kini
+    dilaporkan.
+- **Laporan agen yang cepat tertimpa kembali menjadi "pending",** dan laporan untuk versi kebijakan lama ikut
+  dicatat. Server kini mengabaikan laporan basi dan menolak status yang tidak dikenal.
+- **Input domain tidak divalidasi.** IP, nama tanpa TLD, dan duplikat kini ditolak dengan alasan yang jelas.
+- **Menghapus perangkat secara permanen gagal di PostgreSQL,** karena kodenya menghapus dari dua tabel yang tidak ada.
+- **Jadwal yang mengenai perangkat offline lebih dulu langsung dicatat gagal,** padahal perangkat lain masih berjalan.
 - **Agen macOS tidak pernah bisa di-update.** Formulir unggah mengirim `os_name=darwin`, sedangkan agen melaporkan
   `macos`, sehingga setiap Mac mendapat `no_release`. Rilis lama berlabel `darwin` tetap dikenali.
 - **Update agen gagal lalu rollback di Linux dengan `/tmp` bertipe tmpfs, atau di Windows bila agen dipasang di drive
@@ -50,3 +85,9 @@ Riwayat sebelum v1.5.4 ada di `git log`.
 ### Catatan upgrade
 - Agen yang sudah terpasang (termasuk v1.5.4) dapat di-update dari konsol: perbarui server, buka **Agent Updates →
   Rilis → Impor dari Paket Server**, lalu jalankan kampanye ke versi baru.
+- **Migrasi database 0029** menambah kolom `results_json` di `device_system_policy_states` dan berjalan otomatis.
+- **Kebijakan sistem yang sudah ada:** nilai "allow", "off", dan 0 yang dulu terisi otomatis kini berarti "Tidak
+  diatur". Periksa tab **Kebijakan efektif**. Jika memang perlu pengecualian, misalnya USB diizinkan untuk satu perangkat,
+  atur "Izinkan" secara eksplisit di kebijakan perangkat itu.
+- **Agen lama tetap bekerja.** Mereka belum mengirim hasil per setting, dan server mengirim ulang kebijakan filter
+  setiap kali mereka terhubung sampai diperbarui.
