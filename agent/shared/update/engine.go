@@ -128,8 +128,18 @@ func (e *Engine) ApplyUpdate(ctx context.Context, params UpdateParams) error {
 		return err
 	}
 
-	tempDir := os.TempDir()
-	tempFile := filepath.Join(tempDir, fmt.Sprintf("emagent_update_%s.tmp", params.TaskID))
+	currentExec, err := e.getCurrentExecPath()
+	if err != nil {
+		_ = e.ReportProgress(ctx, params.TaskID, "failed", params.TargetVersion, err.Error())
+		return fmt.Errorf("resolve current executable: %w", err)
+	}
+
+	// The download is staged beside the executable, not in os.TempDir(). The
+	// swap below is a rename, and a rename cannot cross filesystems: /tmp is a
+	// tmpfs on many Linux distributions, and C:\Windows\Temp is on another
+	// volume when the agent is installed to D:. Either way the rename failed
+	// with EXDEV or ERROR_NOT_SAME_DEVICE and every update ended in rollback.
+	tempFile := filepath.Join(filepath.Dir(currentExec), fmt.Sprintf(".emagent_update_%s.tmp", params.TaskID))
 	f, err := os.OpenFile(tempFile, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0755)
 	if err != nil {
 		_ = e.ReportProgress(ctx, params.TaskID, "failed", params.TargetVersion, err.Error())
@@ -198,13 +208,6 @@ func (e *Engine) ApplyUpdate(ctx context.Context, params UpdateParams) error {
 
 	// 3. Report swapping status
 	_ = e.ReportProgress(ctx, params.TaskID, "swapping", params.TargetVersion, "")
-	currentExec, err := e.getCurrentExecPath()
-	if err != nil {
-		_ = os.Remove(tempFile)
-		_ = e.ReportProgress(ctx, params.TaskID, "failed", params.TargetVersion, err.Error())
-		return fmt.Errorf("resolve current executable: %w", err)
-	}
-
 	backupExec := currentExec + ".old"
 	_ = os.Remove(backupExec) // remove any leftover old backup
 
