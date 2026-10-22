@@ -21,6 +21,12 @@ Riwayat sebelum v1.5.4 ada di `git log`.
 - **Audit perubahan domain.** Perangkat yang join, keluar, atau pindah domain tercatat di audit trail sebagai
   `inventory.hw_changed` (`changed: domain`).
 - Dokumentasi alur pengumpulan inventory: `docs/architecture/inventory-collection.md`.
+- **Deploy agent massal lewat GPO Active Directory.**
+  - Startup script siap pakai: `packaging/windows/gpo/deploy-agent.cmd`. Skrip memasang dan mendaftarkan agent
+    sekali, melewati komputer yang sudah terpasang (tidak menimpa agent yang sudah update sendiri), dan mencatat
+    hasilnya di `C:\ProgramData\EndpointAgent\gpo-deploy.log`.
+  - Panduan langkah demi langkah: `docs/installation/agent-gpo.md`. Isinya: token multi-perangkat, share yang hanya
+    bisa dibaca akun komputer, uji sebagai SYSTEM, GPO, root CA, verifikasi, dan pencabutan token setelah rollout.
 
 ### Catatan upgrade
 - Status domain baru muncul setelah agent diperbarui ke versi ini dan mengirim inventory berikutnya. Itu terjadi saat

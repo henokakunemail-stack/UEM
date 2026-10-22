@@ -10,6 +10,7 @@ deployment lewat Docker.
 | Server di Windows | [server-windows.md](server-windows.md) |
 | Server di Linux | [server-linux.md](server-linux.md) |
 | Agen di Windows | [agent-windows.md](agent-windows.md) |
+| Agen Windows massal lewat GPO Active Directory | [agent-gpo.md](agent-gpo.md) |
 | Agen di Linux | [agent-linux.md](agent-linux.md) |
 | Server lewat Docker | [docker.md](docker.md) |
 | Kebutuhan perangkat lunak | [prerequisites.md](prerequisites.md) |

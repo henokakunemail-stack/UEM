@@ -55,6 +55,7 @@ EndpointAgent-Setup.exe /S /SERVER=https://server:8443 /TOKEN=<TOKEN> [/SITE=Med
 - `/SERVER=` wajib bila `/TOKEN=` diberikan: mode senyap tidak menampilkan halaman server, jadi tanpa parameter ini installer berhenti dengan kode keluar 2.
 - Bila enroll gagal, installer berhenti dengan kode keluar 3; alasannya (mis. `token_used_up`, `token_expired`) tercatat di log detail installer.
 - Gunakan token **multi-device**. Menjalankan installer lagi di mesin yang sudah terdaftar mempertahankan identitasnya dan tidak memakai kuota token.
+- Untuk GPO Active Directory, pakai startup script siap pakai [`gpo/deploy-agent.cmd`](gpo/deploy-agent.cmd); langkah lengkapnya di [`docs/installation/agent-gpo.md`](../../docs/installation/agent-gpo.md).
 
 ---
 
