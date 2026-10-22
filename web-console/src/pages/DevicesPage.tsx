@@ -40,6 +40,7 @@ import { GroupMembersModal } from './GroupMembersModal'
 import { EnrollTokenModal } from '../components/EnrollTokenModal'
 import { useT } from '../i18n/core'
 import { UninstallTokenModal } from '../components/UninstallTokenModal'
+import { isNewDevice } from './newDevice'
 
 export const DevicesPage: React.FC<{
   onOpenExec?: (device: DeviceDTO) => void
@@ -58,6 +59,9 @@ export const DevicesPage: React.FC<{
     offset: 0,
   })
   const [loading, setLoading] = useState(true)
+  // When the list was last fetched: the clock the New badge is measured
+  // against, so a refresh is what moves a device out of its first day.
+  const [renderedAt, setRenderedAt] = useState(() => Date.now())
   // Page size is a view preference, not a server filter, so it stays out of
   // the URL — a hand-edited ?limit=100000 would ask for the whole fleet.
   const [pageSize, setPageSize] = useState<(typeof PAGE_SIZES)[number]>(10)
@@ -130,6 +134,7 @@ export const DevicesPage: React.FC<{
     try {
       const res = await api.getDevices(pageSize, offset, status, site, group)
       setData(res)
+      setRenderedAt(Date.now())
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : t('devices.fetch_failed')
       setActionMsg({ type: 'error', text: msg })
@@ -689,6 +694,15 @@ export const DevicesPage: React.FC<{
                       >
                         <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                           <strong className="device-name">{d.hostname}</strong>
+                          {isNewDevice(d, renderedAt) && (
+                            <span
+                              className="badge-severity info"
+                              style={{ padding: '1px 6px', fontSize: 10, borderRadius: 4 }}
+                              title={t('devices.new_title', { time: new Date(d.enrolled_at).toLocaleString() })}
+                            >
+                              {t('devices.new_badge')}
+                            </span>
+                          )}
                           {(hostnameCounts.get(d.hostname) ?? 0) > 1 && (
                             <span
                               className="badge-severity warning"

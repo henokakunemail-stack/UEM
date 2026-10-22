@@ -18,6 +18,9 @@ Riwayat sebelum v1.5.4 ada di `git log`.
     dan winbind. macOS membaca binding Active Directory (`dsconfigad`). Semuanya dibaca lokal, tanpa menghubungi
     domain controller.
   - Data dikirim sebagai field baru `os.domain` di laporan inventory. Server menyimpannya tanpa migrasi database.
+- **Penanda "Baru" di menu Devices.** Perangkat yang agent-nya terdaftar dalam 24 jam terakhir diberi label **Baru**
+  di samping hostname, dengan keterangan waktu pendaftarannya. Perangkat yang dipensiunkan dan pra-registrasi yang agent-nya
+  belum terdaftar tidak diberi label.
 - **Audit perubahan domain.** Perangkat yang join, keluar, atau pindah domain tercatat di audit trail sebagai
   `inventory.hw_changed` (`changed: domain`).
 - Dokumentasi alur pengumpulan inventory: `docs/architecture/inventory-collection.md`.
@@ -27,6 +30,10 @@ Riwayat sebelum v1.5.4 ada di `git log`.
     hasilnya di `C:\ProgramData\EndpointAgent\gpo-deploy.log`.
   - Panduan langkah demi langkah: `docs/installation/agent-gpo.md`. Isinya: token multi-perangkat, share yang hanya
     bisa dibaca akun komputer, uji sebagai SYSTEM, GPO, root CA, verifikasi, dan pencabutan token setelah rollout.
+
+### Diperbaiki
+- **`enrolled_at` untuk token satu perangkat kini berisi waktu agent benar-benar mendaftar,** bukan waktu token dibuat.
+  Sebelumnya perangkat yang token-nya dibuat beberapa hari sebelum agent dipasang tampak sudah lama terdaftar.
 
 ### Catatan upgrade
 - Status domain baru muncul setelah agent diperbarui ke versi ini dan mengirim inventory berikutnya. Itu terjadi saat

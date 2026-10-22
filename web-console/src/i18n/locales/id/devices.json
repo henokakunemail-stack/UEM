@@ -79,6 +79,8 @@
   "view_specs": "Lihat spesifikasi perangkat keras & perangkat lunak",
   "duplicate_title": "Hostname duplikat terdeteksi ({hostname}). Dibedakan dengan ID Perangkat unik: {id}",
   "duplicate": "Duplikat ({id})",
+  "new_badge": "Baru",
+  "new_title": "Agent terdaftar {time}",
   "never": "Tidak pernah",
   "specs_title": "Lihat Perangkat Keras, Disk & Perangkat Lunak",
   "specs": "Spesifikasi",

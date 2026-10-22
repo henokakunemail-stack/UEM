@@ -79,6 +79,8 @@
   "view_specs": "View hardware specs & software",
   "duplicate_title": "Duplicate hostname detected ({hostname}). Isolated by unique Device ID: {id}",
   "duplicate": "Duplicate ({id})",
+  "new_badge": "New",
+  "new_title": "Agent enrolled {time}",
   "never": "Never",
   "specs_title": "View Hardware, Disks & Software",
   "specs": "Specs",
