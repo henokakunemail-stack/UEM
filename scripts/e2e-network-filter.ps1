@@ -272,6 +272,37 @@ try {
 
     Write-Host "  [PASS] Audit logs verified for policy creation, rule addition, and sync dispatch" -ForegroundColor Green
 
+    # 13. Bulk import: every line checked, valid ones stored once, normalized
+    Write-Host "`n12. Bulk Domain Import with Per-Line Report..."
+    $bulk = Invoke-RestMethod -Uri "$base/api/filter/policies/$pol2Id/rules/bulk" -Method POST -Headers $adminHeaders -Body (@{
+        patterns = @("reddit.com", "https://TikTok.com/foryou", "not a domain", "10.1.1.1")
+        category = "social"
+    } | ConvertTo-Json) -ContentType "application/json"
+    if ($bulk.added -ne 1 -or $bulk.duplicates -ne 1 -or $bulk.invalid -ne 2) {
+        throw "Bulk report: added=$($bulk.added) duplicates=$($bulk.duplicates) invalid=$($bulk.invalid), want 1/1/2"
+    }
+    $reasons = ($bulk.results | ForEach-Object { "$($_.status):$($_.reason)" }) -join ","
+    if ($reasons -ne "added:,duplicate:duplicate_existing,invalid:invalid_chars,invalid:ip_literal") {
+        throw "Per-line report: $reasons"
+    }
+    Write-Host "  [PASS] Bulk import: 1 added, existing tiktok.com recognised in URL form, 2 rejected with reasons" -ForegroundColor Green
+
+    # 14. A whitelist with no rules must not switch the device off the blacklist
+    Write-Host "`n13. Empty Whitelist Does Not Override the Blacklist..."
+    $null = Invoke-RestMethod -Uri "$base/api/filter/policies" -Method POST -Headers $adminHeaders -Body (@{
+        name = "Kiosk Allow-List (not filled yet)"
+        mode = "whitelist"
+        target_type = "device"
+        target_id = $deviceId
+        priority = 1
+        is_enabled = $true
+    } | ConvertTo-Json) -ContentType "application/json"
+    $resync = Invoke-RestMethod -Uri "$base/api/devices/$deviceId/filter/sync" -Method POST -Headers $techHeaders
+    if ($resync.effective_rules -ne 4) {
+        throw "Expected the 4 blacklist rules to stay in force beside an empty whitelist, got $($resync.effective_rules)"
+    }
+    Write-Host "  [PASS] Device still enforces its 4 blacklist rules" -ForegroundColor Green
+
     # Clean up websockets
     $wsAgent.Dispose()
 

@@ -153,7 +153,12 @@ try {
 
     # 8. Verify WebSocket command dispatch
     Write-Host "`n7. Verifying Policy Dispatch Frame over WebSocket..."
-    $cmd = Read-AgentCommand -Ws $wsAgent -CommandName 'system_policy.apply' -CancellationToken $ctSource.Token
+    # Wait for the frame carrying the version the new policy compiles to. The
+    # first system_policy.apply on this socket is the baseline pushed when the
+    # agent connected; this script used to read that one and report it back,
+    # which only passed because the server recorded reports for any version.
+    $expected = (Invoke-RestMethod -Uri "$base/api/devices/$deviceId/system-policy" -Method GET -Headers $adminHeaders).compiled.version
+    $cmd = Read-AgentCommand -Ws $wsAgent -CommandName 'system_policy.apply' -CancellationToken $ctSource.Token -Id $expected
     if (-not $cmd) {
         throw "Agent did not receive 'system_policy.apply' command"
     }
@@ -188,6 +193,69 @@ try {
         throw "Expected device status 'synced', got '$($devPolicyState.state.status)'"
     }
     Write-Host "  [PASS] Console reflects device status: synced" -ForegroundColor Green
+
+    # 10b. The console can see which policy decided each setting.
+    Write-Host "`n9b. Verifying Per-Setting Sources and Results..."
+    if ($devPolicyState.sources.usb_storage_mode.policy_name -ne "High Security Endpoint Baseline") {
+        throw "Expected usb_storage_mode to be decided by the baseline policy, got: $($devPolicyState.sources | ConvertTo-Json -Compress)"
+    }
+    if ($devPolicyState.sources.firewall_enabled) {
+        throw "firewall_enabled has a source although no policy decides it"
+    }
+    Write-Host "  [PASS] Sources name the deciding policy and omit undecided settings" -ForegroundColor Green
+
+    # An agent that reports per-setting results: one setting unsupported on its OS.
+    $resultsResp = Invoke-RestMethod -Uri "$base/api/agent/devices/$deviceId/system-policy/report" -Method POST -Headers $agentHeaders -Body (@{
+        policy_version = $policyVersion
+        status = "synced"
+        settings = @{ usb_storage_mode = "block"; disable_cmd = $true }
+        results = @(
+            @{ setting = "usb_storage_mode"; outcome = "applied" },
+            @{ setting = "disable_cmd"; outcome = "unsupported"; reason = "Windows-only setting" }
+        )
+    } | ConvertTo-Json -Depth 5) -ContentType "application/json"
+    if ($resultsResp.status -ne "ok") { throw "Report with results was not recorded: $($resultsResp | ConvertTo-Json -Compress)" }
+    $partialState = Invoke-RestMethod -Uri "$base/api/devices/$deviceId/system-policy" -Method GET -Headers $adminHeaders
+    if ($partialState.state.status -ne "partial" -or @($partialState.state.results).Count -ne 2) {
+        throw "Expected status 'partial' with 2 results, got '$($partialState.state.status)' with $(@($partialState.state.results).Count)"
+    }
+    Write-Host "  [PASS] A setting the OS cannot enforce makes the device 'partial', not 'synced'" -ForegroundColor Green
+
+    # A report for a superseded version must not be recorded.
+    $staleResp = Invoke-RestMethod -Uri "$base/api/agent/devices/$deviceId/system-policy/report" -Method POST -Headers $agentHeaders -Body (@{
+        policy_version = "superseded-version"
+        status = "synced"
+    } | ConvertTo-Json) -ContentType "application/json"
+    if ($staleResp.status -ne "stale") { throw "A stale report was not refused: $($staleResp | ConvertTo-Json -Compress)" }
+    Write-Host "  [PASS] Report for a superseded version answered 'stale'" -ForegroundColor Green
+
+    # 10c. Adding the device to a group re-dispatches group-targeted policies.
+    Write-Host "`n9c. Verifying Group Membership Re-Dispatch..."
+    $group = Invoke-RestMethod -Uri "$base/api/groups" -Method POST -Headers $adminHeaders -Body (@{
+        name = "E2E Kiosk Group"
+    } | ConvertTo-Json) -ContentType "application/json"
+    $null = Invoke-RestMethod -Uri "$base/api/system-policies" -Method POST -Headers $adminHeaders -Body (@{
+        name = "Kiosk Firewall Enforcement"
+        target_type = "group"
+        target_id = $group.id
+        priority = 50
+        is_enabled = $true
+        settings = @{ settings_version = 2; firewall_enabled = $true }
+    } | ConvertTo-Json -Depth 5) -ContentType "application/json"
+    $null = Invoke-RestMethod -Uri "$base/api/groups/$($group.id)/members" -Method POST -Headers $adminHeaders -Body (@{
+        device_ids = @($deviceId)
+    } | ConvertTo-Json) -ContentType "application/json"
+    $regroupVersion = (Invoke-RestMethod -Uri "$base/api/devices/$deviceId/system-policy" -Method GET -Headers $adminHeaders).compiled.version
+    if ($regroupVersion -eq $policyVersion) {
+        throw "Joining a group with a policy did not change the device's compiled version"
+    }
+    # Only the frame for the new version counts: anything older still queued on
+    # the socket is skipped, and a missing re-dispatch times out.
+    $regroupCmd = Read-AgentCommand -Ws $wsAgent -CommandName 'system_policy.apply' -CancellationToken $ctSource.Token -Id $regroupVersion
+    if (-not $regroupCmd.payload.settings.firewall_enabled -or $regroupCmd.payload.settings.usb_storage_mode -ne "block") {
+        throw "Re-dispatched policy does not carry both the group decision and the inherited USB block: $($regroupCmd.payload.settings | ConvertTo-Json -Compress)"
+    }
+    Write-Host "  [PASS] Joining the group re-sent the policy; the group's decision and the device's USB block both apply" -ForegroundColor Green
 
     # 11. Delete policy and verify audit
     Write-Host "`n10. Admin Deleting Policy and Cleaning Up..."
