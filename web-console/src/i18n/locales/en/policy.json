@@ -232,5 +232,10 @@
   "setting_admin_account_enabled": "Managed admin account",
   "err_admin_username_required": "Enter a username for the managed admin account.",
   "err_wallpaper_url_required": "Upload a wallpaper or enter its URL.",
-  "err_invalid_timeout": "Timeouts must be between 0 and 1440 minutes."
+  "err_invalid_timeout": "Timeouts must be between 0 and 1440 minutes.",
+  "status_partial": "Partially applied",
+  "results_summary": "{count} setting(s) not enforced",
+  "outcome_failed": "failed",
+  "outcome_unsupported": "not supported on this OS",
+  "kpi_compliance_partial": "{count} more device(s) partially applied"
 }

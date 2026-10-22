@@ -701,6 +701,13 @@ export interface SystemPolicyConfigDTO {
   admin_account_never_expires?: boolean
 }
 
+/** What an agent did with one policy setting. reason is the agent's own text. */
+export interface SettingResultDTO {
+  setting: string
+  outcome: 'applied' | 'failed' | 'unsupported'
+  reason?: string
+}
+
 /** The policy that decided one setting for a device. */
 export interface SettingSourceDTO {
   policy_id: string
@@ -735,8 +742,11 @@ export interface SystemPolicyDTO {
 export interface DeviceSystemPolicyStateDTO {
   device_id: string
   policy_version: string
-  status: 'synced' | 'pending' | 'failed'
+  /** partial: applied, but some settings failed or are not supported on this OS. */
+  status: 'synced' | 'pending' | 'partial' | 'failed'
   applied_settings: SystemPolicySettingsDTO
+  /** What the agent did with each setting; empty for agents that predate it. */
+  results?: SettingResultDTO[]
   last_applied_at: string
   error_message: string
   hostname?: string

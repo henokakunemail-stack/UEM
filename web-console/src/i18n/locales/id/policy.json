@@ -232,5 +232,10 @@
   "setting_admin_account_enabled": "Akun admin yang dikelola",
   "err_admin_username_required": "Isi nama pengguna untuk akun admin yang dikelola.",
   "err_wallpaper_url_required": "Unggah wallpaper atau isi URL-nya.",
-  "err_invalid_timeout": "Batas waktu harus antara 0 dan 1440 menit."
+  "err_invalid_timeout": "Batas waktu harus antara 0 dan 1440 menit.",
+  "status_partial": "Sebagian diterapkan",
+  "results_summary": "{count} setting tidak diterapkan",
+  "outcome_failed": "gagal",
+  "outcome_unsupported": "tidak didukung di OS ini",
+  "kpi_compliance_partial": "{count} perangkat lain sebagian diterapkan"
 }

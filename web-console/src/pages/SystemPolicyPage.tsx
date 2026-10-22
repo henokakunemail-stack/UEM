@@ -38,6 +38,7 @@ import {
 } from '../services/systemPolicy'
 import { TriStateSelect } from '../components/TriStateSelect'
 import { EffectivePolicyPanel } from '../components/EffectivePolicyPanel'
+import { PolicyResultsList } from '../components/PolicyResultsList'
 import type {
   DeviceDTO,
   DeviceGroupDTO,
@@ -398,6 +399,8 @@ export const SystemPolicyPage: React.FC = () => {
     (p) => p.is_enabled && p.settings?.wallpaper_enabled
   ).length
   const syncedDevicesCount = deviceStates.filter((s) => s.status === 'synced').length
+  // Applied with gaps (failed or unsupported settings): not counted as enforced.
+  const partialDevicesCount = deviceStates.filter((s) => s.status === 'partial').length
 
   return (
     <div className="space-y-6">
@@ -461,7 +464,11 @@ export const SystemPolicyPage: React.FC = () => {
         <KPICard
           title={t('policy.kpi_compliance_title')}
           value={syncedDevicesCount}
-          subtitle={t('policy.kpi_compliance_subtitle')}
+          subtitle={
+            partialDevicesCount > 0
+              ? t('policy.kpi_compliance_partial', { count: partialDevicesCount })
+              : t('policy.kpi_compliance_subtitle')
+          }
           icon={<CheckCircle2 size={20} />}
           variant="success"
         />
@@ -664,6 +671,9 @@ export const SystemPolicyPage: React.FC = () => {
                     if (s.status === 'synced') {
                       badge = 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
                       label = t('policy.status_synced')
+                    } else if (s.status === 'partial') {
+                      badge = 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+                      label = t('policy.status_partial')
                     } else if (s.status === 'failed') {
                       badge = 'bg-red-500/10 text-red-400 border border-red-500/20'
                       label = t('policy.status_failed')
@@ -691,6 +701,7 @@ export const SystemPolicyPage: React.FC = () => {
                               {s.error_message}
                             </div>
                           )}
+                          <PolicyResultsList results={s.results} />
                         </td>
                         <td>
                           {applied ? (
