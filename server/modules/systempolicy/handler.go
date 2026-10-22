@@ -17,6 +17,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/rs/zerolog/log"
 
+	"github.com/henokakunemail-stack/Endpoint-Manager/protocol"
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/auth"
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/rbac"
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/transport"
@@ -490,9 +491,27 @@ func (h *Handler) agentReportPolicyState(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	status := req.Status
-	if status != "synced" && status != "failed" {
-		status = "synced"
+	// Anything unrecognised used to be stored as "synced", so a device could
+	// only ever look more enforced than it was.
+	status, errMsg, ok := reportStatus(req)
+	if !ok {
+		writeErrCode(w, http.StatusBadRequest, "invalid_status", "status must be synced, partial or failed")
+		return
+	}
+
+	// A report for a version that is no longer current describes a policy the
+	// device has since been sent a replacement for. Recording it would mark the
+	// device synced while the new policy is still on its way.
+	compiled, err := h.repo.CompileEffectivePolicy(r.Context(), deviceID)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if req.PolicyVersion != compiled.Version {
+		log.Info().Str("device", deviceID).Str("reported", req.PolicyVersion).Str("current", compiled.Version).
+			Msg("ignored a policy report for a superseded version")
+		writeJSON(w, http.StatusOK, map[string]string{"status": "stale"})
+		return
 	}
 
 	state := &DeviceSystemPolicyState{
@@ -500,7 +519,8 @@ func (h *Handler) agentReportPolicyState(w http.ResponseWriter, r *http.Request)
 		PolicyVersion:   req.PolicyVersion,
 		Status:          status,
 		AppliedSettings: req.Settings,
-		ErrorMessage:    req.ErrorMessage,
+		Results:         req.Results,
+		ErrorMessage:    errMsg,
 	}
 
 	if err := h.repo.UpdateDeviceState(r.Context(), state); err != nil {
@@ -511,6 +531,67 @@ func (h *Handler) agentReportPolicyState(w http.ResponseWriter, r *http.Request)
 
 	log.Info().Str("device", deviceID).Str("version", req.PolicyVersion).Str("status", status).Msg("policy report recorded")
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// reportStatus decides the stored status of an agent report. With per-setting
+// results the server derives it: a setting that failed beside ones that
+// applied, or one this OS cannot enforce, is "partial"; only failures is
+// "failed". Without results (an older agent) the reported status is used, and
+// it must be one the server knows.
+func reportStatus(req PolicyReportRequest) (status, errMsg string, ok bool) {
+	if len(req.Results) == 0 {
+		switch req.Status {
+		case stateSynced, statePartial, stateFailed:
+			return req.Status, req.ErrorMessage, true
+		}
+		return "", "", false
+	}
+	var applied, failed, unsupported int
+	var reasons []string
+	for _, res := range req.Results {
+		switch res.Outcome {
+		case protocol.OutcomeApplied:
+			applied++
+		case protocol.OutcomeFailed:
+			failed++
+			reasons = append(reasons, res.Setting+": "+res.Reason)
+		case protocol.OutcomeUnsupported:
+			unsupported++
+		default:
+			return "", "", false
+		}
+	}
+	errMsg = req.ErrorMessage
+	if errMsg == "" && len(reasons) > 0 {
+		errMsg = strings.Join(reasons, "; ")
+	}
+	switch {
+	case failed > 0 && applied == 0 && unsupported == 0:
+		return stateFailed, errMsg, true
+	case failed > 0 || unsupported > 0:
+		return statePartial, errMsg, true
+	}
+	return stateSynced, errMsg, true
+}
+
+// markPending records that a version is on its way to a device. It is written
+// BEFORE the send: an agent can apply and report within milliseconds, and a
+// pending row written after the send then overwrote that report, leaving the
+// device "pending" until something re-sent the policy.
+func (h *Handler) markPending(ctx context.Context, deviceID string, compiled *CompiledPolicy, prior *DeviceSystemPolicyState) {
+	state := &DeviceSystemPolicyState{
+		DeviceID:        deviceID,
+		PolicyVersion:   compiled.Version,
+		Status:          statePending,
+		AppliedSettings: compiled.Settings,
+	}
+	if prior != nil {
+		state.AppliedSettings = prior.AppliedSettings
+		state.Results = prior.Results
+	}
+	if err := h.repo.UpdateDeviceState(ctx, state); err != nil {
+		log.Warn().Err(err).Str("device", deviceID).Msg("record pending system policy state")
+	}
 }
 
 func (h *Handler) dispatchDevice(ctx context.Context, deviceID string) error {
@@ -527,23 +608,11 @@ func (h *Handler) dispatchDevice(ctx context.Context, deviceID string) error {
 		return fmt.Errorf("encode system policy envelope: %w", err)
 	}
 
+	prior, _ := h.repo.GetDeviceState(ctx, deviceID)
+	h.markPending(ctx, deviceID, compiled, prior)
 	if !h.hub.SendTo(deviceID, envBytes) {
 		return fmt.Errorf("send policy to device %s failed", deviceID)
 	}
-
-	// Update state to 'pending'
-	priorSettings := compiled.Settings
-	if prior, err := h.repo.GetDeviceState(ctx, deviceID); err == nil && prior != nil {
-		priorSettings = prior.AppliedSettings
-	}
-	state := &DeviceSystemPolicyState{
-		DeviceID:        deviceID,
-		PolicyVersion:   compiled.Version,
-		Status:          "pending",
-		AppliedSettings: priorSettings,
-	}
-	_ = h.repo.UpdateDeviceState(ctx, state)
-
 	return nil
 }
 
@@ -597,8 +666,8 @@ func (h *Handler) SyncOnReconnect(ctx context.Context, deviceID string) error {
 
 	state, err := h.repo.GetDeviceState(ctx, deviceID)
 	switch {
-	case err == nil && state != nil && state.PolicyVersion == compiled.Version && state.Status == "synced":
-		return nil // Already up to date and successfully applied
+	case err == nil && state != nil && state.PolicyVersion == compiled.Version && settledState(state):
+		return nil // Already applied as far as this device can apply it
 	case err != nil && !errors.Is(err, sql.ErrNoRows):
 		return fmt.Errorf("read device policy state: %w", err)
 	}
@@ -608,23 +677,30 @@ func (h *Handler) SyncOnReconnect(ctx context.Context, deviceID string) error {
 		return fmt.Errorf("encode system policy envelope: %w", err)
 	}
 
+	h.markPending(ctx, deviceID, compiled, state)
 	if !h.hub.SendTo(deviceID, payload) {
 		return fmt.Errorf("send system policy on reconnect: %s", deviceID)
 	}
-
-	priorSettings := compiled.Settings
-	if state != nil {
-		priorSettings = state.AppliedSettings
-	}
-	pendingState := &DeviceSystemPolicyState{
-		DeviceID:        deviceID,
-		PolicyVersion:   compiled.Version,
-		Status:          "pending",
-		AppliedSettings: priorSettings,
-	}
-	_ = h.repo.UpdateDeviceState(ctx, pendingState)
-
 	return nil
+}
+
+// settledState is a state that re-sending the same version cannot improve:
+// synced, or partial only because some settings are not supported on this OS.
+// A partial state with a failed setting is re-sent, since a retry (for
+// example under a service account with more rights) can succeed.
+func settledState(s *DeviceSystemPolicyState) bool {
+	switch s.Status {
+	case stateSynced:
+		return true
+	case statePartial:
+		for _, r := range s.Results {
+			if r.Outcome == protocol.OutcomeFailed {
+				return false
+			}
+		}
+		return true
+	}
+	return false
 }
 
 func systemPolicyApplyEnvelope(compiled *CompiledPolicy) ([]byte, error) {

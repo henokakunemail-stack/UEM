@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"time"
+
+	"github.com/henokakunemail-stack/Endpoint-Manager/protocol"
 )
 
 // USBStorageMode defines how USB storage devices are handled.
@@ -279,21 +281,35 @@ type CompiledPolicy struct {
 	Settings PolicySettings `json:"settings"`
 }
 
+// Device policy states. 'partial' means the agent applied the policy but some
+// settings failed or are not supported on that OS; Results says which.
+const (
+	statePending = "pending"
+	stateSynced  = "synced"
+	statePartial = "partial"
+	stateFailed  = "failed"
+)
+
 // DeviceSystemPolicyState tracks the sync and enforcement state for a device.
 type DeviceSystemPolicyState struct {
-	DeviceID            string         `json:"device_id" db:"device_id"`
-	PolicyVersion       string         `json:"policy_version" db:"policy_version"`
-	Status              string         `json:"status" db:"status"` // 'synced', 'pending', 'failed'
-	AppliedSettings     PolicySettings `json:"applied_settings"`
-	AppliedSettingsJSON string         `json:"-" db:"applied_settings_json"`
-	LastAppliedAt       time.Time      `json:"last_applied_at" db:"last_applied_at"`
-	ErrorMessage        string         `json:"error_message" db:"error_message"`
+	DeviceID            string                   `json:"device_id" db:"device_id"`
+	PolicyVersion       string                   `json:"policy_version" db:"policy_version"`
+	Status              string                   `json:"status" db:"status"` // pending, synced, partial, failed
+	AppliedSettings     PolicySettings           `json:"applied_settings"`
+	AppliedSettingsJSON string                   `json:"-" db:"applied_settings_json"`
+	Results             []protocol.SettingResult `json:"results"`
+	ResultsJSON         string                   `json:"-" db:"results_json"`
+	LastAppliedAt       time.Time                `json:"last_applied_at" db:"last_applied_at"`
+	ErrorMessage        string                   `json:"error_message" db:"error_message"`
 }
 
 // PolicyReportRequest is the payload sent by the agent when reporting policy enforcement.
 type PolicyReportRequest struct {
 	PolicyVersion string         `json:"policy_version"`
-	Status        string         `json:"status"` // "synced", "failed"
+	Status        string         `json:"status"` // synced, partial, failed
 	Settings      PolicySettings `json:"settings"`
 	ErrorMessage  string         `json:"error_message,omitempty"`
+	// Results is what the agent did with each setting. Agents before it send
+	// none, and their Status is taken as reported.
+	Results []protocol.SettingResult `json:"results,omitempty"`
 }

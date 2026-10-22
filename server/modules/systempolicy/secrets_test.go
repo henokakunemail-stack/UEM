@@ -180,8 +180,14 @@ func TestEnablingTheAccountWithoutAPasswordIsRejected(t *testing.T) {
 // The agent's report used to echo the password into a row per device.
 func TestReportedStateNeverStoresThePassword(t *testing.T) {
 	e := newPolicyEnv(t)
+	// The report has to be for the current version: one for a superseded
+	// version is ignored and stores nothing.
+	compiled, err := e.repo.CompileEffectivePolicy(context.Background(), "dev-1")
+	if err != nil {
+		t.Fatal(err)
+	}
 	code, body := e.do(http.MethodPost, "/api/agent/devices/dev-1/system-policy/report", map[string]any{
-		"policy_version": "v1", "status": "synced",
+		"policy_version": compiled.Version, "status": "synced",
 		"settings": map[string]any{"admin_account_enabled": true, "admin_account_username": "sysadmin", "admin_account_password": secretPw},
 	})
 	if code != http.StatusOK {

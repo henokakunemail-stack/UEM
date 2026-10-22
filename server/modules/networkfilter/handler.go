@@ -648,10 +648,10 @@ func (h *Handler) dispatchDevice(ctx context.Context, deviceID string) error {
 	if err != nil {
 		return fmt.Errorf("encode filter policy: %w", err)
 	}
-	if !h.hub.SendTo(deviceID, envBytes) {
-		return fmt.Errorf("send filter policy: device %s", deviceID)
-	}
 
+	// Pending is written BEFORE the send. Written after, it overwrote a report
+	// from an agent quick enough to apply and answer in between, and the device
+	// read "pending" until something re-sent the policy.
 	priorRules := 0
 	if prior, err := h.repo.GetDeviceFilterState(ctx, deviceID); err == nil {
 		priorRules = prior.RulesApplied
@@ -663,6 +663,10 @@ func (h *Handler) dispatchDevice(ctx context.Context, deviceID string) error {
 		RulesApplied:  priorRules,
 	}
 	_ = h.repo.RecordDeviceFilterState(ctx, state)
+
+	if !h.hub.SendTo(deviceID, envBytes) {
+		return fmt.Errorf("send filter policy: device %s", deviceID)
+	}
 	return nil
 }
 
@@ -818,11 +822,6 @@ func (h *Handler) syncDeviceFilter(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	dispatched := false
-	if h.hub != nil && h.hub.Online(deviceID) {
-		dispatched = h.hub.SendTo(deviceID, envBytes)
-	}
-
 	// rules_applied stays at whatever the agent last reported. This dispatch has
 	// not been confirmed, so writing this policy's rule count here would claim the
 	// device is enforcing N rules the moment the bytes leave the server.
@@ -854,6 +853,13 @@ func (h *Handler) syncDeviceFilter(w http.ResponseWriter, r *http.Request) {
 	if err := h.repo.RecordDeviceFilterState(r.Context(), state); err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
+	}
+
+	// Sent only after the pending row exists: a fast agent's report written in
+	// between used to be overwritten back to pending.
+	dispatched := false
+	if h.hub != nil && h.hub.Online(deviceID) {
+		dispatched = h.hub.SendTo(deviceID, envBytes)
 	}
 
 	actorID := auth.UserIDFromContext(r.Context())

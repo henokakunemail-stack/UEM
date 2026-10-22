@@ -149,7 +149,7 @@ func (r *Repository) Delete(ctx context.Context, id string) error {
 }
 
 func (r *Repository) GetDeviceState(ctx context.Context, deviceID string) (*DeviceSystemPolicyState, error) {
-	q := `SELECT device_id, policy_version, status, applied_settings_json, last_applied_at, error_message
+	q := `SELECT device_id, policy_version, status, applied_settings_json, results_json, last_applied_at, error_message
 	      FROM device_system_policy_states WHERE device_id = ?`
 	var s DeviceSystemPolicyState
 	if err := r.db.GetContext(ctx, &s, r.db.Rebind(q), deviceID); err != nil {
@@ -158,14 +158,26 @@ func (r *Repository) GetDeviceState(ctx context.Context, deviceID string) (*Devi
 		}
 		return nil, fmt.Errorf("get device policy state %s: %w", deviceID, err)
 	}
-	if s.AppliedSettingsJSON != "" && s.AppliedSettingsJSON != "{}" {
-		_ = json.Unmarshal([]byte(s.AppliedSettingsJSON), &s.AppliedSettings)
-	}
+	s.decodeJSON()
 	return &s, nil
 }
 
+// decodeJSON unpacks the stored JSON columns. Results is never nil, so the
+// console always receives a list.
+func (s *DeviceSystemPolicyState) decodeJSON() {
+	if s.AppliedSettingsJSON != "" && s.AppliedSettingsJSON != "{}" {
+		_ = json.Unmarshal([]byte(s.AppliedSettingsJSON), &s.AppliedSettings)
+	}
+	if s.ResultsJSON != "" {
+		_ = json.Unmarshal([]byte(s.ResultsJSON), &s.Results)
+	}
+	if s.Results == nil {
+		s.Results = []protocol.SettingResult{}
+	}
+}
+
 func (r *Repository) ListDeviceStates(ctx context.Context) ([]DeviceSystemPolicyState, error) {
-	q := `SELECT device_id, policy_version, status, applied_settings_json, last_applied_at, error_message
+	q := `SELECT device_id, policy_version, status, applied_settings_json, results_json, last_applied_at, error_message
 	      FROM device_system_policy_states
 	      ORDER BY last_applied_at DESC`
 	var rows []DeviceSystemPolicyState
@@ -173,9 +185,7 @@ func (r *Repository) ListDeviceStates(ctx context.Context) ([]DeviceSystemPolicy
 		return nil, fmt.Errorf("list device policy states: %w", err)
 	}
 	for i := range rows {
-		if rows[i].AppliedSettingsJSON != "" && rows[i].AppliedSettingsJSON != "{}" {
-			_ = json.Unmarshal([]byte(rows[i].AppliedSettingsJSON), &rows[i].AppliedSettings)
-		}
+		rows[i].decodeJSON()
 	}
 	if rows == nil {
 		rows = []DeviceSystemPolicyState{}
@@ -194,19 +204,28 @@ func (r *Repository) UpdateDeviceState(ctx context.Context, state *DeviceSystemP
 		settingsBytes = []byte("{}")
 	}
 	state.AppliedSettingsJSON = string(settingsBytes)
+	if state.Results == nil {
+		state.Results = []protocol.SettingResult{}
+	}
+	resultsBytes, err := json.Marshal(state.Results)
+	if err != nil {
+		resultsBytes = []byte("[]")
+	}
+	state.ResultsJSON = string(resultsBytes)
 
 	// Upsert query compatible with SQLite and PostgreSQL
-	q := `INSERT INTO device_system_policy_states (device_id, policy_version, status, applied_settings_json, last_applied_at, error_message)
-	      VALUES (?, ?, ?, ?, ?, ?)
+	q := `INSERT INTO device_system_policy_states (device_id, policy_version, status, applied_settings_json, results_json, last_applied_at, error_message)
+	      VALUES (?, ?, ?, ?, ?, ?, ?)
 	      ON CONFLICT(device_id) DO UPDATE SET
 	          policy_version = excluded.policy_version,
 	          status = excluded.status,
 	          applied_settings_json = excluded.applied_settings_json,
+	          results_json = excluded.results_json,
 	          last_applied_at = excluded.last_applied_at,
 	          error_message = excluded.error_message`
 	_, err = r.db.ExecContext(ctx, r.db.Rebind(q),
 		state.DeviceID, state.PolicyVersion, state.Status,
-		state.AppliedSettingsJSON, state.LastAppliedAt, state.ErrorMessage,
+		state.AppliedSettingsJSON, state.ResultsJSON, state.LastAppliedAt, state.ErrorMessage,
 	)
 	if err != nil {
 		return fmt.Errorf("upsert device policy state %s: %w", state.DeviceID, err)
