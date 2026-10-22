@@ -1,6 +1,7 @@
 package systempolicy
 
 import (
+	"bytes"
 	"encoding/json"
 	"time"
 )
@@ -81,19 +82,158 @@ type PolicySettings struct {
 	AdminAccountNeverExpires bool   `json:"admin_account_never_expires"`
 }
 
+// settingsVersion marks a stored PolicyConfig. A blob without it was written
+// by an earlier server, whose console and handlers filled every field with a
+// default, so its "allow", false and 0 values are not decisions.
+const settingsVersion = 2
+
+// PolicyConfig is what one policy says. A nil decision field is "not set":
+// the policy leaves that setting to broader or lower-priority policies, and to
+// the OS default when nobody decides it.
+//
+// Policies used to store plain values. The handlers and the console filled
+// every field, so each policy carried an explicit usb_storage_mode "allow", and
+// any policy that ranked above a USB block lifted it -- including one written
+// only to set a wallpaper. A field now decides something only when it is set.
+//
+// Attributes (wallpaper URL/style/lock, the admin account's details) belong to
+// the decision that turns them on and are read only when it is set to true.
+type PolicyConfig struct {
+	SettingsVersion int `json:"settings_version"`
+
+	USBStorageMode *USBStorageMode `json:"usb_storage_mode"`
+
+	WallpaperEnabled *bool          `json:"wallpaper_enabled"`
+	WallpaperURL     string         `json:"wallpaper_url,omitempty"`
+	WallpaperStyle   WallpaperStyle `json:"wallpaper_style,omitempty"`
+	WallpaperLocked  bool           `json:"wallpaper_locked"`
+
+	FirewallEnabled             *bool `json:"firewall_enabled"`
+	DefenderProtectionEnabled   *bool `json:"defender_protection_enabled"`
+	DisablePowerShell           *bool `json:"disable_powershell"`
+	DisableAutoplay             *bool `json:"disable_autoplay"`
+	ScreenSaverTimeoutMinutes   *int  `json:"screensaver_timeout_minutes"`
+	ScreenSaverPasswordRequired *bool `json:"screensaver_password_required"`
+
+	InactivityTimeoutMinutes *int               `json:"inactivity_timeout_minutes"`
+	DisableTaskMgr           *bool              `json:"disable_task_mgr"`
+	DisableCMD               *bool              `json:"disable_cmd"`
+	DisableRegistryTools     *bool              `json:"disable_registry_tools"`
+	DisableControlPanel      *bool              `json:"disable_control_panel"`
+	WindowsUpdateMode        *WindowsUpdateMode `json:"windows_update_mode"`
+
+	AdminAccountEnabled      *bool  `json:"admin_account_enabled"`
+	AdminAccountUsername     string `json:"admin_account_username,omitempty"`
+	AdminAccountPassword     string `json:"admin_account_password,omitempty"`
+	AdminAccountPasswordSet  bool   `json:"admin_account_password_set,omitempty"`
+	AdminAccountFullName     string `json:"admin_account_full_name,omitempty"`
+	AdminAccountDescription  string `json:"admin_account_description,omitempty"`
+	AdminAccountNeverExpires bool   `json:"admin_account_never_expires"`
+}
+
+func ptr[T any](v T) *T { return &v }
+
+// trueOnly keeps a legacy boolean only when it said "on".
+func trueOnly(b bool) *bool {
+	if b {
+		return ptr(true)
+	}
+	return nil
+}
+
+// positiveOnly keeps a legacy minute count only when it enabled something.
+func positiveOnly(n int) *int {
+	if n > 0 {
+		return ptr(n)
+	}
+	return nil
+}
+
+// fromLegacy reads a policy written before settings were tri-state. Its
+// "allow", "default", false and 0 values were filled in by the old console and
+// handlers whether or not the operator chose them, so they become "not set";
+// anything that turned a restriction on is kept as an explicit decision.
+func fromLegacy(s PolicySettings) PolicyConfig {
+	c := PolicyConfig{
+		SettingsVersion:             settingsVersion,
+		FirewallEnabled:             trueOnly(s.FirewallEnabled),
+		DefenderProtectionEnabled:   trueOnly(s.DefenderProtectionEnabled),
+		DisablePowerShell:           trueOnly(s.DisablePowerShell),
+		DisableAutoplay:             trueOnly(s.DisableAutoplay),
+		ScreenSaverTimeoutMinutes:   positiveOnly(s.ScreenSaverTimeoutMinutes),
+		ScreenSaverPasswordRequired: trueOnly(s.ScreenSaverPasswordRequired),
+		InactivityTimeoutMinutes:    positiveOnly(s.InactivityTimeoutMinutes),
+		DisableTaskMgr:              trueOnly(s.DisableTaskMgr),
+		DisableCMD:                  trueOnly(s.DisableCMD),
+		DisableRegistryTools:        trueOnly(s.DisableRegistryTools),
+		DisableControlPanel:         trueOnly(s.DisableControlPanel),
+	}
+	if s.USBStorageMode == USBStorageBlock || s.USBStorageMode == USBStorageReadOnly {
+		c.USBStorageMode = ptr(s.USBStorageMode)
+	}
+	if s.WindowsUpdateMode == WindowsUpdateAutoInstall || s.WindowsUpdateMode == WindowsUpdateNotifyOnly {
+		c.WindowsUpdateMode = ptr(s.WindowsUpdateMode)
+	}
+	if s.WallpaperEnabled {
+		c.WallpaperEnabled = ptr(true)
+		c.WallpaperURL = s.WallpaperURL
+		c.WallpaperStyle = s.WallpaperStyle
+		c.WallpaperLocked = s.WallpaperLocked
+	}
+	if s.AdminAccountEnabled {
+		c.AdminAccountEnabled = ptr(true)
+		c.AdminAccountUsername = s.AdminAccountUsername
+		c.AdminAccountPassword = s.AdminAccountPassword
+		c.AdminAccountFullName = s.AdminAccountFullName
+		c.AdminAccountDescription = s.AdminAccountDescription
+		c.AdminAccountNeverExpires = s.AdminAccountNeverExpires
+	}
+	return c
+}
+
+// decodePolicyConfig reads stored settings or a request body: a tri-state blob
+// as written, anything else through fromLegacy. A console tab opened before an
+// upgrade still posts the old shape, and its auto-filled "allow" must not
+// become an explicit decision.
+func decodePolicyConfig(raw []byte) (PolicyConfig, error) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return PolicyConfig{SettingsVersion: settingsVersion}, nil
+	}
+	var probe struct {
+		Version int `json:"settings_version"`
+	}
+	if err := json.Unmarshal(trimmed, &probe); err != nil {
+		return PolicyConfig{}, err
+	}
+	if probe.Version >= settingsVersion {
+		var c PolicyConfig
+		if err := json.Unmarshal(trimmed, &c); err != nil {
+			return PolicyConfig{}, err
+		}
+		c.SettingsVersion = settingsVersion
+		return c, nil
+	}
+	var legacy PolicySettings
+	if err := json.Unmarshal(trimmed, &legacy); err != nil {
+		return PolicyConfig{}, err
+	}
+	return fromLegacy(legacy), nil
+}
+
 // SystemPolicy represents an AD GPO-like endpoint policy stored in the database.
 type SystemPolicy struct {
-	ID          string         `json:"id" db:"id"`
-	Name        string         `json:"name" db:"name"`
-	Description string         `json:"description" db:"description"`
-	TargetType  string         `json:"target_type" db:"target_type"` // 'all', 'group', 'device'
-	TargetID    string         `json:"target_id" db:"target_id"`
-	IsEnabled   bool           `json:"is_enabled" db:"is_enabled"`
-	Priority    int            `json:"priority" db:"priority"`
-	Settings    PolicySettings `json:"settings"`
-	CreatedBy   string         `json:"created_by" db:"created_by"`
-	CreatedAt   time.Time      `json:"created_at" db:"created_at"`
-	UpdatedAt   time.Time      `json:"updated_at" db:"updated_at"`
+	ID          string       `json:"id" db:"id"`
+	Name        string       `json:"name" db:"name"`
+	Description string       `json:"description" db:"description"`
+	TargetType  string       `json:"target_type" db:"target_type"` // 'all', 'group', 'device'
+	TargetID    string       `json:"target_id" db:"target_id"`
+	IsEnabled   bool         `json:"is_enabled" db:"is_enabled"`
+	Priority    int          `json:"priority" db:"priority"`
+	Settings    PolicyConfig `json:"settings"`
+	CreatedBy   string       `json:"created_by" db:"created_by"`
+	CreatedAt   time.Time    `json:"created_at" db:"created_at"`
+	UpdatedAt   time.Time    `json:"updated_at" db:"updated_at"`
 
 	// Raw JSON from database
 	SettingsJSON string `json:"-" db:"settings_json"`
@@ -101,19 +241,17 @@ type SystemPolicy struct {
 
 // UnmarshalSettings unpacks SettingsJSON into Settings.
 func (p *SystemPolicy) UnmarshalSettings() error {
-	if p.SettingsJSON == "" || p.SettingsJSON == "{}" {
-		p.Settings = PolicySettings{
-			USBStorageMode:    USBStorageAllow,
-			WallpaperStyle:    WallpaperFill,
-			WindowsUpdateMode: WindowsUpdateDefault,
-		}
-		return nil
+	c, err := decodePolicyConfig([]byte(p.SettingsJSON))
+	if err != nil {
+		return err
 	}
-	return json.Unmarshal([]byte(p.SettingsJSON), &p.Settings)
+	p.Settings = c
+	return nil
 }
 
-// MarshalSettings packs Settings into SettingsJSON.
+// MarshalSettings packs Settings into SettingsJSON, always as a tri-state blob.
 func (p *SystemPolicy) MarshalSettings() error {
+	p.Settings.SettingsVersion = settingsVersion
 	b, err := json.Marshal(p.Settings)
 	if err != nil {
 		return err
@@ -121,6 +259,18 @@ func (p *SystemPolicy) MarshalSettings() error {
 	p.SettingsJSON = string(b)
 	return nil
 }
+
+// SettingSource names the policy that decided one setting for a device.
+type SettingSource struct {
+	PolicyID   string `json:"policy_id"`
+	PolicyName string `json:"policy_name"`
+	TargetType string `json:"target_type"`
+	TargetID   string `json:"target_id"`
+	Priority   int    `json:"priority"`
+}
+
+// PolicyRef is one policy that applies to a device, listed most decisive first.
+type PolicyRef = SettingSource
 
 // CompiledPolicy represents the effective merged policy for an endpoint device.
 type CompiledPolicy struct {

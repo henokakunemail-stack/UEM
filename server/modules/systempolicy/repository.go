@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"github.com/jmoiron/sqlx"
+
+	"github.com/henokakunemail-stack/Endpoint-Manager/protocol"
 )
 
 type Repository struct {
@@ -252,11 +254,21 @@ func (r *Repository) GetTargetDeviceIDs(ctx context.Context, targetType, targetI
 // merges them in hierarchical priority order (device > group > all, then priority ASC),
 // and calculates a deterministic SHA-256 policy version hash.
 func (r *Repository) CompileEffectivePolicy(ctx context.Context, deviceID string) (*CompiledPolicy, error) {
+	compiled, _, _, err := r.CompileEffectivePolicyWithSources(ctx, deviceID)
+	return compiled, err
+}
+
+// CompileEffectivePolicyWithSources is CompileEffectivePolicy plus, for every
+// setting some policy decided, which policy that was, and the policies that
+// apply to the device, most decisive first. Without it an operator looking at
+// a device that should block USB and does not had no way to tell which of the
+// policies aimed at it had won.
+func (r *Repository) CompileEffectivePolicyWithSources(ctx context.Context, deviceID string) (*CompiledPolicy, map[string]SettingSource, []PolicyRef, error) {
 	// 1. Get groups for device
 	groupQuery := `SELECT group_id FROM device_group_members WHERE device_id = ?`
 	var groupIDs []string
 	if err := r.db.SelectContext(ctx, &groupIDs, r.db.Rebind(groupQuery), deviceID); err != nil {
-		return nil, fmt.Errorf("lookup device groups: %w", err)
+		return nil, nil, nil, fmt.Errorf("lookup device groups: %w", err)
 	}
 
 	// 2. Query all enabled policies matching device, groups, or all
@@ -266,7 +278,7 @@ func (r *Repository) CompileEffectivePolicy(ctx context.Context, deviceID string
 	              FROM system_policies
 	              WHERE is_enabled = 1`
 	if err := r.db.SelectContext(ctx, &allPolicies, baseQuery); err != nil {
-		return nil, fmt.Errorf("query enabled system policies: %w", err)
+		return nil, nil, nil, fmt.Errorf("query enabled system policies: %w", err)
 	}
 
 	// Filter matching policies
@@ -318,7 +330,12 @@ func (r *Repository) CompileEffectivePolicy(ctx context.Context, deviceID string
 		if matched[i].Priority != matched[j].Priority {
 			return matched[i].Priority > matched[j].Priority // higher priority number (lower precedence) first
 		}
-		return matched[i].CreatedAt.Before(matched[j].CreatedAt)
+		if !matched[i].CreatedAt.Equal(matched[j].CreatedAt) {
+			return matched[i].CreatedAt.Before(matched[j].CreatedAt) // the newer policy wins a tie
+		}
+		// Same scope, priority and creation time: the id decides, so the result
+		// (and the version) never depends on the order rows came back in.
+		return matched[i].ID < matched[j].ID
 	})
 
 	// Default baseline settings
@@ -334,101 +351,103 @@ func (r *Repository) CompileEffectivePolicy(ctx context.Context, deviceID string
 		WindowsUpdateMode:        WindowsUpdateDefault,
 	}
 
-	// If no matched policies, version hash of empty baseline
-	if len(matched) == 0 {
-		return &CompiledPolicy{
-			DeviceID: deviceID,
-			Version:  ComputePolicyVersion(effective, r.versionKey),
-			Settings: effective,
-		}, nil
-	}
+	sources := map[string]SettingSource{}
+	refs := make([]PolicyRef, 0, len(matched))
 
-	// Iterate and merge forward: higher precedence will override
+	// Iterate from lowest to highest precedence: a setting a policy decides
+	// (non-nil) replaces whatever a lower policy said, and remembers who said
+	// it. A setting it leaves nil is untouched. There is no special case per
+	// setting any more: restrictions used to be OR-merged, so a "no" could never
+	// lift a broader "yes", and a few settings could only be reset by a device
+	// policy holding a zero value.
 	for _, p := range matched {
 		s := p.Settings
-		// USB Storage
-		if s.USBStorageMode != "" {
-			effective.USBStorageMode = s.USBStorageMode
+		src := SettingSource{PolicyID: p.ID, PolicyName: p.Name, TargetType: p.TargetType,
+			TargetID: p.TargetID, Priority: p.Priority}
+		refs = append(refs, src)
+		decided := func(key string) { sources[key] = src }
+		decideBool := func(dst *bool, v *bool, key string) {
+			if v != nil {
+				*dst = *v
+				decided(key)
+			}
 		}
-		// Wallpaper
-		if s.WallpaperEnabled {
-			effective.WallpaperEnabled = true
-			effective.WallpaperURL = s.WallpaperURL
-			effective.WallpaperStyle = s.WallpaperStyle
-			effective.WallpaperLocked = s.WallpaperLocked
-		} else if p.TargetType == "device" {
-			// Explicit device policy can turn off wallpaper
-			effective.WallpaperEnabled = false
-			effective.WallpaperURL = ""
-			effective.WallpaperLocked = false
-		}
-		// Inactivity Timeout
-		if s.InactivityTimeoutMinutes > 0 || p.TargetType == "device" {
-			effective.InactivityTimeoutMinutes = s.InactivityTimeoutMinutes
-		}
-		// Restrictions (cumulative across policies)
-		if s.DisableTaskMgr {
-			effective.DisableTaskMgr = true
-		}
-		if s.DisableCMD {
-			effective.DisableCMD = true
-		}
-		if s.DisableRegistryTools {
-			effective.DisableRegistryTools = true
-		}
-		if s.DisableControlPanel {
-			effective.DisableControlPanel = true
-		}
-		if s.DisablePowerShell {
-			effective.DisablePowerShell = true
-		}
-		if s.DisableAutoplay {
-			effective.DisableAutoplay = true
-		}
-		if s.FirewallEnabled {
-			effective.FirewallEnabled = true
-		}
-		if s.DefenderProtectionEnabled {
-			effective.DefenderProtectionEnabled = true
-		}
-		if s.ScreenSaverTimeoutMinutes > 0 || p.TargetType == "device" {
-			effective.ScreenSaverTimeoutMinutes = s.ScreenSaverTimeoutMinutes
-		}
-		if s.ScreenSaverPasswordRequired {
-			effective.ScreenSaverPasswordRequired = true
+		decideInt := func(dst *int, v *int, key string) {
+			if v != nil {
+				*dst = *v
+				decided(key)
+			}
 		}
 
-		// Windows Update
-		if s.WindowsUpdateMode != "" && s.WindowsUpdateMode != WindowsUpdateDefault {
-			effective.WindowsUpdateMode = s.WindowsUpdateMode
+		if s.USBStorageMode != nil {
+			effective.USBStorageMode = *s.USBStorageMode
+			decided(protocol.SettingUSBStorageMode)
 		}
+		if s.WallpaperEnabled != nil {
+			if *s.WallpaperEnabled {
+				effective.WallpaperEnabled = true
+				effective.WallpaperURL = s.WallpaperURL
+				effective.WallpaperStyle = s.WallpaperStyle
+				if effective.WallpaperStyle == "" {
+					effective.WallpaperStyle = WallpaperFill
+				}
+				effective.WallpaperLocked = s.WallpaperLocked
+			} else {
+				effective.WallpaperEnabled = false
+				effective.WallpaperURL = ""
+				effective.WallpaperStyle = WallpaperFill
+				effective.WallpaperLocked = false
+			}
+			decided(protocol.SettingWallpaperEnabled)
+		}
+		decideInt(&effective.InactivityTimeoutMinutes, s.InactivityTimeoutMinutes, protocol.SettingInactivityTimeoutMinutes)
+		decideBool(&effective.DisableTaskMgr, s.DisableTaskMgr, protocol.SettingDisableTaskMgr)
+		decideBool(&effective.DisableCMD, s.DisableCMD, protocol.SettingDisableCMD)
+		decideBool(&effective.DisableRegistryTools, s.DisableRegistryTools, protocol.SettingDisableRegistryTools)
+		decideBool(&effective.DisableControlPanel, s.DisableControlPanel, protocol.SettingDisableControlPanel)
+		if s.WindowsUpdateMode != nil {
+			effective.WindowsUpdateMode = *s.WindowsUpdateMode
+			decided(protocol.SettingWindowsUpdateMode)
+		}
+		decideBool(&effective.FirewallEnabled, s.FirewallEnabled, protocol.SettingFirewallEnabled)
+		decideBool(&effective.DefenderProtectionEnabled, s.DefenderProtectionEnabled, protocol.SettingDefenderProtectionEnabled)
+		decideBool(&effective.DisablePowerShell, s.DisablePowerShell, protocol.SettingDisablePowerShell)
+		decideBool(&effective.DisableAutoplay, s.DisableAutoplay, protocol.SettingDisableAutoplay)
+		decideInt(&effective.ScreenSaverTimeoutMinutes, s.ScreenSaverTimeoutMinutes, protocol.SettingScreenSaverTimeoutMinutes)
+		decideBool(&effective.ScreenSaverPasswordRequired, s.ScreenSaverPasswordRequired, protocol.SettingScreenSaverPasswordRequired)
 
-		// Managed Local Admin Account
-		if s.AdminAccountEnabled && s.AdminAccountUsername != "" && s.AdminAccountPassword != "" {
-			effective.AdminAccountEnabled = true
-			effective.AdminAccountUsername = s.AdminAccountUsername
-			effective.AdminAccountPassword = s.AdminAccountPassword
-			effective.AdminAccountFullName = s.AdminAccountFullName
-			effective.AdminAccountDescription = s.AdminAccountDescription
-			effective.AdminAccountNeverExpires = s.AdminAccountNeverExpires
-		} else if p.TargetType == "device" && !s.AdminAccountEnabled {
-			// Explicit device policy can turn off managed admin account
-			effective.AdminAccountEnabled = false
-			effective.AdminAccountUsername = ""
-			effective.AdminAccountPassword = ""
-			effective.AdminAccountFullName = ""
-			effective.AdminAccountDescription = ""
-			effective.AdminAccountNeverExpires = false
+		if s.AdminAccountEnabled != nil {
+			switch {
+			case *s.AdminAccountEnabled && s.AdminAccountUsername != "" && s.AdminAccountPassword != "":
+				effective.AdminAccountEnabled = true
+				effective.AdminAccountUsername = s.AdminAccountUsername
+				effective.AdminAccountPassword = s.AdminAccountPassword
+				effective.AdminAccountFullName = s.AdminAccountFullName
+				effective.AdminAccountDescription = s.AdminAccountDescription
+				effective.AdminAccountNeverExpires = s.AdminAccountNeverExpires
+				decided(protocol.SettingAdminAccountEnabled)
+			case !*s.AdminAccountEnabled:
+				effective.AdminAccountEnabled = false
+				effective.AdminAccountUsername = ""
+				effective.AdminAccountPassword = ""
+				effective.AdminAccountFullName = ""
+				effective.AdminAccountDescription = ""
+				effective.AdminAccountNeverExpires = false
+				decided(protocol.SettingAdminAccountEnabled)
+			}
 		}
 	}
 
-	version := ComputePolicyVersion(effective, r.versionKey)
+	// Most decisive first, which is how the console lists them.
+	for i, j := 0, len(refs)-1; i < j; i, j = i+1, j-1 {
+		refs[i], refs[j] = refs[j], refs[i]
+	}
 
 	return &CompiledPolicy{
 		DeviceID: deviceID,
-		Version:  version,
+		Version:  ComputePolicyVersion(effective, r.versionKey),
 		Settings: effective,
-	}, nil
+	}, sources, refs, nil
 }
 
 // ComputePolicyVersion generates a deterministic SHA-256 hash (16 chars) for

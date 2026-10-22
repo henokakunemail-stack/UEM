@@ -144,13 +144,56 @@ func (h *Handler) getPolicy(w http.ResponseWriter, r *http.Request) {
 }
 
 type createPolicyReq struct {
-	Name        string         `json:"name"`
-	Description string         `json:"description"`
-	TargetType  string         `json:"target_type"`
-	TargetID    string         `json:"target_id"`
-	IsEnabled   *bool          `json:"is_enabled"`
-	Priority    int            `json:"priority"`
-	Settings    PolicySettings `json:"settings"`
+	Name        string          `json:"name"`
+	Description string          `json:"description"`
+	TargetType  string          `json:"target_type"`
+	TargetID    string          `json:"target_id"`
+	IsEnabled   *bool           `json:"is_enabled"`
+	Priority    int             `json:"priority"`
+	Settings    json.RawMessage `json:"settings"`
+}
+
+// validateConfig checks the values a policy decides. Only what is set is
+// checked: "not set" is always valid.
+func validateConfig(c PolicyConfig) (code, msg string) {
+	if c.USBStorageMode != nil {
+		switch *c.USBStorageMode {
+		case USBStorageAllow, USBStorageBlock, USBStorageReadOnly:
+		default:
+			return "invalid_usb_mode", "usb_storage_mode must be allow, block or read_only"
+		}
+	}
+	if c.WindowsUpdateMode != nil {
+		switch *c.WindowsUpdateMode {
+		case WindowsUpdateDefault, WindowsUpdateAutoInstall, WindowsUpdateNotifyOnly:
+		default:
+			return "invalid_update_mode", "windows_update_mode must be default, auto_install or notify_only"
+		}
+	}
+	if c.WallpaperEnabled != nil && *c.WallpaperEnabled {
+		if strings.TrimSpace(c.WallpaperURL) == "" {
+			return "wallpaper_url_required", "wallpaper_url is required when the wallpaper is enforced"
+		}
+		switch c.WallpaperStyle {
+		case "", WallpaperFill, WallpaperFit, WallpaperStretch, WallpaperCenter, WallpaperTile:
+		default:
+			return "invalid_wallpaper_style", "wallpaper_style must be fill, fit, stretch, center or tile"
+		}
+	}
+	for _, m := range []*int{c.InactivityTimeoutMinutes, c.ScreenSaverTimeoutMinutes} {
+		if m != nil && (*m < 0 || *m > 24*60) {
+			return "invalid_timeout", "timeouts are minutes between 0 (off) and 1440"
+		}
+	}
+	if c.AdminAccountEnabled != nil && *c.AdminAccountEnabled {
+		if strings.TrimSpace(c.AdminAccountUsername) == "" {
+			return "admin_username_required", "admin_account_username is required when the managed admin account is enabled"
+		}
+		if c.AdminAccountPassword == "" {
+			return "admin_password_required", "admin_account_password is required when the managed admin account is enabled"
+		}
+	}
+	return "", ""
 }
 
 func (h *Handler) createPolicy(w http.ResponseWriter, r *http.Request) {
@@ -182,20 +225,17 @@ func (h *Handler) createPolicy(w http.ResponseWriter, r *http.Request) {
 		priority = 100
 	}
 
-	// Sanitize and set defaults for settings
-	if req.Settings.USBStorageMode == "" {
-		req.Settings.USBStorageMode = USBStorageAllow
+	// No defaults are filled in: a setting the request leaves out is "not set".
+	// Filling usb_storage_mode with "allow" here is what let any policy lift a
+	// USB block it was never written to touch.
+	settings, err := decodePolicyConfig(req.Settings)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid settings")
+		return
 	}
-	if req.Settings.WallpaperStyle == "" {
-		req.Settings.WallpaperStyle = WallpaperFill
-	}
-	if req.Settings.WindowsUpdateMode == "" {
-		req.Settings.WindowsUpdateMode = WindowsUpdateDefault
-	}
-	keepStoredPassword(&req.Settings, PolicySettings{})
-	if req.Settings.AdminAccountEnabled && req.Settings.AdminAccountPassword == "" {
-		writeErrCode(w, http.StatusBadRequest, "admin_password_required",
-			"admin_account_password is required when the managed admin account is enabled")
+	keepStoredPassword(&settings, PolicyConfig{})
+	if code, msg := validateConfig(settings); code != "" {
+		writeErrCode(w, http.StatusBadRequest, code, msg)
 		return
 	}
 
@@ -207,7 +247,7 @@ func (h *Handler) createPolicy(w http.ResponseWriter, r *http.Request) {
 		TargetID:    strings.TrimSpace(req.TargetID),
 		IsEnabled:   isEnabled,
 		Priority:    priority,
-		Settings:    req.Settings,
+		Settings:    settings,
 		CreatedBy:   actorID,
 	}
 
@@ -237,7 +277,7 @@ type updatePolicyReq struct {
 	TargetID    *string         `json:"target_id"`
 	IsEnabled   *bool           `json:"is_enabled"`
 	Priority    *int            `json:"priority"`
-	Settings    *PolicySettings `json:"settings"`
+	Settings    json.RawMessage `json:"settings"`
 }
 
 func (h *Handler) updatePolicy(w http.ResponseWriter, r *http.Request) {
@@ -287,23 +327,18 @@ func (h *Handler) updatePolicy(w http.ResponseWriter, r *http.Request) {
 	if req.Priority != nil && *req.Priority > 0 {
 		p.Priority = *req.Priority
 	}
-	if req.Settings != nil {
-		if req.Settings.USBStorageMode == "" {
-			req.Settings.USBStorageMode = USBStorageAllow
-		}
-		if req.Settings.WallpaperStyle == "" {
-			req.Settings.WallpaperStyle = WallpaperFill
-		}
-		if req.Settings.WindowsUpdateMode == "" {
-			req.Settings.WindowsUpdateMode = WindowsUpdateDefault
-		}
-		keepStoredPassword(req.Settings, p.Settings)
-		if req.Settings.AdminAccountEnabled && req.Settings.AdminAccountPassword == "" {
-			writeErrCode(w, http.StatusBadRequest, "admin_password_required",
-				"admin_account_password is required when the managed admin account is enabled")
+	if len(req.Settings) > 0 {
+		settings, err := decodePolicyConfig(req.Settings)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, "invalid settings")
 			return
 		}
-		p.Settings = *req.Settings
+		keepStoredPassword(&settings, p.Settings)
+		if code, msg := validateConfig(settings); code != "" {
+			writeErrCode(w, http.StatusBadRequest, code, msg)
+			return
+		}
+		p.Settings = settings
 	}
 
 	if err := h.repo.Update(r.Context(), p); err != nil {
@@ -381,7 +416,7 @@ func (h *Handler) applyPolicyNow(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) getDeviceSystemPolicy(w http.ResponseWriter, r *http.Request) {
 	deviceID := chi.URLParam(r, "id")
-	compiled, err := h.repo.CompileEffectivePolicy(r.Context(), deviceID)
+	compiled, sources, matched, err := h.repo.CompileEffectivePolicyWithSources(r.Context(), deviceID)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
@@ -392,9 +427,13 @@ func (h *Handler) getDeviceSystemPolicy(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// sources says which policy decided each setting; a setting missing from
+	// it is decided by nobody and stays at the OS default.
 	writeJSON(w, http.StatusOK, map[string]any{
-		"compiled": redactCompiled(compiled),
-		"state":    redactState(state),
+		"compiled":         redactCompiled(compiled),
+		"state":            redactState(state),
+		"sources":          sources,
+		"matched_policies": matched,
 	})
 }
 

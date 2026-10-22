@@ -52,11 +52,11 @@ func TestCompileEffectivePolicy_Precedence(t *testing.T) {
 		IsEnabled:  true,
 		Priority:   100,
 		CreatedBy:  "admin",
-		Settings: PolicySettings{
+		Settings: legacy(PolicySettings{
 			USBStorageMode:           USBStorageAllow,
 			InactivityTimeoutMinutes: 30,
 			DisableTaskMgr:           false,
-		},
+		}),
 	}
 	if err := repo.Create(ctx, pFleet); err != nil {
 		t.Fatalf("create fleet policy: %v", err)
@@ -81,11 +81,11 @@ func TestCompileEffectivePolicy_Precedence(t *testing.T) {
 		IsEnabled:  true,
 		Priority:   50,
 		CreatedBy:  "admin",
-		Settings: PolicySettings{
+		Settings: legacy(PolicySettings{
 			USBStorageMode:           USBStorageBlock,
 			InactivityTimeoutMinutes: 15,
 			DisableTaskMgr:           true,
-		},
+		}),
 	}
 	if err := repo.Create(ctx, pGroup); err != nil {
 		t.Fatalf("create group policy: %v", err)
@@ -113,12 +113,12 @@ func TestCompileEffectivePolicy_Precedence(t *testing.T) {
 		IsEnabled:  true,
 		Priority:   10,
 		CreatedBy:  "admin",
-		Settings: PolicySettings{
+		Settings: legacy(PolicySettings{
 			USBStorageMode:   USBStorageReadOnly,
 			WallpaperEnabled: true,
 			WallpaperURL:     "http://corp/wallpaper.jpg",
 			WallpaperStyle:   WallpaperStretch,
-		},
+		}),
 	}
 	if err := repo.Create(ctx, pDevice); err != nil {
 		t.Fatalf("create device policy: %v", err)
@@ -218,7 +218,7 @@ func TestCompileEffectivePolicy_NewSecurityPolicies(t *testing.T) {
 		IsEnabled:  true,
 		Priority:   1,
 		CreatedBy:  "sec-admin",
-		Settings: PolicySettings{
+		Settings: legacy(PolicySettings{
 			WallpaperEnabled:            true,
 			WallpaperURL:                "/api/system-policies/wallpapers/wallpaper_abc.png",
 			WallpaperStyle:              WallpaperFill,
@@ -229,7 +229,7 @@ func TestCompileEffectivePolicy_NewSecurityPolicies(t *testing.T) {
 			DisableAutoplay:             true,
 			ScreenSaverTimeoutMinutes:   10,
 			ScreenSaverPasswordRequired: true,
-		},
+		}),
 	}
 	if err := repo.Create(ctx, p); err != nil {
 		t.Fatalf("create security policy: %v", err)
@@ -281,14 +281,14 @@ func TestCompileEffectivePolicy_AdminAccount(t *testing.T) {
 		IsEnabled:  true,
 		Priority:   1,
 		CreatedBy:  "admin",
-		Settings: PolicySettings{
+		Settings: legacy(PolicySettings{
 			AdminAccountEnabled:      true,
 			AdminAccountUsername:     "supportadmin",
 			AdminAccountPassword:     "P@ssw0rdEnterprise2026!",
 			AdminAccountFullName:     "Corporate Support Admin",
 			AdminAccountDescription:  "Automated Support Administrator",
 			AdminAccountNeverExpires: true,
-		},
+		}),
 	}
 	if err := repo.Create(ctx, p); err != nil {
 		t.Fatalf("create admin account policy: %v", err)

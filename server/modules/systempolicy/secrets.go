@@ -24,6 +24,13 @@ func (s PolicySettings) redacted() PolicySettings {
 	return s
 }
 
+// redacted returns the policy's settings with the password replaced by a flag.
+func (c PolicyConfig) redacted() PolicyConfig {
+	c.AdminAccountPasswordSet = c.AdminAccountPassword != ""
+	c.AdminAccountPassword = ""
+	return c
+}
+
 func redactPolicy(p *SystemPolicy) *SystemPolicy {
 	if p == nil {
 		return nil
@@ -69,10 +76,11 @@ func redactStates(ss []DeviceSystemPolicyState) []DeviceSystemPolicyState {
 
 // keepStoredPassword applies the edit rule for the password: a blank password
 // in an update means "unchanged" (the console never receives the stored one, so
-// it cannot send it back), and turning the managed account off clears it.
-func keepStoredPassword(incoming *PolicySettings, stored PolicySettings) {
+// it cannot send it back), and a policy that does not turn the managed account
+// on holds no password.
+func keepStoredPassword(incoming *PolicyConfig, stored PolicyConfig) {
 	incoming.AdminAccountPasswordSet = false
-	if !incoming.AdminAccountEnabled {
+	if incoming.AdminAccountEnabled == nil || !*incoming.AdminAccountEnabled {
 		incoming.AdminAccountPassword = ""
 		return
 	}

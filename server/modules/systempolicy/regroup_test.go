@@ -33,7 +33,7 @@ func TestDevicesRegroupedDispatches(t *testing.T) {
 	}
 	if err := repo.Create(ctx, &SystemPolicy{
 		Name: "Block USB", TargetType: "group", TargetID: "g1", IsEnabled: true, Priority: 100,
-		CreatedBy: "admin", Settings: PolicySettings{USBStorageMode: USBStorageBlock},
+		CreatedBy: "admin", Settings: legacy(PolicySettings{USBStorageMode: USBStorageBlock}),
 	}); err != nil {
 		t.Fatal(err)
 	}
