@@ -13,15 +13,14 @@ import (
 // fakeDNS stands in for the adapter configuration; nothing on this machine's
 // network settings changes.
 type fakeDNS struct {
-	snapshot      dnsBackup
-	snapshotErr   error
-	pointWarn     string
-	pointErr      error
-	snapshots     int
-	pointed       []dnsBackup
-	restored      []dnsBackup
-	onPoint       func()
-	backupOnPoint bool
+	snapshot    dnsBackup
+	snapshotErr error
+	pointWarn   string
+	pointErr    error
+	snapshots   int
+	pointed     []dnsBackup
+	restored    []dnsBackup
+	onPoint     func()
 }
 
 func (f *fakeDNS) Snapshot() (dnsBackup, error) {

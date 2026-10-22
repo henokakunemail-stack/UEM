@@ -155,7 +155,7 @@
   "bulk_submit": "Add {count} line(s)",
   "bulk_done": "Done",
   "bulk_failed": "Bulk add failed. Nothing was saved.",
-  "bulk_summary": "{added} added, {duplicates} already in the policy, {invalid} rejected.",
+  "bulk_summary": "{added} added, {duplicates} duplicate(s), {invalid} rejected.",
   "bulk_rejected_label": "Lines that were not added",
   "bulk_col_line": "Line",
   "bulk_col_result": "Why it was not added",

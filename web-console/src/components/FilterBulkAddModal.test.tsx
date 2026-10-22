@@ -55,7 +55,7 @@ describe('FilterBulkAddModal', () => {
       patterns: ['tiktok.com', 'detik.com', '10.0.0.1'],
       category: 'Social Media',
     })
-    expect(screen.getByRole('status').textContent).toBe('1 added, 1 already in the policy, 1 rejected.')
+    expect(screen.getByRole('status').textContent).toBe('1 added, 1 duplicate(s), 1 rejected.')
     const table = screen.getByRole('table', { name: 'Lines that were not added' })
     expect(within(table).getByText('Already in this policy')).toBeTruthy()
     expect(within(table).getByText('An IP address, not a domain. Filtering works on domain names.')).toBeTruthy()

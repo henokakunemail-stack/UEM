@@ -54,8 +54,11 @@ func (systemDNS) Snapshot() (dnsBackup, error) {
 	switch runtime.GOOS {
 	case "windows":
 		adapters, err := getConnectedWindowsAdapters()
-		if err != nil || len(adapters) == 0 {
-			return dnsBackup{}, fmt.Errorf("no connected network adapter found: %v", err)
+		if err != nil {
+			return dnsBackup{}, fmt.Errorf("list network adapters: %w", err)
+		}
+		if len(adapters) == 0 {
+			return dnsBackup{}, errors.New("no connected network adapter found")
 		}
 		b := dnsBackup{Method: "windows"}
 		for _, a := range adapters {

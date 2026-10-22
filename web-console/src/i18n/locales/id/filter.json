@@ -155,7 +155,7 @@
   "bulk_submit": "Tambahkan {count} baris",
   "bulk_done": "Selesai",
   "bulk_failed": "Tambah massal gagal. Tidak ada yang disimpan.",
-  "bulk_summary": "{added} ditambahkan, {duplicates} sudah ada di kebijakan, {invalid} ditolak.",
+  "bulk_summary": "{added} ditambahkan, {duplicates} duplikat, {invalid} ditolak.",
   "bulk_rejected_label": "Baris yang tidak ditambahkan",
   "bulk_col_line": "Baris",
   "bulk_col_result": "Alasan tidak ditambahkan",
