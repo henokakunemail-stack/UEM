@@ -16,13 +16,31 @@ permissions:
 
 jobs:
   build:
+    # Windows, because the NSIS installers are built here. Every other asset is
+    # a cross-compile or an archive, which scripts/build-release.ps1 produces on
+    # any host -- it is the same script scripts/publish-release.ps1 runs.
     name: Build Cross-Platform Release Assets
     runs-on: windows-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Resolve version
+        id: version
+        shell: pwsh
+        run: |
+          $ver = "${{ github.ref_name }}"
+          if (-not $ver -or $ver -notmatch '^v\d') {
+            $ver = "${{ inputs.tag_name }}"
+          }
+          if (-not $ver) { $ver = "v1.0.0" }
+          "tag=$ver" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "version=$($ver.TrimStart('v'))" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -37,124 +55,109 @@ jobs:
           cache: "npm"
           cache-dependency-path: web-console/package-lock.json
 
-      - name: Build Web Console
-        shell: pwsh
-        run: |
-          Set-Location web-console
-          npm ci
-          npm run build
-          Set-Location ..
-
       - name: Install NSIS
         run: |
           choco install nsis -y --no-progress
 
-      - name: Compile Windows & Linux Binaries
+      - name: Build release assets
         shell: pwsh
         run: |
-          $ver = "${{ github.ref_name }}"
-          if (-not $ver -or $ver -notmatch '^v\d') {
-            $ver = "${{ inputs.tag_name }}"
-          }
-          if (-not $ver) { $ver = "v1.0.0" }
-          $cleanVer = $ver.TrimStart('v')
+          # choco does not put NSIS on this step's PATH; build-release.ps1
+          # looks in the default install directories as well.
+          ./scripts/build-release.ps1 -Version "${{ steps.version.outputs.version }}"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-          New-Item -ItemType Directory -Force -Path "dist" | Out-Null
+      - name: Upload release assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-dist
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
 
-          Write-Host "Building for version: $cleanVer"
+  macos-pkg:
+    # pkgbuild and productbuild exist only on macOS. The package is built from
+    # the agents the build job already compiled and stamped, so it carries the
+    # same bytes as agent-darwin-* and the server's agents/ bundle.
+    name: Build macOS Agent Package
+    needs: build
+    runs-on: macos-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
 
-          # 1. Server Linux amd64
-          $env:CGO_ENABLED = "0"
-          $env:GOOS = "linux"
-          $env:GOARCH = "amd64"
-          go build -ldflags "-s -w -X main.serverVersion=$cleanVer" -o dist/server-linux-amd64 ./server/cmd/server
+      - name: Download release assets
+        uses: actions/download-artifact@v4
+        with:
+          name: release-dist
+          path: dist
 
-          # 2. Agent Linux amd64
-          go build -ldflags "-s -w -X github.com/henokakunemail-stack/Endpoint-Manager/agent/shared/osinfo.Version=$cleanVer" -o dist/agent-linux-amd64 ./agent/cmd/agent
-          $env:GOARCH = "arm64"
-          go build -ldflags "-s -w -X github.com/henokakunemail-stack/Endpoint-Manager/agent/shared/osinfo.Version=$cleanVer" -o dist/agent-linux-arm64 ./agent/cmd/agent
-          $env:GOARCH = "amd64"
+      - name: Build EndpointAgent-macOS.pkg
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          mkdir -p pkg-out
+          AGENT_DARWIN_ARM64="$PWD/dist/agent-darwin-arm64" \
+          AGENT_DARWIN_AMD64="$PWD/dist/agent-darwin-amd64" \
+          PKG_OUTPUT="$PWD/pkg-out/EndpointAgent-macOS.pkg" \
+            bash packaging/darwin/build.sh
 
-          # 3. Server Windows amd64
-          $env:GOOS = "windows"
-          go build -ldflags "-s -w -X main.serverVersion=$cleanVer" -o dist/server-windows-amd64.exe ./server/cmd/server
+      - name: Check the package
+        run: |
+          pkgutil --payload-files pkg-out/EndpointAgent-macOS.pkg | tee payload.txt
+          grep -q 'usr/local/bin/endpoint-agent$' payload.txt
+          grep -q 'usr/local/bin/endpoint-agent-uninstall$' payload.txt
+          pkgutil --expand-full pkg-out/EndpointAgent-macOS.pkg expanded
+          # The universal binary must carry both slices, and the scripts must
+          # be executable or Installer skips them.
+          lipo -info expanded/*.pkg/Payload/usr/local/bin/endpoint-agent | tee lipo.txt
+          grep -q arm64 lipo.txt && grep -q x86_64 lipo.txt
+          test -x expanded/*.pkg/Scripts/postinstall
 
-          # 4. Agent Windows amd64
-          go build -ldflags "-s -w -X github.com/henokakunemail-stack/Endpoint-Manager/agent/shared/osinfo.Version=$cleanVer" -o dist/agent-windows-amd64.exe ./agent/cmd/agent
+      - name: Upload macOS package
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-pkg
+          path: pkg-out/EndpointAgent-macOS.pkg
+          if-no-files-found: error
+          retention-days: 7
 
-          # 5. Build NSIS Windows Installers & Uninstallers
-          Copy-Item dist/agent-windows-amd64.exe ./agent-windows-amd64.exe -Force
-          Copy-Item dist/server-windows-amd64.exe ./server-windows-amd64.exe -Force
-          & powershell.exe -ExecutionPolicy Bypass -File .\packaging\windows\build.ps1 -Version $cleanVer
-          & powershell.exe -ExecutionPolicy Bypass -File .\packaging\windows\build-server.ps1 -Version $cleanVer
+  publish:
+    name: Publish GitHub Release
+    needs: [build, macos-pkg]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download release assets
+        uses: actions/download-artifact@v4
+        with:
+          name: release-dist
+          path: dist
 
-          $parts = $cleanVer -split '\.'
-          $numeric = [int[]]@()
-          foreach ($p in $parts) {
-            if ($p -match '^\d+$') { $numeric += [int]$p }
-          }
-          while ($numeric.Count -lt 4) { $numeric += 0 }
-          $versionNum = ($numeric[0..3] -join '.')
+      - name: Download macOS package
+        uses: actions/download-artifact@v4
+        with:
+          name: macos-pkg
+          path: dist
 
-          # choco does not put NSIS on this step's PATH; build.ps1 finds it the
-          # same way, which is why the setup installers built and this failed.
-          $nsis = (Get-Command makensis.exe -ErrorAction SilentlyContinue).Source
-          if (-not $nsis) { $nsis = "${env:ProgramFiles(x86)}\NSIS\makensis.exe" }
-          Push-Location packaging\windows
-          try {
-            & $nsis /DVERSION=$cleanVer /DVERSION_NUM=$versionNum agent-uninstall.nsi
-            if ($LASTEXITCODE -ne 0) { throw "makensis agent-uninstall.nsi failed" }
-            & $nsis /DVERSION=$cleanVer /DVERSION_NUM=$versionNum server-uninstall.nsi
-            if ($LASTEXITCODE -ne 0) { throw "makensis server-uninstall.nsi failed" }
-          } finally {
-            Pop-Location
-          }
-
-          if (Test-Path "packaging\windows\EndpointAgent-Setup.exe") {
-            Copy-Item "packaging\windows\EndpointAgent-Setup.exe" dist/EndpointAgent-Setup.exe -Force
-          }
-          if (Test-Path "packaging\windows\EndpointAgent-Uninstall.exe") {
-            Copy-Item "packaging\windows\EndpointAgent-Uninstall.exe" dist/EndpointAgent-Uninstall.exe -Force
-          }
-          if (Test-Path "packaging\windows\EndpointServer-Setup.exe") {
-            Copy-Item "packaging\windows\EndpointServer-Setup.exe" dist/EndpointServer-Setup.exe -Force
-          }
-          if (Test-Path "packaging\windows\EndpointServer-Uninstall.exe") {
-            Copy-Item "packaging\windows\EndpointServer-Uninstall.exe" dist/EndpointServer-Uninstall.exe -Force
-          }
-
-          # 6. Tarball for Linux server updater
-          # agents/ carries the Linux agents the one-line installer hands out.
-          New-Item -ItemType Directory -Force -Path dist/agents | Out-Null
-          Copy-Item dist/agent-linux-amd64, dist/agent-linux-arm64 dist/agents -Force
-          tar -czf dist/endpoint-server-linux-amd64.tar.gz -C dist server-linux-amd64 agents
-          Remove-Item dist/agents -Recurse -Force
-
-          # 7. SHA256 checksums so operators can verify assets pre-deploy.
-          $hashes = Get-ChildItem dist -File | ForEach-Object {
-            $h = (Get-FileHash -Algorithm SHA256 $_.FullName).Hash.ToLower()
-            "$h  $($_.Name)"
-          }
-          $hashes | Set-Content -Encoding ASCII dist/checksums.txt
-
-          Get-ChildItem dist/ | Select-Object Name, Length
+      - name: Regenerate checksums
+        # The build job's checksums.txt predates the macOS package; this one
+        # covers every asset that is published.
+        working-directory: dist
+        run: |
+          rm -f checksums.txt
+          sha256sum -- * | sort -k2 > checksums.txt
+          cat checksums.txt
 
       - name: Create GitHub Release
-        shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.build.outputs.tag }}
         run: |
-          TAG="${{ github.ref_name }}"
-          if [[ -z "$TAG" || ! "$TAG" =~ ^v ]]; then
-            TAG="${{ inputs.tag_name }}"
-          fi
-          if [[ -z "$TAG" ]]; then TAG="v1.0.0"; fi
-
           echo "Publishing release for $TAG..."
-
           gh release create "$TAG" dist/* \
+            --repo "${{ github.repository }}" \
             --title "Enterprise Endpoint Management $TAG" \
-            --notes "Automated release $TAG with cross-platform server and agent installers." \
+            --notes "Automated release $TAG with server and agent installers for Windows, Linux and macOS." \
             --draft=false \
             --prerelease=false || \
-          gh release upload "$TAG" dist/* --clobber
+          gh release upload "$TAG" dist/* --repo "${{ github.repository }}" --clobber
