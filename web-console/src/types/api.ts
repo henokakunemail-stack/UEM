@@ -809,6 +809,8 @@ export interface UpdateCampaignDTO {
   pending_devices: number
   in_progress_devices: number
   queued_devices: number
+  /** Part of total_devices: already on the target version, sent nothing. */
+  up_to_date_devices: number
 }
 
 export interface CampaignTaskDetail {

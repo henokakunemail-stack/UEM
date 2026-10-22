@@ -10,7 +10,6 @@ import {
   UploadCloud,
   X,
   FileText,
-  CheckCircle2,
   XCircle,
   Monitor,
   Terminal,
@@ -51,6 +50,7 @@ const STATUS_KEYS: Record<string, string> = {
   success: 'updates.status_success',
   failed: 'updates.status_failed',
   rollback: 'updates.status_rollback',
+  up_to_date: 'updates.status_up_to_date',
 }
 const TARGET_KEYS: Record<string, string> = {
   all: 'updates.target_all_short',
@@ -323,15 +323,21 @@ export const AgentUpdatesPage: React.FC<AgentUpdatesPageProps> = ({ activeTab: s
   const handleStartCampaign = async (id: string, name: string) => {
     try {
       const res = await api.startUpdateCampaign(id)
+      // Built from the counts, not the server's English message, and the
+      // two cases that send nothing are told apart: no device matched the
+      // target, or every matched device already runs the version.
       const successText =
-        res.message ||
-        t('updates.campaign_started', {
-          name,
-          live: res.dispatched_live,
-          total: res.total_targets,
-          queued: res.queued ?? 0,
-          no_release: res.no_release ?? 0,
-        })
+        res.total_targets === 0
+          ? t('updates.started_no_targets', { name })
+          : (res.up_to_date ?? 0) === res.total_targets
+            ? t('updates.started_all_current', { name, count: res.total_targets })
+            : t('updates.campaign_started', {
+                name,
+                live: res.dispatched_live,
+                total: res.total_targets,
+                queued: res.queued ?? 0,
+                no_release: res.no_release ?? 0,
+              })
       setMsg({ type: 'success', text: successText })
       toast.success(successText, t('updates.rollout_started'))
       loadData()
@@ -381,6 +387,7 @@ export const AgentUpdatesPage: React.FC<AgentUpdatesPageProps> = ({ activeTab: s
     switch (status) {
       case 'success':
       case 'completed':
+      case 'up_to_date':
         return 'online'
       case 'in_progress':
       case 'dispatched':
@@ -586,7 +593,7 @@ export const AgentUpdatesPage: React.FC<AgentUpdatesPageProps> = ({ activeTab: s
                   </tr>
                 ) : (
                   campaigns.map((c) => {
-                    const { total, succeeded: succ, failed: fail, running, queued, waiting, percent } = campaignProgress(c)
+                    const { total, succeeded: succ, failed: fail, running, queued, waiting, upToDate, percent } = campaignProgress(c)
 
                     return (
                       <tr key={c.id}>
@@ -604,9 +611,10 @@ export const AgentUpdatesPage: React.FC<AgentUpdatesPageProps> = ({ activeTab: s
                           {total > 0 ? (
                             <div style={{ minWidth: 150 }}>
                               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', marginBottom: 3 }}>
-                                <span className="font-semibold">{t('updates.progress_done', { done: succ + fail, total, percent })}</span>
+                                <span className="font-semibold">{t('updates.progress_done', { done: succ + fail + upToDate, total, percent })}</span>
                                 <span>
                                   <span className="text-success" title={t('updates.succeeded')}>✓{succ}</span>{' '}
+                                  {upToDate > 0 && <span className="text-muted" title={t('updates.already_current')}>={upToDate} </span>}
                                   {fail > 0 && <span className="text-danger" title={t('updates.failed')}>✗{fail} </span>}
                                   {running > 0 && <span className="text-primary" title={t('updates.status_in_progress')}>↻{running} </span>}
                                   {queued > 0 && <span className="text-warning" title={t('common.status_queued')}>⧖{queued} </span>}
@@ -616,9 +624,9 @@ export const AgentUpdatesPage: React.FC<AgentUpdatesPageProps> = ({ activeTab: s
                               <div
                                 className="campaign-progress"
                                 role="img"
-                                aria-label={t('updates.progress_done', { done: succ + fail, total, percent })}
+                                aria-label={t('updates.progress_done', { done: succ + fail + upToDate, total, percent })}
                               >
-                                <div className="campaign-progress-success" style={{ width: `${(succ / total) * 100}%` }} />
+                                <div className="campaign-progress-success" style={{ width: `${((succ + upToDate) / total) * 100}%` }} />
                                 <div className="campaign-progress-failed" style={{ width: `${(fail / total) * 100}%` }} />
                                 <div className="campaign-progress-running" style={{ width: `${(running / total) * 100}%` }} />
                               </div>
@@ -768,6 +776,12 @@ export const AgentUpdatesPage: React.FC<AgentUpdatesPageProps> = ({ activeTab: s
                 </span>
               </div>
               <div>
+                <span className="form-label" style={{ marginBottom: 2 }}>{t('updates.already_current')}</span>
+                <span className="font-semibold text-success" style={{ fontSize: '1.1rem' }}>
+                  {campaignTasks.filter((task) => task.status === 'up_to_date').length}
+                </span>
+              </div>
+              <div>
                 <span className="form-label" style={{ marginBottom: 2 }}>{t('updates.in_progress_queued')}</span>
                 <span className="font-semibold text-warning" style={{ fontSize: '1.1rem' }}>
                   {campaignTasks.filter((task) => ['pending', 'dispatched', 'downloading', 'verifying', 'swapping'].includes(task.status)).length}
@@ -811,10 +825,15 @@ export const AgentUpdatesPage: React.FC<AgentUpdatesPageProps> = ({ activeTab: s
                 ) : campaignTasks.length === 0 ? (
                   <div className="py-8 text-center text-muted">
                     {selectedCampaign.status === 'completed' ? (
+                      // Every device a campaign checks has a row, including
+                      // those already on the target version, so a finished
+                      // campaign with no rows matched no device at all. It
+                      // used to say "all target devices are already running"
+                      // here, which is how an empty target looked like a
+                      // fleet that needed nothing.
                       <div>
-                        <CheckCircle2 size={32} className="text-success inline-block mb-2" />
-                        <p className="font-semibold">{t('updates.all_on_version', { version: selectedCampaign.target_version })}</p>
-                        <p className="text-sm">{t('updates.no_tasks_needed')}</p>
+                        <p className="font-semibold">{t('updates.no_targets_title')}</p>
+                        <p className="text-sm">{t('updates.no_targets_hint')}</p>
                       </div>
                     ) : (
                       <p>{t('updates.no_tasks_yet')}</p>
@@ -873,6 +892,10 @@ export const AgentUpdatesPage: React.FC<AgentUpdatesPageProps> = ({ activeTab: s
                               ) : task.status === 'success' ? (
                                 <span className="text-success" style={{ fontSize: '0.8rem' }}>
                                   {t('updates.note_success', { version: task.target_version })}
+                                </span>
+                              ) : task.status === 'up_to_date' ? (
+                                <span className="text-muted" style={{ fontSize: '0.8rem' }}>
+                                  {t('updates.note_up_to_date', { version: task.target_version })}
                                 </span>
                               ) : task.status === 'swapping' ? (
                                 <span className="text-warning" style={{ fontSize: '0.8rem' }}>

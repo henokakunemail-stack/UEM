@@ -105,7 +105,7 @@ describe('AgentUpdatesPage progress from the server contract', () => {
 
   it('counts finished, running, queued and waiting devices', () => {
     expect(campaignProgress(runningCampaign as UpdateCampaignDTO)).toEqual({
-      total: 10, succeeded: 3, failed: 1, running: 1, queued: 2, waiting: 3, percent: 40,
+      total: 10, succeeded: 3, failed: 1, running: 1, queued: 2, waiting: 3, upToDate: 0, percent: 40,
     })
   })
 
@@ -172,5 +172,63 @@ describe('AgentUpdatesPage bundled agents', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: 'Import 1 Selected' }))
     await waitFor(() => expect(api.importBundledAgents).toHaveBeenCalledWith(['agent-darwin-arm64']))
     await waitFor(() => expect(api.getAgentReleases).toHaveBeenCalledTimes(2))
+  })
+})
+
+// A campaign used to keep no row for devices already on the target version,
+// and the detail dialog then said "all target devices are already running" for
+// any finished campaign without rows -- including one whose target matched no
+// device at all.
+describe('AgentUpdatesPage checked devices', () => {
+  beforeAll(() => {
+    HTMLDialogElement.prototype.showModal = function () {
+      this.setAttribute('open', '')
+    }
+    HTMLDialogElement.prototype.close = function () {
+      this.removeAttribute('open')
+    }
+  })
+  const finished = { ...runningCampaign, status: 'completed', total_devices: 2, succeeded_devices: 0, failed_devices: 0,
+    pending_devices: 0, in_progress_devices: 0, queued_devices: 0, up_to_date_devices: 2 } as UpdateCampaignDTO
+  beforeEach(() => {
+    vi.clearAllMocks()
+    api.getAgentReleases.mockResolvedValue([])
+    api.getCampaignLogs.mockResolvedValue([])
+  })
+
+  it('counts devices already on the version as finished', () => {
+    expect(campaignProgress(finished).percent).toBe(100)
+  })
+
+  it('lists devices that were already on the target version', async () => {
+    api.getUpdateCampaigns.mockResolvedValue([finished])
+    api.getCampaignTasks.mockResolvedValue([
+      { ...taskDetail, id: 't-1', hostname: 'PC-1', status: 'up_to_date', from_version: '2.0.0' },
+      { ...taskDetail, id: 't-2', hostname: 'PC-2', status: 'up_to_date', from_version: '2.0.0' },
+    ])
+    renderPage()
+    fireEvent.click(await screen.findByText('Logs & Impact'))
+    const dialog = await screen.findByRole('dialog')
+    await within(dialog).findByText('PC-2')
+    expect(within(dialog).getAllByText('Was already running v2.0.0; nothing sent').length).toBe(2)
+    expect(within(dialog).queryByText("No device matched this campaign's target.")).toBeNull()
+  })
+
+  it('says when a finished campaign matched no device', async () => {
+    api.getUpdateCampaigns.mockResolvedValue([{ ...finished, total_devices: 0, up_to_date_devices: 0 }])
+    api.getCampaignTasks.mockResolvedValue([])
+    renderPage()
+    fireEvent.click(await screen.findByText('Logs & Impact'))
+    const dialog = await screen.findByRole('dialog')
+    expect(await within(dialog).findByText("No device matched this campaign's target.")).toBeTruthy()
+  })
+
+  it('tells an empty target from a fleet already on the version when starting', async () => {
+    api.getUpdateCampaigns.mockResolvedValue([draft])
+    api.startUpdateCampaign.mockResolvedValue({ status: 'started', total_targets: 0, dispatched_live: 0 })
+    renderPage()
+    fireEvent.click(await screen.findByText('Start'))
+    fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Start rollout' }))
+    await waitFor(() => expect(screen.getAllByText("Campaign 'Wave 1' matched no device. Check its target.").length).toBeGreaterThan(0))
   })
 })

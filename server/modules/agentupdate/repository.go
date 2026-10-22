@@ -140,6 +140,9 @@ type UpdateCampaignDTO struct {
 	// QueuedDevices are pending tasks their wave has released: they wait for
 	// the device to come online. The rest of PendingDevices wait for a wave.
 	QueuedDevices int `db:"queued_devices" json:"queued_devices"`
+	// UpToDateDevices already ran the target version when the campaign
+	// started; they are part of TotalDevices but were sent nothing.
+	UpToDateDevices int `db:"up_to_date_devices" json:"up_to_date_devices"`
 }
 
 type CampaignTaskDetail struct {
@@ -372,7 +375,8 @@ func (r *Repository) ListCampaigns(ctx context.Context) ([]*UpdateCampaignDTO, e
 			COALESCE(counts.failed_devices, 0) AS failed_devices,
 			COALESCE(counts.pending_devices, 0) AS pending_devices,
 			COALESCE(counts.in_progress_devices, 0) AS in_progress_devices,
-			COALESCE(counts.queued_devices, 0) AS queued_devices
+			COALESCE(counts.queued_devices, 0) AS queued_devices,
+			COALESCE(counts.up_to_date_devices, 0) AS up_to_date_devices
 		FROM update_campaigns c
 		LEFT JOIN (
 			SELECT
@@ -382,7 +386,8 @@ func (r *Repository) ListCampaigns(ctx context.Context) ([]*UpdateCampaignDTO, e
 				SUM(CASE WHEN status IN ('failed', 'rollback') THEN 1 ELSE 0 END) AS failed_devices,
 				SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending_devices,
 				SUM(CASE WHEN status IN ('dispatched', 'downloading', 'verifying', 'swapping') THEN 1 ELSE 0 END) AS in_progress_devices,
-				SUM(CASE WHEN status = 'pending' AND released_at IS NOT NULL THEN 1 ELSE 0 END) AS queued_devices
+				SUM(CASE WHEN status = 'pending' AND released_at IS NOT NULL THEN 1 ELSE 0 END) AS queued_devices,
+				SUM(CASE WHEN status = 'up_to_date' THEN 1 ELSE 0 END) AS up_to_date_devices
 			FROM device_update_tasks
 			WHERE campaign_id IS NOT NULL
 			GROUP BY campaign_id
@@ -788,7 +793,7 @@ func (r *Repository) RecordTaskProgress(ctx context.Context, taskID, status, err
 		// Only a nonterminal report can regress a finished task. Terminal
 		// reports are left alone above so a later 'success' can still
 		// correct a task that had failed.
-		query += ` AND status NOT IN ('success', 'failed', 'rollback')`
+		query += ` AND status NOT IN ('success', 'failed', 'rollback', 'up_to_date')`
 	}
 	res, err := r.db.ExecContext(ctx, query, args...)
 	if err != nil {
@@ -849,8 +854,8 @@ func (r *Repository) SyncCampaignStatusByID(ctx context.Context, campaignID stri
 	if err := r.db.GetContext(ctx, &counts, `
 		SELECT
 			COUNT(*) AS total,
-			COALESCE(SUM(CASE WHEN status IN ('success', 'failed', 'rollback') THEN 1 ELSE 0 END), 0) AS done,
-			COALESCE(SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END), 0) AS succeeded
+			COALESCE(SUM(CASE WHEN status IN ('success', 'failed', 'rollback', 'up_to_date') THEN 1 ELSE 0 END), 0) AS done,
+			COALESCE(SUM(CASE WHEN status IN ('success', 'up_to_date') THEN 1 ELSE 0 END), 0) AS succeeded
 		FROM device_update_tasks
 		WHERE campaign_id = ?`, campaignID); err != nil {
 		return err
@@ -994,19 +999,25 @@ func (r *Repository) StartSweep(ctx context.Context, interval, grace time.Durati
 
 func (r *Repository) ResolveTargetDevices(ctx context.Context, targetType, targetID string) ([]string, error) {
 	switch targetType {
+	// Retirement is recorded in retired_at; status never becomes 'retired'.
+	// The filter used to be status != 'retired', which matched every row, so
+	// retired machines and expired pending enrollments were campaign targets.
 	case "all":
 		var ids []string
-		err := r.db.SelectContext(ctx, &ids, `SELECT id FROM devices WHERE status != 'retired'`)
+		err := r.db.SelectContext(ctx, &ids, `SELECT id FROM devices WHERE retired_at IS NULL ORDER BY hostname, id`)
 		return ids, err
 	case "device":
-		return []string{targetID}, nil
+		var ids []string
+		err := r.db.SelectContext(ctx, &ids, `SELECT id FROM devices WHERE id = ? AND retired_at IS NULL`, targetID)
+		return ids, err
 	case "group":
 		var ids []string
 		err := r.db.SelectContext(ctx, &ids, `
 			SELECT m.device_id
 			FROM device_group_members m
 			JOIN devices d ON d.id = m.device_id
-			WHERE m.group_id = ? AND d.status != 'retired'
+			WHERE m.group_id = ? AND d.retired_at IS NULL
+			ORDER BY d.hostname, d.id
 		`, targetID)
 		return ids, err
 	default:

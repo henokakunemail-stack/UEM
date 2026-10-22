@@ -10,6 +10,16 @@ Riwayat sebelum v1.5.4 ada di `git log`.
 
 ## [Unreleased]
 
+### Diperbaiki
+- **Kampanye update agen tidak menampilkan perangkat yang sudah di versi target.**
+  - Setiap perangkat yang dicek kini tercatat di tab **Impacted Agents**, termasuk yang sudah menjalankan versi target. Statusnya "Sudah di versi ini", dan tidak ada yang dikirim ke perangkat itu.
+  - Ringkasan kampanye punya kolom baru "Sudah di versi ini", dan progresnya mencapai 100%.
+- **Kampanye yang targetnya tidak berisi perangkat aktif tertulis "semua perangkat sudah di versi ini".** Kini tertulis "Tidak ada perangkat yang cocok dengan target kampanye ini". Pesan saat memulai kampanye juga membedakan kedua keadaan itu.
+- **Perangkat yang di-retire ikut menjadi target kampanye update.** Ini termasuk baris pending enrollment yang di-retire otomatis. Perangkat seperti ini mendapat tugas yang tidak akan pernah selesai.
+
+### Catatan upgrade
+- Kampanye yang dimulai sebelum versi ini tidak mencatat perangkat yang sudah di versi target. Untuk kampanye lama seperti itu, jumlah perangkat yang dicek ada di **Rollout Activity Logs**.
+
 ## [1.5.5] - 2026-10-22
 
 ### Ditambahkan

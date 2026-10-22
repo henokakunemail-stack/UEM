@@ -213,6 +213,8 @@ export interface CampaignStartResult {
   dispatched_live: number
   queued?: number
   no_release?: number
+  /** Devices that already ran the target version; recorded, sent nothing. */
+  up_to_date?: number
   message?: string
 }
 

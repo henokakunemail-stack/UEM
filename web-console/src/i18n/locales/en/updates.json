@@ -91,8 +91,6 @@
   "tab_impacted": "Impacted Agents ({count})",
   "tab_logs": "Rollout Activity Logs ({count})",
   "loading_impacted": "Loading impacted devices...",
-  "all_on_version": "All target devices are already running Agent v{version}.",
-  "no_tasks_needed": "There are no tasks to execute.",
   "no_tasks_yet": "No update tasks have been created for this campaign yet. Press \"Start\" to distribute them.",
   "col_hostname_device": "Hostname & Device",
   "col_platform_short": "Platform",
@@ -162,5 +160,12 @@
   "bundled_imported_title": "Bundled Agents Imported",
   "bundled_skipped": "{count} skipped: {files}",
   "bundled_failed": "Could not read the server's agent bundle",
-  "bundled_import_failed": "Import failed"
+  "bundled_import_failed": "Import failed",
+  "status_up_to_date": "Already on version",
+  "already_current": "Already on version",
+  "note_up_to_date": "Was already running v{version}; nothing sent",
+  "no_targets_title": "No device matched this campaign's target.",
+  "no_targets_hint": "Check the target group or device. Campaigns started before v1.5.6 did not record devices that were already on the target version; their Rollout Activity Logs show how many were checked.",
+  "started_no_targets": "Campaign '{name}' matched no device. Check its target.",
+  "started_all_current": "Campaign '{name}': all {count} target device(s) already run this version. Nothing was sent."
 }

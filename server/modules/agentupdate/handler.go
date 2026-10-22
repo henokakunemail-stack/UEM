@@ -38,6 +38,12 @@ const TaskStatusPending = "pending"
 // TaskStatusFailed is terminal; the error message says why.
 const TaskStatusFailed = "failed"
 
+// TaskStatusUpToDate is terminal: the device already ran the target version
+// when the campaign started, so nothing was sent. These devices used to get no
+// row at all, and a campaign whose targets were all current read "0 devices"
+// with nothing to show which devices had been checked.
+const TaskStatusUpToDate = "up_to_date"
+
 // HubDispatcher is the slice of the transport hub this module uses. Declared
 // as an interface rather than taking *transport.Hub, matching the six other
 // modules that talk to the hub: it keeps the dependency one-way and lets the
@@ -583,73 +589,45 @@ func (h *Handler) handleStartCampaign(w http.ResponseWriter, r *http.Request) {
 
 	actorID := auth.UserIDFromContext(r.Context())
 
-	// Pre-flight check: count devices needing update vs already up to date
-	devicesNeedingUpdate := 0
-	for _, devID := range deviceIDs {
-		dev, err := h.deviceRepo.GetByID(r.Context(), devID)
-		if err != nil {
-			continue
-		}
-		if dev.AgentVersionString() != campaign.TargetVersion {
-			devicesNeedingUpdate++
-		}
-	}
-
-	// The claim happens at the branch, after the read-only pre-flight, so a
-	// failed target lookup cannot leave a campaign stuck in in_progress. Only a
-	// campaign that has not started can be started.
-	notStartable := func() {
-		writeJSON(w, http.StatusConflict, map[string]string{
-			"error":  fmt.Sprintf("campaign cannot be started from status %s", campaign.Status),
-			"code":   "campaign_not_startable",
-			"status": campaign.Status,
-		})
-	}
-
-	if len(deviceIDs) > 0 && devicesNeedingUpdate == 0 {
-		claimed, err := h.repo.TransitionCampaignStatus(r.Context(), id, "completed", "draft", "pending")
-		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-			return
-		}
-		if !claimed {
-			notStartable()
-			return
-		}
-		_ = h.auditor.Log(r.Context(), "user", actorID, "agent_update.campaign_start", id, map[string]string{
-			"campaign_id": id,
-			"status":      "completed",
-			"reason":      fmt.Sprintf("all %d target devices are already running %s", len(deviceIDs), campaign.TargetVersion),
-		})
-		writeJSON(w, http.StatusOK, map[string]any{
-			"status":          "completed",
-			"total_targets":   len(deviceIDs),
-			"dispatched_live": 0,
-			"message":         fmt.Sprintf("All %d target devices are already running agent v%s", len(deviceIDs), campaign.TargetVersion),
-		})
-		return
-	}
-
+	// Only a campaign that has not started can be started.
 	claimed, err := h.repo.TransitionCampaignStatus(r.Context(), id, "in_progress", "draft", "pending")
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
 	if !claimed {
-		notStartable()
+		writeJSON(w, http.StatusConflict, map[string]string{
+			"error":  fmt.Sprintf("campaign cannot be started from status %s", campaign.Status),
+			"code":   "campaign_not_startable",
+			"status": campaign.Status,
+		})
 		return
 	}
 
 	// Every task is created now, in one transaction, so the campaign always
-	// knows how much work is left. A device with no release for its OS and
-	// architecture gets a failed task that says so instead of being dropped
-	// from the rollout without a trace.
+	// knows how much work is left -- and every device it checked has a row. A
+	// device with no release for its OS and architecture gets a failed task that
+	// says so, and one already on the target version an up_to_date task, instead
+	// of either being dropped from the rollout without a trace.
 	tasks := make([]*DeviceUpdateTask, 0, len(deviceIDs))
-	noRelease := 0
+	noRelease, upToDate := 0, 0
 	now := time.Now().UTC()
 	for _, devID := range deviceIDs {
 		dev, err := h.deviceRepo.GetByID(r.Context(), devID)
-		if err != nil || dev.AgentVersionString() == campaign.TargetVersion {
+		if err != nil {
+			continue
+		}
+		if dev.AgentVersionString() == campaign.TargetVersion {
+			tasks = append(tasks, &DeviceUpdateTask{
+				CampaignID:    &campaign.ID,
+				DeviceID:      devID,
+				FromVersion:   dev.AgentVersionString(),
+				TargetVersion: campaign.TargetVersion,
+				Status:        TaskStatusUpToDate,
+				CompletedAt:   &now,
+				ReleasedAt:    &now,
+			})
+			upToDate++
 			continue
 		}
 		task := &DeviceUpdateTask{
@@ -685,19 +663,22 @@ func (h *Handler) handleStartCampaign(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_ = h.auditor.Log(r.Context(), "user", actorID, "agent_update.campaign_start", id, map[string]string{
+		"targets":    fmt.Sprintf("%d", len(tasks)),
 		"dispatched": fmt.Sprintf("%d", dispatched),
 		"queued":     fmt.Sprintf("%d", queued),
 		"no_release": fmt.Sprintf("%d", noRelease),
+		"up_to_date": fmt.Sprintf("%d", upToDate),
 		"target":     campaign.TargetType,
 	})
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status":          "started",
-		"total_targets":   len(deviceIDs),
+		"total_targets":   len(tasks),
 		"tasks":           len(tasks),
 		"dispatched_live": dispatched,
 		"queued":          queued,
 		"no_release":      noRelease,
+		"up_to_date":      upToDate,
 	})
 }
 

@@ -17,5 +17,6 @@
   "failed_devices": 1,
   "pending_devices": 5,
   "in_progress_devices": 1,
-  "queued_devices": 2
+  "queued_devices": 2,
+  "up_to_date_devices": 0
 }

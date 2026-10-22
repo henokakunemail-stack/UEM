@@ -15,7 +15,10 @@ export function campaignProgress(c: UpdateCampaignDTO) {
   const running = c.in_progress_devices || 0
   const queued = c.queued_devices || 0
   const waiting = Math.max(0, (c.pending_devices || 0) - queued)
-  const done = succeeded + failed
+  // Devices already on the target version are part of total and finished
+  // from the start; without them a campaign that skipped some never read 100%.
+  const upToDate = c.up_to_date_devices || 0
+  const done = succeeded + failed + upToDate
   const percent = total > 0 ? Math.round((done / total) * 100) : c.status === 'completed' ? 100 : 0
-  return { total, succeeded, failed, running, queued, waiting, percent }
+  return { total, succeeded, failed, running, queued, waiting, upToDate, percent }
 }

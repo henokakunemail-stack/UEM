@@ -91,8 +91,6 @@
   "tab_impacted": "Agen Terdampak ({count})",
   "tab_logs": "Log Aktivitas Peluncuran ({count})",
   "loading_impacted": "Memuat data perangkat terdampak...",
-  "all_on_version": "Semua perangkat target telah menggunakan Agen v{version}.",
-  "no_tasks_needed": "Tidak ada tugas yang perlu dieksekusi.",
   "no_tasks_yet": "Belum ada tugas pembaruan yang dibuat untuk kampanye ini. Tekan tombol \"Mulai\" untuk mendistribusikannya.",
   "col_hostname_device": "Hostname & Perangkat",
   "col_platform_short": "Platform",
@@ -162,5 +160,12 @@
   "bundled_imported_title": "Agen Bundel Diimpor",
   "bundled_skipped": "{count} dilewati: {files}",
   "bundled_failed": "Gagal membaca bundel agen server",
-  "bundled_import_failed": "Impor gagal"
+  "bundled_import_failed": "Impor gagal",
+  "status_up_to_date": "Sudah di versi ini",
+  "already_current": "Sudah di versi ini",
+  "note_up_to_date": "Sudah menjalankan v{version}; tidak ada yang dikirim",
+  "no_targets_title": "Tidak ada perangkat yang cocok dengan target kampanye ini.",
+  "no_targets_hint": "Periksa grup atau perangkat targetnya. Kampanye yang dimulai sebelum v1.5.6 tidak mencatat perangkat yang sudah di versi target; lihat Rollout Activity Logs untuk jumlah perangkat yang dicek.",
+  "started_no_targets": "Kampanye '{name}' tidak menemukan perangkat yang cocok. Periksa targetnya.",
+  "started_all_current": "Kampanye '{name}': semua {count} perangkat target sudah menjalankan versi ini. Tidak ada yang dikirim."
 }
