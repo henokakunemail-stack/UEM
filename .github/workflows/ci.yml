@@ -184,23 +184,29 @@ jobs:
         shell: pwsh
         run: ./scripts/build-release.ps1 -SkipFrontend -SkipInstallers
       - name: Check archive layout and modes
+        # Each listing is read into a variable first. Piping tar straight into
+        # `grep -q` under pipefail failed the step on a correct archive: grep
+        # exits at the first match, tar gets SIGPIPE ("stdout: write error")
+        # and the pipeline reports tar's non-zero status.
         run: |
           set -euo pipefail
           for os in linux darwin; do
             for arch in amd64 arm64; do
               s="dist/endpoint-server-$os-$arch.tar.gz"
-              tar -tvzf "$s"
-              tar -tvzf "$s" | grep -qE '^-rwxr-xr-x .* endpoint-server$'
-              tar -tvzf "$s" | grep -qE '^-rwxr-xr-x .* install-server.sh$'
+              list="$(tar -tvzf "$s")"
+              echo "$list"
+              grep -qE '^-rwxr-xr-x .* endpoint-server$' <<<"$list"
+              grep -qE '^-rwxr-xr-x .* install-server.sh$' <<<"$list"
               for a in agent-windows-amd64.exe agent-linux-amd64 agent-linux-arm64 agent-darwin-amd64 agent-darwin-arm64; do
-                tar -tvzf "$s" | grep -qE " agents/$a\$"
+                grep -qE " agents/$a\$" <<<"$list"
               done
-              tar -tvzf "dist/endpoint-agent-$os-$arch.tar.gz" | grep -qE '^-rwxr-xr-x .* install-agent.sh$'
+              agent="$(tar -tvzf "dist/endpoint-agent-$os-$arch.tar.gz")"
+              grep -qE '^-rwxr-xr-x .* install-agent.sh$' <<<"$agent"
             done
           done
-          unzip -l dist/endpoint-server-windows-amd64.zip | grep -q 'agents/agent-darwin-arm64'
-          file dist/server-darwin-arm64 | grep -q 'Mach-O'
-          file dist/server-linux-arm64 | grep -q 'aarch64'
+          grep -q 'agents/agent-darwin-arm64' <<<"$(unzip -l dist/endpoint-server-windows-amd64.zip)"
+          grep -q 'Mach-O' <<<"$(file dist/server-darwin-arm64)"
+          grep -q 'aarch64' <<<"$(file dist/server-linux-arm64)"
           test -s dist/checksums.txt
 
   macos-pkg:
