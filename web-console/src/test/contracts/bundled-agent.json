@@ -1,0 +1,10 @@
+{
+  "file": "agent-darwin-arm64",
+  "os_name": "macos",
+  "arch": "arm64",
+  "version": "1.6.0",
+  "file_size": 7340032,
+  "importable": true,
+  "reason": "",
+  "release_id": ""
+}

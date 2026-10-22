@@ -693,6 +693,23 @@ export interface AgentReleaseDTO {
   created_at: string
 }
 
+// An agent binary shipped in the server's release package (agents/).
+export interface BundledAgentDTO {
+  file: string
+  os_name: string
+  arch: string
+  version: string
+  file_size: number
+  importable: boolean
+  reason: string
+  release_id: string
+}
+
+export interface BundledImportResult {
+  imported: AgentReleaseDTO[]
+  skipped: BundledAgentDTO[]
+}
+
 export interface UpdateCampaignDTO {
   id: string
   name: string

@@ -9,6 +9,8 @@ const api = vi.hoisted(() => ({
   getCampaignLogs: vi.fn(),
   startUpdateCampaign: vi.fn(),
   cancelUpdateCampaign: vi.fn(),
+  getBundledAgents: vi.fn(),
+  importBundledAgents: vi.fn(),
 }))
 vi.mock('../services/api', async (orig) => ({ ...(await orig<typeof import('../services/api')>()), api }))
 vi.mock('../context/AuthContext', () => ({ useAuth: () => ({ user: { uid: 'me', usr: 'me', rol: 'admin' } }) }))
@@ -124,5 +126,51 @@ describe('AgentUpdatesPage progress from the server contract', () => {
     fireEvent.click(await screen.findByRole('button', { name: /Rollout Activity Logs/ }))
     await waitFor(() => expect(document.body.textContent).toContain('TASK_DISPATCHED'))
     expect(document.body.textContent).not.toContain('Invalid Date')
+  })
+})
+
+import bundledAgent from '../test/contracts/bundled-agent.json'
+
+describe('AgentUpdatesPage bundled agents', () => {
+  beforeAll(() => {
+    HTMLDialogElement.prototype.showModal = function () {
+      this.setAttribute('open', '')
+    }
+    HTMLDialogElement.prototype.close = function () {
+      this.removeAttribute('open')
+    }
+  })
+  beforeEach(() => {
+    vi.clearAllMocks()
+    api.getAgentReleases.mockResolvedValue([])
+    api.getUpdateCampaigns.mockResolvedValue([])
+  })
+
+  // The agents a server package ships are registered from the console instead
+  // of being downloaded from the release page and uploaded again by hand.
+  it('imports only the bundled agents that are importable', async () => {
+    api.getBundledAgents.mockResolvedValue([
+      bundledAgent,
+      { ...bundledAgent, file: 'agent-windows-amd64.exe', os_name: 'windows', arch: 'amd64', importable: false, reason: 'already registered as a release', release_id: 'r1' },
+      { ...bundledAgent, file: 'agent-linux-arm64', os_name: 'linux', importable: false, reason: 'file name says linux/arm64 but the binary is built for linux/amd64' },
+    ])
+    api.importBundledAgents.mockResolvedValue({ imported: [{ id: 'r2', version: '1.6.0', os_name: 'macos', arch: 'arm64' }], skipped: [] })
+    render(
+      <I18nProvider lang="en">
+        <ToastProvider>
+          <AgentUpdatesPage activeTab="releases" onTabChange={() => {}} />
+        </ToastProvider>
+      </I18nProvider>,
+    )
+    fireEvent.click(await screen.findByText('Import from Server Package'))
+    const dialog = await screen.findByRole('dialog')
+    await within(dialog).findByText('agent-darwin-arm64')
+    expect(within(dialog).getByText('Already a release')).toBeTruthy()
+    expect(within(dialog).getByText(/built for linux\/amd64/)).toBeTruthy()
+    expect((within(dialog).getByLabelText('agent-linux-arm64') as HTMLInputElement).disabled).toBe(true)
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Import 1 Selected' }))
+    await waitFor(() => expect(api.importBundledAgents).toHaveBeenCalledWith(['agent-darwin-arm64']))
+    await waitFor(() => expect(api.getAgentReleases).toHaveBeenCalledTimes(2))
   })
 })

@@ -20,6 +20,7 @@ func TestConsoleContractFixturesMatchTheDTOs(t *testing.T) {
 		"update-campaign.json":      &UpdateCampaignDTO{},
 		"campaign-log-item.json":    &CampaignLogItem{},
 		"campaign-task-detail.json": &CampaignTaskDetail{},
+		"bundled-agent.json":        &BundledAgent{},
 	}
 	for file, target := range cases {
 		t.Run(file, func(t *testing.T) {

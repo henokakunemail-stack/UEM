@@ -2,6 +2,7 @@ import React, { useEffect, useState, useRef } from 'react'
 import {
   ArrowUpCircle,
   FolderArchive,
+  PackageOpen,
   Layers,
   Play,
   RefreshCw,
@@ -20,7 +21,13 @@ import { usePermission } from '../hooks/usePermission'
 import { DataTable } from '../components/ui/DataTable'
 import { Modal } from '../components/ui/Modal'
 import { ConfirmDialog } from '../components/ui/ConfirmDialog'
-import type { AgentReleaseDTO, UpdateCampaignDTO, CampaignTaskDetail, CampaignLogItem } from '../types/api'
+import type {
+  AgentReleaseDTO,
+  BundledAgentDTO,
+  UpdateCampaignDTO,
+  CampaignTaskDetail,
+  CampaignLogItem,
+} from '../types/api'
 import { useT } from '../i18n/core'
 import { settleAll } from '../services/settled'
 import { campaignProgress, taskDisplayStatus } from './campaignProgress'
@@ -99,6 +106,13 @@ export const AgentUpdatesPage: React.FC<AgentUpdatesPageProps> = ({ activeTab: s
   const [relChangelog, setRelChangelog] = useState('')
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [uploading, setUploading] = useState(false)
+
+  // Agents bundled with the server's release package
+  const [isBundledModalOpen, setIsBundledModalOpen] = useState(false)
+  const [bundled, setBundled] = useState<BundledAgentDTO[]>([])
+  const [bundledLoading, setBundledLoading] = useState(false)
+  const [bundledSelected, setBundledSelected] = useState<string[]>([])
+  const [importing, setImporting] = useState(false)
 
   // New Campaign Form
   const [newCampaign, setNewCampaign] = useState({
@@ -238,6 +252,51 @@ export const AgentUpdatesPage: React.FC<AgentUpdatesPageProps> = ({ activeTab: s
     }
   }
 
+  const openBundled = async () => {
+    setIsBundledModalOpen(true)
+    setBundledLoading(true)
+    try {
+      const list = await api.getBundledAgents()
+      setBundled(list)
+      setBundledSelected(list.filter((b) => b.importable).map((b) => b.file))
+    } catch (err: unknown) {
+      setBundled([])
+      toast.error(err instanceof Error && err.message ? err.message : t('updates.bundled_failed'), t('updates.bundled_failed'))
+    } finally {
+      setBundledLoading(false)
+    }
+  }
+
+  const toggleBundled = (file: string) =>
+    setBundledSelected((sel) => (sel.includes(file) ? sel.filter((f) => f !== file) : [...sel, file]))
+
+  const handleImportBundled = async () => {
+    setImporting(true)
+    try {
+      const res = await api.importBundledAgents(bundledSelected)
+      let text = t('updates.bundled_imported', { count: res.imported.length })
+      if (res.skipped.length > 0) {
+        text +=
+          '. ' +
+          t('updates.bundled_skipped', {
+            count: res.skipped.length,
+            files: res.skipped.map((b) => `${b.file} (${b.reason})`).join(', '),
+          })
+      }
+      setMsg({ type: res.imported.length > 0 ? 'success' : 'error', text })
+      if (res.imported.length > 0) toast.success(text, t('updates.bundled_imported_title'))
+      else toast.error(text, t('updates.bundled_import_failed'))
+      setIsBundledModalOpen(false)
+      loadData()
+    } catch (err: unknown) {
+      const errorText = err instanceof Error && err.message ? err.message : t('updates.bundled_import_failed')
+      setMsg({ type: 'error', text: errorText })
+      toast.error(errorText, t('updates.bundled_import_failed'))
+    } finally {
+      setImporting(false)
+    }
+  }
+
   const handleCreateCampaign = async (e: React.FormEvent) => {
     e.preventDefault()
     try {
@@ -357,6 +416,12 @@ export const AgentUpdatesPage: React.FC<AgentUpdatesPageProps> = ({ activeTab: s
             <RefreshCw size={16} className={loading ? 'spinning' : ''} />
             <span>{t('updates.refresh')}</span>
           </button>
+          {canAdmin && subTab === 'releases' && (
+            <button type="button" className="btn btn-secondary" onClick={openBundled}>
+              <PackageOpen size={16} />
+              <span>{t('updates.import_bundled')}</span>
+            </button>
+          )}
           {canAdmin && subTab === 'releases' && (
             <button type="button" className="btn btn-primary" onClick={() => setIsReleaseModalOpen(true)}>
               <UploadCloud size={16} />
@@ -1012,6 +1077,85 @@ export const AgentUpdatesPage: React.FC<AgentUpdatesPageProps> = ({ activeTab: s
             />
           </div>
         </form>
+      </Modal>
+
+      {/* Import Bundled Agents Modal */}
+      <Modal
+        open={isBundledModalOpen}
+        onClose={() => setIsBundledModalOpen(false)}
+        title={t('updates.bundled_modal_title')}
+        size="lg"
+        footer={
+          <>
+            <button type="button" className="btn btn-secondary" onClick={() => setIsBundledModalOpen(false)}>
+              {t('common.cancel')}
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={handleImportBundled}
+              disabled={importing || bundledLoading || bundledSelected.length === 0}
+            >
+              {importing
+                ? t('updates.bundled_importing')
+                : t('updates.bundled_import_selected', { count: bundledSelected.length })}
+            </button>
+          </>
+        }
+      >
+        <p className="text-sm text-muted">{t('updates.bundled_intro')}</p>
+        {bundledLoading ? (
+          <p className="text-center py-8 text-muted">{t('common.loading')}</p>
+        ) : bundled.length === 0 ? (
+          <p className="text-center py-8 text-muted">{t('updates.bundled_empty')}</p>
+        ) : (
+          <DataTable label={t('updates.bundled_modal_title')}>
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th aria-label={t('updates.bundled_col_file')} />
+                  <th>{t('updates.bundled_col_file')}</th>
+                  <th>{t('updates.bundled_col_platform')}</th>
+                  <th>{t('updates.bundled_col_version')}</th>
+                  <th>{t('updates.col_size')}</th>
+                  <th>{t('updates.bundled_col_state')}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {bundled.map((b) => (
+                  <tr key={b.file}>
+                    <td>
+                      <input
+                        type="checkbox"
+                        aria-label={b.file}
+                        disabled={!b.importable}
+                        checked={bundledSelected.includes(b.file)}
+                        onChange={() => toggleBundled(b.file)}
+                      />
+                    </td>
+                    <td className="font-mono text-sm">{b.file}</td>
+                    <td>
+                      <span className="os-badge">
+                        {b.os_name} / {b.arch}
+                      </span>
+                    </td>
+                    <td>{b.version ? `v${b.version}` : '—'}</td>
+                    <td>{formatFileSize(b.file_size)}</td>
+                    <td className="text-sm">
+                      {b.importable ? (
+                        <span className="status-pill online">{t('updates.bundled_ready')}</span>
+                      ) : b.release_id ? (
+                        <span className="status-pill offline">{t('updates.bundled_registered')}</span>
+                      ) : (
+                        <span className="text-danger">{b.reason}</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </DataTable>
+        )}
       </Modal>
 
       {/* Launch Campaign Modal */}
