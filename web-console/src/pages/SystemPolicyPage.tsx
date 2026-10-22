@@ -17,7 +17,7 @@ import {
   Terminal,
   UserCheck,
 } from 'lucide-react'
-import { ApiError, api } from '../services/api'
+import { api } from '../services/api'
 import { usePermission } from '../hooks/usePermission'
 import { DataTable } from '../components/ui/DataTable'
 import { ConfirmDialog } from '../components/ui/ConfirmDialog'
@@ -25,40 +25,42 @@ import { Modal } from '../components/ui/Modal'
 import { KPICard } from '../components/KPICard'
 import { useToast } from '../context/ToastContext'
 import { useT } from '../i18n/core'
+import { apiErrorMessage } from '../services/apiErrorMessage'
+import {
+  DEFAULT_CONFIG,
+  boolValueKeys,
+  explicitDecisions,
+  formatSettingValue,
+  isRestrictive,
+  settingLabelKey,
+  toConfig,
+  type SettingKey,
+} from '../services/systemPolicy'
+import { TriStateSelect } from '../components/TriStateSelect'
+import { EffectivePolicyPanel } from '../components/EffectivePolicyPanel'
 import type {
   DeviceDTO,
   DeviceGroupDTO,
   DeviceSystemPolicyStateDTO,
+  SystemPolicyConfigDTO,
   SystemPolicyDTO,
-  SystemPolicySettingsDTO,
   WallpaperStyle,
-  WindowsUpdateMode,
 } from '../types/api'
 
-const DEFAULT_SETTINGS: SystemPolicySettingsDTO = {
-  usb_storage_mode: 'allow',
-  wallpaper_enabled: false,
-  wallpaper_url: '',
-  wallpaper_style: 'fill',
-  wallpaper_locked: true,
-  firewall_enabled: false,
-  defender_protection_enabled: false,
-  disable_powershell: false,
-  disable_autoplay: false,
-  screensaver_timeout_minutes: 0,
-  screensaver_password_required: false,
-  inactivity_timeout_minutes: 0,
-  disable_task_mgr: false,
-  disable_cmd: false,
-  disable_registry_tools: false,
-  disable_control_panel: false,
-  windows_update_mode: 'default',
-  admin_account_enabled: false,
-  admin_account_username: '',
-  admin_account_password: '',
-  admin_account_full_name: '',
-  admin_account_description: '',
-  admin_account_never_expires: true,
+// Server error codes for a refused save, mapped to their text.
+const SAVE_ERROR_KEYS: Record<string, string> = {
+  admin_password_required: 'policy.admin_password_required',
+  admin_username_required: 'policy.err_admin_username_required',
+  wallpaper_url_required: 'policy.err_wallpaper_url_required',
+  invalid_timeout: 'policy.err_invalid_timeout',
+  invalid_usb_mode: 'policy.save_failed',
+  invalid_update_mode: 'policy.save_failed',
+  invalid_wallpaper_style: 'policy.save_failed',
+}
+
+const MINUTE_CHOICES: Record<'inactivity_timeout_minutes' | 'screensaver_timeout_minutes', number[]> = {
+  inactivity_timeout_minutes: [0, 5, 10, 15, 30, 60],
+  screensaver_timeout_minutes: [0, 5, 10, 15, 30],
 }
 
 const PolicyScopeFields: React.FC<{
@@ -150,7 +152,7 @@ export const SystemPolicyPage: React.FC = () => {
   const isAdmin = can('admin')
   const isTechnician = can('technician')
 
-  const [activeTab, setActiveTab] = useState<'policies' | 'compliance'>('policies')
+  const [activeTab, setActiveTab] = useState<'policies' | 'compliance' | 'effective'>('policies')
   const [policies, setPolicies] = useState<SystemPolicyDTO[]>([])
   const [deviceStates, setDeviceStates] = useState<DeviceSystemPolicyStateDTO[]>([])
   const [groups, setGroups] = useState<DeviceGroupDTO[]>([])
@@ -166,7 +168,7 @@ export const SystemPolicyPage: React.FC = () => {
   const [formTargetId, setFormTargetId] = useState('')
   const [formPriority, setFormPriority] = useState(100)
   const [formIsEnabled, setFormIsEnabled] = useState(true)
-  const [formSettings, setFormSettings] = useState<SystemPolicySettingsDTO>(DEFAULT_SETTINGS)
+  const [formSettings, setFormSettings] = useState<SystemPolicyConfigDTO>(DEFAULT_CONFIG)
   const [modalTab, setModalTab] = useState<'general' | 'peripherals' | 'desktop' | 'security' | 'accounts'>('general')
   const [showAdminPassword, setShowAdminPassword] = useState(false)
 
@@ -239,7 +241,7 @@ export const SystemPolicyPage: React.FC = () => {
     setFormTargetId('')
     setFormPriority(100)
     setFormIsEnabled(true)
-    setFormSettings(DEFAULT_SETTINGS)
+    setFormSettings(DEFAULT_CONFIG)
     setModalTab('general')
     setShowAdminPassword(false)
     setModalOpen(true)
@@ -253,10 +255,7 @@ export const SystemPolicyPage: React.FC = () => {
     setFormTargetId(p.target_id || '')
     setFormPriority(p.priority)
     setFormIsEnabled(p.is_enabled)
-    setFormSettings({
-      ...DEFAULT_SETTINGS,
-      ...(p.settings || {}),
-    })
+    setFormSettings(toConfig(p.settings))
     setModalTab('general')
     setShowAdminPassword(false)
     setModalOpen(true)
@@ -295,13 +294,37 @@ export const SystemPolicyPage: React.FC = () => {
       setModalOpen(false)
       loadData()
     } catch (err) {
-      toast.error(
-        err instanceof ApiError && err.code === 'admin_password_required'
-          ? t('policy.admin_password_required')
-          : err instanceof Error ? err.message : t('policy.save_failed'),
-      )
+      toast.error(apiErrorMessage(err, t, SAVE_ERROR_KEYS, 'policy.save_failed'))
     }
   }
+
+  // One yes/no setting with an explicit "not set" choice.
+  const boolField = (key: SettingKey, label: React.ReactNode, description?: React.ReactNode) => {
+    const [on, off] = boolValueKeys(key)
+    return (
+      <TriStateSelect<boolean>
+        id={`policy-${key}`}
+        label={label}
+        description={description}
+        value={(formSettings[key] as boolean | null) ?? null}
+        options={[
+          { value: true, label: t(on) },
+          { value: false, label: t(off) },
+        ]}
+        onChange={(v) => setFormSettings({ ...formSettings, [key]: v })}
+      />
+    )
+  }
+
+  const minutesField = (key: 'inactivity_timeout_minutes' | 'screensaver_timeout_minutes', label: React.ReactNode) => (
+    <TriStateSelect<number>
+      id={`policy-${key}`}
+      label={label}
+      value={formSettings[key] ?? null}
+      options={MINUTE_CHOICES[key].map((m) => ({ value: m, label: formatSettingValue(key, m, t) }))}
+      onChange={(v) => setFormSettings({ ...formSettings, [key]: v })}
+    />
+  )
 
   const handleToggleEnabled = async (p: SystemPolicyDTO) => {
     try {
@@ -460,7 +483,16 @@ export const SystemPolicyPage: React.FC = () => {
         >
           {t('policy.tab_compliance', { count: deviceStates.length })}
         </button>
+        <button
+          type="button"
+          className={`btn ${activeTab === 'effective' ? 'btn-primary' : 'btn-secondary'}`}
+          onClick={() => setActiveTab('effective')}
+        >
+          {t('policy.tab_effective')}
+        </button>
       </div>
+
+      {activeTab === 'effective' && <EffectivePolicyPanel devices={devices} groups={groups} />}
 
       {/* Tab: Policies */}
       {activeTab === 'policies' && (
@@ -486,7 +518,7 @@ export const SystemPolicyPage: React.FC = () => {
                   </tr>
                 ) : (
                   policies.map((p) => {
-                    const s = p.settings || DEFAULT_SETTINGS
+                    const decisions = explicitDecisions(toConfig(p.settings))
                     return (
                       <tr key={p.id}>
                         <td>
@@ -502,81 +534,25 @@ export const SystemPolicyPage: React.FC = () => {
                           <span className="text-xs text-muted font-mono">{p.priority}</span>
                         </td>
                         <td>
+                          {/* Only what this policy decides. An explicit "allowed"
+                              is shown too: it is an exception that overrides
+                              broader policies, not an absence of a rule. */}
                           <div className="flex flex-wrap gap-1">
-                            {s.usb_storage_mode === 'block' && (
-                              <span className="px-1.5 py-0.5 rounded text-xs bg-red-500/10 text-red-400 border border-red-500/20">
-                                {t('policy.badge_usb_blocked')}
-                              </span>
-                            )}
-                            {s.usb_storage_mode === 'read_only' && (
-                              <span className="px-1.5 py-0.5 rounded text-xs bg-amber-500/10 text-amber-400 border border-amber-500/20">
-                                {t('policy.badge_usb_read_only')}
-                              </span>
-                            )}
-                            {s.wallpaper_enabled && (
-                              <span className="px-1.5 py-0.5 rounded text-xs bg-blue-500/10 text-blue-400 border border-blue-500/20">
-                                {s.wallpaper_locked ? t('policy.badge_wallpaper_locked') : t('policy.badge_wallpaper')}
-                              </span>
-                            )}
-                            {s.firewall_enabled && (
-                              <span className="px-1.5 py-0.5 rounded text-xs bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">
-                                {t('policy.badge_firewall')}
-                              </span>
-                            )}
-                            {s.defender_protection_enabled && (
-                              <span className="px-1.5 py-0.5 rounded text-xs bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
-                                {t('policy.badge_defender')}
-                              </span>
-                            )}
-                            {s.disable_autoplay && (
-                              <span className="px-1.5 py-0.5 rounded text-xs bg-orange-500/10 text-orange-400 border border-orange-500/20">
-                                {t('policy.badge_no_autoplay')}
-                              </span>
-                            )}
-                            {s.disable_powershell && (
-                              <span className="px-1.5 py-0.5 rounded text-xs bg-yellow-500/10 text-yellow-400 border border-yellow-500/20">
-                                {t('policy.badge_no_ps')}
-                              </span>
-                            )}
-                            {s.screensaver_timeout_minutes ? (
-                              <span className="px-1.5 py-0.5 rounded text-xs bg-pink-500/10 text-pink-400 border border-pink-500/20">
-                                {t(s.screensaver_password_required ? 'policy.badge_screensaver_pwd' : 'policy.badge_screensaver', { minutes: s.screensaver_timeout_minutes })}
-                              </span>
-                            ) : null}
-                            {s.inactivity_timeout_minutes > 0 && (
-                              <span className="px-1.5 py-0.5 rounded text-xs bg-purple-500/10 text-purple-400 border border-purple-500/20">
-                                {t('policy.badge_lock', { minutes: s.inactivity_timeout_minutes })}
-                              </span>
-                            )}
-                            {s.disable_task_mgr && (
-                              <span className="px-1.5 py-0.5 rounded text-xs bg-zinc-500/10 text-zinc-300 border border-zinc-500/20">
-                                {t('policy.badge_no_taskmgr')}
-                              </span>
-                            )}
-                            {s.disable_cmd && (
-                              <span className="px-1.5 py-0.5 rounded text-xs bg-zinc-500/10 text-zinc-300 border border-zinc-500/20">
-                                {t('policy.badge_no_cmd')}
-                              </span>
-                            )}
-                            {s.disable_registry_tools && (
-                              <span className="px-1.5 py-0.5 rounded text-xs bg-zinc-500/10 text-zinc-300 border border-zinc-500/20">
-                                {t('policy.badge_no_regedit')}
-                              </span>
-                            )}
-                            {s.disable_control_panel && (
-                              <span className="px-1.5 py-0.5 rounded text-xs bg-zinc-500/10 text-zinc-300 border border-zinc-500/20">
-                                {t('policy.badge_no_control_panel')}
-                              </span>
-                            )}
-                            {s.windows_update_mode === 'auto_install' && (
-                              <span className="px-1.5 py-0.5 rounded text-xs bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                                {t('policy.badge_auto_update')}
-                              </span>
-                            )}
-                            {s.admin_account_enabled && s.admin_account_username && (
-                              <span className="px-1.5 py-0.5 rounded text-xs bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                                {t('policy.badge_admin', { name: s.admin_account_username })}
-                              </span>
+                            {decisions.length === 0 ? (
+                              <span className="text-xs text-muted">{t('policy.decides_nothing')}</span>
+                            ) : (
+                              decisions.map(({ key, value }) => (
+                                <span
+                                  key={key}
+                                  className={`px-1.5 py-0.5 rounded text-xs ${
+                                    isRestrictive(key, value)
+                                      ? 'bg-red-500/10 text-red-400 border border-red-500/20'
+                                      : 'bg-zinc-500/10 text-zinc-300 border border-zinc-500/20'
+                                  }`}
+                                >
+                                  {t(settingLabelKey(key))}: {formatSettingValue(key, value, t)}
+                                </span>
+                              ))
                             )}
                           </div>
                         </td>
@@ -909,6 +885,23 @@ export const SystemPolicyPage: React.FC = () => {
                 </div>
 
                 <div className="space-y-2">
+                  <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.75rem', padding: '0.75rem', borderRadius: '0.5rem', border: '1px dashed var(--border-subtle)', cursor: 'pointer' }}>
+                    <input
+                      type="radio"
+                      name="usb_mode"
+                      value=""
+                      checked={formSettings.usb_storage_mode === null}
+                      onChange={() =>
+                        setFormSettings({ ...formSettings, usb_storage_mode: null })
+                      }
+                      className="mt-1"
+                    />
+                    <div>
+                      <div className="text-sm font-medium text-main">{t('policy.not_set_option')}</div>
+                      <div className="text-xs text-muted">{t('policy.usb_not_set_desc')}</div>
+                    </div>
+                  </label>
+
                   <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.75rem', padding: '0.75rem', borderRadius: '0.5rem', border: '1px solid var(--border-subtle)', cursor: 'pointer' }}>
                     <input
                       type="radio"
@@ -966,22 +959,7 @@ export const SystemPolicyPage: React.FC = () => {
                 </div>
 
                 <div className="pt-3" style={{ borderTop: '1px solid var(--border-subtle)' }}>
-                  <label className="flex items-start gap-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      className="rounded mt-0.5"
-                      checked={formSettings.disable_autoplay || false}
-                      onChange={(e) =>
-                        setFormSettings({ ...formSettings, disable_autoplay: e.target.checked })
-                      }
-                    />
-                    <div>
-                      <div className="text-sm font-medium text-main">{t('policy.autoplay_title')}</div>
-                      <div className="text-xs text-muted">
-                        {t('policy.autoplay_desc')}
-                      </div>
-                    </div>
-                  </label>
+                  {boolField('disable_autoplay', t('policy.autoplay_title'), t('policy.autoplay_desc'))}
                 </div>
               </div>
             )}
@@ -999,21 +977,9 @@ export const SystemPolicyPage: React.FC = () => {
                   </p>
                 </div>
 
-                <div className="form-group">
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      className="rounded"
-                      checked={formSettings.wallpaper_enabled}
-                      onChange={(e) =>
-                        setFormSettings({ ...formSettings, wallpaper_enabled: e.target.checked })
-                      }
-                    />
-                    <span className="text-sm font-medium text-main">{t('policy.wallpaper_enforce')}</span>
-                  </label>
-                </div>
+                {boolField('wallpaper_enabled', t('policy.wallpaper_enforce'))}
 
-                {formSettings.wallpaper_enabled && (
+                {formSettings.wallpaper_enabled === true && (
                   <>
                     <div className="form-group">
                       <label className="form-label">
@@ -1064,7 +1030,7 @@ export const SystemPolicyPage: React.FC = () => {
                       <input
                         id="wallpaper-url"
                         type="text"
-                        required={formSettings.wallpaper_enabled}
+                        required={formSettings.wallpaper_enabled === true}
                         className="form-input"
                         placeholder={t('policy.wallpaper_url_placeholder')}
                         value={formSettings.wallpaper_url || ''}
@@ -1141,214 +1107,62 @@ export const SystemPolicyPage: React.FC = () => {
 
                 {/* Firewall & Defender */}
                 <div className="space-y-2.5 pb-2" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
-                  <label className="flex items-start gap-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      className="rounded mt-0.5"
-                      checked={formSettings.firewall_enabled || false}
-                      onChange={(e) =>
-                        setFormSettings({ ...formSettings, firewall_enabled: e.target.checked })
-                      }
-                    />
-                    <div>
-                      <div className="text-sm font-medium text-main flex items-center gap-1.5">
-                        <Flame className="h-3.5 w-3.5 text-orange-400" />
-                        {t('policy.firewall_title')}
-                      </div>
-                      <div className="text-xs text-muted">
-                        {t('policy.firewall_desc')}
-                      </div>
-                    </div>
-                  </label>
-
-                  <label className="flex items-start gap-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      className="rounded mt-0.5"
-                      checked={formSettings.defender_protection_enabled || false}
-                      onChange={(e) =>
-                        setFormSettings({ ...formSettings, defender_protection_enabled: e.target.checked })
-                      }
-                    />
-                    <div>
-                      <div className="text-sm font-medium text-main flex items-center gap-1.5">
-                        <Shield className="h-3.5 w-3.5 text-emerald-400" />
-                        {t('policy.defender_title')}
-                      </div>
-                      <div className="text-xs text-muted">
-                        {t('policy.defender_desc')}
-                      </div>
-                    </div>
-                  </label>
-
-                  <label className="flex items-start gap-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      className="rounded mt-0.5"
-                      checked={formSettings.disable_powershell || false}
-                      onChange={(e) =>
-                        setFormSettings({ ...formSettings, disable_powershell: e.target.checked })
-                      }
-                    />
-                    <div>
-                      <div className="text-sm font-medium text-main flex items-center gap-1.5">
-                        <Terminal className="h-3.5 w-3.5 text-amber-400" />
-                        {t('policy.powershell_title')}
-                      </div>
-                      <div className="text-xs text-muted">
-                        {t('policy.powershell_desc')}
-                      </div>
-                    </div>
-                  </label>
+                  {boolField(
+                    'firewall_enabled',
+                    <span className="flex items-center gap-1.5">
+                      <Flame className="h-3.5 w-3.5 text-orange-400" />
+                      {t('policy.firewall_title')}
+                    </span>,
+                    t('policy.firewall_desc'),
+                  )}
+                  {boolField(
+                    'defender_protection_enabled',
+                    <span className="flex items-center gap-1.5">
+                      <Shield className="h-3.5 w-3.5 text-emerald-400" />
+                      {t('policy.defender_title')}
+                    </span>,
+                    t('policy.defender_desc'),
+                  )}
+                  {boolField(
+                    'disable_powershell',
+                    <span className="flex items-center gap-1.5">
+                      <Terminal className="h-3.5 w-3.5 text-amber-400" />
+                      {t('policy.powershell_title')}
+                    </span>,
+                    t('policy.powershell_desc'),
+                  )}
                 </div>
 
                 {/* Screen Saver & Inactivity */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pb-2" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
-                  <div className="form-group">
-                    <label className="form-label" htmlFor="inactivity-timeout">
-                      {t('policy.inactivity_label')}
-                    </label>
-                    <select
-                      id="inactivity-timeout"
-                      className="form-select"
-                      value={formSettings.inactivity_timeout_minutes}
-                      onChange={(e) =>
-                        setFormSettings({
-                          ...formSettings,
-                          inactivity_timeout_minutes: Number(e.target.value),
-                        })
-                      }
-                    >
-                      <option value={0}>{t('policy.inactivity_disabled')}</option>
-                      <option value={5}>{t('policy.minutes_option', { minutes: 5 })}</option>
-                      <option value={10}>{t('policy.minutes_option', { minutes: 10 })}</option>
-                      <option value={15}>{t('policy.minutes_standard', { minutes: 15 })}</option>
-                      <option value={30}>{t('policy.minutes_option', { minutes: 30 })}</option>
-                      <option value={60}>{t('policy.minutes_option', { minutes: 60 })}</option>
-                    </select>
-                  </div>
-
-                  <div className="form-group">
-                    <label className="form-label" htmlFor="screensaver-timeout">
-                      {t('policy.screensaver_label')}
-                    </label>
-                    <select
-                      id="screensaver-timeout"
-                      className="form-select"
-                      value={formSettings.screensaver_timeout_minutes || 0}
-                      onChange={(e) =>
-                        setFormSettings({
-                          ...formSettings,
-                          screensaver_timeout_minutes: Number(e.target.value),
-                        })
-                      }
-                    >
-                      <option value={0}>{t('policy.disabled')}</option>
-                      <option value={5}>{t('policy.minutes_option', { minutes: 5 })}</option>
-                      <option value={10}>{t('policy.minutes_option', { minutes: 10 })}</option>
-                      <option value={15}>{t('policy.minutes_option', { minutes: 15 })}</option>
-                      <option value={30}>{t('policy.minutes_option', { minutes: 30 })}</option>
-                    </select>
-                    <label className="flex items-center gap-2 cursor-pointer mt-2">
-                      <input
-                        type="checkbox"
-                        className="rounded"
-                        checked={formSettings.screensaver_password_required || false}
-                        onChange={(e) =>
-                          setFormSettings({
-                            ...formSettings,
-                            screensaver_password_required: e.target.checked,
-                          })
-                        }
-                      />
-                      <span className="text-xs text-main font-medium">{t('policy.screensaver_password')}</span>
-                    </label>
+                  {minutesField('inactivity_timeout_minutes', t('policy.inactivity_label'))}
+                  <div>
+                    {minutesField('screensaver_timeout_minutes', t('policy.screensaver_label'))}
+                    {boolField('screensaver_password_required', t('policy.screensaver_password'))}
                   </div>
                 </div>
 
-                {/* Restriction Switches */}
+                {/* Restriction settings */}
                 <div className="space-y-3 pt-2">
-                  <label className="flex items-start gap-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      className="rounded mt-0.5"
-                      checked={formSettings.disable_task_mgr}
-                      onChange={(e) =>
-                        setFormSettings({ ...formSettings, disable_task_mgr: e.target.checked })
-                      }
-                    />
-                    <div>
-                      <div className="text-sm font-medium text-main">{t('policy.taskmgr_title')}</div>
-                      <div className="text-xs text-muted">{t('policy.taskmgr_desc')}</div>
-                    </div>
-                  </label>
-
-                  <label className="flex items-start gap-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      className="rounded mt-0.5"
-                      checked={formSettings.disable_cmd}
-                      onChange={(e) =>
-                        setFormSettings({ ...formSettings, disable_cmd: e.target.checked })
-                      }
-                    />
-                    <div>
-                      <div className="text-sm font-medium text-main">{t('policy.cmd_title')}</div>
-                      <div className="text-xs text-muted">{t('policy.cmd_desc')}</div>
-                    </div>
-                  </label>
-
-                  <label className="flex items-start gap-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      className="rounded mt-0.5"
-                      checked={formSettings.disable_registry_tools}
-                      onChange={(e) =>
-                        setFormSettings({ ...formSettings, disable_registry_tools: e.target.checked })
-                      }
-                    />
-                    <div>
-                      <div className="text-sm font-medium text-main">{t('policy.regedit_title')}</div>
-                      <div className="text-xs text-muted">{t('policy.regedit_desc')}</div>
-                    </div>
-                  </label>
-
-                  <label className="flex items-start gap-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      className="rounded mt-0.5"
-                      checked={formSettings.disable_control_panel}
-                      onChange={(e) =>
-                        setFormSettings({ ...formSettings, disable_control_panel: e.target.checked })
-                      }
-                    />
-                    <div>
-                      <div className="text-sm font-medium text-main">{t('policy.control_panel_title')}</div>
-                      <div className="text-xs text-muted">{t('policy.control_panel_desc')}</div>
-                    </div>
-                  </label>
+                  {boolField('disable_task_mgr', t('policy.taskmgr_title'), t('policy.taskmgr_desc'))}
+                  {boolField('disable_cmd', t('policy.cmd_title'), t('policy.cmd_desc'))}
+                  {boolField('disable_registry_tools', t('policy.regedit_title'), t('policy.regedit_desc'))}
+                  {boolField('disable_control_panel', t('policy.control_panel_title'), t('policy.control_panel_desc'))}
                 </div>
 
                 {/* Windows Update Mode */}
-                <div className="form-group pt-2">
-                  <label className="form-label" htmlFor="wu-mode">
-                    {t('policy.wu_label')}
-                  </label>
-                  <select
+                <div className="pt-2">
+                  <TriStateSelect
                     id="wu-mode"
-                    className="form-select"
+                    label={t('policy.wu_label')}
                     value={formSettings.windows_update_mode}
-                    onChange={(e) =>
-                      setFormSettings({
-                        ...formSettings,
-                        windows_update_mode: e.target.value as WindowsUpdateMode,
-                      })
-                    }
-                  >
-                    <option value="default">{t('policy.wu_default')}</option>
-                    <option value="auto_install">{t('policy.wu_auto')}</option>
-                    <option value="notify_only">{t('policy.wu_notify')}</option>
-                  </select>
+                    options={[
+                      { value: 'default' as const, label: t('policy.wu_default') },
+                      { value: 'auto_install' as const, label: t('policy.wu_auto') },
+                      { value: 'notify_only' as const, label: t('policy.wu_notify') },
+                    ]}
+                    onChange={(v) => setFormSettings({ ...formSettings, windows_update_mode: v })}
+                  />
                 </div>
               </div>
             )}
@@ -1366,23 +1180,9 @@ export const SystemPolicyPage: React.FC = () => {
                   </p>
                 </div>
 
-                <div className="form-group">
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      className="rounded"
-                      checked={formSettings.admin_account_enabled || false}
-                      onChange={(e) =>
-                        setFormSettings({ ...formSettings, admin_account_enabled: e.target.checked })
-                      }
-                    />
-                    <span className="text-sm font-medium text-main">
-                      {t('policy.admin_enforce')}
-                    </span>
-                  </label>
-                </div>
+                {boolField('admin_account_enabled', t('policy.admin_enforce'))}
 
-                {formSettings.admin_account_enabled && (
+                {formSettings.admin_account_enabled === true && (
                   <div className="space-y-4 p-4 rounded-lg bg-zinc-900/60 border border-zinc-700/60">
                     <div className="grid grid-cols-2 gap-4">
                       <div className="form-group">

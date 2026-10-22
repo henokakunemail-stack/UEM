@@ -668,6 +668,56 @@ export interface VerifyUninstallTokenResp {
   valid: boolean
 }
 
+/**
+ * What one policy decides. null is "not set": the policy leaves that setting to
+ * broader or lower-priority policies (or the OS default). Every saved policy
+ * used to carry usb_storage_mode "allow", so any policy lifted a USB block.
+ */
+export interface SystemPolicyConfigDTO {
+  settings_version: 2
+  usb_storage_mode: USBStorageMode | null
+  wallpaper_enabled: boolean | null
+  wallpaper_url?: string
+  wallpaper_style?: WallpaperStyle
+  wallpaper_locked?: boolean
+  firewall_enabled: boolean | null
+  defender_protection_enabled: boolean | null
+  disable_powershell: boolean | null
+  disable_autoplay: boolean | null
+  screensaver_timeout_minutes: number | null
+  screensaver_password_required: boolean | null
+  inactivity_timeout_minutes: number | null
+  disable_task_mgr: boolean | null
+  disable_cmd: boolean | null
+  disable_registry_tools: boolean | null
+  disable_control_panel: boolean | null
+  windows_update_mode: WindowsUpdateMode | null
+  admin_account_enabled: boolean | null
+  admin_account_username?: string
+  admin_account_password?: string
+  admin_account_password_set?: boolean
+  admin_account_full_name?: string
+  admin_account_description?: string
+  admin_account_never_expires?: boolean
+}
+
+/** The policy that decided one setting for a device. */
+export interface SettingSourceDTO {
+  policy_id: string
+  policy_name: string
+  target_type: 'all' | 'group' | 'device'
+  target_id: string
+  priority: number
+}
+
+export interface DeviceSystemPolicyDTO {
+  compiled: { device_id: string; version: string; settings: SystemPolicySettingsDTO }
+  state?: DeviceSystemPolicyStateDTO | null
+  /** setting key -> deciding policy; a key missing here is decided by nobody. */
+  sources: Record<string, SettingSourceDTO>
+  matched_policies: SettingSourceDTO[]
+}
+
 export interface SystemPolicyDTO {
   id: string
   name: string
@@ -676,7 +726,7 @@ export interface SystemPolicyDTO {
   target_id: string
   is_enabled: boolean
   priority: number
-  settings: SystemPolicySettingsDTO
+  settings: SystemPolicyConfigDTO
   created_by: string
   created_at: string
   updated_at: string

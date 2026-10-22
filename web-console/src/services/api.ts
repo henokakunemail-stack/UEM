@@ -51,7 +51,8 @@ import type {
   RemoteControlSessionDTO,
   AuthSession,
   SystemPolicyDTO,
-  SystemPolicySettingsDTO,
+  SystemPolicyConfigDTO,
+  DeviceSystemPolicyDTO,
   DeviceSystemPolicyStateDTO,
   UninstallTokenResp,
   VerifyUninstallTokenResp,
@@ -1137,7 +1138,7 @@ export const api = {
     target_id?: string
     is_enabled?: boolean
     priority?: number
-    settings: SystemPolicySettingsDTO
+    settings: Omit<SystemPolicyConfigDTO, 'admin_account_password_set'>
   }): Promise<SystemPolicyDTO> {
     return request<SystemPolicyDTO>('/api/system-policies', {
       method: 'POST',
@@ -1154,7 +1155,7 @@ export const api = {
       target_id: string
       is_enabled: boolean
       priority: number
-      settings: SystemPolicySettingsDTO
+      settings: Omit<SystemPolicyConfigDTO, 'admin_account_password_set'>
     }>
   ): Promise<SystemPolicyDTO> {
     return request<SystemPolicyDTO>(`/api/system-policies/${id}`, {
@@ -1175,11 +1176,8 @@ export const api = {
     })
   },
 
-  async getDeviceSystemPolicy(deviceId: string): Promise<{
-    compiled: { device_id: string; version: string; settings: SystemPolicySettingsDTO }
-    state?: DeviceSystemPolicyStateDTO | null
-  }> {
-    return request(`/api/devices/${deviceId}/system-policy`)
+  async getDeviceSystemPolicy(deviceId: string): Promise<DeviceSystemPolicyDTO> {
+    return request<DeviceSystemPolicyDTO>(`/api/devices/${deviceId}/system-policy`)
   },
 
   async syncDeviceSystemPolicy(deviceId: string): Promise<{ status: string; message: string }> {
