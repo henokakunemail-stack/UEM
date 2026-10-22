@@ -1,9 +1,7 @@
 package networkfilter
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -17,6 +15,7 @@ import (
 
 	"github.com/rs/zerolog/log"
 
+	"github.com/henokakunemail-stack/Endpoint-Manager/agent/shared/reportretry"
 	"github.com/henokakunemail-stack/Endpoint-Manager/agent/shared/transport"
 )
 
@@ -24,6 +23,12 @@ const (
 	MarkerBegin = "### BEGIN ENDPOINT-MGMT MANAGED BLOCKLIST ###"
 	MarkerEnd   = "### END ENDPOINT-MGMT MANAGED BLOCKLIST ###"
 )
+
+// whitelistProxy is the running whitelist resolver (a *DNSProxy outside tests).
+type whitelistProxy interface {
+	UpdateAllowed(allowed []string)
+	Stop()
+}
 
 type Engine struct {
 	hostsPath    string
@@ -34,9 +39,22 @@ type Engine struct {
 	mu           sync.Mutex
 	resolver     *resolver
 	firewall     firewallBackend
-	dnsProxy     *DNSProxy
-	dnsRestore   func()
+	dnsProxy     whitelistProxy
 	currentMode  string
+
+	// dns redirects the system resolver; activeBackup is the snapshot taken
+	// before it did, kept on disk under stateDir until DNS is restored.
+	dns          dnsConfigurator
+	activeBackup *dnsBackup
+	// stateDir holds filter-state.json and dns-backup.json; empty disables
+	// persistence (tests, or an agent run without a creds directory).
+	stateDir string
+	// lastBlocked is the blacklist currently enforced, so a refresh can
+	// re-install firewall entries that expire on their own.
+	lastBlocked []string
+
+	startProxy func(listenAddr, upstream string, allowed []string, serverURL string) (whitelistProxy, error)
+	upstream   func() string
 }
 
 func NewEngine(serverURL, deviceID, deviceSecret string) *Engine {
@@ -53,6 +71,11 @@ func NewEngine(serverURL, deviceID, deviceSecret string) *Engine {
 		httpClient:   transport.NewHTTPClient(10 * time.Second),
 		resolver:     newResolver(),
 		firewall:     newFirewallBackend(),
+		dns:          systemDNS{},
+		startProxy: func(listenAddr, upstream string, allowed []string, serverURL string) (whitelistProxy, error) {
+			return StartDNSProxy(listenAddr, upstream, allowed, serverURL)
+		},
+		upstream: GetPrimaryUpstreamDNS,
 	}
 }
 
@@ -92,16 +115,26 @@ func (e *Engine) applyWhitelist(allowedDomains []string) (count int, degraded st
 		_, _ = e.firewall.Apply(nil)
 	}
 
-	// If no allowed domains specified, stop proxy and restore original DNS
+	e.lastBlocked = nil
+
+	// An empty whitelist enforces nothing. The server no longer compiles one
+	// (a policy without rules is skipped), but an older server can still send
+	// it, and it used to be reported as "synced" with filtering off.
 	if len(allowedDomains) == 0 {
 		e.stopWhitelistProxy()
 		e.currentMode = "whitelist"
-		return 0, "", nil
+		return 0, "whitelist has no allowed domains, so nothing is filtered", nil
 	}
 
-	upstream := GetPrimaryUpstreamDNS()
+	upstream := ""
+	if e.activeBackup != nil {
+		upstream = upstreamFromBackup(*e.activeBackup)
+	}
+	if upstream == "" {
+		upstream = e.upstream()
+	}
 	if e.dnsProxy == nil {
-		proxy, err := StartDNSProxy("127.0.0.1:53", upstream, allowedDomains, e.serverURL)
+		proxy, err := e.startProxy("127.0.0.1:53", upstream, allowedDomains, e.serverURL)
 		if err != nil {
 			return 0, "", fmt.Errorf("start whitelist DNS proxy: %w", err)
 		}
@@ -110,13 +143,25 @@ func (e *Engine) applyWhitelist(allowedDomains []string) (count int, degraded st
 		e.dnsProxy.UpdateAllowed(allowedDomains)
 	}
 
-	// Configure system network adapters to point to loopback DNS
-	restore, err := ConfigureLoopbackDNS()
-	if err != nil {
-		degraded = "failed to configure adapter DNS to loopback: " + err.Error()
-		log.Warn().Err(err).Msg("failed to configure loopback DNS on adapter; proxy is listening on 127.0.0.1:53")
-	} else {
-		e.dnsRestore = restore
+	// Redirect the system resolver once. The snapshot reaches disk before any
+	// adapter changes, so a crash from here on can always be undone.
+	if e.activeBackup == nil {
+		b, err := e.dns.Snapshot()
+		if err != nil {
+			e.stopWhitelistProxy()
+			return 0, "", fmt.Errorf("route DNS through the whitelist resolver: %w", err)
+		}
+		if err := e.saveDNSBackup(b); err != nil {
+			e.stopWhitelistProxy()
+			return 0, "", fmt.Errorf("persist DNS backup before changing adapters: %w", err)
+		}
+		e.activeBackup = &b
+		warning, err := e.dns.PointToLoopback(b)
+		if err != nil {
+			e.stopWhitelistProxy()
+			return 0, "", fmt.Errorf("route DNS through the whitelist resolver: %w", err)
+		}
+		degraded = warning
 	}
 
 	e.currentMode = "whitelist"
@@ -124,16 +169,20 @@ func (e *Engine) applyWhitelist(allowedDomains []string) (count int, degraded st
 	return len(allowedDomains), degraded, nil
 }
 
+// stopWhitelistProxy stops the resolver and puts the system's DNS back as it
+// was, then forgets the backup.
 func (e *Engine) stopWhitelistProxy() {
 	if e.dnsProxy != nil {
 		e.dnsProxy.Stop()
 		e.dnsProxy = nil
 	}
-	if e.dnsRestore != nil {
-		e.dnsRestore()
-		e.dnsRestore = nil
+	if e.activeBackup != nil {
+		if err := e.dns.Restore(*e.activeBackup); err != nil {
+			log.Warn().Err(err).Msg("restore DNS after whitelist mode")
+		}
+		e.activeBackup = nil
+		e.removeDNSBackup()
 	}
-	RestoreOriginalDNS()
 }
 
 func (e *Engine) applyBlacklist(domains []string) (count int, degraded string, err error) {
@@ -174,6 +223,8 @@ func (e *Engine) applyBlacklist(domains []string) (count int, degraded string, e
 	// Sorted so the same policy produces the same report text, which is what makes
 	// a changed message meaningful to an operator reading the device's history.
 	sort.Strings(warnings)
+
+	e.lastBlocked = append([]string(nil), domains...)
 
 	if len(warnings) > 0 {
 		return hostsCount, strings.Join(warnings, "; "), nil
@@ -362,38 +413,14 @@ func (e *Engine) Close() {
 	e.stopWhitelistProxy()
 }
 
-// ReportFilterState reports policy enforcement status to server
+// ReportFilterState reports policy enforcement status to the server, retrying
+// a transient failure; a dropped report left the device "pending".
 func (e *Engine) ReportFilterState(ctx context.Context, version, status string, count int, errMsg string) error {
 	reportURL := fmt.Sprintf("%s/api/agent/devices/%s/filter/report", strings.TrimRight(e.serverURL, "/"), e.deviceID)
-
-	payload := map[string]any{
+	return reportretry.Post(ctx, e.httpClient, reportURL, e.deviceID, e.deviceSecret, map[string]any{
 		"policy_version": version,
 		"status":         status,
 		"rules_applied":  count,
 		"error_message":  errMsg,
-	}
-
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return fmt.Errorf("marshal filter report: %w", err)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, reportURL, bytes.NewReader(body))
-	if err != nil {
-		return fmt.Errorf("create filter report request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Device-Id", e.deviceID)
-	req.Header.Set("X-Device-Secret", e.deviceSecret)
-
-	resp, err := e.httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("send filter report: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 300 {
-		return fmt.Errorf("filter report HTTP %d", resp.StatusCode)
-	}
-	return nil
+	})
 }

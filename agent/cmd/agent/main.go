@@ -773,8 +773,27 @@ func runAgent(serverURL, enrollToken, enrollSite, credsPath string, heartbeatSec
 		return map[string]string{"status": "stopped"}
 	})
 
-	// Phase 12: Network & Web Filter
-	filterEngine := networkfilter.NewEngine(targetServerURL, creds.DeviceID, creds.DeviceSecret)
+	// Phase 12: Network & Web Filter. The last applied policy and any DNS
+	// backup live beside the credentials, so a restart (or a crash) puts the
+	// filter back before the agent has even reached the server.
+	filterEngine := networkfilter.NewEngine(targetServerURL, creds.DeviceID, creds.DeviceSecret).
+		WithStateDir(filepath.Dir(credsPath))
+	if rec := filterEngine.Recover(); rec != nil {
+		go func() {
+			defer guardAgentGoroutine("networkfilter.recover")
+			status, errMsg := "synced", ""
+			switch {
+			case rec.Err != nil:
+				status, errMsg = "failed", rec.Err.Error()
+			case rec.Degraded != "":
+				status, errMsg = "degraded", rec.Degraded
+			}
+			if err := filterEngine.ReportFilterState(ctx, rec.Version, status, rec.Count, errMsg); err != nil {
+				log.Warn().Err(err).Msg("report re-applied filter policy")
+			}
+		}()
+	}
+	go filterEngine.RunRefresh(ctx, 30*time.Minute)
 
 	dispatcher.Register("filter.apply", func(ctx context.Context, command, id string, payload json.RawMessage) any {
 		var p struct {
@@ -793,7 +812,7 @@ func runAgent(serverURL, enrollToken, enrollSite, credsPath string, heartbeatSec
 
 		go func() {
 			defer guardAgentGoroutine("networkfilter.apply")
-			count, degraded, err := filterEngine.ApplyFilter(p.Mode, p.BlockedDomains, p.AllowedDomains)
+			count, degraded, err := filterEngine.ApplyPolicy(p.PolicyVersion, p.Mode, p.BlockedDomains, p.AllowedDomains)
 			status, errMsg := "synced", ""
 			switch {
 			case err != nil:
@@ -808,7 +827,9 @@ func runAgent(serverURL, enrollToken, enrollSite, credsPath string, heartbeatSec
 				status, errMsg = "degraded", degraded
 				log.Warn().Str("reason", degraded).Msg("filter policy applied with reduced enforcement")
 			}
-			_ = filterEngine.ReportFilterState(context.Background(), p.PolicyVersion, status, count, errMsg)
+			if rerr := filterEngine.ReportFilterState(context.Background(), p.PolicyVersion, status, count, errMsg); rerr != nil {
+				log.Warn().Err(rerr).Str("version", p.PolicyVersion).Msg("report filter policy result")
+			}
 		}()
 
 		return map[string]string{"status": "applying", "version": p.PolicyVersion}
@@ -927,8 +948,11 @@ func runAgent(serverURL, enrollToken, enrollSite, credsPath string, heartbeatSec
 
 	// Advertise what this build can do, so the server avoids sending commands to
 	// an agent that would silently drop them.
+	// filter.persist tells the server this agent re-applies its filter policy
+	// itself after a restart; an agent without it gets the policy re-sent on
+	// every reconnect.
 	client.SetHelloExtra(map[string]any{
-		"capabilities": append(inventoryCapabilities(), maintenance.Capabilities()...),
+		"capabilities": append(append(inventoryCapabilities(), maintenance.Capabilities()...), "filter.persist"),
 	})
 
 	// On shutdown, close the socket and restore any modified network adapter DNS

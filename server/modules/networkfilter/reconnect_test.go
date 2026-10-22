@@ -107,9 +107,11 @@ func TestReconnectDeliversToADeviceThatNeverSynced(t *testing.T) {
 
 // A device already enforcing the current version must be left alone. This is what
 // keeps a reconnect storm from re-pushing an identical rule set to every endpoint.
+// It applies to an agent that keeps its policy across restarts (filter.persist).
 func TestReconnectSkipsADeviceAlreadyCurrent(t *testing.T) {
 	f := newConnectFixture(t)
 	ctx := context.Background()
+	f.database.MustExec(`UPDATE devices SET capabilities = '["ping","filter.persist"]' WHERE id = 'dev-1'`)
 
 	if err := f.repo.RecordDeviceFilterState(ctx, &DeviceFilterState{
 		DeviceID: "dev-1", PolicyVersion: f.version, Status: statusSynced, RulesApplied: 1,

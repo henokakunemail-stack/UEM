@@ -28,6 +28,10 @@ type nftablesFirewall struct{}
 
 func newFirewallBackend() firewallBackend { return &nftablesFirewall{} }
 
+// EntriesExpire: every set element carries a timeout, so the engine re-applies
+// the set before it lapses (Engine.RunRefresh).
+func (n *nftablesFirewall) EntriesExpire() bool { return true }
+
 func (n *nftablesFirewall) Supported() bool {
 	_, err := exec.LookPath("nft")
 	return err == nil

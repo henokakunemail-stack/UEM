@@ -10,114 +10,184 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
-	"sync"
 
 	"github.com/rs/zerolog/log"
 )
 
-var (
-	adapterMu     sync.Mutex
-	activeRestore func()
-)
+// ErrLoopbackUnsupported means this OS has no way, in this agent, to send the
+// system's DNS through the whitelist resolver. macOS used to return a no-op
+// here and the whitelist reported "synced" while every lookup bypassed it.
+var ErrLoopbackUnsupported = errors.New("networkfilter: this OS cannot route system DNS through the whitelist resolver")
 
-// ConfigureLoopbackDNS points the system's active network adapter(s) to 127.0.0.1,
-// returning a restore function that resets the adapters to their previous state.
-func ConfigureLoopbackDNS() (func(), error) {
-	adapterMu.Lock()
-	defer adapterMu.Unlock()
+// dnsBackup is what the system's DNS looked like before whitelist mode pointed
+// it at 127.0.0.1. It is written to disk before anything changes: the backup
+// used to live only in memory, so an agent that crashed or was killed left
+// every adapter on 127.0.0.1 with nothing listening, and the next start backed
+// up "127.0.0.1" (skipped as loopback) and "restored" the adapters to DHCP.
+type dnsBackup struct {
+	Method     string          `json:"method"` // windows | resolvectl | resolvconf
+	Adapters   []adapterBackup `json:"adapters,omitempty"`
+	Iface      string          `json:"iface,omitempty"`
+	ResolvConf string          `json:"resolv_conf,omitempty"`
+}
 
-	// If a previous configuration was already active, don't nest restores; keep original
-	if activeRestore != nil {
-		return activeRestore, nil
-	}
+type adapterBackup struct {
+	Name      string   `json:"name"`
+	DHCP      bool     `json:"dhcp"`
+	Addresses []string `json:"addresses,omitempty"`
+}
 
-	var restore func()
-	var err error
+// dnsConfigurator points the system resolver at the whitelist proxy and back.
+// The engine snapshots, persists the snapshot, and only then changes anything.
+type dnsConfigurator interface {
+	Snapshot() (dnsBackup, error)
+	// PointToLoopback returns a warning when it only partly succeeded (some
+	// adapters refused), and an error when nothing was redirected.
+	PointToLoopback(b dnsBackup) (warning string, err error)
+	Restore(b dnsBackup) error
+}
 
+// systemDNS is the real configurator for the running OS.
+type systemDNS struct{}
+
+func (systemDNS) Snapshot() (dnsBackup, error) {
 	switch runtime.GOOS {
 	case "windows":
-		restore, err = configureWindowsDNS()
+		adapters, err := getConnectedWindowsAdapters()
+		if err != nil || len(adapters) == 0 {
+			return dnsBackup{}, fmt.Errorf("no connected network adapter found: %v", err)
+		}
+		b := dnsBackup{Method: "windows"}
+		for _, a := range adapters {
+			b.Adapters = append(b.Adapters, getWindowsDNSBackup(a))
+		}
+		return b, nil
 	case "linux":
-		restore, err = configureLinuxDNS()
-	default:
-		return func() {}, nil
-	}
-
-	if err != nil {
-		return nil, err
-	}
-
-	activeRestore = restore
-	return func() {
-		adapterMu.Lock()
-		defer adapterMu.Unlock()
-		if activeRestore != nil {
-			activeRestore()
-			activeRestore = nil
-		}
-	}, nil
-}
-
-// RestoreOriginalDNS immediately restores the system DNS adapters if modified.
-func RestoreOriginalDNS() {
-	adapterMu.Lock()
-	defer adapterMu.Unlock()
-	if activeRestore != nil {
-		activeRestore()
-		activeRestore = nil
-	}
-}
-
-type windowsAdapterBackup struct {
-	name      string
-	isDHCP    bool
-	addresses []string
-}
-
-func configureWindowsDNS() (func(), error) {
-	adapters, err := getConnectedWindowsAdapters()
-	if err != nil || len(adapters) == 0 {
-		return nil, fmt.Errorf("no connected network adapter found: %w", err)
-	}
-
-	var backups []windowsAdapterBackup
-	for _, adapter := range adapters {
-		bk := getWindowsDNSBackup(adapter)
-		backups = append(backups, bk)
-
-		// Set DNS to 127.0.0.1
-		cmd := exec.Command("netsh", "interface", "ipv4", "set", "dnsservers",
-			"name="+adapter, "source=static", "address=127.0.0.1", "validate=no")
-		if err := cmd.Run(); err != nil {
-			log.Warn().Str("adapter", adapter).Err(err).Msg("failed to set 127.0.0.1 DNS on adapter")
-		} else {
-			log.Info().Str("adapter", adapter).Msg("configured adapter DNS to 127.0.0.1")
-		}
-	}
-
-	restore := func() {
-		for _, bk := range backups {
-			if bk.isDHCP || len(bk.addresses) == 0 {
-				_ = exec.Command("netsh", "interface", "ipv4", "set", "dnsservers",
-					"name="+bk.name, "source=dhcp").Run()
-				log.Info().Str("adapter", bk.name).Msg("restored adapter DNS to DHCP")
-			} else {
-				// Restore primary static DNS
-				_ = exec.Command("netsh", "interface", "ipv4", "set", "dnsservers",
-					"name="+bk.name, "source=static", "address="+bk.addresses[0], "validate=no").Run()
-				// Add secondary static DNS if present
-				for i := 1; i < len(bk.addresses); i++ {
-					_ = exec.Command("netsh", "interface", "ipv4", "add", "dnsservers",
-						"name="+bk.name, "address="+bk.addresses[i], fmt.Sprintf("index=%d", i+1), "validate=no").Run()
-				}
-				log.Info().Str("adapter", bk.name).Strs("dns", bk.addresses).Msg("restored adapter static DNS")
+		if _, err := exec.LookPath("resolvectl"); err == nil {
+			if iface := getActiveLinuxInterface(); iface != "" {
+				return dnsBackup{Method: "resolvectl", Iface: iface}, nil
 			}
 		}
-		_ = exec.Command("ipconfig", "/flushdns").Run()
+		original, err := os.ReadFile("/etc/resolv.conf")
+		if err != nil {
+			return dnsBackup{}, fmt.Errorf("read /etc/resolv.conf: %w", err)
+		}
+		return dnsBackup{Method: "resolvconf", ResolvConf: string(original)}, nil
 	}
+	return dnsBackup{}, ErrLoopbackUnsupported
+}
 
-	_ = exec.Command("ipconfig", "/flushdns").Run()
-	return restore, nil
+func (systemDNS) PointToLoopback(b dnsBackup) (string, error) {
+	switch b.Method {
+	case "windows":
+		var refused []string
+		for _, a := range b.Adapters {
+			out, err := exec.Command("netsh", "interface", "ipv4", "set", "dnsservers",
+				"name="+a.Name, "source=static", "address=127.0.0.1", "validate=no").CombinedOutput()
+			if err != nil {
+				refused = append(refused, fmt.Sprintf("%s (%v: %s)", a.Name, err, strings.TrimSpace(string(out))))
+				continue
+			}
+			log.Info().Str("adapter", a.Name).Msg("configured adapter DNS to 127.0.0.1")
+		}
+		_ = exec.Command("ipconfig", "/flushdns").Run()
+		// A refused adapter used to be logged and the whitelist reported as
+		// enforced; lookups on that adapter bypass it entirely.
+		if len(refused) == len(b.Adapters) {
+			return "", fmt.Errorf("no adapter accepted 127.0.0.1 as its DNS server: %s", strings.Join(refused, "; "))
+		}
+		if len(refused) > 0 {
+			return "whitelist not enforced on adapter(s): " + strings.Join(refused, "; "), nil
+		}
+		return "", nil
+	case "resolvectl":
+		if out, err := exec.Command("resolvectl", "dns", b.Iface, "127.0.0.1").CombinedOutput(); err != nil {
+			return "", fmt.Errorf("resolvectl dns %s: %w (%s)", b.Iface, err, strings.TrimSpace(string(out)))
+		}
+		log.Info().Str("interface", b.Iface).Msg("configured Linux DNS via resolvectl")
+		return "", nil
+	case "resolvconf":
+		if err := os.WriteFile("/etc/resolv.conf", []byte(rewriteResolvConf(b.ResolvConf)), 0o644); err != nil {
+			return "", fmt.Errorf("write /etc/resolv.conf: %w", err)
+		}
+		log.Info().Msg("configured Linux DNS via /etc/resolv.conf")
+		return "", nil
+	}
+	return "", ErrLoopbackUnsupported
+}
+
+func (systemDNS) Restore(b dnsBackup) error {
+	switch b.Method {
+	case "windows":
+		var errs []string
+		for _, a := range b.Adapters {
+			var err error
+			if a.DHCP || len(a.Addresses) == 0 {
+				err = exec.Command("netsh", "interface", "ipv4", "set", "dnsservers",
+					"name="+a.Name, "source=dhcp").Run()
+			} else {
+				err = exec.Command("netsh", "interface", "ipv4", "set", "dnsservers",
+					"name="+a.Name, "source=static", "address="+a.Addresses[0], "validate=no").Run()
+				for i := 1; i < len(a.Addresses); i++ {
+					_ = exec.Command("netsh", "interface", "ipv4", "add", "dnsservers",
+						"name="+a.Name, "address="+a.Addresses[i], fmt.Sprintf("index=%d", i+1), "validate=no").Run()
+				}
+			}
+			if err != nil {
+				errs = append(errs, a.Name+": "+err.Error())
+				continue
+			}
+			log.Info().Str("adapter", a.Name).Bool("dhcp", a.DHCP).Strs("dns", a.Addresses).Msg("restored adapter DNS")
+		}
+		_ = exec.Command("ipconfig", "/flushdns").Run()
+		if len(errs) > 0 {
+			return fmt.Errorf("restore adapter DNS: %s", strings.Join(errs, "; "))
+		}
+		return nil
+	case "resolvectl":
+		err := exec.Command("resolvectl", "revert", b.Iface).Run()
+		_ = exec.Command("resolvectl", "flush-caches").Run()
+		return err
+	case "resolvconf":
+		return os.WriteFile("/etc/resolv.conf", []byte(b.ResolvConf), 0o644)
+	}
+	return nil
+}
+
+// rewriteResolvConf puts the whitelist resolver first and comments out every
+// other nameserver. Prepending alone left the original servers listed, and a
+// resolver that failed over to them bypassed the whitelist.
+func rewriteResolvConf(original string) string {
+	var sb strings.Builder
+	sb.WriteString("nameserver 127.0.0.1\n")
+	for _, line := range strings.Split(strings.TrimRight(original, "\n"), "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "nameserver") {
+			sb.WriteString("# endpoint whitelist: " + line + "\n")
+			continue
+		}
+		sb.WriteString(line + "\n")
+	}
+	return sb.String()
+}
+
+// upstreamFromBackup is the resolver the whitelist proxy should forward to,
+// taken from the persisted backup. After a crash the live settings say
+// 127.0.0.1, so reading them would forward the proxy to itself.
+func upstreamFromBackup(b dnsBackup) string {
+	for _, a := range b.Adapters {
+		for _, addr := range a.Addresses {
+			if !strings.HasPrefix(addr, "127.") {
+				return addr + ":53"
+			}
+		}
+	}
+	for _, line := range strings.Split(b.ResolvConf, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) >= 2 && fields[0] == "nameserver" && !strings.HasPrefix(fields[1], "127.") {
+			return fields[1] + ":53"
+		}
+	}
+	return ""
 }
 
 func getConnectedWindowsAdapters() ([]string, error) {
@@ -145,8 +215,8 @@ func getConnectedWindowsAdapters() ([]string, error) {
 	return adapters, nil
 }
 
-func getWindowsDNSBackup(adapter string) windowsAdapterBackup {
-	bk := windowsAdapterBackup{name: adapter, isDHCP: true}
+func getWindowsDNSBackup(adapter string) adapterBackup {
+	bk := adapterBackup{Name: adapter, DHCP: true}
 	out, err := exec.Command("netsh", "interface", "ipv4", "show", "dnsservers", "name="+adapter).Output()
 	if err != nil {
 		return bk
@@ -162,67 +232,32 @@ func getWindowsDNSBackup(adapter string) windowsAdapterBackup {
 			if len(parts) > 1 {
 				ip := strings.TrimSpace(parts[1])
 				if parsed := net.ParseIP(ip); parsed != nil && ip != "None" && ip != "127.0.0.1" {
-					bk.addresses = append(bk.addresses, ip)
+					bk.Addresses = append(bk.Addresses, ip)
 				}
 			}
 		} else if isStatic {
 			ip := line
 			if parsed := net.ParseIP(ip); parsed != nil && ip != "127.0.0.1" {
-				bk.addresses = append(bk.addresses, ip)
+				bk.Addresses = append(bk.Addresses, ip)
 			} else if strings.Contains(line, "Register with which suffix:") {
 				isStatic = false
 			}
 		} else if strings.Contains(line, "DNS servers configured through DHCP:") {
-			bk.isDHCP = true
+			bk.DHCP = true
 			parts := strings.Split(line, ":")
 			if len(parts) > 1 {
 				ip := strings.TrimSpace(parts[1])
 				if parsed := net.ParseIP(ip); parsed != nil && ip != "None" && ip != "127.0.0.1" {
-					bk.addresses = append(bk.addresses, ip)
+					bk.Addresses = append(bk.Addresses, ip)
 				}
 			}
 		}
 	}
 
-	if len(bk.addresses) > 0 && isStatic {
-		bk.isDHCP = false
+	if len(bk.Addresses) > 0 && isStatic {
+		bk.DHCP = false
 	}
 	return bk
-}
-
-func configureLinuxDNS() (func(), error) {
-	// Try resolvectl first
-	if _, err := exec.LookPath("resolvectl"); err == nil {
-		iface := getActiveLinuxInterface()
-		if iface != "" {
-			if err := exec.Command("resolvectl", "dns", iface, "127.0.0.1").Run(); err == nil {
-				log.Info().Str("interface", iface).Msg("configured Linux DNS via resolvectl")
-				return func() {
-					_ = exec.Command("resolvectl", "revert", iface).Run()
-					_ = exec.Command("resolvectl", "flush-caches").Run()
-					log.Info().Str("interface", iface).Msg("reverted Linux DNS via resolvectl")
-				}, nil
-			}
-		}
-	}
-
-	// Fallback to /etc/resolv.conf
-	resolvPath := "/etc/resolv.conf"
-	original, err := os.ReadFile(resolvPath)
-	if err != nil {
-		return nil, fmt.Errorf("read /etc/resolv.conf: %w", err)
-	}
-
-	newContent := "nameserver 127.0.0.1\n" + string(original)
-	if err := os.WriteFile(resolvPath, []byte(newContent), 0644); err != nil {
-		return nil, fmt.Errorf("write /etc/resolv.conf: %w", err)
-	}
-	log.Info().Msg("configured Linux DNS via /etc/resolv.conf")
-
-	return func() {
-		_ = os.WriteFile(resolvPath, original, 0644)
-		log.Info().Msg("restored /etc/resolv.conf")
-	}, nil
 }
 
 func getActiveLinuxInterface() string {
@@ -249,7 +284,7 @@ func GetPrimaryUpstreamDNS() string {
 		if err == nil {
 			for _, a := range adapters {
 				bk := getWindowsDNSBackup(a)
-				for _, addr := range bk.addresses {
+				for _, addr := range bk.Addresses {
 					if addr != "127.0.0.1" && !strings.HasPrefix(addr, "127.") {
 						return addr + ":53"
 					}
@@ -273,6 +308,3 @@ func GetPrimaryUpstreamDNS() string {
 	}
 	return defaultUpstream
 }
-
-// Ensure unused error import doesn't cause build error if not referenced
-var _ = errors.New

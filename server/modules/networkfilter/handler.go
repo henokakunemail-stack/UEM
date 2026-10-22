@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -784,7 +785,12 @@ func (h *Handler) SyncOnReconnect(ctx context.Context, deviceID string) error {
 	}
 	state, err := h.repo.GetDeviceFilterState(ctx, deviceID)
 	switch {
-	case err == nil && state.PolicyVersion == compiled.Version && state.Status == statusSynced:
+	// Skipped only for an agent that re-applies its policy itself after a
+	// restart. An older agent keeps nothing across a restart, so its "synced"
+	// row describes a filter it no longer enforces -- a whitelist was simply
+	// gone after the agent restarted, with the console still showing it synced.
+	case err == nil && state.PolicyVersion == compiled.Version && state.Status == statusSynced &&
+		(compiled.Version == "" || h.persistsFilter(ctx, deviceID)):
 		return nil
 	case err != nil && !errors.Is(err, sql.ErrNoRows):
 		return fmt.Errorf("read filter state: %w", err)
@@ -801,6 +807,24 @@ func (h *Handler) SyncOnReconnect(ctx context.Context, deviceID string) error {
 		Str("mode", compiled.Mode).Int("rules", len(compiled.Patterns())).
 		Msg("re-synced filter policy on reconnect")
 	return nil
+}
+
+// persistsFilter reports whether the device's last hello advertised
+// filter.persist: it keeps its filter policy on disk and re-applies it at
+// startup, so a reconnect does not need to re-send an unchanged policy.
+func (h *Handler) persistsFilter(ctx context.Context, deviceID string) bool {
+	if h.devices == nil {
+		return false
+	}
+	d, err := h.devices.GetByID(ctx, deviceID)
+	if err != nil || d.Capabilities == nil {
+		return false
+	}
+	var caps []string
+	if err := json.Unmarshal([]byte(*d.Capabilities), &caps); err != nil {
+		return false
+	}
+	return slices.Contains(caps, "filter.persist")
 }
 
 func (h *Handler) syncDeviceFilter(w http.ResponseWriter, r *http.Request) {
