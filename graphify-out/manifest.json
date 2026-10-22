@@ -222,9 +222,9 @@
     "semantic_hash": "45ee77e9a6e1f14f4336371579756c0c"
   },
   "agent/shared/osinfo/osinfo.go": {
-    "mtime": 1792600590.0183156,
-    "seen": 1792600670.4902143,
-    "ast_hash": "b7eec0ad014ff9fee639056ca75db5ab",
+    "mtime": 1792639311.5942218,
+    "seen": 1792643138.224862,
+    "ast_hash": "a05793da2fb43959e1b598a591c9a213",
     "semantic_hash": ""
   },
   "agent/shared/patch/classify_windows_test.go": {
@@ -1434,9 +1434,9 @@
     "semantic_hash": "6951d915572a84df5b44b6c209eeb17b"
   },
   "server/modules/agentupdate/handler.go": {
-    "mtime": 1792638218.5864959,
-    "seen": 1792638549.1342468,
-    "ast_hash": "79260f9515223b0fb39bf00c6793ac05",
+    "mtime": 1792642340.0382686,
+    "seen": 1792643138.2259915,
+    "ast_hash": "229dd8d790ba4b53c37d9c8c07d1443d",
     "semantic_hash": ""
   },
   "server/modules/agentupdate/release_path_test.go": {
@@ -1452,9 +1452,9 @@
     "semantic_hash": "d4e7c0806d37ac4071eb55e8fb3aa442"
   },
   "server/modules/agentupdate/repository.go": {
-    "mtime": 1792638218.5885077,
-    "seen": 1792638549.1342633,
-    "ast_hash": "2e4e51b076a124a5b3abcd6446fa5bac",
+    "mtime": 1792642348.9250512,
+    "seen": 1792643138.226003,
+    "ast_hash": "add81782ce04e671e9f7ab950d254e2f",
     "semantic_hash": ""
   },
   "server/modules/agentupdate/signing.go": {
@@ -2376,9 +2376,9 @@
     "semantic_hash": "787e5a07efeb2bf6209d5937195f2f68"
   },
   "web-console/src/pages/AgentUpdatesPage.tsx": {
-    "mtime": 1792638218.5905168,
-    "seen": 1792638549.1355376,
-    "ast_hash": "d9b4ff02d97d9c855ddf3ec2b3091bd5",
+    "mtime": 1792642670.5743654,
+    "seen": 1792643138.2268336,
+    "ast_hash": "64d9dbec161dad453a0b529cca90f098",
     "semantic_hash": ""
   },
   "web-console/src/pages/AlertsPage.tsx": {
@@ -2496,15 +2496,15 @@
     "semantic_hash": ""
   },
   "web-console/src/services/api.ts": {
-    "mtime": 1792638218.591513,
-    "seen": 1792638549.1356936,
-    "ast_hash": "c0447606fb052ecb7e16cb6bf0692bcd",
+    "mtime": 1792642413.4572127,
+    "seen": 1792643138.2269437,
+    "ast_hash": "94b53b5ebd1238a24cd51df556f41028",
     "semantic_hash": ""
   },
   "web-console/src/types/api.ts": {
-    "mtime": 1792638218.5935125,
-    "seen": 1792638549.1357543,
-    "ast_hash": "87645e009c803bc9f776dd5d52c20a3f",
+    "mtime": 1792642413.566887,
+    "seen": 1792643138.2269943,
+    "ast_hash": "5127db67d2d58c40b7574294b49e653e",
     "semantic_hash": ""
   },
   "web-console/tsconfig.app.json": {
@@ -2676,9 +2676,9 @@
     "semantic_hash": ""
   },
   ".github/workflows/ci.yml": {
-    "mtime": 1792638218.4492352,
-    "seen": 1792638549.1357837,
-    "ast_hash": "b64200082d1674813215c71089140b72",
+    "mtime": 1792639261.4664588,
+    "seen": 1792643138.2270153,
+    "ast_hash": "2fcde84d50ba34d7576b6bd817043b3a",
     "semantic_hash": ""
   },
   ".github/workflows/release.yml": {
@@ -2706,9 +2706,9 @@
     "semantic_hash": ""
   },
   "README.md": {
-    "mtime": 1792600589.683216,
-    "seen": 1792600670.4913352,
-    "ast_hash": "d2361b20959846325e72901757348a67",
+    "mtime": 1792639311.2652502,
+    "seen": 1792643138.2270367,
+    "ast_hash": "6c0701430ba1701adb5dc2994e600e05",
     "semantic_hash": ""
   },
   "SECURITY.md": {
@@ -3648,9 +3648,9 @@
     "semantic_hash": ""
   },
   "web-console/src/i18n/locales/en/updates.json": {
-    "mtime": 1792638218.5885077,
-    "seen": 1792638549.1354012,
-    "ast_hash": "0faac14c4f22d486a526cde2058368e4",
+    "mtime": 1792642438.2673502,
+    "seen": 1792643138.2267268,
+    "ast_hash": "b30eb97cf717f0c791c9b7443eb5fe4f",
     "semantic_hash": ""
   },
   "web-console/src/i18n/locales/en/users.json": {
@@ -3810,9 +3810,9 @@
     "semantic_hash": ""
   },
   "web-console/src/i18n/locales/id/updates.json": {
-    "mtime": 1792638218.5895085,
-    "seen": 1792638549.1355202,
-    "ast_hash": "f4977c8e43b518e59c11d964c63d8c44",
+    "mtime": 1792642438.948068,
+    "seen": 1792643138.2268212,
+    "ast_hash": "529c21ed722e5b1f90074c26cfa87f69",
     "semantic_hash": ""
   },
   "web-console/src/i18n/locales/id/users.json": {
@@ -4272,9 +4272,9 @@
     "semantic_hash": ""
   },
   "web-console/src/pages/AgentUpdatesPage.test.tsx": {
-    "mtime": 1792638218.5895085,
-    "seen": 1792638549.1355338,
-    "ast_hash": "03c3f4d89b18d622bf723c890f2ebfd1",
+    "mtime": 1792642511.4638097,
+    "seen": 1792643138.226831,
+    "ast_hash": "aad14af761026f2cef24af2dd5ee9372",
     "semantic_hash": ""
   },
   "web-console/src/pages/LoginPage.test.tsx": {
@@ -4308,9 +4308,9 @@
     "semantic_hash": ""
   },
   "web-console/src/pages/campaignProgress.ts": {
-    "mtime": 1792597958.96986,
-    "seen": 1792600670.4912825,
-    "ast_hash": "55f62848429e0fd689fe609a36af067b",
+    "mtime": 1792642664.427942,
+    "seen": 1792643138.2269168,
+    "ast_hash": "f9de58d5358713b07e6491b0c5db0135",
     "semantic_hash": ""
   },
   "web-console/src/pages/honestPages.test.tsx": {
@@ -4392,9 +4392,9 @@
     "semantic_hash": ""
   },
   "web-console/src/test/contracts/update-campaign.json": {
-    "mtime": 1792597959.0074322,
-    "seen": 1792600670.4913077,
-    "ast_hash": "f021ba7891f7b1a115ab8e859aa4891c",
+    "mtime": 1792642280.919626,
+    "seen": 1792643138.2269883,
+    "ast_hash": "299ead8e620c0e0ff068237789e32d15",
     "semantic_hash": ""
   },
   "agent/cmd/agent/restart_test.go": {
@@ -4674,15 +4674,21 @@
     "semantic_hash": ""
   },
   "CHANGELOG.md": {
-    "mtime": 1792638360.7011797,
-    "seen": 1792638549.1358004,
-    "ast_hash": "182b4a535e81fa48ddfa1f7bd9ad8f13",
+    "mtime": 1792642876.4328127,
+    "seen": 1792643138.2270274,
+    "ast_hash": "5220794a48ad9a2aa39d6a67bda0af22",
     "semantic_hash": ""
   },
   "docs/architecture/policy-resolution.md": {
     "mtime": 1792637595.8199146,
     "seen": 1792638549.1359105,
     "ast_hash": "f91850c3a378e5dba18d28827b43576b",
+    "semantic_hash": ""
+  },
+  "server/modules/agentupdate/campaign_targets_test.go": {
+    "mtime": 1792642318.723253,
+    "seen": 1792643138.2259781,
+    "ast_hash": "7570641fabcfcd75e69c6a1e9a4d13c4",
     "semantic_hash": ""
   }
 }
