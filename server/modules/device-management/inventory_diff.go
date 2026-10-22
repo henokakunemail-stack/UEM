@@ -19,6 +19,10 @@ type inventoryDiff struct {
 	DiskCountChanged bool
 	ModelChanged     bool
 	OSBuildChanged   bool
+	// DomainChanged: the machine joined, left or moved between directory
+	// domains. Who can sign in to it changed, which is the kind of change an
+	// administrator has to be able to find later.
+	DomainChanged bool
 }
 
 // hwJSON mirrors the agent's inventory.Hardware for diffing.
@@ -45,6 +49,11 @@ type osJSON struct {
 	InstallDate      string `json:"install_date,omitempty"`
 	LastBootUTC      string `json:"last_boot_utc,omitempty"`
 	InstallTimestamp int64  `json:"install_timestamp,omitempty"`
+	Domain           *struct {
+		Joined bool   `json:"joined"`
+		Type   string `json:"type"`
+		Name   string `json:"name"`
+	} `json:"domain,omitempty"`
 }
 
 // diffInventory compares two hardware/OS snapshots.
@@ -62,6 +71,13 @@ func diffInventory(oldHW, newHW, oldOS, newOS string) inventoryDiff {
 
 	oo, no := decodeOS(oldOS), decodeOS(newOS)
 	d.OSBuildChanged = oo.BuildNumber != no.BuildNumber
+	// Compared only when both snapshots know: the first report from an agent
+	// that has just learned to send the field is not a domain change.
+	if oo.Domain != nil && no.Domain != nil {
+		d.DomainChanged = oo.Domain.Joined != no.Domain.Joined ||
+			oo.Domain.Type != no.Domain.Type ||
+			!strings.EqualFold(oo.Domain.Name, no.Domain.Name)
+	}
 
 	return d
 }
@@ -121,7 +137,7 @@ func decodeSoftwareNames(jsonStr string) map[string]struct{} {
 // auditWorthy returns true when the diff belongs in the audit trail rather than
 // being recorded as ordinary drift.
 func (d inventoryDiff) auditWorthy() bool {
-	return d.CPUChanged || d.RAMChanged || d.DiskCountChanged || d.ModelChanged || d.OSBuildChanged
+	return d.CPUChanged || d.RAMChanged || d.DiskCountChanged || d.ModelChanged || d.OSBuildChanged || d.DomainChanged
 }
 
 // summary renders a human-readable description for the audit log details field.
@@ -141,6 +157,9 @@ func (d inventoryDiff) summary(sw softwareDiff) string {
 	}
 	if d.OSBuildChanged {
 		parts = append(parts, "os-build")
+	}
+	if d.DomainChanged {
+		parts = append(parts, "domain")
 	}
 	if len(sw.Added) > 0 {
 		parts = append(parts, "software+"+strconv.Itoa(len(sw.Added)))
