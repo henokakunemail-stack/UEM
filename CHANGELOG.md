@@ -10,6 +10,12 @@ Riwayat sebelum v1.5.4 ada di `git log`.
 
 ## [Unreleased]
 
+## [1.5.8] - 2026-10-23
+
+- Filter versi agent, ubah site, dan perbaikan tabel yang terpotong ada di console server v1.5.8. Server Linux bisa
+  diperbarui dengan `update.sh`. Ikon agen dan versi yang benar di Programs and Features memerlukan agen v1.5.8: perbarui
+  agen dari **Agent Updates → Impor dari Paket Server**, lalu jalankan kampanye ke 1.5.8.
+
 ### Ditambahkan
 - **Filter versi agent di menu Devices.** Dropdown **All Agents** di samping filter Status dan Site menampilkan setiap
   versi agent yang dipakai armada beserta jumlah perangkatnya (terbaru di atas), ditambah "Versi belum dilaporkan".
