@@ -17,6 +17,14 @@ Riwayat sebelum v1.5.4 ada di `git log`.
   dan Group. API: parameter `agent_version` di `GET /api/devices` dan `GET /api/devices/agent-versions`.
 - **Ikon untuk Endpoint Management Agent** (monitor dengan tanda centang): tampil di Programs and Features, installer,
   dan uninstaller. Sumbernya `packaging/icons/endpoint-agent.svg`.
+- **Ubah site perangkat dari menu Devices** (admin dan technician). Perangkat yang di-enroll dengan token multi-device
+  tanpa site tampil sebagai Unassigned; kini site-nya bisa diatur dari console:
+  - **Banyak perangkat sekaligus:** centang perangkat, isi kolom **Site** di bar seleksi (bisa memilih site yang sudah
+    ada), lalu klik **Set site**. Jika sebagian gagal, jumlah yang berhasil dan gagal ditampilkan.
+  - **Satu perangkat:** buka detailnya, klik ikon pensil di samping **SITE**, ubah, lalu **Save**.
+  - Filter Site langsung memuat site baru. Server memangkas spasi dan menolak site kosong atau lebih dari 64 karakter.
+    Technician kini juga bisa mencentang perangkat; menambah ke grup dan menghapus perangkat retired tetap khusus admin.
+    Hanya console dan server; agen tidak perlu di-update.
 
 ### Diperbaiki
 - **Versi agen di Programs and Features tidak ikut berubah setelah update.** Installer menulis versi sekali saat

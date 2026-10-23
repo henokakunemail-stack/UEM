@@ -12,6 +12,7 @@ import {
   KeyRound,
   Laptop,
   Layers,
+  MapPin,
   Monitor,
   RefreshCw,
   RotateCcw,
@@ -91,6 +92,9 @@ export const DevicesPage: React.FC<{
   const [membersGroup, setMembersGroup] = useState<DeviceGroupDTO | null>(null)
   const [assignTarget, setAssignTarget] = useState<DeviceGroupDTO | null>(null)
   const [assigning, setAssigning] = useState(false)
+  // Bulk "set site": the label typed into the selection bar.
+  const [bulkSite, setBulkSite] = useState('')
+  const [settingSite, setSettingSite] = useState(false)
 
   const loadGroups = useCallback(async () => {
     try {
@@ -114,6 +118,8 @@ export const DevicesPage: React.FC<{
   )
 
   const [siteOptions, setSiteOptions] = useState<string[]>([])
+  const [siteReload, setSiteReload] = useState(0)
+  const reloadSiteOptions = () => setSiteReload((n) => n + 1)
   const [agentOptions, setAgentOptions] = useState<{ version: string; count: number }[]>([])
   useEffect(() => {
     let active = true
@@ -142,7 +148,7 @@ export const DevicesPage: React.FC<{
     return () => {
       active = false
     }
-  }, [])
+  },[siteReload])
 
   const fetchDevices = useCallback(async () => {
     setLoading(true)
@@ -257,6 +263,45 @@ export const DevicesPage: React.FC<{
   // walks them into a 403. Same endpoint, admin only.
   const canManage = can('technician')
   const canRetire = can('admin')
+  // Selecting rows is for setting their site (technician and up) and, for an
+  // admin, adding them to a group or deleting retired ones.
+  const canSelect = canManage
+
+  // Devices enrolled with a multi-device token carry no site unless the token
+  // or the installer named one, so a GPO rollout leaves the fleet Unassigned.
+  // Each selected, active device is updated; a failure is counted, not
+  // swallowed, and the site filter's choices are reloaded so the new site
+  // appears there.
+  const handleBulkSite = async () => {
+    const value = bulkSite.trim()
+    const ids = (data.devices || []).filter((d) => selected.has(d.id) && !d.retired_at).map((d) => d.id)
+    if (!value || ids.length === 0) return
+    setSettingSite(true)
+    let ok = 0
+    let failed = 0
+    for (const id of ids) {
+      try {
+        await api.updateDevice(id, { site: value })
+        ok++
+      } catch {
+        failed++
+      }
+    }
+    setSettingSite(false)
+    if (failed > 0) {
+      const text = t('devices.site_set_partial', { ok, failed, site: value })
+      setActionMsg({ type: 'error', text })
+      toast.error(text, t('devices.site_set_failed_title'))
+    } else {
+      const text = t('devices.site_set', { count: ok, site: value })
+      setActionMsg({ type: 'success', text })
+      toast.success(text, t('devices.site_set_title'))
+    }
+    setSelected(new Set())
+    setBulkSite('')
+    fetchDevices()
+    reloadSiteOptions()
+  }
 
   const handleRetire = async () => {
     if (!retireTarget) return
@@ -570,11 +615,45 @@ export const DevicesPage: React.FC<{
 
       {/* Selection bar. Only rendered when something is checked, so the page is
           unchanged for the common case of reading the fleet without editing it. */}
-      {canRetire && selected.size > 0 && (
+      {canSelect && selected.size > 0 && (
         <div className="filter-bar" role="region" aria-label={t('devices.selection_actions')}>
           <span className="filter-hint" style={{ margin: 0 }}>
             {t(selected.size === 1 ? 'devices.selected_one' : 'devices.selected_many', { count: selected.size })}
           </span>
+          <div className="filter-group">
+            <MapPin size={16} className="filter-icon" aria-hidden="true" />
+            <input
+              type="text"
+              className="search-input"
+              style={{ width: 180 }}
+              list="device-site-options"
+              maxLength={64}
+              value={bulkSite}
+              onChange={(e) => setBulkSite(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleBulkSite()
+              }}
+              placeholder={t('devices.site_placeholder')}
+              aria-label={t('devices.site_input_label')}
+            />
+            <datalist id="device-site-options">
+              {siteOptions
+                .filter((s) => s !== 'unassigned')
+                .map((s) => (
+                  <option key={s} value={s} />
+                ))}
+            </datalist>
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={handleBulkSite}
+              disabled={!bulkSite.trim() || settingSite}
+            >
+              {settingSite ? <RefreshCw size={16} className="spinning" /> : <MapPin size={16} />}
+              <span>{settingSite ? t('devices.site_setting') : t('devices.set_site')}</span>
+            </button>
+          </div>
+          {canRetire && (
           <div className="filter-group">
             <Layers size={16} className="filter-icon" aria-hidden="true" />
             <select
@@ -606,7 +685,7 @@ export const DevicesPage: React.FC<{
               )}
               <span>{assigning ? t('devices.adding') : t('devices.add_to_group')}</span>
             </button>
-            {canRetire && selectedRetiredCount > 0 && (
+            {selectedRetiredCount > 0 && (
               <button
                 type="button"
                 className="btn btn-danger"
@@ -633,6 +712,19 @@ export const DevicesPage: React.FC<{
               <span>{t('devices.clear')}</span>
             </button>
           </div>
+          )}
+          {!canRetire && (
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => {
+                setSelected(new Set())
+                setBulkSite('')
+              }}
+            >
+              <span>{t('devices.clear')}</span>
+            </button>
+          )}
         </div>
       )}
 
@@ -660,7 +752,7 @@ export const DevicesPage: React.FC<{
         <DataTable label={t('devices.table_label')}>
           <thead>
             <tr>
-              {canRetire && <th style={{ width: 36 }}>{t('devices.col_select')}</th>}
+              {canSelect && <th style={{ width: 36 }}>{t('devices.col_select')}</th>}
               <th>{t('devices.col_status')}</th>
               <th>{t('devices.col_hostname')}</th>
               <th>{t('devices.col_os')}</th>
@@ -673,7 +765,7 @@ export const DevicesPage: React.FC<{
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={canRetire ? 8 : 7} className="text-center py-8">
+                <td colSpan={canSelect ? 8 : 7} className="text-center py-8">
                   <div className="table-loader">
                     <RefreshCw size={24} className="spinning" />
                     <span>{t('devices.loading_records')}</span>
@@ -682,7 +774,7 @@ export const DevicesPage: React.FC<{
               </tr>
             ) : filteredItems.length === 0 ? (
               <tr>
-                <td colSpan={canRetire ? 8 : 7} className="text-center py-8">
+                <td colSpan={canSelect ? 8 : 7} className="text-center py-8">
                   <div className="empty-state">
                     <Laptop size={32} />
                     <p>
@@ -699,7 +791,7 @@ export const DevicesPage: React.FC<{
                 const isPending = d.hostname === 'Pending Enrollment' || (!d.last_seen_at && !isRetired && d.status === 'offline')
                 return (
                   <tr key={d.id} className="device-row">
-                    {canRetire && (
+                    {canSelect && (
                       <td data-label={t('devices.col_select')}>
                         <input
                           type="checkbox"
@@ -961,6 +1053,11 @@ export const DevicesPage: React.FC<{
       {selectedDevice && (
         <DeviceDetailModal
           device={selectedDevice}
+          onUpdated={(d) => {
+            setSelectedDevice(d)
+            fetchDevices()
+            reloadSiteOptions()
+          }}
           onClose={() => {
             setSelectedDevice(null)
             // Drop ?device_id= on close so a refresh does not immediately

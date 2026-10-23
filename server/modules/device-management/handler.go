@@ -3,6 +3,7 @@ package devicemanagement
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -367,6 +368,9 @@ func (h *Handler) createEnrollToken(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// maxSiteLen bounds a site label: it is shown in filters, badges and reports.
+const maxSiteLen = 64
+
 type updateDeviceReq struct {
 	Hostname string `json:"hostname"`
 	Site     string `json:"site"`
@@ -379,8 +383,16 @@ func (h *Handler) updateDevice(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
+	// The console's bulk "set site" sends what an operator typed. Untrimmed, a
+	// stray space made " HQ" a second site next to "HQ" in every site filter.
+	req.Hostname = strings.TrimSpace(req.Hostname)
+	req.Site = strings.TrimSpace(req.Site)
 	if req.Hostname == "" && req.Site == "" {
 		writeErr(w, http.StatusBadRequest, "hostname or site is required")
+		return
+	}
+	if len(req.Site) > maxSiteLen || req.Site == UnassignedSite {
+		writeErr(w, http.StatusBadRequest, fmt.Sprintf("site must be 1-%d characters", maxSiteLen))
 		return
 	}
 	if err := h.repo.UpdateDevice(r.Context(), id, req.Hostname, req.Site); err != nil {

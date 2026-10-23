@@ -8,6 +8,7 @@ import {
   Landmark,
   Layers,
   Network,
+  Pencil,
   RefreshCw,
   Search,
   Server,
@@ -23,6 +24,8 @@ import type { Vars } from '../i18n/core'
 interface DeviceDetailModalProps {
   device: DeviceDTO | null
   onClose: () => void
+  /** Called with the saved device after its site is changed here. */
+  onUpdated?: (device: DeviceDTO) => void
 }
 
 // How often to ask whether a new snapshot has landed, and how long to keep
@@ -70,7 +73,7 @@ function formatAge(ms: number, t: (key: string, vars?: Vars) => string): string 
   return t(days === 1 ? 'device_detail.days_ago_one' : 'device_detail.days_ago_many', { count: days })
 }
 
-export const DeviceDetailModal: React.FC<DeviceDetailModalProps> = ({ device, onClose }) => {
+export const DeviceDetailModal: React.FC<DeviceDetailModalProps> = ({ device, onClose, onUpdated }) => {
   const [inventory, setInventory] = useState<DeviceInventorySnapshot | null>(null)
   const [loading, setLoading] = useState(false)
   const [activeTab, setActiveTab] = useState<'hardware' | 'software' | 'network'>('hardware')
@@ -79,6 +82,11 @@ export const DeviceDetailModal: React.FC<DeviceDetailModalProps> = ({ device, on
   const [uninstallTarget, setUninstallTarget] = useState<SoftwareInfo | null>(null)
   const [uninstalling, setUninstalling] = useState(false)
   const canUninstall = usePermission().can('technician')
+  const canEditSite = canUninstall
+  // Inline site editor: null when closed, the draft text while open.
+  const [siteDraft, setSiteDraft] = useState<string | null>(null)
+  const [savingSite, setSavingSite] = useState(false)
+  const [siteError, setSiteError] = useState<string | null>(null)
   const { t } = useT()
   const now = useNow()
 
@@ -413,6 +421,75 @@ export const DeviceDetailModal: React.FC<DeviceDetailModalProps> = ({ device, on
         <div className="overview-item">
           <span className="overview-label">{t('device_detail.agent_version')}</span>
           <span className="overview-val">{device.agent_version || t('device_detail.not_enrolled')}</span>
+        </div>
+        <div className="overview-item" data-testid="device-site">
+          <span className="overview-label">{t('device_detail.site')}</span>
+          {siteDraft === null ? (
+            <span className="overview-val" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              {device.site || t('device_detail.site_unassigned')}
+              {canEditSite && !device.retired_at && (
+                <button
+                  type="button"
+                  className="btn-action"
+                  onClick={() => {
+                    setSiteDraft(device.site || '')
+                    setSiteError(null)
+                  }}
+                  aria-label={t('device_detail.site_edit')}
+                  title={t('device_detail.site_edit')}
+                >
+                  <Pencil size={12} />
+                </button>
+              )}
+            </span>
+          ) : (
+            <form
+              style={{ display: 'flex', gap: 6, alignItems: 'center' }}
+              onSubmit={async (e) => {
+                e.preventDefault()
+                const value = siteDraft.trim()
+                if (!value) {
+                  setSiteError(t('device_detail.site_required'))
+                  return
+                }
+                setSavingSite(true)
+                try {
+                  const updated = await api.updateDevice(device.id, { site: value })
+                  setSiteDraft(null)
+                  onUpdated?.(updated)
+                } catch (err: unknown) {
+                  setSiteError(err instanceof Error ? err.message : t('device_detail.site_save_failed'))
+                } finally {
+                  setSavingSite(false)
+                }
+              }}
+            >
+              <input
+                type="text"
+                className="search-input"
+                style={{ width: 140 }}
+                maxLength={64}
+                autoFocus
+                value={siteDraft}
+                onChange={(e) => {
+                  setSiteDraft(e.target.value)
+                  setSiteError(null)
+                }}
+                aria-label={t('device_detail.site')}
+              />
+              <button type="submit" className="btn btn-sm btn-primary" disabled={savingSite}>
+                {t('device_detail.site_save')}
+              </button>
+              <button type="button" className="btn btn-sm btn-secondary" onClick={() => setSiteDraft(null)}>
+                {t('common.cancel')}
+              </button>
+            </form>
+          )}
+          {siteError && (
+            <span className="text-danger" role="alert" style={{ fontSize: 12 }}>
+              {siteError}
+            </span>
+          )}
         </div>
         <div className="overview-item">
           <span className="overview-label">{t('device_detail.last_seen')}</span>

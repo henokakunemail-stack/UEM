@@ -16,11 +16,13 @@ const api = vi.hoisted(() => ({
   getDashboardSites: vi.fn(),
   getDeviceAgentVersions: vi.fn(),
   deleteDevice: vi.fn(),
+  updateDevice: vi.fn(),
   getReportExportUrl: vi.fn(),
 }))
 const fetchRaw = vi.hoisted(() => vi.fn())
 vi.mock('../services/api', async (orig) => ({ ...(await orig<typeof import('../services/api')>()), api, fetchRaw }))
-vi.mock('../context/AuthContext', () => ({ useAuth: () => ({ user: { uid: 'me', usr: 'me', rol: 'admin' } }) }))
+const session = vi.hoisted(() => ({ rol: 'admin' }))
+vi.mock('../context/AuthContext', () => ({ useAuth: () => ({ user: { uid: 'me', usr: 'me', rol: session.rol } }) }))
 
 import { MaintenancePage } from './MaintenancePage'
 import { AssetLicensePage } from './AssetLicensePage'
@@ -51,6 +53,7 @@ beforeAll(() => {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  session.rol = 'admin'
   api.getDeviceGroups.mockResolvedValue([])
   api.getDevices.mockResolvedValue({ devices: [], count: 0, total: 0, limit: 20, offset: 0 })
   api.getDashboardSites.mockResolvedValue([])
@@ -115,6 +118,44 @@ describe('DevicesPage', () => {
     expect((within(select).getByRole('option', { name: 'No version reported (1)' }) as HTMLOptionElement).value).toBe('__unknown__')
     fireEvent.change(select, { target: { value: '1.5.6' } })
     await waitFor(() => expect(api.getDevices).toHaveBeenLastCalledWith(expect.any(Number), 0, '', '', '', '1.5.6'))
+  })
+
+  // A multi-device token leaves every machine it enrolls without a site, and
+  // the console had no way to set one: the endpoint existed, nothing called
+  // it. A technician selects rows and sets their site in one step.
+  it('lets a technician set the site of the selected devices', async () => {
+    session.rol = 'technician'
+    const now = new Date().toISOString()
+    api.getDevices.mockResolvedValue({
+      devices: [
+        device({ id: 'a', hostname: 'PC-A', status: 'online', last_seen_at: now }),
+        device({ id: 'b', hostname: 'PC-B', status: 'online', last_seen_at: now }),
+        device({ id: 'c', hostname: 'PC-C', status: 'online', last_seen_at: now }),
+      ],
+      count: 3, total: 3, limit: 20, offset: 0,
+    })
+    api.updateDevice.mockImplementation((id: string) => (id === 'b' ? Promise.reject(new Error('500')) : Promise.resolve({})))
+    wrap(<DevicesPage />)
+    for (const name of ['PC-A', 'PC-B']) {
+      const row = (await screen.findByText(name)).closest('tr') as HTMLElement
+      fireEvent.click(within(row).getByRole('checkbox'))
+    }
+    // Group membership stays an admin action.
+    expect(screen.queryByLabelText('Target group for the selection')).toBeNull()
+    fireEvent.change(screen.getByLabelText('Site for the selected devices'), { target: { value: '  HQ ' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Set site' }))
+    await waitFor(() => expect(api.updateDevice).toHaveBeenCalledTimes(2))
+    expect(api.updateDevice).toHaveBeenCalledWith('a', { site: 'HQ' })
+    expect(api.updateDevice).toHaveBeenCalledWith('b', { site: 'HQ' })
+    expect((await screen.findAllByText('HQ set on 1 device(s); 1 could not be updated')).length).toBeGreaterThan(0)
+  })
+
+  it('gives a viewer no row selection', async () => {
+    session.rol = 'viewer'
+    api.getDevices.mockResolvedValue({ devices: [device({ id: 'a', hostname: 'PC-A' })], count: 1, total: 1, limit: 20, offset: 0 })
+    wrap(<DevicesPage />)
+    const row = (await screen.findByText('PC-A')).closest('tr') as HTMLElement
+    expect(within(row).queryByRole('checkbox')).toBeNull()
   })
 
   // Bulk delete sent every selected id, swallowed each failure, and reported

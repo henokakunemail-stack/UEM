@@ -1,8 +1,8 @@
-import { render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DeviceDTO, DeviceInventorySnapshot } from '../types/api'
 
-const api = vi.hoisted(() => ({ getDeviceInventory: vi.fn() }))
+const api = vi.hoisted(() => ({ getDeviceInventory: vi.fn(), updateDevice: vi.fn() }))
 vi.mock('../services/api', async (orig) => ({ ...(await orig<typeof import('../services/api')>()), api }))
 vi.mock('../context/AuthContext', () => ({ useAuth: () => ({ user: { uid: 'me', usr: 'me', rol: 'admin' } }) }))
 
@@ -58,5 +58,36 @@ describe('DeviceDetailModal domain membership', () => {
     const card = await domainCard({ edition: 'Professional' })
     expect(card.getByText('Unknown')).toBeTruthy()
     expect(card.queryByText('Not joined')).toBeNull()
+  })
+})
+
+describe('DeviceDetailModal site', () => {
+  beforeAll(() => {
+    HTMLDialogElement.prototype.showModal = function () {
+      this.setAttribute('open', '')
+    }
+    HTMLDialogElement.prototype.close = function () {
+      this.removeAttribute('open')
+    }
+  })
+  beforeEach(() => vi.clearAllMocks())
+
+  // One device's site was only settable through the API.
+  it('changes one device\'s site from its detail', async () => {
+    api.getDeviceInventory.mockResolvedValue(snapshot({}))
+    api.updateDevice.mockResolvedValue({ ...device, site: 'HQ' })
+    const onUpdated = vi.fn()
+    render(
+      <I18nProvider lang="en">
+        <DeviceDetailModal device={{ ...device, site: '' }} onClose={() => {}} onUpdated={onUpdated} />
+      </I18nProvider>,
+    )
+    const cell = within(await screen.findByTestId('device-site'))
+    expect(cell.getByText('Unassigned')).toBeTruthy()
+    fireEvent.click(cell.getByRole('button', { name: 'Change site' }))
+    fireEvent.change(cell.getByRole('textbox'), { target: { value: ' HQ ' } })
+    fireEvent.click(cell.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(api.updateDevice).toHaveBeenCalledWith('dev-1', { site: 'HQ' }))
+    await waitFor(() => expect(onUpdated).toHaveBeenCalledWith(expect.objectContaining({ site: 'HQ' })))
   })
 })
