@@ -14,6 +14,7 @@ const api = vi.hoisted(() => ({
   getLicenses: vi.fn(),
   getLicenseCompliance: vi.fn(),
   getDashboardSites: vi.fn(),
+  getDeviceAgentVersions: vi.fn(),
   deleteDevice: vi.fn(),
   getReportExportUrl: vi.fn(),
 }))
@@ -53,6 +54,7 @@ beforeEach(() => {
   api.getDeviceGroups.mockResolvedValue([])
   api.getDevices.mockResolvedValue({ devices: [], count: 0, total: 0, limit: 20, offset: 0 })
   api.getDashboardSites.mockResolvedValue([])
+  api.getDeviceAgentVersions.mockResolvedValue([])
 })
 
 describe('MaintenancePage', () => {
@@ -100,6 +102,19 @@ describe('DevicesPage', () => {
     expect((within(select).getByRole('option', { name: 'Unassigned' }) as HTMLOptionElement).value).toBe('__unassigned__')
     expect(within(select).queryByRole('option', { name: /HQ/ })).toBeNull()
     expect(await screen.findAllByText('Unassigned')).toBeTruthy()
+  })
+
+  // The page could filter by status and site but not by agent version, so the
+  // machines still on an old agent could only be found by paging the fleet.
+  it('filters the fleet by agent version on the server', async () => {
+    api.getDeviceAgentVersions.mockResolvedValue([{ version: '1.5.7', count: 3 }, { version: '1.5.6', count: 9 }, { version: '', count: 1 }])
+    api.getDevices.mockResolvedValue({ devices: [device({ id: 'a', hostname: 'OLD-AGENT', agent_version: '1.5.6' })], count: 1, total: 1, limit: 20, offset: 0 })
+    wrap(<DevicesPage />)
+    const select = await screen.findByLabelText('Filter by agent version')
+    await waitFor(() => expect(within(select).getByRole('option', { name: 'v1.5.6 (9)' })).toBeTruthy())
+    expect((within(select).getByRole('option', { name: 'No version reported (1)' }) as HTMLOptionElement).value).toBe('__unknown__')
+    fireEvent.change(select, { target: { value: '1.5.6' } })
+    await waitFor(() => expect(api.getDevices).toHaveBeenLastCalledWith(expect.any(Number), 0, '', '', '', '1.5.6'))
   })
 
   // Bulk delete sent every selected id, swallowed each failure, and reported

@@ -427,12 +427,12 @@ func (h *inventoryHandler) listGroupDevices(w http.ResponseWriter, r *http.Reque
 	groupID := chi.URLParam(r, "id")
 	limit, offset := pageParams(r)
 
-	total, err := h.repo.countGroupDevices(r.Context(), groupID, "", "")
+	total, err := h.repo.countGroupDevices(r.Context(), groupID, "", "", "")
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	devices, err := h.repo.listGroupDevices(r.Context(), groupID, "", "", limit, offset)
+	devices, err := h.repo.listGroupDevices(r.Context(), groupID, "", "", "", limit, offset)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return

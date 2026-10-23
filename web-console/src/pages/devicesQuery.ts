@@ -26,9 +26,14 @@ export type DeviceTab = (typeof DEVICE_TABS)[number]
  *  values a server would reject, and no one paginates that far by hand. */
 export const MAX_PAGE = 100_000
 
+/** Agent filter value for devices that have not reported a version. */
+export const UNKNOWN_AGENT_VERSION = '__unknown__'
+
 export interface DevicesQuery {
   status: DeviceStatus
   site: string
+  /** Agent version from ?agent=; UNKNOWN_AGENT_VERSION for none reported. */
+  agent: string
   page: number
   /** Free-text term filtered against the CURRENT page only — the server has
    *  no search parameter, so this is explicitly a page-local filter. */
@@ -59,6 +64,7 @@ export function parseDevicesQuery(params: URLSearchParams): DevicesQuery {
     : ''
 
   const site = (params.get('site') ?? '').slice(0, 128)
+  const agent = (params.get('agent') ?? '').slice(0, 64)
   const q = (params.get('q') ?? '').slice(0, 128)
   const deviceId = params.get('device_id')
   const rawTab = params.get('tab') ?? ''
@@ -69,6 +75,7 @@ export function parseDevicesQuery(params: URLSearchParams): DevicesQuery {
   return {
     status,
     site,
+    agent,
     page: parsePage(params.get('page')),
     q,
     // A device id is a UUID; anything longer than 64 is not one, and passing
@@ -87,6 +94,7 @@ export function buildDevicesQuery(next: Partial<DevicesQuery>): string {
   const params = new URLSearchParams()
   if (next.status) params.set('status', next.status)
   if (next.site) params.set('site', next.site)
+  if (next.agent) params.set('agent', next.agent)
   if (next.page && next.page > 1) params.set('page', String(next.page))
   if (next.q) params.set('q', next.q)
   if (next.deviceId) params.set('device_id', next.deviceId)

@@ -20,6 +20,7 @@ const P = (qs) => parseDevicesQuery(new URLSearchParams(qs))
 assert.deepEqual(P(''), {
   status: '',
   site: '',
+  agent: '',
   page: 1,
   q: '',
   deviceId: null,
@@ -64,7 +65,7 @@ assert.equal(P(`?group=${'z'.repeat(200)}`).group.length, 64)
 // Round-trip: defaults are omitted, non-defaults are preserved.
 assert.equal(buildDevicesQuery({}), '')
 assert.equal(
-  buildDevicesQuery({ page: 1, status: '', site: '', q: '', deviceId: null, tab: 'devices', group: '' }),
+  buildDevicesQuery({ page: 1, status: '', site: '', agent: '', q: '', deviceId: null, tab: 'devices', group: '' }),
   ''
 )
 assert.equal(
@@ -80,11 +81,16 @@ assert.equal(
 assert.deepEqual(P('?tab=groups&group=grp-fin'), {
   status: '',
   site: '',
+  agent: '',
   page: 1,
   q: '',
   deviceId: null,
   tab: 'groups',
   group: 'grp-fin',
 })
+
+// The agent version filter round-trips through the URL like status and site.
+assert.equal(P('?agent=1.5.6').agent, '1.5.6')
+assert.equal(buildDevicesQuery({ agent: '1.5.6' }), '?agent=1.5.6')
 
 console.log('devicesQuery: all assertions passed')

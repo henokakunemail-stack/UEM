@@ -33,6 +33,7 @@ func NewHandler(repo *Repository, db *sqlx.DB, jwt *auth.JWTService, enrollmentT
 func (h *Handler) Register(r chi.Router) {
 	r.Route("/api", func(r chi.Router) {
 		r.With(h.jwt.RequireAuth, rbac.RequireRole(rbac.RoleViewer)).Get("/devices", h.listDevices)
+		r.With(h.jwt.RequireAuth, rbac.RequireRole(rbac.RoleViewer)).Get("/devices/agent-versions", h.listAgentVersions)
 		r.With(h.jwt.RequireAuth, rbac.RequireRole(rbac.RoleViewer)).Get("/devices/{id}", h.getDevice)
 		r.With(h.jwt.RequireAuth, rbac.RequireRole(rbac.RoleTechnician)).Patch("/devices/{id}", h.updateDevice)
 		// Creating enrollment tokens is admin-only.
@@ -89,17 +90,18 @@ func toDTO(d Device) deviceDTO {
 func (h *Handler) listDevices(w http.ResponseWriter, r *http.Request) {
 	status := r.URL.Query().Get("status")
 	site := r.URL.Query().Get("site")
+	agentVersion := r.URL.Query().Get("agent_version")
 	groupID := r.URL.Query().Get("group_id")
 	limit, offset := pageParams(r)
 
 	// The group filter is inventory-domain knowledge; route it through the
 	// inventory repository rather than duplicating membership SQL here.
 	if groupID != "" {
-		h.listDevicesByGroup(w, r, groupID, status, site, limit, offset)
+		h.listDevicesByGroup(w, r, groupID, status, site, agentVersion, limit, offset)
 		return
 	}
 
-	devices, total, err := h.repo.ListPaged(r.Context(), status, site, limit, offset)
+	devices, total, err := h.repo.ListPaged(r.Context(), status, site, agentVersion, limit, offset)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
@@ -115,15 +117,26 @@ func (h *Handler) listDevices(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// listDevicesByGroup is the group-filtered variant of listDevices, sharing the
-// response shape so the console can use one component for both lists.
-func (h *Handler) listDevicesByGroup(w http.ResponseWriter, r *http.Request, groupID, status, site string, limit, offset int) {
-	total, err := h.inventory.countGroupDevices(r.Context(), groupID, status, site)
+// listAgentVersions feeds the Devices page's agent filter: the versions the
+// fleet reports, newest first, each with its device count.
+func (h *Handler) listAgentVersions(w http.ResponseWriter, r *http.Request) {
+	versions, err := h.repo.AgentVersions(r.Context())
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	devices, err := h.inventory.listGroupDevices(r.Context(), groupID, status, site, limit, offset)
+	writeJSON(w, http.StatusOK, versions)
+}
+
+// listDevicesByGroup is the group-filtered variant of listDevices, sharing the
+// response shape so the console can use one component for both lists.
+func (h *Handler) listDevicesByGroup(w http.ResponseWriter, r *http.Request, groupID, status, site, agentVersion string, limit, offset int) {
+	total, err := h.inventory.countGroupDevices(r.Context(), groupID, status, site, agentVersion)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	devices, err := h.inventory.listGroupDevices(r.Context(), groupID, status, site, agentVersion, limit, offset)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return

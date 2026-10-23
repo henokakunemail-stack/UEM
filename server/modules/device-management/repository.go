@@ -5,6 +5,9 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"sort"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jmoiron/sqlx"
@@ -57,7 +60,7 @@ func (r *Repository) List(ctx context.Context, status, site string) ([]Device, e
 	if status == "retired" {
 		return []Device{}, nil // List never returns retired devices
 	}
-	cond, args := deviceFilter("", status, site)
+	cond, args := deviceFilter("", status, site, "")
 	q := `SELECT * FROM devices WHERE ` + cond + ` ORDER BY hostname ASC`
 	devices := []Device{}
 	if err := r.db.SelectContext(ctx, &devices, q, args...); err != nil {
@@ -69,13 +72,13 @@ func (r *Repository) List(ctx context.Context, status, site string) ([]Device, e
 // ListPaged returns a page of devices and the total count matching the filters.
 // Pagination is performed in SQL (LIMIT/OFFSET) so only the requested page is
 // transferred from the database.
-func (r *Repository) ListPaged(ctx context.Context, status, site string, limit, offset int) ([]Device, int, error) {
+func (r *Repository) ListPaged(ctx context.Context, status, site, agentVersion string, limit, offset int) ([]Device, int, error) {
 	// Retirement is a column, not a status value: the dashboard counts retired
 	// endpoints as `retired_at IS NOT NULL`. Asking for status='retired' against
 	// the default `retired_at IS NULL` predicate ANDs a false pair, so the
 	// console's "Retired Only" filter and the dashboard's retired KPI link both
 	// returned zero rows no matter how many devices had been decommissioned.
-	cond, args := deviceFilter("", status, site)
+	cond, args := deviceFilter("", status, site, agentVersion)
 	where := `WHERE ` + cond
 
 	// Total count first (same filters, no LIMIT).
@@ -495,11 +498,16 @@ func (r *Repository) ConsumeSharedEnrollmentTokenAndCreateDevice(ctx context.Con
 // them as "HQ" while the hq filter matched neither.
 const UnassignedSite = "__unassigned__"
 
+// UnknownAgentVersion is the agent filter value for devices that have not
+// reported a version: pre-registered rows and agents that never connected.
+const UnknownAgentVersion = "__unknown__"
+
 // deviceFilter builds the WHERE condition shared by every device list:
 // retired devices only for status "retired" and never otherwise, an exact
-// status, and a site (UnassignedSite for none). prefix qualifies the columns
-// ("d.") when the query joins.
-func deviceFilter(prefix, status, site string) (string, []any) {
+// status, a site (UnassignedSite for none), and an agent version
+// (UnknownAgentVersion for none). prefix qualifies the columns ("d.") when the
+// query joins.
+func deviceFilter(prefix, status, site, agentVersion string) (string, []any) {
 	cond := prefix + "retired_at IS NULL"
 	var args []any
 	if status == "retired" {
@@ -516,7 +524,59 @@ func deviceFilter(prefix, status, site string) (string, []any) {
 		cond += " AND " + prefix + "site = ?"
 		args = append(args, site)
 	}
+	switch agentVersion {
+	case "":
+	case UnknownAgentVersion:
+		cond += " AND (" + prefix + "agent_version IS NULL OR " + prefix + "agent_version = '')"
+	default:
+		cond += " AND " + prefix + "agent_version = ?"
+		args = append(args, agentVersion)
+	}
 	return cond, args
+}
+
+// AgentVersionCount is one value of the Devices page's agent filter.
+type AgentVersionCount struct {
+	Version string `json:"version" db:"version"`
+	Count   int    `json:"count" db:"count"`
+}
+
+// AgentVersions lists the agent versions the fleet reports, newest first,
+// with how many devices run each. Retired devices are not fleet members and
+// are left out; devices with no version report "" (UnknownAgentVersion in the
+// filter).
+func (r *Repository) AgentVersions(ctx context.Context) ([]AgentVersionCount, error) {
+	out := []AgentVersionCount{}
+	if err := r.db.SelectContext(ctx, &out, `
+		SELECT COALESCE(agent_version, '') AS version, COUNT(*) AS count
+		FROM devices WHERE retired_at IS NULL
+		GROUP BY COALESCE(agent_version, '')`); err != nil {
+		return nil, fmt.Errorf("list agent versions: %w", err)
+	}
+	sort.Slice(out, func(i, j int) bool { return versionNewer(out[i].Version, out[j].Version) })
+	return out, nil
+}
+
+// versionNewer orders dotted versions numerically, so 1.5.10 sorts above
+// 1.5.9 where a string sort would put it below. An empty version sorts last.
+func versionNewer(a, b string) bool {
+	if a == "" || b == "" {
+		return a != "" && b == ""
+	}
+	pa, pb := strings.Split(a, "."), strings.Split(b, ".")
+	for i := 0; i < len(pa) || i < len(pb); i++ {
+		var x, y int
+		if i < len(pa) {
+			x, _ = strconv.Atoi(pa[i])
+		}
+		if i < len(pb) {
+			y, _ = strconv.Atoi(pb[i])
+		}
+		if x != y {
+			return x > y
+		}
+	}
+	return a > b
 }
 
 // Enrollment failure codes. The agent prints them, and the installer and the

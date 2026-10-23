@@ -33,11 +33,11 @@ func TestGroupAndSiteFiltersAgree(t *testing.T) {
 	inv := newInventoryRepository(d)
 	ctx := context.Background()
 
-	n, err := inv.countGroupDevices(ctx, "g", "online", "")
+	n, err := inv.countGroupDevices(ctx, "g", "online", "", "")
 	if err != nil || n != 2 {
 		t.Fatalf("online members = %d (%v), want 2", n, err)
 	}
-	n, _ = inv.countGroupDevices(ctx, "g", "", "hq")
+	n, _ = inv.countGroupDevices(ctx, "g", "", "hq", "")
 	if n != 2 {
 		t.Fatalf("hq members = %d, want 2 (the retired one is not a member)", n)
 	}
@@ -47,7 +47,7 @@ func TestGroupAndSiteFiltersAgree(t *testing.T) {
 	}
 
 	repo := NewRepository(d)
-	_, total, err := repo.ListPaged(ctx, "", UnassignedSite, 50, 0)
+	_, total, err := repo.ListPaged(ctx, "", UnassignedSite, "", 50, 0)
 	if err != nil || total != 2 {
 		t.Fatalf("unassigned devices = %d (%v), want 2 (NULL and empty site)", total, err)
 	}

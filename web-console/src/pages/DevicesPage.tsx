@@ -33,7 +33,7 @@ import { relativeTime } from '../services/relativeTime'
 const UNASSIGNED_SITE = '__unassigned__'
 import { api } from '../services/api'
 import type { DeviceDTO, DeviceGroupDTO, DeviceListResponse } from '../types/api'
-import { PAGE_SIZES, buildDevicesQuery, parseDevicesQuery } from './devicesQuery'
+import { PAGE_SIZES, UNKNOWN_AGENT_VERSION, buildDevicesQuery, parseDevicesQuery } from './devicesQuery'
 import type { DeviceStatus } from './devicesQuery'
 import { DeviceGroupsPanel } from './DeviceGroupsPanel'
 import { GroupMembersModal } from './GroupMembersModal'
@@ -80,7 +80,7 @@ export const DevicesPage: React.FC<{
   const toast = useToast()
   const { t, lang } = useT()
 
-  const { status, site, page, q, deviceId, tab, group } = query
+  const { status, site, agent, page, q, deviceId, tab, group } = query
   const offset = (page - 1) * pageSize
 
   // Group administration. `selected` is the multi-select for the "add to group"
@@ -114,6 +114,21 @@ export const DevicesPage: React.FC<{
   )
 
   const [siteOptions, setSiteOptions] = useState<string[]>([])
+  const [agentOptions, setAgentOptions] = useState<{ version: string; count: number }[]>([])
+  useEffect(() => {
+    let active = true
+    api.getDeviceAgentVersions().then(
+      (versions) => {
+        if (active) setAgentOptions(versions)
+      },
+      () => {
+        // Without the list the filter still offers "all"; the table works.
+      },
+    )
+    return () => {
+      active = false
+    }
+  }, [])
   useEffect(() => {
     let active = true
     api.getDashboardSites().then(
@@ -132,7 +147,7 @@ export const DevicesPage: React.FC<{
   const fetchDevices = useCallback(async () => {
     setLoading(true)
     try {
-      const res = await api.getDevices(pageSize, offset, status, site, group)
+      const res = await api.getDevices(pageSize, offset, status, site, group, agent)
       setData(res)
       setRenderedAt(Date.now())
     } catch (err: unknown) {
@@ -141,7 +156,7 @@ export const DevicesPage: React.FC<{
     } finally {
       setLoading(false)
     }
-  }, [group, offset, pageSize, site, status, t])
+  }, [agent, group, offset, pageSize, site, status, t])
 
   const toggleDevice = (id: string) =>
     setSelected((prev) => {
@@ -158,7 +173,7 @@ export const DevicesPage: React.FC<{
   // them, so a bulk action could reach rows on another page.
   useEffect(() => {
     setSelected(new Set())
-  }, [group, tab, offset, status, site])
+  }, [group, tab, offset, status, site, agent])
 
   const confirmAssign = async () => {
     if (!assignTarget || selected.size === 0) return
@@ -500,6 +515,23 @@ export const DevicesPage: React.FC<{
             {siteOptions.map((s) => (
               <option key={s} value={s === 'unassigned' ? UNASSIGNED_SITE : s}>
                 {s === 'unassigned' ? t('devices.site_unassigned') : s}
+              </option>
+            ))}
+          </select>
+
+          <select
+            value={agent}
+            onChange={(e) => setQuery({ agent: e.target.value, page: 1 })}
+            className="select-input"
+            aria-label={t('devices.filter_agent')}
+          >
+            <option value="">{t('devices.agent_all')}</option>
+            {/* The versions the fleet actually runs, newest first. */}
+            {agentOptions.map((a) => (
+              <option key={a.version || UNKNOWN_AGENT_VERSION} value={a.version || UNKNOWN_AGENT_VERSION}>
+                {a.version
+                  ? t('devices.agent_option', { version: a.version, count: a.count })
+                  : t('devices.agent_unknown', { count: a.count })}
               </option>
             ))}
           </select>

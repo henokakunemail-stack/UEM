@@ -54,7 +54,7 @@ func TestListPagedRetiredFilter(t *testing.T) {
 	repo := NewRepository(d)
 
 	t.Run("default excludes retired", func(t *testing.T) {
-		rows, total, err := repo.ListPaged(ctx, "", "", 50, 0)
+		rows, total, err := repo.ListPaged(ctx, "", "", "", 50, 0)
 		if err != nil {
 			t.Fatalf("list: %v", err)
 		}
@@ -64,7 +64,7 @@ func TestListPagedRetiredFilter(t *testing.T) {
 	})
 
 	t.Run("status=retired returns retired devices", func(t *testing.T) {
-		rows, total, err := repo.ListPaged(ctx, "retired", "", 50, 0)
+		rows, total, err := repo.ListPaged(ctx, "retired", "", "", 50, 0)
 		if err != nil {
 			t.Fatalf("list retired: %v", err)
 		}
@@ -79,7 +79,7 @@ func TestListPagedRetiredFilter(t *testing.T) {
 	})
 
 	t.Run("status=online excludes retired", func(t *testing.T) {
-		rows, total, err := repo.ListPaged(ctx, "online", "", 50, 0)
+		rows, total, err := repo.ListPaged(ctx, "online", "", "", 50, 0)
 		if err != nil {
 			t.Fatalf("list online: %v", err)
 		}
@@ -95,7 +95,7 @@ func TestListPagedRetiredFilter(t *testing.T) {
 		if err != nil {
 			t.Fatalf("set site: %v", err)
 		}
-		rows, total, err := repo.ListPaged(ctx, "retired", "jakarta", 50, 0)
+		rows, total, err := repo.ListPaged(ctx, "retired", "jakarta", "", 50, 0)
 		if err != nil {
 			t.Fatalf("list retired+jakarta: %v", err)
 		}

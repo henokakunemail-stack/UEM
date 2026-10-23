@@ -286,6 +286,12 @@ export const api = {
     return request<DashboardSummary>('/api/dashboard/summary')
   },
 
+  /** Agent versions the active fleet runs, newest first, with device counts. */
+  async getDeviceAgentVersions(): Promise<{ version: string; count: number }[]> {
+    const res = await request<{ version: string; count: number }[]>('/api/devices/agent-versions')
+    return res || []
+  },
+
   async getDashboardSites(): Promise<SiteMetric[]> {
     return request<SiteMetric[]>('/api/dashboard/sites')
   },
@@ -310,7 +316,8 @@ export const api = {
     offset = 0,
     status = '',
     site = '',
-    groupId = ''
+    groupId = '',
+    agentVersion = ''
   ): Promise<DeviceListResponse> {
     const params = new URLSearchParams({
       limit: limit.toString(),
@@ -319,6 +326,7 @@ export const api = {
     if (status) params.append('status', status)
     if (site) params.append('site', site)
     if (groupId) params.append('group_id', groupId)
+    if (agentVersion) params.append('agent_version', agentVersion)
     return request<DeviceListResponse>(`/api/devices?${params.toString()}`)
   },
 

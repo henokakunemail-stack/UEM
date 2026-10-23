@@ -11,6 +11,10 @@ Riwayat sebelum v1.5.4 ada di `git log`.
 ## [Unreleased]
 
 ### Ditambahkan
+- **Filter versi agent di menu Devices.** Dropdown **All Agents** di samping filter Status dan Site menampilkan setiap
+  versi agent yang dipakai armada beserta jumlah perangkatnya (terbaru di atas), ditambah "Versi belum dilaporkan".
+  Filter dijalankan di server, sehingga berlaku untuk semua halaman hasil dan bisa digabung dengan filter Status, Site,
+  dan Group. API: parameter `agent_version` di `GET /api/devices` dan `GET /api/devices/agent-versions`.
 - **Ikon untuk Endpoint Management Agent** (monitor dengan tanda centang): tampil di Programs and Features, installer,
   dan uninstaller. Sumbernya `packaging/icons/endpoint-agent.svg`.
 

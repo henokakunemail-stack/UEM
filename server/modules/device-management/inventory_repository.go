@@ -388,9 +388,9 @@ func (r *inventoryRepository) removeMember(ctx context.Context, groupID, deviceI
 // The status and site filters apply here too, and retired members are left out
 // unless asked for: the group view used to drop both filters and list retired
 // devices as members.
-func (r *inventoryRepository) listGroupDevices(ctx context.Context, groupID, status, site string, limit, offset int) ([]Device, error) {
+func (r *inventoryRepository) listGroupDevices(ctx context.Context, groupID, status, site, agentVersion string, limit, offset int) ([]Device, error) {
 	devices := []Device{}
-	cond, args := deviceFilter("d.", status, site)
+	cond, args := deviceFilter("d.", status, site, agentVersion)
 	args = append([]any{groupID}, args...)
 	args = append(args, limit, offset)
 	err := r.db.SelectContext(ctx, &devices, `
@@ -406,9 +406,9 @@ func (r *inventoryRepository) listGroupDevices(ctx context.Context, groupID, sta
 }
 
 // countGroupDevices returns the total member count of a group.
-func (r *inventoryRepository) countGroupDevices(ctx context.Context, groupID, status, site string) (int, error) {
+func (r *inventoryRepository) countGroupDevices(ctx context.Context, groupID, status, site, agentVersion string) (int, error) {
 	var count int
-	cond, args := deviceFilter("d.", status, site)
+	cond, args := deviceFilter("d.", status, site, agentVersion)
 	args = append([]any{groupID}, args...)
 	err := r.db.GetContext(ctx, &count, `SELECT COUNT(*) FROM device_group_members m
 		JOIN devices d ON d.id = m.device_id
