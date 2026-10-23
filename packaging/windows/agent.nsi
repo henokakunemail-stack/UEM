@@ -54,8 +54,10 @@ Var TokenVerified
 
 ; --- Interface Settings ---
 !define MUI_ABORTWARNING
-!define MUI_ICON "${NSISDIR}\Contrib\Graphics\Icons\modern-install.ico"
-!define MUI_UNICON "${NSISDIR}\Contrib\Graphics\Icons\modern-uninstall.ico"
+; The agent's own icon (packaging/icons/endpoint-agent.svg). Installer and
+; uninstaller share one file: NSIS requires the two to have the same images.
+!define MUI_ICON "..\..\agent\windows\assets\endpoint-agent.ico"
+!define MUI_UNICON "..\..\agent\windows\assets\endpoint-agent.ico"
 
 ; --- Installer Pages ---
 !insertmacro MUI_PAGE_WELCOME
@@ -167,6 +169,9 @@ Section "Install Agent" SecInstall
 
     ; 1. Copy agent binary
     File "/oname=endpoint-agent.exe" "..\..\agent-windows-amd64.exe"
+    ; Programs and Features shows this icon. endpoint-agent.exe has no icon
+    ; resource, so pointing the entry at it showed a blank page.
+    File "/oname=endpoint-agent.ico" "..\..\agent\windows\assets\endpoint-agent.ico"
 
     ; 2. Ensure system-wide ProgramData directory exists for credentials
     CreateDirectory "$DATADIR"
@@ -226,7 +231,7 @@ Section "Install Agent" SecInstall
 
     WriteRegStr HKLM "${UNINSTALL_KEY}" "DisplayName" "Endpoint Management Agent"
     WriteRegStr HKLM "${UNINSTALL_KEY}" "UninstallString" '"$INSTDIR\uninstall.exe"'
-    WriteRegStr HKLM "${UNINSTALL_KEY}" "DisplayIcon" '"$INSTDIR\endpoint-agent.exe"'
+    WriteRegStr HKLM "${UNINSTALL_KEY}" "DisplayIcon" "$INSTDIR\endpoint-agent.ico"
     WriteRegStr HKLM "${UNINSTALL_KEY}" "DisplayVersion" "${VERSION}"
     WriteRegStr HKLM "${UNINSTALL_KEY}" "Publisher" "Enterprise Endpoint Management"
     WriteRegDWORD HKLM "${UNINSTALL_KEY}" "NoModify" 1
@@ -367,6 +372,7 @@ Section "Uninstall"
 
     ; Remove files and directories
     Delete "$INSTDIR\endpoint-agent.exe"
+    Delete "$INSTDIR\endpoint-agent.ico"
     Delete "$INSTDIR\uninstall.exe"
     RMDir "$INSTDIR"
 

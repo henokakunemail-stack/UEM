@@ -10,7 +10,15 @@ Riwayat sebelum v1.5.4 ada di `git log`.
 
 ## [Unreleased]
 
+### Ditambahkan
+- **Ikon untuk Endpoint Management Agent** (monitor dengan tanda centang): tampil di Programs and Features, installer,
+  dan uninstaller. Sumbernya `packaging/icons/endpoint-agent.svg`.
+
 ### Diperbaiki
+- **Versi agen di Programs and Features tidak ikut berubah setelah update.** Installer menulis versi sekali saat
+  pemasangan, sedangkan update dari console hanya mengganti file program, sehingga PC yang dipasang dengan 1.5.0 dan
+  sudah di-update ke 1.5.6 tetap tertulis 1.5.0. Agen kini memperbarui versi dan ikonnya di Programs and Features
+  setiap kali start. Perlu agen versi berikutnya; agen yang sudah ada ikut terkoreksi setelah di-update.
 - **Tabel di menu Remote control terpotong.** Daftar Online endpoints dan Session history dipaksa selebar minimal
   720 px, lebih lebar dari kartunya, sehingga kolom Last heartbeat dan tombol Start terpotong di tepi kartu. Kedua tabel
   kini menyesuaikan lebar kartunya (diuji pada layar 1280–1920 px). Hanya console; agen tidak perlu di-update.

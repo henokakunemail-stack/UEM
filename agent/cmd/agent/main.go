@@ -251,6 +251,7 @@ func runEnrollOnly(serverURL, enrollToken, enrollSite, credsPath string) error {
 
 func runAgent(serverURL, enrollToken, enrollSite, credsPath string, heartbeatSecs int) {
 	log.Info().Str("server", serverURL).Str("creds", credsPath).Msg("agent starting")
+	syncInstallRecord()
 
 	// Cleanup leftover backup binary from previous self-update
 	if execPath, err := os.Executable(); err == nil {
