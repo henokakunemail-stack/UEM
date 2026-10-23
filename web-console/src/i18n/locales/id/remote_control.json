@@ -91,6 +91,8 @@
   "fps_title": "Pembaruan layar per detik. Pembaruan hanya membawa area yang berubah, sehingga desktop yang diam tidak mengirim apa pun — itu disengaja, bukan macet.",
   "fps": "{fps} pembaruan/dtk",
   "stats_title": "Kualitas gambar yang dienkode perangkat, disesuaikan dengan kecepatan tautan ini, dan laju pengirimannya.",
+  "scale": "Ukuran {scale}%",
+  "scale_title": "Perangkat mengirim gambar yang lebih kecil agar sesi tetap lancar saat layar sibuk atau tautan lambat. Ukuran penuh kembali saat layar diam.",
   "caps_title": "Kemampuan yang dilaporkan agen",
   "cap_capture": "tangkapan",
   "cap_no_capture": "tanpa tangkapan",

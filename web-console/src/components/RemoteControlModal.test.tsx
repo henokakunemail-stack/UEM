@@ -99,6 +99,17 @@ describe('RemoteControlModal feature gating', () => {
     expect(screen.queryByRole('combobox')).toBeNull()
   })
 
+  // The agent sends a smaller picture while the screen is busy. Without saying
+  // so, a softer image reads as a fault; at full size nothing is shown.
+  it('says when the endpoint is sending a scaled-down picture', async () => {
+    const ws = await openSession({ capture: true, mouse: true, keyboard: true })
+    act(() => ws.deliver(JSON.stringify({ type: 'stats', quality: 70, kbps: 900, scale: 100 })))
+    await waitFor(() => expect(screen.getByText(/Q70/)).toBeTruthy())
+    expect(screen.queryByText(/Size \d+%/)).toBeNull()
+    act(() => ws.deliver(JSON.stringify({ type: 'stats', quality: 60, kbps: 1200, scale: 75 })))
+    await waitFor(() => expect(screen.getByText('Size 75%')).toBeTruthy())
+  })
+
   // View mode changes nothing on the endpoint: the controls that would are
   // disabled, while choosing which monitor to watch stays available.
   it('disables endpoint-changing controls in View mode but keeps monitor selection', async () => {

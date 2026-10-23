@@ -165,7 +165,7 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
   const [monitorIndex, setMonitorIndex] = useState<number | null>(null)
   const [remoteCursor, setRemoteCursor] = useState<{ x: number; y: number; visible: boolean } | null>(null)
   const [pointerInside, setPointerInside] = useState<boolean>(false)
-  const [stats, setStats] = useState<{ quality: number; kbps: number } | null>(null)
+  const [stats, setStats] = useState<{ quality: number; kbps: number; scale: number } | null>(null)
   const [remoteClipboard, setRemoteClipboard] = useState<string | null>(null)
   const [clipboardDraft, setClipboardDraft] = useState<string | null>(null)
   // Which way the fallback box is for: text the operator is about to send, or
@@ -446,6 +446,7 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
         visible?: boolean
         quality?: number
         kbps?: number
+        scale?: number
         index?: number
         text?: string
         id?: string
@@ -466,7 +467,8 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
       } else if (msg.type === 'cursor') {
         setRemoteCursor({ x: msg.x ?? 0, y: msg.y ?? 0, visible: Boolean(msg.visible) })
       } else if (msg.type === 'stats') {
-        setStats({ quality: msg.quality ?? 0, kbps: msg.kbps ?? 0 })
+        // An older agent sends no scale: its frames are always full size.
+        setStats({ quality: msg.quality ?? 0, kbps: msg.kbps ?? 0, scale: msg.scale ?? 100 })
       } else if (msg.type === 'monitor_changed') {
         setMonitorIndex(msg.index ?? null)
       } else if (msg.type === 'clipboard') {
@@ -940,6 +942,11 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
             {stats && (
               <span title={t('remote_control.stats_title')}>
                 Q{stats.quality} · {stats.kbps} kbps
+              </span>
+            )}
+            {stats && stats.scale < 100 && (
+              <span title={t('remote_control.scale_title')}>
+                {t('remote_control.scale', { scale: stats.scale })}
               </span>
             )}
             <span>{formatMB(bytesReceived)}</span>
