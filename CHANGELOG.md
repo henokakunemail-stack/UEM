@@ -17,6 +17,19 @@ Riwayat sebelum v1.5.4 ada di `git log`.
   sudah ada), lalu Enter atau ✓; Esc membatalkan. Perangkat retired tidak bisa diubah. Hanya console.
 
 ### Diubah
+- **Remote desktop sekitar 2,5× lebih lancar.** Diukur dengan capture layar sungguhan 1920×1080 yang berubah penuh
+  setiap frame (seperti saat scroll atau menggeser jendela): dari 4,5–5,2 fps menjadi 12,5–12,8 fps. Tiga perubahan di
+  agen:
+  - **Kompresi paralel.** Area besar dipecah menjadi pita yang dikompres JPEG di semua core CPU. Satu layar penuh kini
+    ±25 ms, sebelumnya ±75 ms.
+  - **Capture dan pengiriman berjalan bersamaan.** Frame berikutnya diambil sementara frame sebelumnya dikompres dan
+    dikirim; jeda 33 ms antar-frame kini dihitung dari awal frame, bukan ditambahkan setelah semua pekerjaan selesai.
+  - **Resolusi turun otomatis saat berat.** Jika frame terus butuh lebih dari 80 ms atau jaringan padat, gambar dikirim
+    di 75% lalu 50% ukuran (tidak lebih kecil dari lebar 960 px), dan kembali ke ukuran penuh begitu layar diam
+    1,5 detik agar teks tajam saat dibaca. Klik mouse dan posisi kursor dipetakan otomatis. Toolbar remote menampilkan
+    "Ukuran 75%" selama gambar diperkecil.
+
+  Perlu agen v1.5.9 (perbarui lewat Agent updates). Pembatas berikutnya adalah capture layar GDI (50–80 ms per frame).
 - **README ditulis ulang.** Ringkasan fitur, tabel dukungan per platform (Windows/Linux/macOS), diagram arsitektur,
   langkah cepat instalasi server dan agen, tabel konfigurasi, roadmap, dan FAQ. Setiap klaim dicocokkan dengan kode,
   sehingga beberapa kesalahan di README lama ikut diperbaiki: versi Go (kini 1.26.8+, bukan 1.23+), paket `.deb` yang

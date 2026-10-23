@@ -239,6 +239,10 @@ func (s *Session) selectMonitor(index int) {
 func (s *Session) pollEndpointState() {
 	if cr, ok := s.capturer.(cursorReporter); ok {
 		x, y, visible := cr.CursorPosition()
+		// The pointer is drawn over the frame, so it is reported in frame
+		// pixels, which differ from desktop pixels while the stream is scaled.
+		l := s.scale.level()
+		x, y = toFrame(x, l), toFrame(y, l)
 		if x != s.lastCursorX || y != s.lastCursorY || visible != s.lastCursorVisible {
 			s.lastCursorX, s.lastCursorY, s.lastCursorVisible = x, y, visible
 			_ = s.sendControl(map[string]any{"type": "cursor", "x": x, "y": y, "visible": visible})
@@ -282,5 +286,13 @@ func (s *Session) maybeSendStats(now time.Time) {
 		return
 	}
 	s.lastStats = now
-	_ = s.sendControl(map[string]any{"type": "stats", "quality": s.quality.quality, "kbps": s.quality.kbps})
+	l := s.scale.level()
+	_ = s.sendControl(map[string]any{
+		"type":    "stats",
+		"quality": s.quality.quality,
+		"kbps":    s.quality.kbps,
+		// scale is the frame size as a percentage of the desktop, so the
+		// operator can tell a softer picture from a slow one.
+		"scale": 100 * l.num / l.den,
+	})
 }

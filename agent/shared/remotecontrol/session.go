@@ -151,6 +151,13 @@ type Session struct {
 	lastCursorVisible bool
 	quality           *qualityController
 	lastStats         time.Time
+
+	// scaleCtl and scaler belong to the capture loop; scale is the level the
+	// frames on the wire are at, which the input loop and the cursor report
+	// read to map between frame and desktop pixels.
+	scaleCtl *scaleController
+	scaler   downscaler
+	scale    streamScale
 }
 
 func NewSession(cfg SessionConfig, serverBaseURL string, creds Credentials, capturer ScreenCapturer) *Session {
@@ -170,6 +177,7 @@ func NewSession(cfg SessionConfig, serverBaseURL string, creds Credentials, capt
 		files:        newFileReceiver(defaultTransfersDir()),
 		progressSent: make(map[string]int64),
 		quality:      newQualityController(time.Now()),
+		scaleCtl:     newScaleController(),
 	}
 }
 
@@ -413,6 +421,11 @@ func (s *Session) readInputLoop() {
 
 		switch in.Type {
 		case "mouse":
+			// The console sends frame pixels; a scaled-down frame has fewer of
+			// them than the desktop, so the point is mapped back before it is
+			// injected.
+			l := s.scale.level()
+			in.X, in.Y = toDesktop(in.X, l), toDesktop(in.Y, l)
 			s.reportInputError(s.capturer.InjectMouseEvent(in))
 			s.wakeCapture()
 		case "keyboard":
@@ -444,6 +457,14 @@ func (s *Session) streamFramesLoop() {
 	interval := minCaptureInterval
 	timer := time.NewTimer(interval)
 	defer timer.Stop()
+	// schedule arms the timer for the next tick, counted from when this tick
+	// started. Counting from when it finished added the whole capture, encode
+	// and send to every interval, so a "33ms" loop on a desktop that took 130ms
+	// to process ran at six frames a second rather than seven -- and at four
+	// once the work grew.
+	schedule := func(tickStart time.Time) {
+		timer.Reset(max(0, interval-time.Since(tickStart)))
+	}
 
 	caps := s.capturer.Capabilities()
 	if !caps.Capture {
@@ -467,10 +488,48 @@ func (s *Session) streamFramesLoop() {
 	// activeFrames keeps capture at minCaptureInterval (30 FPS) during active bursts
 	activeFrames := 0
 
+	// The frame is encoded and written on its own goroutine while this one,
+	// which owns the desktop-attached thread, captures the next. Capture, encode
+	// and send used to run one after the other, so a frame cost the sum of all
+	// three; overlapped, it costs the larger of capture and encode-plus-send.
+	jobs := make(chan frameJob)
+	results := make(chan frameResult, 1)
+	go s.sendFrames(jobs, results)
+	defer close(jobs)
+	inFlight := false
+
+	// handle applies what the sender reports about the frame it finished. It
+	// returns false when the socket is gone and the session is over.
+	handle := func(r frameResult) bool {
+		inFlight = false
+		if r.writeErr != nil {
+			return false
+		}
+		if r.encodeErr != nil {
+			// The rectangles were acknowledged when they were handed over, and
+			// they never reached the console. Only a full frame repairs that.
+			log.Error().Err(r.encodeErr).Msg("encode remote control frame")
+			damage.ForceKeyframe()
+			return true
+		}
+		now := time.Now()
+		if s.quality.observe(r.bytes, r.write, now) {
+			log.Debug().Int("quality", s.quality.quality).Dur("write", r.write).Msg("remote control quality adjusted")
+		}
+		if s.scaleCtl.frameSent(r.encode+r.write, r.write >= congestedWrite, now) {
+			s.applyScale(damage)
+		}
+		return true
+	}
+
 	for {
 		select {
 		case <-s.stopChan:
 			return
+		case r := <-results:
+			if !handle(r) {
+				return
+			}
 		case <-s.wakeChan:
 			activeFrames = 30 // hold ~30 FPS for active interaction burst
 			interval = minCaptureInterval
@@ -483,6 +542,7 @@ func (s *Session) streamFramesLoop() {
 			timer.Reset(0)
 			continue
 		case <-timer.C:
+			tickStart := time.Now()
 			pixels, width, height, err := s.capturer.CaptureScreen()
 			if err != nil {
 				// A single blit can fail on a moment when the desktop is being
@@ -502,7 +562,7 @@ func (s *Session) streamFramesLoop() {
 					s.SendNotice("capture_failed", err.Error())
 				}
 				log.Debug().Err(err).Msg("capture screen error")
-				timer.Reset(interval)
+				schedule(tickStart)
 				continue
 			}
 			// Coming back from a reported failure (a UAC prompt or the lock
@@ -516,13 +576,18 @@ func (s *Session) streamFramesLoop() {
 			s.pollEndpointState()
 			s.maybeSendStats(time.Now())
 			if len(pixels) == 0 {
-				timer.Reset(interval)
+				schedule(tickStart)
 				continue
 			}
 
 			if s.refreshRequested.Swap(false) {
 				damage.ForceKeyframe()
 			}
+			if s.scaleCtl.setDesktopWidth(width) {
+				s.applyScale(damage)
+			}
+			capturedLevel := s.scaleCtl.level
+			pixels, width, height = s.scaleFrame(pixels, width, height)
 			damage.SetSize(width, height)
 			rects := damage.Diff(pixels)
 			if len(rects) == 0 {
@@ -534,7 +599,15 @@ func (s *Session) streamFramesLoop() {
 					// ponytail: step up linearly. Add PID rate controller if network RTT feedback exists.
 					interval = min(interval+15*time.Millisecond, maxCaptureInterval)
 				}
-				timer.Reset(interval)
+				// A still desktop is the moment to give back full size: the
+				// operator has stopped to read, and the next tick sends a sharp
+				// keyframe.
+				if s.scaleCtl.idle(time.Now()) {
+					s.applyScale(damage)
+					timer.Reset(0)
+					continue
+				}
+				schedule(tickStart)
 				continue
 			}
 
@@ -547,34 +620,104 @@ func (s *Session) streamFramesLoop() {
 				idleTicks = 0
 			}
 
-			payload, err := EncodeFrameQuality(pixels, width, height, rects, s.quality.quality)
-			if err != nil {
-				log.Error().Err(err).Msg("encode remote control frame")
-				timer.Reset(interval)
-				continue
+			// One frame is in flight at most. While the previous frame was being
+			// encoded and sent, this one was being captured; it now waits for
+			// the sender rather than queueing behind it, so the console never
+			// receives a backlog of frames that are already stale.
+			if inFlight {
+				select {
+				case r := <-results:
+					if !handle(r) {
+						return
+					}
+				case <-s.stopChan:
+					return
+				}
+				if s.scaleCtl.level != capturedLevel {
+					// The sender's report changed the size; this frame was
+					// captured at the old one and its diff no longer applies.
+					timer.Reset(0)
+					continue
+				}
 			}
-
-			// The write is timed with the lock held, because that is how long
-			// the socket refused the bytes: it is the link telling the agent to
-			// send less, and the quality controller listens to nothing else.
-			s.mu.Lock()
-			writeStart := time.Now()
-			err = s.conn.WriteMessage(websocket.BinaryMessage, payload)
-			took := time.Since(writeStart)
-			s.mu.Unlock()
-			if err != nil {
+			select {
+			case jobs <- frameJob{pixels: pixels, width: width, height: height, rects: rects, quality: s.quality.quality}:
+			case <-s.stopChan:
 				return
 			}
-			if s.quality.observe(len(payload), took, time.Now()) {
-				log.Debug().Int("quality", s.quality.quality).Dur("write", took).Msg("remote control quality adjusted")
-			}
-
-			// Only now is the baseline safe to advance. Doing it before the
-			// write marks the region as delivered on a frame that never left
-			// the agent, and the console then shows the old image there until
-			// the session ends, with nothing in any log to explain it.
+			inFlight = true
+			// The baseline advances when the frame is handed over, not when it
+			// is written, so the next capture is diffed against what the
+			// console is about to hold rather than resending this frame's
+			// changes. Nothing is lost by it: a failed write ends the session,
+			// and a failed encode forces a keyframe in handle.
 			damage.Acknowledge(rects)
-			timer.Reset(interval)
+			schedule(tickStart)
 		}
 	}
+}
+
+// frameJob is one frame handed from the capture loop to the sender. The
+// pixels belong to the job: every capturer returns a fresh slice, and the
+// capture loop never touches a slice once it is handed over.
+type frameJob struct {
+	pixels        []byte
+	width, height int
+	rects         []Rect
+	quality       int
+}
+
+// frameResult is what the sender learned from one frame.
+type frameResult struct {
+	bytes     int
+	encode    time.Duration
+	write     time.Duration
+	encodeErr error
+	writeErr  error
+}
+
+// sendFrames encodes and writes frames until jobs is closed or a write fails.
+func (s *Session) sendFrames(jobs <-chan frameJob, results chan<- frameResult) {
+	for job := range jobs {
+		start := time.Now()
+		payload, err := EncodeFrameQuality(job.pixels, job.width, job.height, job.rects, job.quality)
+		encode := time.Since(start)
+		if err != nil {
+			results <- frameResult{encodeErr: err, encode: encode}
+			continue
+		}
+		// The write is timed with the lock held, because that is how long
+		// the socket refused the bytes: it is the link telling the agent to
+		// send less, and the quality controller listens to nothing else.
+		s.mu.Lock()
+		writeStart := time.Now()
+		err = s.conn.WriteMessage(websocket.BinaryMessage, payload)
+		write := time.Since(writeStart)
+		s.mu.Unlock()
+		results <- frameResult{bytes: len(payload), encode: encode, write: write, writeErr: err}
+		if err != nil {
+			return
+		}
+	}
+}
+
+// scaleFrame shrinks a captured frame to the current level. At full size the
+// pixels are returned as they are.
+func (s *Session) scaleFrame(pixels []byte, width, height int) ([]byte, int, int) {
+	l := scaleLevels[s.scaleCtl.level]
+	if l.num == l.den {
+		return pixels, width, height
+	}
+	dw, dh := scaledSize(width, height, l)
+	return s.scaler.scale(pixels, width, height, dw, dh), dw, dh
+}
+
+// applyScale publishes a new level to the input loop and makes the next frame a
+// keyframe: the console's canvas is about to change size and holds nothing that
+// lines up with frames at the new one.
+func (s *Session) applyScale(damage *Damage) {
+	s.scale.set(s.scaleCtl.level)
+	damage.ForceKeyframe()
+	l := scaleLevels[s.scaleCtl.level]
+	log.Debug().Int("num", l.num).Int("den", l.den).Msg("remote control frame size adjusted")
 }

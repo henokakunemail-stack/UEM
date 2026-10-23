@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"image"
 	"image/jpeg"
+	"runtime"
+	"sync"
 )
 
 // The capture loop used to encode the whole desktop into a single JPEG on every
@@ -356,47 +358,149 @@ func EncodeFrameQuality(pixels []byte, width, height int, rects []Rect, quality 
 		return nil, fmt.Errorf("desktop %dx%d does not fit the frame header", width, height)
 	}
 
-	// 6 bytes of header, 8 per rectangle, then the encoded pixels.
-	buf := make([]byte, 0, 6+len(rects)*8+width*height/4)
-	head := make([]byte, 6)
-	head[0] = frameVersion
-	head[1] = byte(len(rects))
-	binary.BigEndian.PutUint16(head[2:4], uint16(width))
-	binary.BigEndian.PutUint16(head[4:6], uint16(height))
-	buf = append(buf, head...)
-
-	rowBytes := width * 4
 	for _, r := range rects {
 		if r.X < 0 || r.Y < 0 || r.W <= 0 || r.H <= 0 ||
 			r.X+r.W > width || r.Y+r.H > height {
 			return nil, fmt.Errorf("rectangle %+v is outside the %dx%d desktop", r, width, height)
 		}
-		var dims [8]byte
-		binary.BigEndian.PutUint16(dims[0:2], uint16(r.X))
-		binary.BigEndian.PutUint16(dims[2:4], uint16(r.Y))
-		binary.BigEndian.PutUint16(dims[4:6], uint16(r.W))
-		binary.BigEndian.PutUint16(dims[6:8], uint16(r.H))
-		buf = append(buf, dims[:]...)
+	}
+	jobs := encodeJobs(rects, encodeWorkers(), quality)
+	if len(jobs) > 0xFF {
+		// Splitting is an optimisation, not part of the frame's meaning; a frame
+		// that would carry too many stripes is sent with its rectangles whole.
+		jobs = encodeJobs(rects, 1, quality)
+	}
+	encoded, err := encodeAll(pixels, width*4, jobs)
+	if err != nil {
+		return nil, err
+	}
 
-		encoded, err := encodeRect(pixels, rowBytes, r, quality)
-		if err != nil {
-			return nil, err
-		}
-		var size [4]byte
-		binary.BigEndian.PutUint32(size[:], uint32(len(encoded)))
-		buf = append(buf, size[:]...)
-		buf = append(buf, encoded...)
+	// 6 bytes of header, 12 per rectangle, then the encoded pixels.
+	total := 6
+	for _, e := range encoded {
+		total += 12 + len(e)
+	}
+	buf := make([]byte, 0, total)
+	head := make([]byte, 6)
+	head[0] = frameVersion
+	head[1] = byte(len(jobs))
+	binary.BigEndian.PutUint16(head[2:4], uint16(width))
+	binary.BigEndian.PutUint16(head[4:6], uint16(height))
+	buf = append(buf, head...)
+
+	for i, j := range jobs {
+		var dims [12]byte
+		binary.BigEndian.PutUint16(dims[0:2], uint16(j.rect.X))
+		binary.BigEndian.PutUint16(dims[2:4], uint16(j.rect.Y))
+		binary.BigEndian.PutUint16(dims[4:6], uint16(j.rect.W))
+		binary.BigEndian.PutUint16(dims[6:8], uint16(j.rect.H))
+		binary.BigEndian.PutUint32(dims[8:12], uint32(len(encoded[i])))
+		buf = append(buf, dims[:]...)
+		buf = append(buf, encoded[i]...)
 	}
 	return buf, nil
 }
 
-// encodeRect converts one rectangle from BGRA to RGBA and JPEG-encodes it.
+// encodeJob is one JPEG in a frame: a rectangle, or a stripe of one, and the
+// quality its parent rectangle's size earned.
+type encodeJob struct {
+	rect    Rect
+	quality int
+}
+
+// stripeMinArea is the smallest stripe worth its own JPEG. Below it the
+// per-image overhead (headers, Huffman tables, a goroutine) costs more than
+// spreading the work saves.
+const stripeMinArea = 64 * 1024
+
+// encodeWorkers is how many JPEGs are encoded at once.
+func encodeWorkers() int { return runtime.GOMAXPROCS(0) }
+
+// encodeJobs plans the JPEGs for a frame.
+//
+// A large rectangle is cut into horizontal stripes so they can be encoded on
+// separate cores. Encoding one full 1080p desktop took about 75ms on one core,
+// which on its own held a scrolling page or a window drag to under 13 frames a
+// second; the frame format already carries any number of rectangles, so the
+// console paints the stripes exactly as it paints any other update.
+//
+// Stripe heights are multiples of 16, the height of a JPEG macroblock with
+// chroma subsampling, so a stripe boundary falls where the encoder would have
+// started a new row of blocks anyway and no seam appears between stripes.
+func encodeJobs(rects []Rect, workers, base int) []encodeJob {
+	jobs := make([]encodeJob, 0, len(rects))
+	for _, r := range rects {
+		q := max(base+tierQuality(r.W*r.H), minQuality-10)
+		n := min(workers, (r.W*r.H)/stripeMinArea)
+		if n < 2 {
+			jobs = append(jobs, encodeJob{rect: r, quality: q})
+			continue
+		}
+		stripe := ((r.H+n-1)/n + 15) / 16 * 16
+		for y := 0; y < r.H; y += stripe {
+			h := min(stripe, r.H-y)
+			jobs = append(jobs, encodeJob{rect: Rect{X: r.X, Y: r.Y + y, W: r.W, H: h}, quality: q})
+		}
+	}
+	return jobs
+}
+
+// encodeAll runs the jobs concurrently, at most encodeWorkers at a time, and
+// returns the JPEGs in job order.
+func encodeAll(pixels []byte, rowBytes int, jobs []encodeJob) ([][]byte, error) {
+	out := make([][]byte, len(jobs))
+	if len(jobs) == 1 {
+		b, err := encodeRect(pixels, rowBytes, jobs[0].rect, jobs[0].quality)
+		out[0] = b
+		return out, err
+	}
+	errs := make([]error, len(jobs))
+	sem := make(chan struct{}, encodeWorkers())
+	var wg sync.WaitGroup
+	for i, j := range jobs {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(i int, j encodeJob) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			out[i], errs[i] = encodeRect(pixels, rowBytes, j.rect, j.quality)
+		}(i, j)
+	}
+	wg.Wait()
+	for _, err := range errs {
+		if err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+// tierQuality is the offset from the session's base quality for a rectangle
+// of the given area.
+//
+// Small damage is usually text and keeps the base quality; large areas are
+// usually a scrolled page or a window drag, where a softer image is the
+// difference between a fluid move and a stalled one. The tier is the offset
+// from the base, decided by the area of the rectangle the diff produced, not of
+// a stripe cut from it: a stripe of a scrolled page is still part of a scroll.
+func tierQuality(area int) int {
+	switch {
+	case area > 200000:
+		return -20
+	case area > 60000:
+		return -10
+	}
+	return 0
+}
+
+// encodeRect converts one rectangle from BGRA to RGBA and JPEG-encodes it at
+// the given quality.
 //
 // The conversion is scoped to the rectangle. Doing it across the whole frame is
 // what the previous path did, and it is a full pass over 8MB that produces
 // bytes which are then thrown away whenever the diff finds the change was
 // smaller than the screen.
-func encodeRect(pixels []byte, rowBytes int, r Rect, base int) ([]byte, error) {
+func encodeRect(pixels []byte, rowBytes int, r Rect, quality int) ([]byte, error) {
 	img := image.NewRGBA(image.Rect(0, 0, r.W, r.H))
 	for y := 0; y < r.H; y++ {
 		src := pixels[(r.Y+y)*rowBytes+r.X*4:]
@@ -410,17 +514,6 @@ func encodeRect(pixels []byte, rowBytes int, r Rect, base int) ([]byte, error) {
 	}
 
 	var out bytes.Buffer
-	area := r.W * r.H
-	// Small damage is usually text and keeps the base quality; large areas are
-	// usually a scrolled page or a window drag, where a softer image is the
-	// difference between a fluid move and a stalled one.
-	quality := base
-	if area > 200000 {
-		quality = base - 20
-	} else if area > 60000 {
-		quality = base - 10
-	}
-	quality = max(quality, minQuality-10)
 	if err := jpeg.Encode(&out, img, &jpeg.Options{Quality: quality}); err != nil {
 		return nil, fmt.Errorf("encode rect: %w", err)
 	}
