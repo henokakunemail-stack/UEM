@@ -10,6 +10,8 @@ Riwayat sebelum v1.5.4 ada di `git log`.
 
 ## [Unreleased]
 
+## [1.5.7] - 2026-10-23
+
 ### Ditambahkan
 - **Status join domain di detail perangkat.** Tab Hardware punya kartu baru, **Keanggotaan Domain**. Kartu ini
   menunjukkan apakah perangkat sudah join domain, nama domainnya, dan jenisnya: Active Directory, Microsoft Entra ID,
@@ -36,6 +38,8 @@ Riwayat sebelum v1.5.4 ada di `git log`.
   Sebelumnya perangkat yang token-nya dibuat beberapa hari sebelum agent dipasang tampak sudah lama terdaftar.
 
 ### Catatan upgrade
+- Kartu domain dan label "Baru" ada di console server v1.5.7. Status domain memerlukan agen v1.5.7: perbarui agen dari
+  **Agent Updates → Impor dari Paket Server**, lalu jalankan kampanye ke 1.5.7.
 - Status domain baru muncul setelah agent diperbarui ke versi ini dan mengirim inventory berikutnya. Itu terjadi saat
   agent start, setiap 4 jam, atau saat tombol **Collect** ditekan. Agent lama ditampilkan "Tidak diketahui", bukan
   "Belum join".
