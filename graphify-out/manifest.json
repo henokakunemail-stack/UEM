@@ -222,9 +222,9 @@
     "semantic_hash": "45ee77e9a6e1f14f4336371579756c0c"
   },
   "agent/shared/osinfo/osinfo.go": {
-    "mtime": 1792717475.1054442,
-    "seen": 1792717561.7225268,
-    "ast_hash": "6d4e3cf924ecc179cf446fa58cb2a88a",
+    "mtime": 1792728910.8272452,
+    "seen": 1792729005.5172718,
+    "ast_hash": "7deae2fb0a4e45e49a3ce8b085497fb7",
     "semantic_hash": ""
   },
   "agent/shared/patch/classify_windows_test.go": {
@@ -708,9 +708,9 @@
     "semantic_hash": "0779d47a36e0e1ebef395ce9df66f393"
   },
   "agent/shared/update/engine.go": {
-    "mtime": 1792633589.4592652,
-    "seen": 1792650332.9494464,
-    "ast_hash": "6850140594e8e457adbaf1ccf5c525d7",
+    "mtime": 1792741349.60694,
+    "seen": 1792742014.5743442,
+    "ast_hash": "7b5416a9523868481093348deb3b3131",
     "semantic_hash": ""
   },
   "agent/shared/update/keys.go": {
@@ -2376,9 +2376,9 @@
     "semantic_hash": "787e5a07efeb2bf6209d5937195f2f68"
   },
   "web-console/src/pages/AgentUpdatesPage.tsx": {
-    "mtime": 1792650135.6109726,
-    "seen": 1792650332.9509208,
-    "ast_hash": "64d9dbec161dad453a0b529cca90f098",
+    "mtime": 1792741116.618262,
+    "seen": 1792742014.5794353,
+    "ast_hash": "cae66c3ac1f2cfff8ee7a3ac725dd713",
     "semantic_hash": ""
   },
   "web-console/src/pages/AlertsPage.tsx": {
@@ -2412,9 +2412,9 @@
     "semantic_hash": ""
   },
   "web-console/src/pages/DevicesPage.tsx": {
-    "mtime": 1792723488.1548493,
-    "seen": 1792724376.528245,
-    "ast_hash": "dbc23ba7d65070711263e33efa4b637e",
+    "mtime": 1792744404.9008043,
+    "seen": 1792744734.6069958,
+    "ast_hash": "65e09ed1c0a4a05af48e4c1e221c46c4",
     "semantic_hash": ""
   },
   "web-console/src/pages/GroupMembersModal.tsx": {
@@ -2706,9 +2706,9 @@
     "semantic_hash": ""
   },
   "README.md": {
-    "mtime": 1792717475.167535,
-    "seen": 1792717561.723792,
-    "ast_hash": "e841d8546c1c52cb6954a5b650293652",
+    "mtime": 1792746542.3812084,
+    "seen": 1792746647.0966704,
+    "ast_hash": "5e8c4406b93baf6b6f8821d9d65483d1",
     "semantic_hash": ""
   },
   "SECURITY.md": {
@@ -3522,9 +3522,9 @@
     "semantic_hash": ""
   },
   "web-console/src/i18n/locales/en/devices.json": {
-    "mtime": 1792723426.392249,
-    "seen": 1792724376.5278308,
-    "ast_hash": "cfb821d1dc943be61b30af0b22b35700",
+    "mtime": 1792744418.2166705,
+    "seen": 1792744734.6067655,
+    "ast_hash": "5f2163e4df1b41c6e814a2282d940696",
     "semantic_hash": ""
   },
   "web-console/src/i18n/locales/en/enroll.json": {
@@ -3684,9 +3684,9 @@
     "semantic_hash": ""
   },
   "web-console/src/i18n/locales/id/devices.json": {
-    "mtime": 1792723426.3932495,
-    "seen": 1792724376.527998,
-    "ast_hash": "0ae992f6de03ea67acae1d6030586a3d",
+    "mtime": 1792744418.217775,
+    "seen": 1792744734.6068747,
+    "ast_hash": "1db2cc62e337bc4481f3a313c15949d1",
     "semantic_hash": ""
   },
   "web-console/src/i18n/locales/id/enroll.json": {
@@ -4290,9 +4290,9 @@
     "semantic_hash": ""
   },
   "web-console/src/pages/honestPages.test.tsx": {
-    "mtime": 1792723463.4702864,
-    "seen": 1792724376.52839,
-    "ast_hash": "960701d834063ee22430a04944a4a697",
+    "mtime": 1792744443.9771683,
+    "seen": 1792744734.6070833,
+    "ast_hash": "5f7a5f28c8556987482551da1daae5e5",
     "semantic_hash": ""
   },
   "web-console/src/pages/settings/restorePoller.test.ts": {
@@ -4650,9 +4650,9 @@
     "semantic_hash": ""
   },
   "CHANGELOG.md": {
-    "mtime": 1792724051.4296525,
-    "seen": 1792724376.5286126,
-    "ast_hash": "837a8934b654c0fc801d3b5550cbfd38",
+    "mtime": 1792746618.9338598,
+    "seen": 1792746647.0966601,
+    "ast_hash": "baa8c018206db9fdd01b9eb38e558d16",
     "semantic_hash": ""
   },
   "docs/architecture/policy-resolution.md": {
@@ -4785,6 +4785,18 @@
     "mtime": 1792723334.0246606,
     "seen": 1792724376.5266242,
     "ast_hash": "c9dd527b89fe2eb96e7b99b184b785a5",
+    "semantic_hash": ""
+  },
+  "agent/shared/update/download_timeout_test.go": {
+    "mtime": 1792741178.1438468,
+    "seen": 1792742014.5743222,
+    "ast_hash": "73c5601731c510cb4a330bab905c5c52",
+    "semantic_hash": ""
+  },
+  "web-console/src/pages/DeviceSiteCell.tsx": {
+    "mtime": 1792744495.9620848,
+    "seen": 1792744734.606991,
+    "ast_hash": "d1610289b1849f1137fd91225acfb2c6",
     "semantic_hash": ""
   }
 }
