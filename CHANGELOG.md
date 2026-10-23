@@ -10,6 +10,11 @@ Riwayat sebelum v1.5.4 ada di `git log`.
 
 ## [Unreleased]
 
+### Diperbaiki
+- **Tabel di menu Remote control terpotong.** Daftar Online endpoints dan Session history dipaksa selebar minimal
+  720 px, lebih lebar dari kartunya, sehingga kolom Last heartbeat dan tombol Start terpotong di tepi kartu. Kedua tabel
+  kini menyesuaikan lebar kartunya (diuji pada layar 1280–1920 px). Hanya console; agen tidak perlu di-update.
+
 ## [1.5.7] - 2026-10-23
 
 ### Ditambahkan
