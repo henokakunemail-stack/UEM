@@ -24,9 +24,9 @@
     "semantic_hash": "22bf7b338bb5b22d45ecaa309db6914f"
   },
   "agent/cmd/agent/main.go": {
-    "mtime": 1792640418.430813,
-    "seen": 1792650332.9489803,
-    "ast_hash": "e42d084bd54dfafd9e1a212458c6a62e",
+    "mtime": 1792721656.6080978,
+    "seen": 1792721802.348417,
+    "ast_hash": "8acbb7efdaef5ae66c0d803b0915fc44",
     "semantic_hash": ""
   },
   "agent/cmd/agent/osinfo_darwin.go": {
@@ -1608,9 +1608,9 @@
     "semantic_hash": "56feaae18c22b74589921b0e4af54199"
   },
   "server/modules/device-management/handler.go": {
-    "mtime": 1792599694.9067545,
-    "seen": 1792650332.9501877,
-    "ast_hash": "e03f8d6e9c4a9659578879701babab26",
+    "mtime": 1792723350.0157926,
+    "seen": 1792724376.5264947,
+    "ast_hash": "61bfc24c53993a464bc1661be3474895",
     "semantic_hash": ""
   },
   "server/modules/device-management/helpers.go": {
@@ -1632,9 +1632,9 @@
     "semantic_hash": ""
   },
   "server/modules/device-management/inventory_handler.go": {
-    "mtime": 1792640422.3463557,
-    "seen": 1792650332.9502225,
-    "ast_hash": "dbc1205a7d52b456a030c1298bb55c27",
+    "mtime": 1792722577.1375325,
+    "seen": 1792723155.899115,
+    "ast_hash": "aa9d016882178d5f8a0849c4494c23c2",
     "semantic_hash": ""
   },
   "server/modules/device-management/inventory_model.go": {
@@ -1644,9 +1644,9 @@
     "semantic_hash": "889f1072fcb667edbc090f22ce238668"
   },
   "server/modules/device-management/inventory_repository.go": {
-    "mtime": 1792640422.3463557,
-    "seen": 1792650332.9502313,
-    "ast_hash": "1ff66925e254e1a41f5a2dffc02267f1",
+    "mtime": 1792722577.1375325,
+    "seen": 1792723155.8991241,
+    "ast_hash": "f1940d670d9be4a3820fc61e7b795047",
     "semantic_hash": ""
   },
   "server/modules/device-management/inventory_test.go": {
@@ -1656,10 +1656,10 @@
     "semantic_hash": "7d85367456d1449aa28dad5f015e2a40"
   },
   "server/modules/device-management/listpaged_test.go": {
-    "mtime": 1790330811.9873078,
-    "seen": 1792650332.950241,
-    "ast_hash": "d05ac2ccaa13a2c202886c6d5ee98376",
-    "semantic_hash": "d05ac2ccaa13a2c202886c6d5ee98376"
+    "mtime": 1792722577.1398592,
+    "seen": 1792723155.8991327,
+    "ast_hash": "b91bb0b6624d3a8b3ee68cce40436301",
+    "semantic_hash": ""
   },
   "server/modules/device-management/model.go": {
     "mtime": 1792467855.7814302,
@@ -1668,9 +1668,9 @@
     "semantic_hash": ""
   },
   "server/modules/device-management/repository.go": {
-    "mtime": 1792660965.9812014,
-    "seen": 1792661423.3764098,
-    "ast_hash": "906655671584be0ae1a4b5678b51f663",
+    "mtime": 1792722665.5769033,
+    "seen": 1792723155.8991551,
+    "ast_hash": "f397508033c9cce341769e14673c0a9f",
     "semantic_hash": ""
   },
   "server/modules/directory/diff.go": {
@@ -2244,10 +2244,10 @@
     "semantic_hash": "dcf574eb601bd1df7a07034ccc3b154c"
   },
   "web-console/scripts/test-devices-query.mjs": {
-    "mtime": 1791271138.653814,
-    "seen": 1792650332.9506664,
-    "ast_hash": "141070cf429b17f6d9cdb6dda476a257",
-    "semantic_hash": "141070cf429b17f6d9cdb6dda476a257"
+    "mtime": 1792722984.7200303,
+    "seen": 1792723155.8996315,
+    "ast_hash": "61de96b6c91fde3f6e76fe03e11c2d49",
+    "semantic_hash": ""
   },
   "web-console/src/App.tsx": {
     "mtime": 1792477294.0815997,
@@ -2262,9 +2262,9 @@
     "semantic_hash": ""
   },
   "web-console/src/components/DeviceDetailModal.tsx": {
-    "mtime": 1792652555.7633317,
-    "seen": 1792653260.8206334,
-    "ast_hash": "f28388b08d861edc102150b26b5b91ce",
+    "mtime": 1792723574.602136,
+    "seen": 1792724376.5275257,
+    "ast_hash": "94c82010976c6e08da9b9825a56230d1",
     "semantic_hash": ""
   },
   "web-console/src/components/EnrollTokenModal.tsx": {
@@ -2412,9 +2412,9 @@
     "semantic_hash": ""
   },
   "web-console/src/pages/DevicesPage.tsx": {
-    "mtime": 1792661026.953375,
-    "seen": 1792661423.3772402,
-    "ast_hash": "35496b128e1138b2c63a4f83bcc7d061",
+    "mtime": 1792723488.1548493,
+    "seen": 1792724376.528245,
+    "ast_hash": "dbc23ba7d65070711263e33efa4b637e",
     "semantic_hash": ""
   },
   "web-console/src/pages/GroupMembersModal.tsx": {
@@ -2490,15 +2490,15 @@
     "semantic_hash": ""
   },
   "web-console/src/pages/devicesQuery.ts": {
-    "mtime": 1792599875.2216938,
-    "seen": 1792650332.9510229,
-    "ast_hash": "a4dc5a31b6ca95da85ea7d90eb00ef5d",
+    "mtime": 1792722721.1453395,
+    "seen": 1792723155.900045,
+    "ast_hash": "38cebc1a3fa21d1f030dd29e4baca0d1",
     "semantic_hash": ""
   },
   "web-console/src/services/api.ts": {
-    "mtime": 1792650135.6407032,
-    "seen": 1792650332.9510493,
-    "ast_hash": "94b53b5ebd1238a24cd51df556f41028",
+    "mtime": 1792722721.1464322,
+    "seen": 1792723155.9000728,
+    "ast_hash": "c5d5246a453327b10ccbbf1f43ce01f2",
     "semantic_hash": ""
   },
   "web-console/src/types/api.ts": {
@@ -3516,15 +3516,15 @@
     "semantic_hash": ""
   },
   "web-console/src/i18n/locales/en/device_detail.json": {
-    "mtime": 1792652486.4498913,
-    "seen": 1792653260.8207412,
-    "ast_hash": "2767f2982da29bb2c38f76925cfc6a83",
+    "mtime": 1792723426.3932495,
+    "seen": 1792724376.527826,
+    "ast_hash": "0702afb372853858ec0dfa1e39b68fb5",
     "semantic_hash": ""
   },
   "web-console/src/i18n/locales/en/devices.json": {
-    "mtime": 1792661011.652114,
-    "seen": 1792661423.3769639,
-    "ast_hash": "cf1d9d0c8b5bf8752524ef90d73aa7f6",
+    "mtime": 1792723426.392249,
+    "seen": 1792724376.5278308,
+    "ast_hash": "cfb821d1dc943be61b30af0b22b35700",
     "semantic_hash": ""
   },
   "web-console/src/i18n/locales/en/enroll.json": {
@@ -3678,15 +3678,15 @@
     "semantic_hash": ""
   },
   "web-console/src/i18n/locales/id/device_detail.json": {
-    "mtime": 1792652486.4498913,
-    "seen": 1792653260.820803,
-    "ast_hash": "86742f47e7af29023bfea76b653f56d0",
+    "mtime": 1792723426.3942523,
+    "seen": 1792724376.5279922,
+    "ast_hash": "90847d413f0f0f50f4e4c16119c0a6b4",
     "semantic_hash": ""
   },
   "web-console/src/i18n/locales/id/devices.json": {
-    "mtime": 1792661011.6541135,
-    "seen": 1792661423.3770952,
-    "ast_hash": "7ab6cd90430718dacf5d4ae502658f37",
+    "mtime": 1792723426.3932495,
+    "seen": 1792724376.527998,
+    "ast_hash": "0ae992f6de03ea67acae1d6030586a3d",
     "semantic_hash": ""
   },
   "web-console/src/i18n/locales/id/enroll.json": {
@@ -4110,9 +4110,9 @@
     "semantic_hash": ""
   },
   "server/modules/device-management/filters_test.go": {
-    "mtime": 1792570374.9667785,
-    "seen": 1792650332.950183,
-    "ast_hash": "ae91935d46f9de48f5f031e32771ae72",
+    "mtime": 1792722615.6654077,
+    "seen": 1792723155.8990881,
+    "ast_hash": "861aec5899545b7b5a6d3773df298f78",
     "semantic_hash": ""
   },
   "server/modules/device-management/retire_lifecycle_test.go": {
@@ -4290,9 +4290,9 @@
     "semantic_hash": ""
   },
   "web-console/src/pages/honestPages.test.tsx": {
-    "mtime": 1792571438.6446576,
-    "seen": 1792650332.951026,
-    "ast_hash": "0fc84e7cec0661b74e3e8cbed619b338",
+    "mtime": 1792723463.4702864,
+    "seen": 1792724376.52839,
+    "ast_hash": "960701d834063ee22430a04944a4a697",
     "semantic_hash": ""
   },
   "web-console/src/pages/settings/restorePoller.test.ts": {
@@ -4650,9 +4650,9 @@
     "semantic_hash": ""
   },
   "CHANGELOG.md": {
-    "mtime": 1792717475.2900653,
-    "seen": 1792717561.7237866,
-    "ast_hash": "1fdc934807f7672aea5a0e6e3d27afb0",
+    "mtime": 1792724051.4296525,
+    "seen": 1792724376.5286126,
+    "ast_hash": "837a8934b654c0fc801d3b5550cbfd38",
     "semantic_hash": ""
   },
   "docs/architecture/policy-resolution.md": {
@@ -4698,9 +4698,9 @@
     "semantic_hash": ""
   },
   "web-console/src/components/DeviceDetailModal.test.tsx": {
-    "mtime": 1792652516.5481925,
-    "seen": 1792653260.820631,
-    "ast_hash": "5e31dd45618073e2c905e26ed104f043",
+    "mtime": 1792723488.3102105,
+    "seen": 1792724376.5275195,
+    "ast_hash": "f3522c9631d2cab592c43fe13f648d6c",
     "semantic_hash": ""
   },
   "docs/architecture/inventory-collection.md": {
@@ -4731,6 +4731,60 @@
     "mtime": 1792661070.183546,
     "seen": 1792661423.3773432,
     "ast_hash": "12ff35c8cdccc63f512542bc68e85e3a",
+    "semantic_hash": ""
+  },
+  "agent/cmd/agent/install_record_other.go": {
+    "mtime": 1792721656.5211918,
+    "seen": 1792721802.3483956,
+    "ast_hash": "144ea171d014ee6b09e03b922e456f2d",
+    "semantic_hash": ""
+  },
+  "agent/cmd/agent/install_record_windows.go": {
+    "mtime": 1792721656.4921083,
+    "seen": 1792721802.3484,
+    "ast_hash": "26d2946949e27dc9ac2e4fa06ae82357",
+    "semantic_hash": ""
+  },
+  "agent/windows/install_record_windows.go": {
+    "mtime": 1792721710.0919757,
+    "seen": 1792721802.348972,
+    "ast_hash": "1c4a9831d8b58a61bd4a30dd6bbbcaf2",
+    "semantic_hash": ""
+  },
+  "agent/windows/install_record_windows_test.go": {
+    "mtime": 1792721696.041836,
+    "seen": 1792721802.3489752,
+    "ast_hash": "7e3216e6b11848a3b662c67a62245f58",
+    "semantic_hash": ""
+  },
+  "packaging/icons/make_agent_icon.py": {
+    "mtime": 1792721599.2878816,
+    "seen": 1792721802.3490243,
+    "ast_hash": "459b777b0c12683725866197069d3bf9",
+    "semantic_hash": ""
+  },
+  "packaging/icons/endpoint-agent.svg": {
+    "mtime": 1792721599.2483325,
+    "seen": 1792721802.3524964,
+    "ast_hash": "5d5a2b0e14244a6c5482073a955c209e",
+    "semantic_hash": ""
+  },
+  "server/modules/device-management/agent_filter_test.go": {
+    "mtime": 1792722647.666961,
+    "seen": 1792723155.899022,
+    "ast_hash": "8d2e0a70188a67f3110ec2f65b4cd95b",
+    "semantic_hash": ""
+  },
+  "web-console/src/pages/devicesQuery.test.ts": {
+    "mtime": 1792722732.3236406,
+    "seen": 1792723155.900042,
+    "ast_hash": "c2240b40c7ceb85c1aa1f568ac2d3d4e",
+    "semantic_hash": ""
+  },
+  "server/modules/device-management/update_site_test.go": {
+    "mtime": 1792723334.0246606,
+    "seen": 1792724376.5266242,
+    "ast_hash": "c9dd527b89fe2eb96e7b99b184b785a5",
     "semantic_hash": ""
   }
 }
