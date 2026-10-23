@@ -16,6 +16,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/henokakunemail-stack/Endpoint-Manager/agent/shared/transport"
@@ -35,12 +36,26 @@ type UpdateParams struct {
 	Manifest *SignedManifest `json:"manifest,omitempty"`
 }
 
+// downloadMaxDuration is the ceiling on fetching a release. It is generous on
+// purpose: a slow link is not a failure, a link that stops is, and
+// stallTimeout catches that much sooner.
+const downloadMaxDuration = 30 * time.Minute
+
+// downloadStallTimeout is how long a release download may go without receiving
+// any data before it is abandoned.
+const downloadStallTimeout = 60 * time.Second
+
 type Engine struct {
 	serverURL    string
 	deviceID     string
 	deviceSecret string
 	client       *http.Client
-	execPath     string
+	// downloadClient fetches the release. client's 60 second limit covers
+	// reading the whole body, which a PC on a slow link cannot meet for an
+	// 11 MB agent even while data is arriving.
+	downloadClient *http.Client
+	stallTimeout   time.Duration
+	execPath       string
 	// publicKey is the trusted release-signing key. Nil means the agent was not
 	// built/configured with one, in which case signed verification is skipped
 	// and only the checksum applies. That is a build-time decision, not a
@@ -58,11 +73,27 @@ type Engine struct {
 func NewEngine(serverURL, deviceID, deviceSecret string) *Engine {
 	cleanURL := strings.TrimRight(strings.TrimSpace(serverURL), "/")
 	return &Engine{
-		serverURL:    cleanURL,
-		deviceID:     deviceID,
-		deviceSecret: deviceSecret,
-		client:       transport.NewHTTPClient(60 * time.Second),
+		serverURL:      cleanURL,
+		deviceID:       deviceID,
+		deviceSecret:   deviceSecret,
+		client:         transport.NewHTTPClient(60 * time.Second),
+		downloadClient: transport.NewHTTPClient(downloadMaxDuration),
+		stallTimeout:   downloadStallTimeout,
 	}
+}
+
+// progressReader calls onRead whenever a read returns data.
+type progressReader struct {
+	r      io.Reader
+	onRead func()
+}
+
+func (p *progressReader) Read(b []byte) (int, error) {
+	n, err := p.r.Read(b)
+	if n > 0 {
+		p.onRead()
+	}
+	return n, err
 }
 
 // WithSigningKey trusts the given public key for release manifests and sets
@@ -107,7 +138,24 @@ func (e *Engine) ApplyUpdate(ctx context.Context, params UpdateParams) error {
 		fullDownloadURL = e.serverURL + fullDownloadURL
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fullDownloadURL, nil)
+	// The download is cancelled when no data has arrived for stallTimeout, and
+	// the watchdog is pushed back on every read that returns data.
+	dlCtx, cancelDownload := context.WithCancel(ctx)
+	defer cancelDownload()
+	var stalled atomic.Bool
+	watchdog := time.AfterFunc(e.stallTimeout, func() {
+		stalled.Store(true)
+		cancelDownload()
+	})
+	defer watchdog.Stop()
+	stallErr := func(err error) error {
+		if stalled.Load() {
+			return fmt.Errorf("download stalled: no data received for %s", e.stallTimeout)
+		}
+		return err
+	}
+
+	req, err := http.NewRequestWithContext(dlCtx, http.MethodGet, fullDownloadURL, nil)
 	if err != nil {
 		_ = e.ReportProgress(ctx, params.TaskID, "failed", params.TargetVersion, err.Error())
 		return fmt.Errorf("create download request: %w", err)
@@ -115,8 +163,9 @@ func (e *Engine) ApplyUpdate(ctx context.Context, params UpdateParams) error {
 	req.Header.Set("X-Device-Id", e.deviceID)
 	req.Header.Set("X-Device-Secret", e.deviceSecret)
 
-	resp, err := e.client.Do(req)
+	resp, err := e.downloadClient.Do(req)
 	if err != nil {
+		err = stallErr(err)
 		_ = e.ReportProgress(ctx, params.TaskID, "failed", params.TargetVersion, err.Error())
 		return fmt.Errorf("download binary: %w", err)
 	}
@@ -148,9 +197,11 @@ func (e *Engine) ApplyUpdate(ctx context.Context, params UpdateParams) error {
 
 	hasher := sha256.New()
 	writer := io.MultiWriter(f, hasher)
-	_, err = io.Copy(writer, resp.Body)
+	_, err = io.Copy(writer, &progressReader{r: resp.Body, onRead: func() { watchdog.Reset(e.stallTimeout) }})
+	watchdog.Stop()
 	_ = f.Close()
 	if err != nil {
+		err = stallErr(err)
 		_ = os.Remove(tempFile)
 		_ = e.ReportProgress(ctx, params.TaskID, "failed", params.TargetVersion, err.Error())
 		return fmt.Errorf("save download stream: %w", err)
