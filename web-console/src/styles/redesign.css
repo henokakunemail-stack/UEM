@@ -351,6 +351,13 @@ button.site-row { width: 100%; border: 0; font: inherit; text-align: left; }
 /* Page hooks. The shell supplies the page chrome; these stay as stable
    descendant hooks for module-specific overrides. */
 .dashboard-page, .devices-page, .audit-page { min-width: 0; }
+/* The device row's eight action buttons sat on one line, 325px of a table
+   that then ran past its card below 1366px; they wrap instead. The audit
+   trail's ids and JSON details have no spaces to break at, so its cells break
+   anywhere rather than push the table 150px past the card at 1024px. */
+.devices-page .row-actions { flex-wrap: wrap; }
+.audit-page .data-table td { overflow-wrap: anywhere; }
+.audit-page .actor-badge { display: inline; white-space: normal; overflow-wrap: anywhere; }
 
 /* Remote desktop: the canvas shows an arbitrary endpoint screen, so it keeps a
    fixed dark ground in both themes; the surrounding chrome uses theme tokens. */

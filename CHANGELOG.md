@@ -22,6 +22,10 @@ Riwayat sebelum v1.5.4 ada di `git log`.
 - **Tabel di menu Remote control terpotong.** Daftar Online endpoints dan Session history dipaksa selebar minimal
   720 px, lebih lebar dari kartunya, sehingga kolom Last heartbeat dan tombol Start terpotong di tepi kartu. Kedua tabel
   kini menyesuaikan lebar kartunya (diuji pada layar 1280–1920 px). Hanya console; agen tidak perlu di-update.
+- **Tabel Devices dan Audit trail meluber keluar kartu di layar kecil.** Delapan tombol aksi Devices dipaksa satu baris,
+  dan ID serta detail JSON di Audit trail tidak bisa dipatahkan, sehingga kolom terakhir terpotong di layar 1024–1366 px.
+  Tombol aksi kini turun ke baris berikutnya dan teks panjang dipatahkan. Seluruh 22 halaman console (semua menu,
+  sub-menu, dan tab) dipindai otomatis di layar 1024, 1280, 1366, 1536, dan 1920 px; tidak ada lagi tabel yang terpotong.
 
 ## [1.5.7] - 2026-10-23
 
