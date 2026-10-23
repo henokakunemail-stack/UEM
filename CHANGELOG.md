@@ -36,8 +36,13 @@ Riwayat sebelum v1.5.4 ada di `git log`.
   kini menyesuaikan lebar kartunya (diuji pada layar 1280–1920 px). Hanya console; agen tidak perlu di-update.
 - **Tabel Devices dan Audit trail meluber keluar kartu di layar kecil.** Delapan tombol aksi Devices dipaksa satu baris,
   dan ID serta detail JSON di Audit trail tidak bisa dipatahkan, sehingga kolom terakhir terpotong di layar 1024–1366 px.
-  Tombol aksi kini turun ke baris berikutnya dan teks panjang dipatahkan. Seluruh 22 halaman console (semua menu,
-  sub-menu, dan tab) dipindai otomatis di layar 1024, 1280, 1366, 1536, dan 1920 px; tidak ada lagi tabel yang terpotong.
+  Tombol aksi kini turun ke baris berikutnya dan teks panjang dipatahkan.
+- **Tabel Release Catalog di menu Agent updates meluber keluar kartu.** Nama file release dan ID pengunggahnya tidak
+  punya spasi untuk dipatahkan, sehingga tabel 79 px lebih lebar dari kartunya di layar 1280 px (layar 1920 px dengan
+  skala 150%) dan kolom Status terpotong. Sel tabel di halaman Agent updates (release, kampanye, dan log) kini
+  dipatahkan. Pemindaian sebelumnya tidak menangkap ini karena tabel release di server uji masih kosong; seluruh
+  24 halaman dan tab console kini dipindai ulang dengan data release, kampanye, site, dan audit di layar 1024–1920 px.
+  Hanya console; agen tidak perlu di-update.
 
 ## [1.5.7] - 2026-10-23
 

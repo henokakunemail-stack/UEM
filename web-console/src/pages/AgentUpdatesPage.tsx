@@ -410,7 +410,7 @@ export const AgentUpdatesPage: React.FC<AgentUpdatesPageProps> = ({ activeTab: s
   }
 
   return (
-    <div className="page-container">
+    <div className="page-container agent-updates-page">
       <div className="page-header">
         <div>
           <h2 className="page-title">{t('updates.title')}</h2>
