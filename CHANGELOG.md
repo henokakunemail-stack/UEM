@@ -10,6 +10,13 @@ Riwayat sebelum v1.5.4 ada di `git log`.
 
 ## [Unreleased]
 
+## [1.5.9] - 2026-10-23
+
+- Server Linux bisa diperbarui dengan `update.sh`. Remote desktop yang lebih lancar dan unduhan update yang tidak lagi
+  terputus di koneksi lambat memerlukan agen v1.5.9: perbarui agen dari **Agent Updates → Impor dari Paket Server**,
+  lalu jalankan kampanye ke 1.5.9. Agen 1.5.8 mengunduh v1.5.9 dengan cara lama (batas 60 detik); bila ada PC yang
+  gagal, jalankan ulang kampanye.
+
 ### Ditambahkan
 - **Ubah site langsung dari baris perangkat di menu Devices** (admin dan technician). Di v1.5.8 site hanya bisa diubah
   lewat checkbox dan bar seleksi, atau lewat ikon pensil di detail perangkat; badge SITE di baris tabel tidak bisa
