@@ -222,9 +222,9 @@
     "semantic_hash": "45ee77e9a6e1f14f4336371579756c0c"
   },
   "agent/shared/osinfo/osinfo.go": {
-    "mtime": 1792728910.8272452,
-    "seen": 1792729005.5172718,
-    "ast_hash": "7deae2fb0a4e45e49a3ce8b085497fb7",
+    "mtime": 1792770942.7113085,
+    "seen": 1792770971.5009234,
+    "ast_hash": "d040b59a2db392d6ff019e5099367867",
     "semantic_hash": ""
   },
   "agent/shared/patch/classify_windows_test.go": {
@@ -324,8 +324,8 @@
     "semantic_hash": ""
   },
   "agent/shared/remotecontrol/capture_windows.go": {
-    "mtime": 1792600748.8505733,
-    "seen": 1792650332.9491777,
+    "mtime": 1792767938.695961,
+    "seen": 1792770971.5010717,
     "ast_hash": "955449c5a9c585489aed1d95329048b9",
     "semantic_hash": ""
   },
@@ -336,9 +336,9 @@
     "semantic_hash": "397a980adda91a0c9503537606877ad2"
   },
   "agent/shared/remotecontrol/damage.go": {
-    "mtime": 1792463236.3800738,
-    "seen": 1792650332.94919,
-    "ast_hash": "0d5230d596ea904240a2e2812d4c459a",
+    "mtime": 1792770741.7470343,
+    "seen": 1792770971.5010924,
+    "ast_hash": "f97d48df79eec257e8134eb78b6ea4a4",
     "semantic_hash": ""
   },
   "agent/shared/remotecontrol/damage_test.go": {
@@ -348,9 +348,9 @@
     "semantic_hash": ""
   },
   "agent/shared/remotecontrol/session.go": {
-    "mtime": 1792650143.378798,
-    "seen": 1792650332.9492247,
-    "ast_hash": "d3f74318c2530c1ee7ce70ac31196a2f",
+    "mtime": 1792770741.9180276,
+    "seen": 1792770971.501205,
+    "ast_hash": "8ff1ce7de119a6fee5f7fb01303cc320",
     "semantic_hash": ""
   },
   "agent/shared/remotecontrol/session0_commandline_test.go": {
@@ -2298,9 +2298,9 @@
     "semantic_hash": ""
   },
   "web-console/src/components/RemoteControlModal.tsx": {
-    "mtime": 1792600748.9024622,
-    "seen": 1792650332.9507275,
-    "ast_hash": "eee981fa56381bd091aae575ef1d459c",
+    "mtime": 1792770036.771483,
+    "seen": 1792770971.5052211,
+    "ast_hash": "2c5e825c811d67abfa759a89eb08d36f",
     "semantic_hash": ""
   },
   "web-console/src/components/RemoteExecModal.tsx": {
@@ -3222,9 +3222,9 @@
     "semantic_hash": ""
   },
   "agent/shared/remotecontrol/features.go": {
-    "mtime": 1792600748.85257,
-    "seen": 1792650332.949195,
-    "ast_hash": "a9e27583f145c9a6805d86ac1fac8248",
+    "mtime": 1792770741.7849364,
+    "seen": 1792770971.5011046,
+    "ast_hash": "584d7e8d66776380557b8d01c64def5d",
     "semantic_hash": ""
   },
   "agent/shared/remotecontrol/features_session_test.go": {
@@ -3576,9 +3576,9 @@
     "semantic_hash": ""
   },
   "web-console/src/i18n/locales/en/remote_control.json": {
-    "mtime": 1792600748.9024622,
-    "seen": 1792650332.9508274,
-    "ast_hash": "6ca832e3eb95ed0f1542f22269e052b6",
+    "mtime": 1792769854.8938565,
+    "seen": 1792770971.505469,
+    "ast_hash": "17c30e2ddf3126f9fd21dc16b06066f4",
     "semantic_hash": ""
   },
   "web-console/src/i18n/locales/en/remote_exec.json": {
@@ -3738,9 +3738,9 @@
     "semantic_hash": ""
   },
   "web-console/src/i18n/locales/id/remote_control.json": {
-    "mtime": 1792600748.9024622,
-    "seen": 1792650332.9508905,
-    "ast_hash": "90ce6dfc667ff8f093c27d32bddae579",
+    "mtime": 1792769854.8958583,
+    "seen": 1792770971.5056527,
+    "ast_hash": "58851f3ef5b52390c3cfcf9d30985cab",
     "semantic_hash": ""
   },
   "web-console/src/i18n/locales/id/remote_exec.json": {
@@ -3816,9 +3816,9 @@
     "semantic_hash": ""
   },
   "web-console/src/components/RemoteControlModal.test.tsx": {
-    "mtime": 1792472505.9484923,
-    "seen": 1792650332.9507241,
-    "ast_hash": "9c74cc5c1ced73415d9a8bb368938bde",
+    "mtime": 1792769857.4015403,
+    "seen": 1792770971.505214,
+    "ast_hash": "5fcb19c5c364868761d93f0e9a436a4c",
     "semantic_hash": ""
   },
   "web-console/src/pages/DashboardPage.test.tsx": {
@@ -4650,9 +4650,9 @@
     "semantic_hash": ""
   },
   "CHANGELOG.md": {
-    "mtime": 1792746618.9338598,
-    "seen": 1792746647.0966601,
-    "ast_hash": "baa8c018206db9fdd01b9eb38e558d16",
+    "mtime": 1792770937.9886415,
+    "seen": 1792770971.5061834,
+    "ast_hash": "8d3924b04861b513ed11ef9569b8a456",
     "semantic_hash": ""
   },
   "docs/architecture/policy-resolution.md": {
@@ -4797,6 +4797,30 @@
     "mtime": 1792744495.9620848,
     "seen": 1792744734.606991,
     "ast_hash": "d1610289b1849f1137fd91225acfb2c6",
+    "semantic_hash": ""
+  },
+  "agent/shared/remotecontrol/pipeline_bench_test.go": {
+    "mtime": 1792768565.5383136,
+    "seen": 1792770971.5011663,
+    "ast_hash": "6f76f82a22b6bb950f5586d67a1fb34b",
+    "semantic_hash": ""
+  },
+  "agent/shared/remotecontrol/pipeline_test.go": {
+    "mtime": 1792770741.8271997,
+    "seen": 1792770971.5011725,
+    "ast_hash": "d75518b3f5b40730d42cc8e3f6b45e95",
+    "semantic_hash": ""
+  },
+  "agent/shared/remotecontrol/scale.go": {
+    "mtime": 1792770741.870361,
+    "seen": 1792770971.501193,
+    "ast_hash": "8b0331400aa0e031d4ae6ccc81299621",
+    "semantic_hash": ""
+  },
+  "agent/shared/remotecontrol/scale_test.go": {
+    "mtime": 1792770741.9130342,
+    "seen": 1792770971.5011985,
+    "ast_hash": "71825366557ebf0fef77eef8d1368b10",
     "semantic_hash": ""
   }
 }
