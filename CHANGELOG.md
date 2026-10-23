@@ -16,6 +16,13 @@ Riwayat sebelum v1.5.4 ada di `git log`.
   diklik, sehingga fitur itu tidak ditemukan. Kini badge SITE punya ikon pensil: klik, ketik site (bisa memilih site yang
   sudah ada), lalu Enter atau ✓; Esc membatalkan. Perangkat retired tidak bisa diubah. Hanya console.
 
+### Diubah
+- **README ditulis ulang.** Ringkasan fitur, tabel dukungan per platform (Windows/Linux/macOS), diagram arsitektur,
+  langkah cepat instalasi server dan agen, tabel konfigurasi, roadmap, dan FAQ. Setiap klaim dicocokkan dengan kode,
+  sehingga beberapa kesalahan di README lama ikut diperbaiki: versi Go (kini 1.26.8+, bukan 1.23+), paket `.deb` yang
+  tidak ada di rilis, nama paket macOS, opsi PostgreSQL (`DB_DRIVER` + `DB_URL`), jadwal "cron" (yang ada interval),
+  dan opsi installer Windows yang harus diberi tanda kutip (`/SERVER="https://..."`).
+
 ### Diperbaiki
 - **Update agen gagal di PC dengan koneksi lambat** ("context deadline exceeded (Client.Timeout or context cancellation
   while reading body)"). Agen mengunduh binary update dengan batas total 60 detik, sehingga PC yang koneksinya di bawah
