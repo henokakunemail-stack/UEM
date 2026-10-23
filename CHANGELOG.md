@@ -10,6 +10,12 @@ Riwayat sebelum v1.5.4 ada di `git log`.
 
 ## [Unreleased]
 
+### Ditambahkan
+- **Ubah site langsung dari baris perangkat di menu Devices** (admin dan technician). Di v1.5.8 site hanya bisa diubah
+  lewat checkbox dan bar seleksi, atau lewat ikon pensil di detail perangkat; badge SITE di baris tabel tidak bisa
+  diklik, sehingga fitur itu tidak ditemukan. Kini badge SITE punya ikon pensil: klik, ketik site (bisa memilih site yang
+  sudah ada), lalu Enter atau ✓; Esc membatalkan. Perangkat retired tidak bisa diubah. Hanya console.
+
 ### Diperbaiki
 - **Update agen gagal di PC dengan koneksi lambat** ("context deadline exceeded (Client.Timeout or context cancellation
   while reading body)"). Agen mengunduh binary update dengan batas total 60 detik, sehingga PC yang koneksinya di bawah

@@ -71,6 +71,8 @@
   "site_set_title": "Site Diperbarui",
   "site_set_partial": "{site} diterapkan ke {ok} perangkat; {failed} gagal diperbarui",
   "site_set_failed_title": "Sebagian Perangkat Gagal",
+  "site_edit_row": "Ubah site {hostname}",
+  "site_row_input": "Site untuk {hostname}",
   "no_groups_hint": "Belum ada grup. Buat grup di tab Grup untuk menargetkan sekumpulan perangkat dalam satu eksekusi.",
   "filter_hint": "Menampilkan {shown} dari {page_count} perangkat di halaman ini yang cocok dengan “{q}”. Kosongkan kotak untuk melihat semua {total}.",
   "table_label": "Perangkat armada",

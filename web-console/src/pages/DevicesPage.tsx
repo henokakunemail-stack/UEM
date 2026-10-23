@@ -37,6 +37,7 @@ import type { DeviceDTO, DeviceGroupDTO, DeviceListResponse } from '../types/api
 import { PAGE_SIZES, UNKNOWN_AGENT_VERSION, buildDevicesQuery, parseDevicesQuery } from './devicesQuery'
 import type { DeviceStatus } from './devicesQuery'
 import { DeviceGroupsPanel } from './DeviceGroupsPanel'
+import { DeviceSiteCell } from './DeviceSiteCell'
 import { GroupMembersModal } from './GroupMembersModal'
 import { EnrollTokenModal } from '../components/EnrollTokenModal'
 import { useT } from '../i18n/core'
@@ -613,6 +614,17 @@ export const DevicesPage: React.FC<{
         </div>
       </div>
 
+      {/* Site suggestions for the selection bar and each row's site editor. */}
+      {canManage && (
+        <datalist id="device-site-options">
+          {siteOptions
+            .filter((s) => s !== 'unassigned')
+            .map((s) => (
+              <option key={s} value={s} />
+            ))}
+        </datalist>
+      )}
+
       {/* Selection bar. Only rendered when something is checked, so the page is
           unchanged for the common case of reading the fleet without editing it. */}
       {canSelect && selected.size > 0 && (
@@ -636,13 +648,6 @@ export const DevicesPage: React.FC<{
               placeholder={t('devices.site_placeholder')}
               aria-label={t('devices.site_input_label')}
             />
-            <datalist id="device-site-options">
-              {siteOptions
-                .filter((s) => s !== 'unassigned')
-                .map((s) => (
-                  <option key={s} value={s} />
-                ))}
-            </datalist>
             <button
               type="button"
               className="btn btn-primary"
@@ -848,7 +853,15 @@ export const DevicesPage: React.FC<{
                       </div>
                     </td>
                     <td data-label={t('devices.col_site')}>
-                      <span className="site-badge">{d.site || t('devices.site_unassigned')}</span>
+                      <DeviceSiteCell
+                        device={d}
+                        canEdit={canManage && !isRetired}
+                        suggestionsId="device-site-options"
+                        onSaved={() => {
+                          fetchDevices()
+                          reloadSiteOptions()
+                        }}
+                      />
                     </td>
                     <td data-label={t('devices.col_agent')}>
                       <span className="font-mono text-sm">{d.agent_version || '—'}</span>

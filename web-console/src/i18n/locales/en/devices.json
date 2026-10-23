@@ -71,6 +71,8 @@
   "site_set_title": "Site Updated",
   "site_set_partial": "{site} set on {ok} device(s); {failed} could not be updated",
   "site_set_failed_title": "Some Devices Not Updated",
+  "site_edit_row": "Change site of {hostname}",
+  "site_row_input": "Site for {hostname}",
   "no_groups_hint": "No groups exist yet. Create one on the Groups tab to target a set of devices with a single run.",
   "filter_hint": "Showing {shown} of {page_count} endpoints on this page matching “{q}”. Clear the box to see all {total}.",
   "table_label": "Fleet endpoints",

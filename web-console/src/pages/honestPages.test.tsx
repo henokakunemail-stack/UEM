@@ -156,6 +156,31 @@ describe('DevicesPage', () => {
     wrap(<DevicesPage />)
     const row = (await screen.findByText('PC-A')).closest('tr') as HTMLElement
     expect(within(row).queryByRole('checkbox')).toBeNull()
+    expect(within(row).queryByRole('button', { name: 'Change site of PC-A' })).toBeNull()
+  })
+
+  // The site was editable from the selection bar and the device detail, but
+  // not from the Site badge in the row, which is where an admin looked for it
+  // and concluded it could not be changed.
+  it("lets an admin change a device's site from its row", async () => {
+    const now = new Date().toISOString()
+    api.getDevices.mockResolvedValue({
+      devices: [
+        device({ id: 'a', hostname: 'PC-A', status: 'online', last_seen_at: now }),
+        device({ id: 'old', hostname: 'OLD-1', status: 'offline', retired_at: now }),
+      ],
+      count: 2, total: 2, limit: 20, offset: 0,
+    })
+    api.updateDevice.mockResolvedValue(device({ id: 'a', hostname: 'PC-A', site: 'Cabang Surabaya' }))
+    wrap(<DevicesPage />)
+    const row = (await screen.findByText('PC-A')).closest('tr') as HTMLElement
+    fireEvent.click(within(row).getByRole('button', { name: 'Change site of PC-A' }))
+    fireEvent.change(within(row).getByLabelText('Site for PC-A'), { target: { value: '  Cabang Surabaya ' } })
+    fireEvent.click(within(row).getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(api.updateDevice).toHaveBeenCalledWith('a', { site: 'Cabang Surabaya' }))
+    // A retired device is not a fleet member; its site stays as it was.
+    const retired = screen.getByText('OLD-1').closest('tr') as HTMLElement
+    expect(within(retired).queryByRole('button', { name: 'Change site of OLD-1' })).toBeNull()
   })
 
   // Bulk delete sent every selected id, swallowed each failure, and reported
