@@ -544,14 +544,14 @@ export const AgentUpdatesPage: React.FC<AgentUpdatesPageProps> = ({ activeTab: s
                       <td>
                         <span className="os-badge">{r.os_name} / {r.arch}</span>
                       </td>
-                      <td className="font-mono text-sm">{r.file_name}</td>
+                      <td className="font-mono text-sm cell-break">{r.file_name}</td>
                       <td>{formatFileSize(r.file_size)}</td>
                       <td>
                         <span className="font-mono text-sm text-dim" title={r.sha256_checksum}>
                           {r.sha256_checksum ? r.sha256_checksum.slice(0, 16) + '...' : '—'}
                         </span>
                       </td>
-                      <td>{r.uploaded_by}</td>
+                      <td className="cell-break">{r.uploaded_by}</td>
                       <td className="text-sm text-muted">{new Date(r.created_at).toLocaleString()}</td>
                       <td>
                         <span className={`status-pill ${r.is_active ? 'online' : 'offline'}`}>
@@ -874,7 +874,7 @@ export const AgentUpdatesPage: React.FC<AgentUpdatesPageProps> = ({ activeTab: s
                             <td>
                               <span className="os-badge">{task.os_name || 'windows'}</span>
                             </td>
-                            <td>
+                            <td style={{ whiteSpace: 'nowrap' }}>
                               <span className="text-muted" style={{ fontSize: '0.85rem' }}>v{task.from_version}</span>
                               <span style={{ margin: '0 4px' }}>→</span>
                               <span className="font-semibold text-primary" style={{ fontSize: '0.85rem' }}>v{task.target_version}</span>

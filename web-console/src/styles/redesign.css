@@ -359,9 +359,10 @@ button.site-row { width: 100%; border: 0; font: inherit; text-align: left; }
 .audit-page .data-table td { overflow-wrap: anywhere; }
 .audit-page .actor-badge { display: inline; white-space: normal; overflow-wrap: anywhere; }
 /* Agent updates: a release row's file name and uploader id have no spaces, and
-   pushed the release catalog 79px past its card at 1280px; campaign and log
-   rows carry device ids and agent errors of the same kind. */
-.agent-updates-page .data-table td { overflow-wrap: anywhere; }
+   pushed the release catalog 79px past its card at 1280px. Only those cells
+   break anywhere: applied to every cell, it let the table squeeze the campaign
+   version column until "v1.5.8" split across two lines. */
+.agent-updates-page .cell-break { overflow-wrap: anywhere; }
 
 /* Remote desktop: the canvas shows an arbitrary endpoint screen, so it keeps a
    fixed dark ground in both themes; the surrounding chrome uses theme tokens. */

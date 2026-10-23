@@ -10,6 +10,17 @@ Riwayat sebelum v1.5.4 ada di `git log`.
 
 ## [Unreleased]
 
+### Diperbaiki
+- **Update agen gagal di PC dengan koneksi lambat** ("context deadline exceeded (Client.Timeout or context cancellation
+  while reading body)"). Agen mengunduh binary update dengan batas total 60 detik, sehingga PC yang koneksinya di bawah
+  ±1,5 Mbps tidak pernah selesai mengunduh agen 11 MB, walaupun data terus masuk. Unduhan kini hanya dibatalkan bila
+  tidak ada data masuk selama 60 detik (batas atas 30 menit), dan pesan errornya menyebut unduhan macet. Perbaikan ini
+  ada di agen, jadi berlaku untuk update berikutnya setelah agen memakai versi yang memuatnya. PC yang gagal sekarang
+  bisa dicoba lagi dengan kampanye baru ke versi yang sama: PC yang sudah di versi itu dilewati.
+- **Versi di daftar perangkat kampanye terpecah dua baris** ("v1.5." dan "8"). Efek samping perbaikan tabel Release
+  Catalog di v1.5.8: semua sel tabel Agent updates boleh dipatahkan di mana saja, sehingga kolom versi terjepit. Kini
+  hanya nama file dan ID pengunggah release yang dipatahkan, dan versi selalu satu baris. Hanya console.
+
 ## [1.5.8] - 2026-10-23
 
 - Filter versi agent, ubah site, dan perbaikan tabel yang terpotong ada di console server v1.5.8. Server Linux bisa
