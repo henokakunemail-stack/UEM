@@ -222,9 +222,9 @@
     "semantic_hash": "45ee77e9a6e1f14f4336371579756c0c"
   },
   "agent/shared/osinfo/osinfo.go": {
-    "mtime": 1792770942.7113085,
-    "seen": 1792770971.5009234,
-    "ast_hash": "d040b59a2db392d6ff019e5099367867",
+    "mtime": 1792857610.6322823,
+    "seen": 1792857658.085607,
+    "ast_hash": "f8d0586bbbb29860d528b84b8b38fd17",
     "semantic_hash": ""
   },
   "agent/shared/patch/classify_windows_test.go": {
@@ -324,9 +324,9 @@
     "semantic_hash": ""
   },
   "agent/shared/remotecontrol/capture_windows.go": {
-    "mtime": 1792767938.695961,
-    "seen": 1792770971.5010717,
-    "ast_hash": "955449c5a9c585489aed1d95329048b9",
+    "mtime": 1792856099.9460893,
+    "seen": 1792857658.0857534,
+    "ast_hash": "ddcdef20c8c65b14a3fba4ca4f3c5af4",
     "semantic_hash": ""
   },
   "agent/shared/remotecontrol/capture_windows_test.go": {
@@ -348,9 +348,9 @@
     "semantic_hash": ""
   },
   "agent/shared/remotecontrol/session.go": {
-    "mtime": 1792770741.9180276,
-    "seen": 1792770971.501205,
-    "ast_hash": "8ff1ce7de119a6fee5f7fb01303cc320",
+    "mtime": 1792855953.90451,
+    "seen": 1792857658.0859149,
+    "ast_hash": "7dbc814d652becf5c40a00315617e624",
     "semantic_hash": ""
   },
   "agent/shared/remotecontrol/session0_commandline_test.go": {
@@ -4650,9 +4650,9 @@
     "semantic_hash": ""
   },
   "CHANGELOG.md": {
-    "mtime": 1792770937.9886415,
-    "seen": 1792770971.5061834,
-    "ast_hash": "8d3924b04861b513ed11ef9569b8a456",
+    "mtime": 1792857595.3431113,
+    "seen": 1792857658.0916183,
+    "ast_hash": "15f09820f0e2189ae798a7e89ca0e676",
     "semantic_hash": ""
   },
   "docs/architecture/policy-resolution.md": {
@@ -4821,6 +4821,24 @@
     "mtime": 1792770741.9130342,
     "seen": 1792770971.5011985,
     "ast_hash": "71825366557ebf0fef77eef8d1368b10",
+    "semantic_hash": ""
+  },
+  "agent/shared/remotecontrol/dxgi_fallback_windows_test.go": {
+    "mtime": 1792856544.0756488,
+    "seen": 1792857658.08579,
+    "ast_hash": "e2d77b451ac17d2e86de4428f106ee96",
+    "semantic_hash": ""
+  },
+  "agent/shared/remotecontrol/dxgi_source_test.go": {
+    "mtime": 1792856493.2572124,
+    "seen": 1792857658.0857964,
+    "ast_hash": "42d6c12cf346ecb671df34227f962f08",
+    "semantic_hash": ""
+  },
+  "agent/shared/remotecontrol/dxgi_windows.go": {
+    "mtime": 1792857463.9022448,
+    "seen": 1792857658.0858026,
+    "ast_hash": "3b8ae5f1107492a5381d881db486a004",
     "semantic_hash": ""
   }
 }
