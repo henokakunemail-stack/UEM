@@ -10,6 +10,24 @@ Riwayat sebelum v1.5.4 ada di `git log`.
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-10-24
+
+- Perlu agen v1.6.0: perbarui agen dari **Agent Updates → Impor dari Paket Server**, lalu jalankan kampanye ke 1.6.0.
+  Server cukup diperbarui dengan `update.sh`.
+
+### Diubah
+- **Remote desktop Windows memakai DXGI Desktop Duplication.** Gambar layar kini diambil lewat GPU, langsung dari
+  salinan desktop milik Windows, dalam beberapa milidetik; capture GDI sebelumnya butuh 50–80 ms untuk satu layar
+  1080p. Saat layar tidak berubah, Windows sendiri melaporkannya sehingga tidak ada yang perlu disalin. Diukur dengan
+  sesi sungguhan 1920×1080 yang berubah penuh setiap frame, dalam beban CPU yang sama: 15–18 fps dengan DXGI, 5,5–10 fps
+  dengan GDI (22 vs 13–14 fps saat laptop senggang). Sesi lewat console mencapai 24 update/detik.
+  - **GDI tetap menjadi cadangan** untuk semua yang tidak bisa ditangani DXGI: layar kunci, Ctrl+Alt+Del dan UAC
+    (secure desktop), sesi RDP, driver layar dasar, monitor yang diputar, dan pilihan "semua monitor" bila ada lebih
+    dari satu monitor. Bila DXGI gagal atau terputus (misalnya saat UAC muncul), frame itu diambil dengan GDI dan DXGI
+    dicoba lagi setelah jeda yang berlipat dari 1 detik hingga paling lama 30 detik.
+  - Bila driver layar suatu PC bermasalah dengan DXGI, set variabel lingkungan `ENDPOINT_AGENT_RC_CAPTURE=gdi` pada
+    agen untuk kembali ke GDI.
+
 ## [1.5.9] - 2026-10-23
 
 - Server Linux bisa diperbarui dengan `update.sh`. Remote desktop yang lebih lancar dan unduhan update yang tidak lagi
