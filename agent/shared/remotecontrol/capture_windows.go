@@ -5,9 +5,13 @@ package remotecontrol
 import (
 	"errors"
 	"fmt"
+	"os"
 	"sync"
 	"syscall"
+	"time"
 	"unsafe"
+
+	"github.com/rs/zerolog/log"
 )
 
 var (
@@ -243,6 +247,16 @@ type WindowsCapturer struct {
 	// section at once would hand each of them a mixture of both frames.
 	capMu sync.Mutex
 	surf  *dibSurface
+
+	// dx is the desktop duplication in use, nil while capturing with GDI. It
+	// is guarded by capMu with the GDI surface, and used from the capture
+	// thread only. dxRetryAt and dxBackoff space out attempts to bring it
+	// back after it failed; dxMode is the method the last frame used, so a
+	// switch between the two is logged once rather than on every frame.
+	dx        frameSource
+	dxRetryAt time.Time
+	dxBackoff time.Duration
+	dxMode    string
 
 	// geoMu guards the monitor selection and the geometry of the last frame.
 	// Input runs on the relay's read goroutine and has to translate the
@@ -485,6 +499,10 @@ func (c *WindowsCapturer) CaptureScreen() ([]byte, int, int, error) {
 		return nil, 0, 0, fmt.Errorf("invalid screen dimensions: %dx%d", width, height)
 	}
 
+	if pixels, ok := c.captureDuplicated(area); ok {
+		return pixels, width, height, nil
+	}
+
 	hdcScreen, _, _ := procGetDC.Call(0)
 	if hdcScreen == 0 {
 		return nil, 0, 0, fmt.Errorf("failed to get screen DC")
@@ -530,6 +548,103 @@ func (c *WindowsCapturer) CaptureScreen() ([]byte, int, int, error) {
 	return pixels, width, height, nil
 }
 
+// frameSource is a capture method faster than GDI that can be unavailable or
+// stop working at any moment. Desktop duplication is the only one; the
+// interface is what lets the fallback below be tested without a GPU.
+type frameSource interface {
+	capture() ([]byte, error)
+	matches(area MonitorInfo) bool
+	close()
+}
+
+// newFrameSource creates the duplication for an area.
+var newFrameSource = func(area MonitorInfo) (frameSource, error) {
+	d, err := newDXGIDuplicator(area)
+	if err != nil {
+		return nil, err
+	}
+	return d, nil
+}
+
+// dxgiDisabled forces GDI capture. Setting ENDPOINT_AGENT_RC_CAPTURE=gdi on an
+// endpoint is the way out if a display driver misbehaves under duplication.
+var dxgiDisabled = os.Getenv("ENDPOINT_AGENT_RC_CAPTURE") == "gdi"
+
+const (
+	dxgiRetryMin = time.Second
+	dxgiRetryMax = 30 * time.Second
+)
+
+// captureDuplicated returns a frame from desktop duplication, or false when
+// this frame has to come from GDI instead.
+//
+// GDI is always the fallback, never an error: duplication cannot see the
+// secure desktop (UAC, Ctrl+Alt+Del, the lock screen), is unsupported over RDP
+// and on basic display drivers, does not cover a selection spanning several
+// monitors, and dies on every desktop switch or mode change. Each of those
+// drops to GDI for the frame, and duplication is tried again after a pause that
+// doubles while it keeps failing, so a session spent on the lock screen costs
+// one attempt every 30 seconds rather than one per frame.
+func (c *WindowsCapturer) captureDuplicated(area MonitorInfo) ([]byte, bool) {
+	if dxgiDisabled {
+		return nil, false
+	}
+	c.capMu.Lock()
+	defer c.capMu.Unlock()
+
+	if c.dx != nil && !c.dx.matches(area) {
+		// Another monitor was selected: duplication is per monitor.
+		c.dx.close()
+		c.dx = nil
+		c.dxRetryAt, c.dxBackoff = time.Time{}, 0
+	}
+	if c.dx == nil {
+		now := time.Now()
+		if now.Before(c.dxRetryAt) {
+			return nil, false
+		}
+		src, err := newFrameSource(area)
+		if err != nil {
+			c.duplicationFailed(err, now)
+			return nil, false
+		}
+		c.dx = src
+	}
+	pixels, err := c.dx.capture()
+	if err != nil {
+		if errors.Is(err, errNoNewFrame) {
+			// Started, but no image has arrived yet; keep it for the next tick.
+			return nil, false
+		}
+		c.dx.close()
+		c.dx = nil
+		c.duplicationFailed(err, time.Now())
+		return nil, false
+	}
+	c.dxBackoff = 0
+	c.noteCaptureMode("dxgi", nil)
+	return pixels, true
+}
+
+func (c *WindowsCapturer) duplicationFailed(err error, now time.Time) {
+	c.dxBackoff = min(max(2*c.dxBackoff, dxgiRetryMin), dxgiRetryMax)
+	c.dxRetryAt = now.Add(c.dxBackoff)
+	c.noteCaptureMode("gdi", err)
+}
+
+// noteCaptureMode logs a change of capture method. Caller holds capMu.
+func (c *WindowsCapturer) noteCaptureMode(mode string, err error) {
+	if mode == c.dxMode {
+		return
+	}
+	c.dxMode = mode
+	if mode == "dxgi" {
+		log.Info().Msg("remote control capture uses DXGI desktop duplication")
+		return
+	}
+	log.Info().Err(err).Msg("remote control capture falls back to GDI")
+}
+
 // releaseCaptureResources frees the cached surface when a session ends. The
 // service process keeps one capturer for its whole life, and without this an
 // 8MB section from a fallback session would stay allocated until the agent
@@ -541,6 +656,11 @@ func (c *WindowsCapturer) releaseCaptureResources() {
 		c.surf.close()
 		c.surf = nil
 	}
+	if c.dx != nil {
+		c.dx.close()
+		c.dx = nil
+	}
+	c.dxRetryAt, c.dxBackoff, c.dxMode = time.Time{}, 0, ""
 }
 
 func (c *WindowsCapturer) InjectMouseEvent(e InputEvent) error {

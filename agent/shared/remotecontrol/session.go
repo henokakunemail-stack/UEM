@@ -100,7 +100,9 @@ type InputEvent struct {
 type ScreenCapturer interface {
 	Capabilities() Capabilities
 	// CaptureScreen returns one frame as BGRA pixels, 4 bytes per pixel, row by
-	// row, with no padding between rows.
+	// row, with no padding between rows. The caller must not modify the slice:
+	// a capturer may return the same one again while the desktop is unchanged,
+	// and the stream may still be encoding it.
 	CaptureScreen() ([]byte, int, int, error)
 	InjectMouseEvent(e InputEvent) error
 	InjectKeyboardEvent(e InputEvent) error
