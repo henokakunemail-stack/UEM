@@ -87,6 +87,11 @@ type InputEvent struct {
 	Size  int64  `json:"size,omitempty"`
 	Seq   int    `json:"seq,omitempty"`
 	Data  string `json:"data,omitempty"`
+
+	// Frames is an acknowledgement's count of frames the console has painted;
+	// Enabled is the low-bandwidth setting. See flow.go.
+	Frames  int  `json:"frames,omitempty"`
+	Enabled bool `json:"enabled,omitempty"`
 }
 
 // ScreenCapturer produces a frame, not an encoded image.
@@ -160,6 +165,11 @@ type Session struct {
 	scaleCtl *scaleController
 	scaler   downscaler
 	scale    streamScale
+
+	// flow is the acknowledgement window and delivery timing (flow.go);
+	// lowBandwidth is the operator's low-bandwidth setting.
+	flow         flowControl
+	lowBandwidth atomic.Bool
 }
 
 func NewSession(cfg SessionConfig, serverBaseURL string, creds Credentials, capturer ScreenCapturer) *Session {
@@ -412,6 +422,18 @@ func (s *Session) readInputLoop() {
 			s.wakeCapture()
 			continue
 		}
+		// Both of these are about delivering the picture, not input, and are
+		// honoured in view_only like a refresh.
+		if in.Type == "ack" {
+			s.flow.ack(in.Frames, time.Now())
+			s.wakeCapture()
+			continue
+		}
+		if in.Type == "low_bandwidth" {
+			s.lowBandwidth.Store(in.Enabled)
+			s.wakeCapture()
+			continue
+		}
 
 		if s.handleFeatureMessage(in) {
 			continue
@@ -494,6 +516,9 @@ func (s *Session) streamFramesLoop() {
 	// which owns the desktop-attached thread, captures the next. Capture, encode
 	// and send used to run one after the other, so a frame cost the sum of all
 	// three; overlapped, it costs the larger of capture and encode-plus-send.
+	// lastEncode is the encode time of the latest frame, which is the part of
+	// a delivery the agent itself can make shorter by sending a smaller frame.
+	var lastEncode time.Duration
 	jobs := make(chan frameJob)
 	results := make(chan frameResult, 1)
 	go s.sendFrames(jobs, results)
@@ -514,6 +539,13 @@ func (s *Session) streamFramesLoop() {
 			damage.ForceKeyframe()
 			return true
 		}
+		lastEncode = r.encode
+		if s.flow.active() {
+			// The write only reached the server. The acknowledgement is what
+			// says how long the frame took to reach the operator, and
+			// applyDeliveries adjusts from that.
+			return true
+		}
 		now := time.Now()
 		if s.quality.observe(r.bytes, r.write, now) {
 			log.Debug().Int("quality", s.quality.quality).Dur("write", r.write).Msg("remote control quality adjusted")
@@ -522,6 +554,20 @@ func (s *Session) streamFramesLoop() {
 			s.applyScale(damage)
 		}
 		return true
+	}
+
+	// applyDeliveries adjusts quality and size from the frames the console has
+	// acknowledged since the last tick.
+	applyDeliveries := func() {
+		now := time.Now()
+		for _, d := range s.flow.drain() {
+			if s.quality.observeDelivery(d.bytes, d.rtt, now) {
+				log.Debug().Int("quality", s.quality.quality).Dur("rtt", d.rtt).Msg("remote control quality adjusted")
+			}
+			if s.scaleCtl.frameSent(lastEncode, d.rtt >= congestedRTT, now) {
+				s.applyScale(damage)
+			}
+		}
 	}
 
 	for {
@@ -545,6 +591,15 @@ func (s *Session) streamFramesLoop() {
 			continue
 		case <-timer.C:
 			tickStart := time.Now()
+			applyDeliveries()
+			if s.flow.full() {
+				// The console has not yet painted the frames already sent. A
+				// frame captured now would only wait in a queue on the way to
+				// it; the next acknowledgement wakes the loop instead.
+				s.maybeSendStats(tickStart)
+				timer.Reset(interval)
+				continue
+			}
 			pixels, width, height, err := s.capturer.CaptureScreen()
 			if err != nil {
 				// A single blit can fail on a moment when the desktop is being
@@ -586,6 +641,13 @@ func (s *Session) streamFramesLoop() {
 				damage.ForceKeyframe()
 			}
 			if s.scaleCtl.setDesktopWidth(width) {
+				s.applyScale(damage)
+			}
+			floor := 0
+			if s.lowBandwidth.Load() {
+				floor = lowBandwidthLevel
+			}
+			if s.scaleCtl.setFloor(floor, time.Now()) {
 				s.applyScale(damage)
 			}
 			capturedLevel := s.scaleCtl.level
@@ -643,7 +705,7 @@ func (s *Session) streamFramesLoop() {
 				}
 			}
 			select {
-			case jobs <- frameJob{pixels: pixels, width: width, height: height, rects: rects, quality: s.quality.quality}:
+			case jobs <- frameJob{pixels: pixels, width: width, height: height, rects: rects, quality: s.frameQuality()}:
 			case <-s.stopChan:
 				return
 			}
@@ -696,11 +758,23 @@ func (s *Session) sendFrames(jobs <-chan frameJob, results chan<- frameResult) {
 		err = s.conn.WriteMessage(websocket.BinaryMessage, payload)
 		write := time.Since(writeStart)
 		s.mu.Unlock()
+		if err == nil {
+			s.flow.written(len(payload), time.Now())
+		}
 		results <- frameResult{bytes: len(payload), encode: encode, write: write, writeErr: err}
 		if err != nil {
 			return
 		}
 	}
+}
+
+// frameQuality is the JPEG quality for the next frame: the adaptive quality,
+// capped in low-bandwidth mode.
+func (s *Session) frameQuality() int {
+	if s.lowBandwidth.Load() {
+		return min(s.quality.quality, lowBandwidthQuality)
+	}
+	return s.quality.quality
 }
 
 // scaleFrame shrinks a captured frame to the current level. At full size the

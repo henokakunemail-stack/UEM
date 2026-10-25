@@ -48,6 +48,20 @@ func newQualityController(now time.Time) *qualityController {
 
 // observe records one frame write and reports whether the quality changed.
 func (q *qualityController) observe(bytes int, took time.Duration, now time.Time) bool {
+	return q.observeSignal(bytes, took >= congestedWrite, took >= idleWrite, now)
+}
+
+// observeDelivery records one frame's delivery time to the console, the time
+// from writing it to the console acknowledging it was painted. That is the
+// signal when the console acknowledges frames: it covers the whole path to the
+// operator, where a write to the server covers only the first hop.
+func (q *qualityController) observeDelivery(bytes int, rtt time.Duration, now time.Time) bool {
+	return q.observeSignal(bytes, rtt >= congestedRTT, rtt > calmRTT, now)
+}
+
+// observeSignal adjusts the quality from whether the path was congested, or
+// merely not idle, for one frame.
+func (q *qualityController) observeSignal(bytes int, congested, busy bool, now time.Time) bool {
 	q.windowBytes += bytes
 	if elapsed := now.Sub(q.windowStart); elapsed >= time.Second {
 		q.kbps = int(float64(q.windowBytes*8) / 1000 / elapsed.Seconds())
@@ -56,14 +70,14 @@ func (q *qualityController) observe(bytes int, took time.Duration, now time.Time
 	}
 
 	switch {
-	case took >= congestedWrite:
+	case congested:
 		q.calmSince = now
 		if q.quality > minQuality && now.Sub(q.lastDown) >= stepDownEvery {
 			q.quality = max(q.quality-10, minQuality)
 			q.lastDown = now
 			return true
 		}
-	case took >= idleWrite:
+	case busy:
 		// Neither congested nor idle: hold, and restart the calm window.
 		q.calmSince = now
 	default:

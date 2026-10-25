@@ -26,7 +26,10 @@ func TestFrameWriteDeadlineGrowsWithTheFrame(t *testing.T) {
 // have to be recognised before the view_only gate drops them. Clipboard text,
 // key combinations and file chunks change the endpoint and must not be.
 func TestViewControlMessagesAreRecognised(t *testing.T) {
-	for _, m := range []string{`{"type":"refresh"}`, `{"type":"monitor","index":1}`} {
+	// An ack and the low-bandwidth setting change how the picture is delivered,
+	// not the endpoint; a view-only stream stalls if its acks are dropped.
+	for _, m := range []string{`{"type":"refresh"}`, `{"type":"monitor","index":1}`,
+		`{"type":"ack","frames":12}`, `{"type":"low_bandwidth","enabled":true}`} {
 		if !isViewControlMessage([]byte(m)) {
 			t.Fatalf("%s not recognised", m)
 		}

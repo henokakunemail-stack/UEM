@@ -44,8 +44,11 @@ const (
 // send. It belongs to the capture loop alone; only the chosen level is shared,
 // through Session.scale, with the input loop that maps coordinates back.
 type scaleController struct {
-	level     int
-	maxLevel  int
+	level    int
+	maxLevel int
+	// floor is the sharpest level allowed: 0 normally, the half-size level in
+	// low-bandwidth mode.
+	floor     int
 	changedAt time.Time
 	slowSince time.Time
 	fastSince time.Time
@@ -65,9 +68,28 @@ func (c *scaleController) setDesktopWidth(width int) bool {
 			break
 		}
 	}
+	c.floor = min(c.floor, c.maxLevel)
 	if c.level > c.maxLevel {
 		c.level = c.maxLevel
 		return true
+	}
+	return false
+}
+
+// setFloor sets the sharpest level allowed, and reports whether the level
+// changed. Raising the floor (low-bandwidth mode on) moves the level up to it.
+// Lowering it (the mode turned off) brings the level back down with it, unless
+// the stream had stepped down further on its own: the operator who turns the
+// mode off has asked for the normal picture, and waiting for the desktop to go
+// still before giving it back reads as the switch not working.
+func (c *scaleController) setFloor(floor int, now time.Time) bool {
+	prev := c.floor
+	c.floor = min(floor, c.maxLevel)
+	switch {
+	case c.level < c.floor:
+		return c.set(c.floor, now)
+	case c.floor < prev && c.level == prev:
+		return c.set(c.floor, now)
 	}
 	return false
 }
@@ -94,7 +116,7 @@ func (c *scaleController) frameSent(took time.Duration, congested bool, now time
 		if c.fastSince.IsZero() {
 			c.fastSince = now
 		}
-		if now.Sub(c.fastSince) >= stepUpFastAfter && c.level > 0 {
+		if now.Sub(c.fastSince) >= stepUpFastAfter && c.level > c.floor {
 			return c.set(c.level-1, now)
 		}
 	default:
@@ -109,8 +131,8 @@ func (c *scaleController) idle(now time.Time) bool {
 	if c.idleSince.IsZero() {
 		c.idleSince = now
 	}
-	if c.level > 0 && now.Sub(c.idleSince) >= sharpenAfterIdle {
-		return c.set(0, now)
+	if c.level > c.floor && now.Sub(c.idleSince) >= sharpenAfterIdle {
+		return c.set(c.floor, now)
 	}
 	return false
 }

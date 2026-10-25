@@ -10,6 +10,21 @@ Riwayat sebelum v1.5.4 ada di `git log`.
 
 ## [Unreleased]
 
+### Ditambahkan
+- **Tombol "Hemat bandwidth" di toolbar remote.** Untuk koneksi lambat (misalnya meremote dari luar kantor): perangkat
+  langsung mengirim gambar setengah ukuran dengan kualitas JPEG maksimal 50, tanpa menunggu sesi mendeteksi koneksi
+  lambat. Pilihan ini diingat di browser yang sama, dan mematikannya mengembalikan ukuran normal saat itu juga.
+
+### Diperbaiki
+- **Remote desktop dari luar kantor tertinggal jauh di belakang desktop.** Agen menilai kecepatan koneksi dari lamanya
+  menulis ke server, padahal saat operator di luar kantor agen menulis ke server lewat LAN yang cepat dan antrean
+  justru terjadi di upload internet kantor. Buffer TCP di antaranya menampung puluhan frame, sehingga gambar tertinggal
+  beberapa detik sebelum kualitas atau ukuran sempat diturunkan. Kini console mengonfirmasi (ack) setiap frame yang
+  selesai digambar; agen hanya mengirim paling banyak 2 frame yang belum dikonfirmasi, dan mengatur kualitas serta
+  ukuran dari waktu tempuh sampai layar operator. Pada simulasi koneksi 4 Mbps dengan latensi 50 ms, keterlambatan
+  gambar turun dari ±1,6 detik menjadi ±0,34 detik. Toolbar remote kini menampilkan waktu tempuh itu (mis. "180 ms").
+  Perlu server, console, dan agen versi baru; console atau agen lama tetap bekerja seperti sebelumnya.
+
 ## [1.6.0] - 2026-10-24
 
 - Perlu agen v1.6.0: perbarui agen dari **Agent Updates → Impor dari Paket Server**, lalu jalankan kampanye ke 1.6.0.

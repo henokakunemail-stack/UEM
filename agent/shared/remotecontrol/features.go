@@ -288,11 +288,17 @@ func (s *Session) maybeSendStats(now time.Time) {
 	s.lastStats = now
 	l := s.scale.level()
 	_ = s.sendControl(map[string]any{
-		"type":    "stats",
-		"quality": s.quality.quality,
+		"type": "stats",
+		// The quality frames are actually encoded at, which low-bandwidth
+		// mode caps below the adaptive value.
+		"quality": s.frameQuality(),
 		"kbps":    s.quality.kbps,
 		// scale is the frame size as a percentage of the desktop, so the
 		// operator can tell a softer picture from a slow one.
 		"scale": 100 * l.num / l.den,
+		// rtt_ms is how long the last frame took to reach the console's
+		// canvas; 0 while the console sends no acknowledgements.
+		"rtt_ms":        s.flow.rtt().Milliseconds(),
+		"low_bandwidth": s.lowBandwidth.Load(),
 	})
 }

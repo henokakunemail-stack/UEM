@@ -480,8 +480,10 @@ func parseModeMessage(msg []byte) (string, bool) {
 }
 
 // isViewControlMessage reports whether a console message only changes what the
-// operator sees -- a keyframe request or a monitor selection -- and so is
-// allowed through in view_only.
+// operator sees -- a keyframe request, a monitor selection, the acknowledgement
+// of a painted frame, or the low-bandwidth setting -- and so is allowed through
+// in view_only. Dropping acks there would stall a view-only stream: the agent
+// sends ahead only as far as the console has confirmed.
 func isViewControlMessage(msg []byte) bool {
 	var probe struct {
 		Type string `json:"type"`
@@ -489,7 +491,11 @@ func isViewControlMessage(msg []byte) bool {
 	if json.Unmarshal(msg, &probe) != nil {
 		return false
 	}
-	return probe.Type == "refresh" || probe.Type == "monitor"
+	switch probe.Type {
+	case "refresh", "monitor", "ack", "low_bandwidth":
+		return true
+	}
+	return false
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {
