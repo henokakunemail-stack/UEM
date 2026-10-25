@@ -222,9 +222,9 @@
     "semantic_hash": "45ee77e9a6e1f14f4336371579756c0c"
   },
   "agent/shared/osinfo/osinfo.go": {
-    "mtime": 1792857610.6322823,
-    "seen": 1792857658.085607,
-    "ast_hash": "f8d0586bbbb29860d528b84b8b38fd17",
+    "mtime": 1792942661.6959915,
+    "seen": 1792942689.6717803,
+    "ast_hash": "f8a4a91662ef7e5c944bbde8d54e4b2c",
     "semantic_hash": ""
   },
   "agent/shared/patch/classify_windows_test.go": {
@@ -4650,9 +4650,9 @@
     "semantic_hash": ""
   },
   "CHANGELOG.md": {
-    "mtime": 1792937214.764553,
-    "seen": 1792937391.1704009,
-    "ast_hash": "2609efe282ae76436621b6cb8a7c2971",
+    "mtime": 1792942654.5646799,
+    "seen": 1792942689.672907,
+    "ast_hash": "1a42c84815b1edd5bb6fcfe9b9bea872",
     "semantic_hash": ""
   },
   "docs/architecture/policy-resolution.md": {
