@@ -10,6 +10,11 @@ Riwayat sebelum v1.5.4 ada di `git log`.
 
 ## [Unreleased]
 
+## [1.6.1] - 2026-10-25
+
+- Perlu server **dan** agen v1.6.1: perbarui server dengan `update.sh`, lalu agen dari **Agent Updates → Impor dari Paket
+  Server** dan kampanye ke 1.6.1. Selama salah satunya masih versi lama, remote berjalan seperti sebelumnya.
+
 ### Ditambahkan
 - **Tombol "Hemat bandwidth" di toolbar remote.** Untuk koneksi lambat (misalnya meremote dari luar kantor): perangkat
   langsung mengirim gambar setengah ukuran dengan kualitas JPEG maksimal 50, tanpa menunggu sesi mendeteksi koneksi
