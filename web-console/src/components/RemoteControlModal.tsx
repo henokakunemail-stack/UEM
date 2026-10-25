@@ -12,6 +12,7 @@ import {
   ClipboardCopy,
   Upload,
   Command,
+  Gauge,
 } from 'lucide-react'
 import { api } from '../services/api'
 import { Modal } from './ui'
@@ -52,6 +53,8 @@ const STALL_AFTER_MS = 8000
 const FRAME_VERSION = 1
 
 /** version | rectangle count | uint16 width | uint16 height */
+// LOW_BANDWIDTH_KEY remembers the low-bandwidth setting in this browser.
+const LOW_BANDWIDTH_KEY = 'em_rc_low_bandwidth'
 const FRAME_HEADER_BYTES = 6
 
 /** Per rectangle: uint16 x, y, w, h, uint32 jpeg length, then the JPEG. */
@@ -165,7 +168,17 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
   const [monitorIndex, setMonitorIndex] = useState<number | null>(null)
   const [remoteCursor, setRemoteCursor] = useState<{ x: number; y: number; visible: boolean } | null>(null)
   const [pointerInside, setPointerInside] = useState<boolean>(false)
-  const [stats, setStats] = useState<{ quality: number; kbps: number; scale: number } | null>(null)
+  const [stats, setStats] = useState<{ quality: number; kbps: number; scale: number; rtt: number } | null>(null)
+  // Low-bandwidth mode is remembered per browser: an operator who works from
+  // a slow link turns it on once, not every session.
+  const [lowBandwidth, setLowBandwidth] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(LOW_BANDWIDTH_KEY) === '1'
+    } catch {
+      return false
+    }
+  })
+  const lowBandwidthRef = useRef<boolean>(lowBandwidth)
   const [remoteClipboard, setRemoteClipboard] = useState<string | null>(null)
   const [clipboardDraft, setClipboardDraft] = useState<string | null>(null)
   // Which way the fallback box is for: text the operator is about to send, or
@@ -188,6 +201,11 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
   // accumulates rectangles, so an older update landing after a newer one would
   // leave the desktop showing a mixture of two states.
   const paintQueueRef = useRef<Promise<void>>(Promise.resolve())
+  // Frames painted (or discarded) so far in this session. Every binary frame
+  // is acknowledged with this count once the canvas is done with it; the
+  // agent sends ahead only as far as the console has confirmed, so a frame
+  // that is never acknowledged would stall the stream.
+  const framesDoneRef = useRef<number>(0)
 
   // Kept in a ref, not state: the socket must be able to read the current mode
   // without the effect that owns the socket re-running when the mode changes.
@@ -261,6 +279,15 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
         const ws = new WebSocket(wsUrl)
         ws.binaryType = 'arraybuffer'
         wsRef.current = ws
+        framesDoneRef.current = 0
+        // Acknowledgements and the low-bandwidth setting go out in View mode
+        // too: they are about delivering the picture, not input.
+        const frameDone = () => {
+          framesDoneRef.current++
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'ack', frames: framesDoneRef.current }))
+          }
+        }
 
         ws.onopen = () => {
           if (isCancelled) return
@@ -282,7 +309,10 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
           }
 
           const buffer = event.data as ArrayBuffer
-          if (buffer.byteLength < FRAME_HEADER_BYTES) return
+          if (buffer.byteLength < FRAME_HEADER_BYTES) {
+            frameDone()
+            return
+          }
 
           const view = new DataView(buffer)
           const version = view.getUint8(0)
@@ -309,7 +339,10 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
           const rects: FrameRect[] = []
           let pos = FRAME_HEADER_BYTES
           for (let i = 0; i < rectCount; i++) {
-            if (pos + FRAME_RECT_HEADER_BYTES > buffer.byteLength) return
+            if (pos + FRAME_RECT_HEADER_BYTES > buffer.byteLength) {
+              frameDone()
+              return
+            }
             const rect = {
               x: view.getUint16(pos),
               y: view.getUint16(pos + 2),
@@ -318,7 +351,10 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
               size: view.getUint32(pos + 8),
             }
             pos += FRAME_RECT_HEADER_BYTES
-            if (pos + rect.size > buffer.byteLength) return
+            if (pos + rect.size > buffer.byteLength) {
+              frameDone()
+              return
+            }
             rects.push({
               ...rect,
               body: new Blob([buffer.slice(pos, pos + rect.size)], { type: 'image/jpeg' }),
@@ -349,7 +385,10 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
           }
 
           const canvas = canvasRef.current
-          if (!canvas) return
+          if (!canvas) {
+            frameDone()
+            return
+          }
           if (canvas.width !== width || canvas.height !== height) {
             // Assigning the size clears the canvas, which is the correct thing
             // to do here: the endpoint's resolution changed, so nothing already
@@ -404,6 +443,9 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
               // A truncated JPEG is not worth failing the session over; the
               // next update arrives in 100ms.
             })
+            // Acknowledged once painted, or once skipped: either way the
+            // canvas is done with it.
+            .finally(frameDone)
         }
 
         ws.onerror = () => {
@@ -447,6 +489,7 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
         quality?: number
         kbps?: number
         scale?: number
+        rtt_ms?: number
         index?: number
         text?: string
         id?: string
@@ -461,6 +504,13 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
 
       if (msg.type === 'hello') {
         setCapabilities(msg.capabilities ?? null)
+        // The first acknowledgement tells the agent this console confirms
+        // painted frames; an agent that predates it ignores the message.
+        const ws = wsRef.current
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'ack', frames: framesDoneRef.current }))
+          ws.send(JSON.stringify({ type: 'low_bandwidth', enabled: lowBandwidthRef.current }))
+        }
         if (msg.mode) setMode(msg.mode)
         const primary = msg.capabilities?.monitors?.find((m) => m.primary)
         setMonitorIndex(primary ? primary.index : null)
@@ -468,7 +518,7 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
         setRemoteCursor({ x: msg.x ?? 0, y: msg.y ?? 0, visible: Boolean(msg.visible) })
       } else if (msg.type === 'stats') {
         // An older agent sends no scale: its frames are always full size.
-        setStats({ quality: msg.quality ?? 0, kbps: msg.kbps ?? 0, scale: msg.scale ?? 100 })
+        setStats({ quality: msg.quality ?? 0, kbps: msg.kbps ?? 0, scale: msg.scale ?? 100, rtt: msg.rtt_ms ?? 0 })
       } else if (msg.type === 'monitor_changed') {
         setMonitorIndex(msg.index ?? null)
       } else if (msg.type === 'clipboard') {
@@ -572,6 +622,21 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
     if (!ws || ws.readyState !== WebSocket.OPEN) return
     if (modeRef.current === 'view_only') return
     ws.send(JSON.stringify(msg))
+  }, [])
+
+  const toggleLowBandwidth = useCallback(() => {
+    const next = !lowBandwidthRef.current
+    lowBandwidthRef.current = next
+    setLowBandwidth(next)
+    try {
+      localStorage.setItem(LOW_BANDWIDTH_KEY, next ? '1' : '0')
+    } catch {
+      // Not remembered for next time; this session still switches.
+    }
+    const ws = wsRef.current
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'low_bandwidth', enabled: next }))
+    }
   }, [])
 
   const sendMode = useCallback((next: RemoteControlMode) => {
@@ -941,7 +1006,7 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
             </span>
             {stats && (
               <span title={t('remote_control.stats_title')}>
-                Q{stats.quality} · {stats.kbps} kbps
+                Q{stats.quality} · {stats.kbps} kbps{stats.rtt > 0 ? ` · ${t('remote_control.rtt', { ms: stats.rtt })}` : ''}
               </span>
             )}
             {stats && stats.scale < 100 && (
@@ -1063,6 +1128,17 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
                 />
               </>
             )}
+
+            <button
+              type="button"
+              onClick={toggleLowBandwidth}
+              aria-pressed={lowBandwidth}
+              className={`btn btn-sm ${lowBandwidth ? 'btn-primary' : 'btn-secondary'}`}
+              title={t('remote_control.low_bandwidth_title')}
+            >
+              <Gauge size={14} />
+              <span>{t('remote_control.low_bandwidth')}</span>
+            </button>
 
             <div className="remote-mode-switch" role="group" aria-label={t('remote_control.input_mode_label')}>
               <button

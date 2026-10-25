@@ -110,6 +110,42 @@ describe('RemoteControlModal feature gating', () => {
     await waitFor(() => expect(screen.getByText('Size 75%')).toBeTruthy())
   })
 
+  // The agent sends ahead only as far as the console has confirmed painting.
+  // The console announces it acknowledges as soon as the agent says hello, and
+  // then acknowledges every frame -- in View mode too, or a view-only stream
+  // would stop after two frames.
+  it('acknowledges every frame, in View mode too', async () => {
+    const ws = await openSession({ capture: true, mouse: true, keyboard: true })
+    const acks = () => ws.sent.map((m) => JSON.parse(m)).filter((m) => m.type === 'ack')
+    expect(acks()[0]).toEqual({ type: 'ack', frames: 0 })
+    await waitFor(() => expect(acks().some((m) => m.frames === 1)).toBe(true))
+
+    fireEvent.click(screen.getByRole('button', { name: /View/ }))
+    act(() => {
+      ws.deliver(emptyFrame())
+      ws.deliver(emptyFrame())
+    })
+    await waitFor(() => expect(acks().some((m) => m.frames === 3)).toBe(true))
+  })
+
+  // Low-bandwidth mode is for an operator on a slow link: one switch, sent to
+  // the agent straight away (View mode included) and remembered next time.
+  it('switches low-bandwidth mode and remembers it', async () => {
+    localStorage.removeItem('em_rc_low_bandwidth')
+    const ws = await openSession({ capture: true, mouse: true, keyboard: true })
+    const settings = () => ws.sent.map((m) => JSON.parse(m)).filter((m) => m.type === 'low_bandwidth')
+    expect(settings()[0]).toEqual({ type: 'low_bandwidth', enabled: false })
+
+    fireEvent.click(screen.getByRole('button', { name: /View/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Low bandwidth' }))
+    expect(settings().at(-1)).toEqual({ type: 'low_bandwidth', enabled: true })
+    expect(localStorage.getItem('em_rc_low_bandwidth')).toBe('1')
+
+    act(() => ws.deliver(JSON.stringify({ type: 'stats', quality: 50, kbps: 400, scale: 50, rtt_ms: 180 })))
+    await waitFor(() => expect(screen.getByText(/180 ms/)).toBeTruthy())
+    localStorage.removeItem('em_rc_low_bandwidth')
+  })
+
   // View mode changes nothing on the endpoint: the controls that would are
   // disabled, while choosing which monitor to watch stays available.
   it('disables endpoint-changing controls in View mode but keeps monitor selection', async () => {
