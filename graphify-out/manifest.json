@@ -3012,9 +3012,9 @@
     "semantic_hash": ""
   },
   "agent/shared/systempolicy/engine_windows.go": {
-    "mtime": 1792640420.4562306,
-    "seen": 1792650332.9494078,
-    "ast_hash": "ee70866ed653e282dddc837b176565ae",
+    "mtime": 1792989306.3711784,
+    "seen": 1792989645.4166968,
+    "ast_hash": "7e17575efac9ba83da4890096d9e817b",
     "semantic_hash": ""
   },
   "scripts/e2e-system-policy.ps1": {
@@ -4650,9 +4650,9 @@
     "semantic_hash": ""
   },
   "CHANGELOG.md": {
-    "mtime": 1792942654.5646799,
-    "seen": 1792942689.672907,
-    "ast_hash": "1a42c84815b1edd5bb6fcfe9b9bea872",
+    "mtime": 1792989602.4149542,
+    "seen": 1792989645.4209166,
+    "ast_hash": "07c79eac6dfaa0aed2897addb2e77400",
     "semantic_hash": ""
   },
   "docs/architecture/policy-resolution.md": {
@@ -4851,6 +4851,18 @@
     "mtime": 1792937316.8865287,
     "seen": 1792937391.1685805,
     "ast_hash": "84ad4ba67b5c7be2de347af4f6646957",
+    "semantic_hash": ""
+  },
+  "agent/shared/systempolicy/admin_windows.go": {
+    "mtime": 1792989412.7057729,
+    "seen": 1792989645.4166713,
+    "ast_hash": "6524a96e8962672d244f5a156660255c",
+    "semantic_hash": ""
+  },
+  "agent/shared/systempolicy/admin_windows_test.go": {
+    "mtime": 1792989583.202238,
+    "seen": 1792989645.4166782,
+    "ast_hash": "7e37b2b2a381bfb2115d3ec8e043e8bf",
     "semantic_hash": ""
   }
 }
