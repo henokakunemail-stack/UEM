@@ -10,6 +10,11 @@ Riwayat sebelum v1.5.4 ada di `git log`.
 
 ## [Unreleased]
 
+## [1.6.2] - 2026-10-26
+
+- Perlu agen v1.6.2: perbarui agen dari **Agent Updates → Impor dari Paket Server** (setelah server diperbarui dengan
+  `update.sh`), lalu jalankan kampanye ke 1.6.2. Setelah itu tekan **Force Sync** pada kebijakan grup.
+
 ### Diperbaiki
 - **Kebijakan akun admin terkelola gagal di sinkronisasi kedua ("powershell provision admin user ...: exit status 1
   (output: )").** Akun dibuat lewat skrip PowerShell. Bila modul LocalAccounts tidak termuat di bawah akun layanan agen,
