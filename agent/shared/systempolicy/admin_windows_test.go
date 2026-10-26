@@ -173,7 +173,9 @@ func TestProvisioningARealAccountTwice(t *testing.T) {
 	}
 	name := fmt.Sprintf("uem-ci-%06d", rand.Intn(1000000))
 	t.Cleanup(func() { deleteLocalUser(name) })
-	pass := "Uem!Ci-" + fmt.Sprint(rand.Int63())
+	// Windows rejects a password that contains part of the account name, so
+	// nothing in it may echo "uem" or "ci".
+	pass := fmt.Sprintf("Kx9#Qz!%x", rand.Int63())
 	for i := 0; i < 2; i++ {
 		if err := provisionAdmin(netapiAccounts{}, name, pass, "UEM CI", "test account", true); err != nil {
 			t.Fatalf("run %d: %v", i+1, err)
