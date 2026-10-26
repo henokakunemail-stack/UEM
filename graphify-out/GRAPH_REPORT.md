@@ -1,17 +1,17 @@
 # Graph Report - Desktop Manage  (2026-10-26)
 
 ## Corpus Check
-- 801 files · ~676,805 words
+- 801 files · ~676,885 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 23 file(s) not represented in the graph (top: (none) 8, .nsi 4, .template 2)
 
 ## Summary
-- 6674 nodes · 23982 edges · 383 communities (249 shown, 134 thin omitted)
+- 6674 nodes · 23984 edges · 383 communities (249 shown, 134 thin omitted)
 - Extraction: 94% EXTRACTED · 6% INFERRED · 0% AMBIGUOUS · INFERRED: 1391 edges (avg confidence: 0.85)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `ad895350`
+- Built from commit: `01b0886c`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -1361,17 +1361,17 @@ Nodes (5): hwJSON, hwModel, decodeHW(), hwModelValue(), modelsEqual()
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `UserIDFromContext()` connect `UserIDFromContext` to `github.com/jmoiron/sqlx.DB`, `context.Context`, `newEnv`, `net/http.Handler`, `user-management/handler_test.go`, `Handler`, `Handler`, `Handler`, `Handler`, `Handler`, `LoginHandler`, `AuthenticateAgent`, `Handler`, `Handler`, `Handler`, `Handler`, `net/http.Request`, `server/main.go`, `net/http.ResponseWriter`, `Handler`?**
-  _High betweenness centrality (0.009) - this node is a cross-community bridge._
+- **Why does `Evaluator` connect `Evaluator` to `github.com/jmoiron/sqlx.DB`, `testing.T`, `server/main.go`, `Config`?**
+  _High betweenness centrality (0.012) - this node is a cross-community bridge._
 - **What connects `Repository`, `github.com/henokakunemail-stack/Endpoint-Manager`, `jsdom` to the rest of the system?**
   _17 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `github.com/jmoiron/sqlx.DB` be split into smaller, more focused modules?**
   _Cohesion score 0.03247400655177325 - nodes in this community are weakly interconnected._
-- **Why does `buildServer()` connect `github.com/jmoiron/sqlx.DB` to `context.Context`, `testing.T`, `newEnv`, `.Open`, `Config`, `NewRepository`, `net/http.Handler`, `maintenance/repository_test.go`, `ticket_test.go`, `WithRole`, `UserIDFromContext`, `user-management/handler_test.go`, `WSHandler`, `Handler`, `reports/repository.go`, `Handler`, `Handler`, `APIRateLimiter`, `writeCSV`, `Handler`, `IPRateLimiter`, `Handler`, `terminalFixture`, `rcRouteFixture`, `LoginHandler`, `newRunFixture`, `AuthenticateAgent`, `Contact`, `Handler`, `time.Time`, `securityheaders_test.go`, `Handler`, `scm_windows.go`, `RequireRole`, `SessionStore`, `Handler`, `metrics.go`, `net/http.Request`, `Handler`, `NewHandler`, `newRemoteExecEnv`, `agentinstall/handler_test.go`, `server/main.go`, `newInventoryRepository`, `setupTestDB`, `patchFixture`, `net/http.ResponseWriter`?**
-  _High betweenness centrality (0.009) - this node is a cross-community bridge._
+- **Why does `fileReceiver` connect `filetransfer_test.go` to `server/main.go`, `sync.Mutex`?**
+  _High betweenness centrality (0.010) - this node is a cross-community bridge._
 - **Should `context.Context` be split into smaller, more focused modules?**
   _Cohesion score 0.019995455578277664 - nodes in this community are weakly interconnected._
-- **Why does `ptyShellCmd()` connect `os/exec.Cmd` to `context.Context`, `server/main.go`?**
-  _High betweenness centrality (0.009) - this node is a cross-community bridge._
+- **Why does `FinalizeRestoreMarker()` connect `Handler` to `context.Context`, `server/main.go`, `Config`?**
+  _High betweenness centrality (0.008) - this node is a cross-community bridge._
 - **Should `testing.T` be split into smaller, more focused modules?**
   _Cohesion score 0.021623827009383926 - nodes in this community are weakly interconnected._

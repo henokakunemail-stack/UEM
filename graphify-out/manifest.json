@@ -2148,10 +2148,10 @@
     "semantic_hash": "79fb4f138047fd84335db0312f4340b4"
   },
   "tests/integration/remote_control_test.go": {
-    "mtime": 1790830485.7498906,
-    "seen": 1792650332.9506125,
-    "ast_hash": "90fc6727ab7b53c6c8dbc62f2b089c24",
-    "semantic_hash": "90fc6727ab7b53c6c8dbc62f2b089c24"
+    "mtime": 1792990602.0355284,
+    "seen": 1792990925.6100397,
+    "ast_hash": "c422af0ad5df3c374fac1fe97be98448",
+    "semantic_hash": ""
   },
   "tests/integration/remote_exec_test.go": {
     "mtime": 1791350685.4921238,
