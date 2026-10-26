@@ -225,11 +225,24 @@ func TestRemoteControl_PlatformCapturer(t *testing.T) {
 		if err != nil {
 			t.Fatalf("DecodeFrame: %v", err)
 		}
-		if len(rects) != 1 || len(jpegs) != 1 {
-			t.Fatalf("round trip produced %d rects and %d bodies, want 1 and 1", len(rects), len(jpegs))
+		// A large area is sent as horizontal stripes encoded on separate
+		// cores, so one full-screen rectangle comes back as several. They must
+		// be JPEGs that tile the frame exactly.
+		if len(rects) == 0 || len(rects) != len(jpegs) {
+			t.Fatalf("round trip produced %d rects and %d bodies", len(rects), len(jpegs))
 		}
-		if len(jpegs[0]) < 4 || jpegs[0][0] != 0xFF || jpegs[0][1] != 0xD8 {
-			t.Fatalf("encoded body is not JPEG (leading bytes % x)", jpegs[0][:min(4, len(jpegs[0]))])
+		area := 0
+		for i, r := range rects {
+			if r.X != 0 || r.W != width {
+				t.Fatalf("rect %d is %+v; stripes span the full width", i, r)
+			}
+			area += r.W * r.H
+			if len(jpegs[i]) < 4 || jpegs[i][0] != 0xFF || jpegs[i][1] != 0xD8 {
+				t.Fatalf("body %d is not JPEG (leading bytes % x)", i, jpegs[i][:min(4, len(jpegs[i]))])
+			}
+		}
+		if area != width*height {
+			t.Fatalf("stripes cover %d pixels of %d", area, width*height)
 		}
 	} else {
 		// The honest-failure contract: a platform with no backend must say so
