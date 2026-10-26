@@ -10,6 +10,20 @@ Riwayat sebelum v1.5.4 ada di `git log`.
 
 ## [Unreleased]
 
+### Diperbaiki
+- **Security audit tidak lagi melaporkan hasil "lulus" yang tidak diperiksa.** Dari 40 pemeriksaan di
+  `GET /api/system/security-audit`, 26 selalu mengembalikan "pass" dengan teks bukti tetap (sebagian keliru, misalnya
+  menyebut Go 1.24), dan tesnya sendiri mewajibkan minimal 30 lulus pada konfigurasi kosong. Kini:
+  - **27 kontrol tingkat kode** (validasi input, RBAC per route, anti-XSS, dll.) yang tidak bisa diamati saat server
+    berjalan diberi status baru **`not_verified`**, lengkap dengan cara meninjaunya, dan **tidak ikut dihitung** dalam
+    skor.
+  - **13 pemeriksaan benar-benar dievaluasi**, beberapa di antaranya diganti dengan pemeriksaan sungguhan: rantai hash
+    audit log diverifikasi (bukan sekadar dihitung barisnya), umur file backup terbaru diperiksa (bukan hanya ada
+    tidaknya folder backup), semua hash password diperiksa (bukan satu sampel), lama berlaku token sesi, CORS `*`,
+    TLS/reverse proxy (menggantikan "self-test" yang selalu lulus), dan lisensi yang melebihi seat atau kedaluwarsa.
+  - Skor dan grade dihitung **hanya dari pemeriksaan yang dievaluasi**, dan satu kegagalan membatasi grade ke F.
+    Laporan kini memuat `evaluated` dan `not_verified`. Hanya server; agen tidak perlu di-update.
+
 ## [1.6.2] - 2026-10-26
 
 - Perlu agen v1.6.2: perbarui agen dari **Agent Updates → Impor dari Paket Server** (setelah server diperbarui dengan

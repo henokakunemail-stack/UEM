@@ -947,7 +947,9 @@ func buildServer(cfg config.Config, database *sqlx.DB) (*http.Server, *serverApp
 	backupH := backup.NewHandler(cfg, database, &auditAdapter{db: database}, jwtSvc.RequireAuth)
 	backupH.Register(r)
 
-	// Automated 40-point pre-launch security posture auditor.
+	// Security posture audit: deployment checks it can observe (secrets,
+	// password hashes, audit chain, backups, TLS, CORS, ...) plus the code-level
+	// controls it cannot, listed as not verified and kept out of the grade.
 	secAuditH := securityaudit.NewHandler(&cfg, database, &auditAdapter{db: database}, jwtSvc.RequireAuth).
 		WithSetupPassword(os.Getenv("ADMIN_PASSWORD"))
 	secAuditH.Register(r)

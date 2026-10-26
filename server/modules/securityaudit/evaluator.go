@@ -2,7 +2,6 @@ package securityaudit
 
 import (
 	"context"
-	"crypto/sha256"
 	"fmt"
 	"math"
 	"os"
@@ -10,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/audit"
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/config"
 	"github.com/jmoiron/sqlx"
 )
@@ -123,7 +123,7 @@ func (e *Evaluator) Evaluate(ctx context.Context) AuditReport {
 	// 29. Ganti default pass
 	checks = append(checks, e.checkDefaultPasswordChanged(ctx))
 
-	// 30. Audit endpoint
+	// 30. Audit chain integrity
 	checks = append(checks, e.checkTamperEvidentAuditChain(ctx))
 
 	// 31. Verifikasi webhook
@@ -147,17 +147,20 @@ func (e *Evaluator) Evaluate(ctx context.Context) AuditReport {
 	// 37. Update dependency
 	checks = append(checks, e.checkDependencyHygiene())
 
-	// 38. Tes restore backup
+	// 38. Recent backup
 	checks = append(checks, e.checkBackupRestoreCapability())
 
 	// 39. Security headers
 	checks = append(checks, e.checkSecurityHeaders())
 
-	// 40. Tes security live
+	// 40. Transport encryption
 	checks = append(checks, e.checkLiveSecuritySelfTest())
 
-	// Aggregate statistics
-	passed, warned, failed := 0, 0, 0
+	// Aggregate statistics. Only evaluated checks count toward the score: a
+	// control the audit cannot observe says nothing about this deployment,
+	// and scoring it as a pass is what let the grade claim more than had been
+	// checked.
+	passed, warned, failed, notVerified := 0, 0, 0, 0
 	for _, c := range checks {
 		switch c.Status {
 		case StatusPass:
@@ -166,18 +169,22 @@ func (e *Evaluator) Evaluate(ctx context.Context) AuditReport {
 			warned++
 		case StatusFail:
 			failed++
+		case StatusNotVerified:
+			notVerified++
 		}
 	}
 
 	total := len(checks)
+	evaluated := passed + warned + failed
 	score := 0
-	if total > 0 {
-		// Pass = 2.5 pts (100 total), Warn = 1.25 pts, Fail = 0 pts
-		rawScore := float64(passed)*2.5 + float64(warned)*1.25
-		score = int(math.Round(rawScore))
-		if score > 100 {
-			score = 100
-		}
+	if evaluated > 0 {
+		// Pass = full marks, warn = half, fail = none.
+		score = int(math.Round((float64(passed) + float64(warned)/2) * 100 / float64(evaluated)))
+	}
+	// A single failure caps the grade: an exposed default password is not
+	// offset by twelve other checks passing.
+	if failed > 0 {
+		score = min(score, 69)
 	}
 
 	var grade string
@@ -202,7 +209,30 @@ func (e *Evaluator) Evaluate(ctx context.Context) AuditReport {
 		Passed:      passed,
 		Warned:      warned,
 		Failed:      failed,
+		NotVerified: notVerified,
+		Evaluated:   evaluated,
 		Checks:      checks,
+	}
+}
+
+// notVerified lists a control the audit cannot observe on a running server:
+// how handlers validate input, which routes carry which role, what the
+// frontend escapes. These used to be reported as "pass" with a fixed sentence
+// of evidence, some of it no longer true, and they made up most of the score.
+// They are still listed, as requirements with a way to review them, but they
+// do not count toward the grade.
+func notVerified(id, part int, title string, cat CheckCategory, owasp, requirement, review string) CheckItem {
+	return CheckItem{
+		ID:          id,
+		Part:        part,
+		Number:      id,
+		Title:       title,
+		Category:    cat,
+		Status:      StatusNotVerified,
+		Description: requirement,
+		Evidence:    "Not checked by this audit: this is a property of the server's code, not of this deployment, and it cannot be observed at runtime.",
+		Remediation: review,
+		OWASPTag:    owasp,
 	}
 }
 
@@ -211,35 +241,15 @@ func (e *Evaluator) Evaluate(ctx context.Context) AuditReport {
 // -------------------------------------------------------------
 
 func (e *Evaluator) checkAPIKeySecurity() CheckItem {
-	item := CheckItem{
-		ID:          1,
-		Part:        1,
-		Number:      1,
-		Title:       "API Key & Token Hashing",
-		Category:    CategoryCoreApp,
-		Status:      StatusPass,
-		Description: "API keys, device secrets, and WebSocket tickets must never be stored in plaintext. Cryptographic hashing (SHA-256 / bcrypt) with high entropy is enforced.",
-		Evidence:    "Agent device_secret stored as SHA-256 hash. One-time WebSocket tickets minted via crypto/rand with 60s TTL and SHA-256 storage.",
-		Remediation: "Continue using SHA-256 or Argon2/bcrypt for secret hashing; avoid reversible encryption for credentials.",
-		OWASPTag:    "A02:2021-Cryptographic Failures",
-	}
-	return item
+	return notVerified(1, 1, "API Key & Token Hashing", CategoryCoreApp, "A02:2021-Cryptographic Failures",
+		"API keys, device secrets and one-time tickets must never be stored in plaintext.",
+		"Review how device secrets and WebSocket tickets are stored (server/modules/device-management, server/core/auth).")
 }
 
 func (e *Evaluator) checkEnvNotPublic() CheckItem {
-	item := CheckItem{
-		ID:          2,
-		Part:        1,
-		Number:      2,
-		Title:       "Environment File Privacy",
-		Category:    CategoryCoreApp,
-		Status:      StatusPass,
-		Description: "Environment configuration files (.env, server.env) must reside outside the public web root and never be served over HTTP.",
-		Evidence:    "server.env resides in service directory; SPA static files served from embedded web-console/dist with strict file extension and index.html routing jail.",
-		Remediation: "Ensure reverse proxy (nginx/Caddy) blocks direct requests to .env, .git, and config files with 403/404.",
-		OWASPTag:    "A05:2021-Security Misconfiguration",
-	}
-	return item
+	return notVerified(2, 1, "Environment File Privacy", CategoryCoreApp, "A05:2021-Security Misconfiguration",
+		"Configuration files (.env, server.env) must live outside anything served over HTTP.",
+		"Request /server.env and /.env through the public URL and confirm a 404; make the reverse proxy refuse dotfiles.")
 }
 
 func (e *Evaluator) checkNoHardcodedSecret() CheckItem {
@@ -273,41 +283,9 @@ func (e *Evaluator) checkNoHardcodedSecret() CheckItem {
 }
 
 func (e *Evaluator) checkSecretInGit() CheckItem {
-	status := StatusPass
-	evidence := ".gitignore contains protections for credentials, *.db, server.env, and private keys."
-	remediation := "Run regular git history audits using gitleaks or trufflehog."
-
-	gitIgnorePaths := []string{".gitignore", "../.gitignore"}
-	found := false
-	for _, p := range gitIgnorePaths {
-		data, err := os.ReadFile(p)
-		if err == nil {
-			content := string(data)
-			if strings.Contains(content, "*.db") && strings.Contains(content, ".env") {
-				found = true
-				break
-			}
-		}
-	}
-
-	if !found {
-		status = StatusWarn
-		evidence = "Could not confirm .gitignore entries for .env and database files from current working directory."
-		remediation = "Ensure .env, server.env, creds.json, and *.db are explicitly listed in .gitignore."
-	}
-
-	return CheckItem{
-		ID:          4,
-		Part:        1,
-		Number:      4,
-		Title:       "Version Control Secret Exclusion",
-		Category:    CategoryCoreApp,
-		Status:      status,
-		Description: "Sensitive configuration, credentials, and live databases must be strictly excluded from git tracking.",
-		Evidence:    evidence,
-		Remediation: remediation,
-		OWASPTag:    "A05:2021-Security Misconfiguration",
-	}
+	return notVerified(4, 1, "Version Control Secret Exclusion", CategoryCoreApp, "A05:2021-Security Misconfiguration",
+		"Credentials, environment files and databases must never be committed to version control.",
+		"Scan the repository and its history with gitleaks or trufflehog before publishing it.")
 }
 
 func (e *Evaluator) checkDebugModeOff() CheckItem {
@@ -336,123 +314,51 @@ func (e *Evaluator) checkDebugModeOff() CheckItem {
 }
 
 func (e *Evaluator) checkErrorLeakage() CheckItem {
-	return CheckItem{
-		ID:          6,
-		Part:        1,
-		Number:      6,
-		Title:       "API Error Sanitization",
-		Category:    CategoryCoreApp,
-		Status:      StatusPass,
-		Description: "Error handlers must return standardized, sanitized messages without leaking raw database queries or runtime stack traces.",
-		Evidence:    "Standardized JSON error responder (writeErr / writeJSON) returns sanitized messages without exposing internal stack traces.",
-		Remediation: "Ensure all newly added handlers route errors through central error responder functions.",
-		OWASPTag:    "A04:2021-Insecure Design",
-	}
+	return notVerified(6, 1, "API Error Sanitization", CategoryCoreApp, "A04:2021-Insecure Design",
+		"Error responses must not leak SQL, file paths or stack traces.",
+		"Review handler error paths; probe the API with malformed requests and read the responses.")
 }
 
 func (e *Evaluator) checkInputValidation() CheckItem {
-	return CheckItem{
-		ID:          7,
-		Part:        1,
-		Number:      7,
-		Title:       "Request Body & Boundary Limits",
-		Category:    CategoryCoreApp,
-		Status:      StatusPass,
-		Description: "Strict payload size limits must be enforced on unauthenticated requests to prevent denial-of-service via memory exhaustion.",
-		Evidence:    "Unauthenticated enrollment and login requests bounded by http.MaxBytesReader (1MB). Package uploads bounded to 500MB.",
-		Remediation: "Maintain http.MaxBytesReader limits across all incoming multipart and JSON handlers.",
-		OWASPTag:    "A04:2021-Insecure Design",
-	}
+	return notVerified(7, 1, "Request Body & Boundary Limits", CategoryCoreApp, "A04:2021-Insecure Design",
+		"Request bodies, especially unauthenticated ones, must be size-limited.",
+		"Review http.MaxBytesReader use on login, enrollment and upload handlers.")
 }
 
 func (e *Evaluator) checkInputSanitization() CheckItem {
-	return CheckItem{
-		ID:          8,
-		Part:        1,
-		Number:      8,
-		Title:       "Command & Argument Sanitization",
-		Category:    CategoryCoreApp,
-		Status:      StatusPass,
-		Description: "Shell commands, system calls, and arguments must be strictly typed or escaped to prevent command injection.",
-		Evidence:    "Remote execution and interactive terminal commands run with native arguments without raw shell string concatenation.",
-		Remediation: "Always execute binaries with separate argument slices instead of invoking 'sh -c' with user input.",
-		OWASPTag:    "A03:2021-Injection",
-	}
+	return notVerified(8, 1, "Command & Argument Sanitization", CategoryCoreApp, "A03:2021-Injection",
+		"Commands must be run with separate arguments, never by building a shell string from input.",
+		"Review the agent's exec paths (remote-exec, software install, maintenance, system policy).")
 }
 
 func (e *Evaluator) checkAntiSQLInjection() CheckItem {
-	return CheckItem{
-		ID:          9,
-		Part:        1,
-		Number:      9,
-		Title:       "Parameterized SQL Execution",
-		Category:    CategoryData,
-		Status:      StatusPass,
-		Description: "All database queries must use prepared statements and parameterized bindings (sqlx ? and :name syntax).",
-		Evidence:    "100% of repository queries across 17 modules use sqlx parameterized placeholders ($1 or ?). Zero raw query formatting.",
-		Remediation: "Never use fmt.Sprintf to construct SQL WHERE clauses.",
-		OWASPTag:    "A03:2021-Injection",
-	}
+	return notVerified(9, 1, "Parameterized SQL Execution", CategoryData, "A03:2021-Injection",
+		"Every query must bind values as parameters instead of formatting them into SQL.",
+		"Search repositories for fmt.Sprintf or string concatenation that builds SQL.")
 }
 
 func (e *Evaluator) checkAntiXSS() CheckItem {
-	return CheckItem{
-		ID:          10,
-		Part:        1,
-		Number:      10,
-		Title:       "Cross-Site Scripting (XSS) Prevention",
-		Category:    CategoryCoreApp,
-		Status:      StatusPass,
-		Description: "Content Security Policy (CSP) and automated frontend escaping must prevent reflected, stored, or DOM-based script injection.",
-		Evidence:    "React JSX auto-escapes all dynamic content. SecurityHeaders middleware enforces default-src 'self' CSP.",
-		Remediation: "Avoid dangerouslySetInnerHTML in web-console components.",
-		OWASPTag:    "A03:2021-Injection",
-	}
+	return notVerified(10, 1, "Cross-Site Scripting (XSS) Prevention", CategoryCoreApp, "A03:2021-Injection",
+		"Untrusted content must be escaped on output, and a Content-Security-Policy should limit script sources.",
+		"Search the console for dangerouslySetInnerHTML; check the Content-Security-Policy response header.")
 }
 
 func (e *Evaluator) checkServerSideAuth() CheckItem {
-	return CheckItem{
-		ID:          11,
-		Part:        1,
-		Number:      11,
-		Title:       "Server-Side Token Authentication",
-		Category:    CategoryCoreApp,
-		Status:      StatusPass,
-		Description: "All API operations must validate cryptographically signed JWT tokens on the server for each request.",
-		Evidence:    "JWT RequireAuth middleware verifies HMAC signature, expiration time, and active session status on every private route.",
-		Remediation: "Do not trust client-asserted identity or localStorage state without server verification.",
-		OWASPTag:    "A07:2021-Identification and Authentication Failures",
-	}
+	return notVerified(11, 1, "Server-Side Token Authentication", CategoryCoreApp, "A07:2021-Identification and Authentication Failures",
+		"Every private API route must verify the caller's token on the server.",
+		"Review route registration for routes outside the authentication middleware.")
 }
 
 func (e *Evaluator) checkUserAccessRBAC() CheckItem {
-	return CheckItem{
-		ID:          12,
-		Part:        1,
-		Number:      12,
-		Title:       "Role-Based Access Control (RBAC)",
-		Category:    CategoryCoreApp,
-		Status:      StatusPass,
-		Description: "Granular roles (Viewer, Operator, Technician, Admin) must be enforced at the HTTP router level before executing business logic.",
-		Evidence:    "rbac.RequireRole and rbac.RequirePermission guard all state-modifying routes across fleet, patches, and deployment modules.",
-		Remediation: "Ensure new API routes specify appropriate role prerequisites.",
-		OWASPTag:    "A01:2021-Broken Access Control",
-	}
+	return notVerified(12, 1, "Role-Based Access Control (RBAC)", CategoryCoreApp, "A01:2021-Broken Access Control",
+		"State-changing routes must require the role the action needs (viewer, technician, admin).",
+		"Review rbac.RequireRole on each route; test each role against the routes it must not reach.")
 }
 
 func (e *Evaluator) checkAdminRoleSecurity() CheckItem {
-	return CheckItem{
-		ID:          13,
-		Part:        1,
-		Number:      13,
-		Title:       "Administrative Privilege Separation",
-		Category:    CategoryCoreApp,
-		Status:      StatusPass,
-		Description: "Critical operations (user management, backup/restore, audit logs, permanent device deletion) must require the highest Admin role.",
-		Evidence:    "User CRUD, directory sync, backup creation, security audits, and permanent device deletions are strictly isolated under RoleAdmin.",
-		Remediation: "Audit operator accounts periodically to ensure principle of least privilege.",
-		OWASPTag:    "A01:2021-Broken Access Control",
-	}
+	return notVerified(13, 1, "Administrative Privilege Separation", CategoryCoreApp, "A01:2021-Broken Access Control",
+		"User management, backup and restore and permanent deletion must require the admin role.",
+		"Sign in as a technician and confirm those actions are refused.")
 }
 
 func (e *Evaluator) checkDBNotPublic() CheckItem {
@@ -503,19 +409,27 @@ func (e *Evaluator) checkDBFilePermissions() CheckItem {
 
 func (e *Evaluator) checkPasswordHashing(ctx context.Context) CheckItem {
 	status := StatusPass
-	evidence := "bcrypt with work factor 12 is enforced for all stored credentials."
-	remediation := "Keep bcrypt cost >= 12 or migrate to Argon2id for higher memory hardness."
+	var evidence string
+	remediation := "Keep bcrypt cost >= 12 or migrate to Argon2id."
 
-	var sampleHash string
-	err := e.db.GetContext(ctx, &sampleHash, `SELECT password_hash FROM users WHERE password_hash != '' LIMIT 1`)
-	if err == nil && len(sampleHash) > 0 {
-		if strings.HasPrefix(sampleHash, "$2a$") || strings.HasPrefix(sampleHash, "$2b$") {
-			evidence = "Confirmed bcrypt password hashing ($2a$/$2b$) on user credentials in database."
-		} else {
-			status = StatusFail
-			evidence = "Non-bcrypt password hash detected in database."
-			remediation = "Re-hash all passwords using bcrypt cost 12."
-		}
+	// Every hash is checked, not one sample: one account created by an old
+	// import with a weak hash is the one an attacker finds.
+	var users, weak int
+	errAll := e.db.GetContext(ctx, &users, `SELECT COUNT(*) FROM users WHERE password_hash != ''`)
+	errWeak := e.db.GetContext(ctx, &weak, `SELECT COUNT(*) FROM users WHERE password_hash != '' AND password_hash NOT LIKE '$2a$%' AND password_hash NOT LIKE '$2b$%' AND password_hash NOT LIKE '$2y$%'`)
+	switch {
+	case errAll != nil || errWeak != nil:
+		status = StatusWarn
+		evidence = "The users table could not be read to check password hashes."
+		remediation = "Check the database connection and rerun the audit."
+	case weak > 0:
+		status = StatusFail
+		evidence = fmt.Sprintf("%d of %d stored password(s) are not bcrypt hashes.", weak, users)
+		remediation = "Reset the passwords of those accounts so they are re-hashed with bcrypt."
+	case users == 0:
+		evidence = "No console accounts have a password yet."
+	default:
+		evidence = fmt.Sprintf("All %d stored password(s) are bcrypt hashes.", users)
 	}
 
 	return CheckItem{
@@ -533,24 +447,34 @@ func (e *Evaluator) checkPasswordHashing(ctx context.Context) CheckItem {
 }
 
 func (e *Evaluator) checkSessionSecurity(ctx context.Context) CheckItem {
+	_ = ctx
+	access, refresh := e.cfg.AccessTokenTTL, e.cfg.RefreshTokenTTL
 	status := StatusPass
-	evidence := "Active session tracking in auth_sessions table with server-side revocation on logout."
-	remediation := "Enforce short-lived access tokens (15-60 min) with refresh token rotation."
-
-	var sessionCount int
-	err := e.db.GetContext(ctx, &sessionCount, `SELECT COUNT(*) FROM auth_sessions`)
-	if err == nil {
-		evidence = fmt.Sprintf("auth_sessions table active with %d recorded session(s). Revocation supported.", sessionCount)
+	evidence := fmt.Sprintf("Access tokens last %s and refresh sessions %s; sessions are stored server-side and revoked on logout.", access, refresh)
+	remediation := "Keep access tokens short-lived (15-60 min)."
+	switch {
+	case access <= 0 || refresh <= 0:
+		status = StatusWarn
+		evidence = "ACCESS_TOKEN_TTL or REFRESH_TOKEN_TTL is not set to a positive duration."
+		remediation = "Set ACCESS_TOKEN_TTL (e.g. 15m) and REFRESH_TOKEN_TTL (e.g. 168h)."
+	case access > time.Hour:
+		status = StatusWarn
+		evidence = fmt.Sprintf("Access tokens last %s: a stolen token stays usable that long, and revocation only takes effect when it expires.", access)
+		remediation = "Lower ACCESS_TOKEN_TTL to 1h or less."
+	case refresh > 30*24*time.Hour:
+		status = StatusWarn
+		evidence = fmt.Sprintf("Refresh sessions last %s.", refresh)
+		remediation = "Lower REFRESH_TOKEN_TTL to 30 days or less."
 	}
 
 	return CheckItem{
 		ID:          17,
 		Part:        1,
 		Number:      17,
-		Title:       "Session Invalidation & Revocation",
+		Title:       "Session Lifetime & Revocation",
 		Category:    CategoryCoreApp,
 		Status:      status,
-		Description: "Sessions must be tracked server-side and invalidated immediately upon logout, role change, or timeout.",
+		Description: "Access tokens must be short-lived and sessions revocable on the server.",
 		Evidence:    evidence,
 		Remediation: remediation,
 		OWASPTag:    "A07:2021-Identification and Authentication Failures",
@@ -558,48 +482,21 @@ func (e *Evaluator) checkSessionSecurity(ctx context.Context) CheckItem {
 }
 
 func (e *Evaluator) checkResetPasswordSecurity() CheckItem {
-	return CheckItem{
-		ID:          18,
-		Part:        1,
-		Number:      18,
-		Title:       "Secure Password Change Flow",
-		Category:    CategoryCoreApp,
-		Status:      StatusPass,
-		Description: "Changing passwords must require verification of the current password and terminate all other concurrent sessions.",
-		Evidence:    "PUT /api/users/{id}/password requires current password verification and terminates active sessions on credential change.",
-		Remediation: "Ensure password reset tokens are single-use and expire within 15 minutes.",
-		OWASPTag:    "A07:2021-Identification and Authentication Failures",
-	}
+	return notVerified(18, 1, "Secure Password Change Flow", CategoryCoreApp, "A07:2021-Identification and Authentication Failures",
+		"Changing a password must require the current one and end the account's other sessions.",
+		"Change a password while signed in elsewhere and confirm the other session ends.")
 }
 
 func (e *Evaluator) checkFileUploadLimits() CheckItem {
-	return CheckItem{
-		ID:          19,
-		Part:        1,
-		Number:      19,
-		Title:       "File Upload Size Restraints",
-		Category:    CategoryCoreApp,
-		Status:      StatusPass,
-		Description: "File upload endpoints must enforce strict content length and body reader limits to prevent disk exhaustion attacks.",
-		Evidence:    "Software packages bounded to 500MB via http.MaxBytesReader; agent update binaries bounded to 200MB; wallpaper bounded to 10MB.",
-		Remediation: "Ensure storage directories reside on volumes with adequate free disk space monitoring.",
-		OWASPTag:    "A04:2021-Insecure Design",
-	}
+	return notVerified(19, 1, "File Upload Size Restraints", CategoryCoreApp, "A04:2021-Insecure Design",
+		"Uploads must be size-limited so they cannot fill the disk.",
+		"Review upload handlers for size limits; monitor free space on the data volume.")
 }
 
 func (e *Evaluator) checkFileUploadScanning() CheckItem {
-	return CheckItem{
-		ID:          20,
-		Part:        1,
-		Number:      20,
-		Title:       "File Upload Integrity & Validation",
-		Category:    CategoryCoreApp,
-		Status:      StatusPass,
-		Description: "Uploaded files must undergo SHA-256 integrity verification, extension validation, and format checking.",
-		Evidence:    "Software packages and agent release binaries calculate and verify SHA-256 checksums before distribution.",
-		Remediation: "Consider integrating ClamAV or Windows Defender scanning hooks for untrusted installer packages.",
-		OWASPTag:    "A08:2021-Software and Data Integrity Failures",
-	}
+	return notVerified(20, 1, "File Upload Integrity & Validation", CategoryCoreApp, "A08:2021-Software and Data Integrity Failures",
+		"Uploaded packages must be checksummed, and ideally scanned, before they are distributed.",
+		"Uploaded installers are not malware-scanned; scan packages before uploading them.")
 }
 
 // -------------------------------------------------------------
@@ -607,27 +504,26 @@ func (e *Evaluator) checkFileUploadScanning() CheckItem {
 // -------------------------------------------------------------
 
 func (e *Evaluator) checkRateLimitAPI() CheckItem {
-	return CheckItem{
-		ID:          21,
-		Part:        2,
-		Number:      21,
-		Title:       "API Rate Limiting & Brute-Force Defense",
-		Category:    CategoryNetwork,
-		Status:      StatusPass,
-		Description: "Sensitive endpoints (login, enrollment) must enforce rate limiting to mitigate credential stuffing and brute-force attacks.",
-		Evidence:    "IPRateLimiter active on /api/auth/login and /api/agent/enroll with sliding window limiting.",
-		Remediation: "Configure reverse proxy rate limits for defense-in-depth across the entire /api/ prefix.",
-		OWASPTag:    "A04:2021-Insecure Design",
-	}
+	return notVerified(21, 2, "API Rate Limiting & Brute-Force Defense", CategoryNetwork, "A04:2021-Insecure Design",
+		"Login and enrollment must be rate-limited against brute force.",
+		"Send repeated failed logins and confirm HTTP 429 and account lockout.")
 }
 
 func (e *Evaluator) checkStrictCORS() CheckItem {
 	status := StatusPass
-	evidence := "Origin checking strictly validates WebSocket requests against same-host and loopback."
+	evidence := "No extra origins are allowed: only the console's own origin can call the API from a browser."
 	remediation := "Only add trusted domains to ALLOWED_ORIGIN_DOMAINS."
 
-	if len(e.cfg.AllowedOriginDomains) > 0 {
-		evidence = fmt.Sprintf("Allowed origin domains configured: %s.", strings.Join(e.cfg.AllowedOriginDomains, ", "))
+	for _, d := range e.cfg.AllowedOriginDomains {
+		if strings.TrimSpace(d) == "*" {
+			status = StatusFail
+			evidence = "ALLOWED_ORIGIN_DOMAINS contains \"*\": any website can call the API from a signed-in operator's browser."
+			remediation = "Remove \"*\" and list the exact domains that need access."
+			break
+		}
+	}
+	if status == StatusPass && len(e.cfg.AllowedOriginDomains) > 0 {
+		evidence = fmt.Sprintf("Allowed extra origins: %s.", strings.Join(e.cfg.AllowedOriginDomains, ", "))
 	}
 
 	return CheckItem{
@@ -637,7 +533,7 @@ func (e *Evaluator) checkStrictCORS() CheckItem {
 		Title:       "Strict Cross-Origin Resource Sharing (CORS)",
 		Category:    CategoryNetwork,
 		Status:      status,
-		Description: "CORS and WebSocket origin validation must reject unauthorized cross-origin requests.",
+		Description: "Cross-origin requests and WebSocket origins must be limited to trusted domains.",
 		Evidence:    evidence,
 		Remediation: remediation,
 		OWASPTag:    "A01:2021-Broken Access Control",
@@ -645,93 +541,39 @@ func (e *Evaluator) checkStrictCORS() CheckItem {
 }
 
 func (e *Evaluator) checkCSRFProtection() CheckItem {
-	return CheckItem{
-		ID:          23,
-		Part:        2,
-		Number:      23,
-		Title:       "Cross-Site Request Forgery (CSRF) Mitigation",
-		Category:    CategoryNetwork,
-		Status:      StatusPass,
-		Description: "Authentication must use explicit Authorization Bearer headers rather than ambient browser cookies.",
-		Evidence:    "All API interactions use explicit Authorization: Bearer <token> headers. Browser cookies are not used for authentication.",
-		Remediation: "Do not switch to cookie-based auth without implementing SameSite=Strict and CSRF tokens.",
-		OWASPTag:    "A01:2021-Broken Access Control",
-	}
+	return notVerified(23, 2, "Cross-Site Request Forgery (CSRF) Mitigation", CategoryNetwork, "A01:2021-Broken Access Control",
+		"Authentication must not rely on cookies a browser sends automatically, or must carry CSRF protection.",
+		"Confirm API calls authenticate with an Authorization header rather than a cookie.")
 }
 
 func (e *Evaluator) checkPreventSSRF() CheckItem {
-	return CheckItem{
-		ID:          24,
-		Part:        2,
-		Number:      24,
-		Title:       "Server-Side Request Forgery (SSRF) Prevention",
-		Category:    CategoryNetwork,
-		Status:      StatusPass,
-		Description: "Outbound HTTP requests (webhooks, remote downloads) must validate destination IP addresses to prevent intranet scanning.",
-		Evidence:    "Alert webhooks and external HTTP clients reject loopback, link-local, and RFC 1918 private IP destinations unless explicitly authorized.",
-		Remediation: "Maintain safe dialer validation on any new outbound network integrations.",
-		OWASPTag:    "A10:2021-Server-Side Request Forgery",
-	}
+	return notVerified(24, 2, "Server-Side Request Forgery (SSRF) Prevention", CategoryNetwork, "A10:2021-Server-Side Request Forgery",
+		"Server-side requests to operator-supplied URLs (webhooks) must not reach internal addresses.",
+		"Point an alert webhook at 127.0.0.1 or a private address and confirm it is refused.")
 }
 
 func (e *Evaluator) checkPathTraversalJail() CheckItem {
-	return CheckItem{
-		ID:          25,
-		Part:        2,
-		Number:      25,
-		Title:       "Path Traversal & Storage Jailing",
-		Category:    CategoryHardening,
-		Status:      StatusPass,
-		Description: "File operations must sanitize paths with filepath.Clean and verify they remain within the intended root directory.",
-		Evidence:    "Storage paths use filepath.Clean and verify strings.HasPrefix(target, root) to prevent directory traversal outside jailed folders.",
-		Remediation: "Always use filepath.Base on user-supplied file names before joining with root paths.",
-		OWASPTag:    "A01:2021-Broken Access Control",
-	}
+	return notVerified(25, 2, "Path Traversal & Storage Jailing", CategoryHardening, "A01:2021-Broken Access Control",
+		"File operations on supplied names must stay inside their storage directory.",
+		"Review file name handling in package, backup and transfer storage.")
 }
 
 func (e *Evaluator) checkAPIInputValidation() CheckItem {
-	return CheckItem{
-		ID:          26,
-		Part:        2,
-		Number:      26,
-		Title:       "Strict API Schema Validation",
-		Category:    CategoryPipeline,
-		Status:      StatusPass,
-		Description: "API requests must strictly validate required JSON fields, UUID formats, and reject malformed schemas with HTTP 400.",
-		Evidence:    "Strict JSON struct decoding with DisallowUnknownFields and explicit validation logic across all modules.",
-		Remediation: "Continue validating struct fields immediately after JSON unmarshaling.",
-		OWASPTag:    "A04:2021-Insecure Design",
-	}
+	return notVerified(26, 2, "Strict API Schema Validation", CategoryPipeline, "A04:2021-Insecure Design",
+		"Requests must be validated and malformed ones rejected with HTTP 400.",
+		"Probe endpoints with missing and malformed fields.")
 }
 
 func (e *Evaluator) checkAPIOutputValidation() CheckItem {
-	return CheckItem{
-		ID:          27,
-		Part:        2,
-		Number:      27,
-		Title:       "Sensitive Field Redaction in API Responses",
-		Category:    CategoryPipeline,
-		Status:      StatusPass,
-		Description: "Password hashes, device secrets, and private keys must be tagged with json:\"-\" or stripped before serialization.",
-		Evidence:    "Models use explicit json:\"-\" or separate DTO structs (DeviceDTO, UserDTO) to guarantee secrets are omitted from API responses.",
-		Remediation: "Never return raw entity database models directly to API callers.",
-		OWASPTag:    "A02:2021-Cryptographic Failures",
-	}
+	return notVerified(27, 2, "Sensitive Field Redaction in API Responses", CategoryPipeline, "A02:2021-Cryptographic Failures",
+		"Password hashes, device secrets and keys must never appear in API responses.",
+		"Read the user and device API responses and confirm no secret fields are present.")
 }
 
 func (e *Evaluator) checkAdminRouteSecurity() CheckItem {
-	return CheckItem{
-		ID:          28,
-		Part:        2,
-		Number:      28,
-		Title:       "Administrative Route Isolation",
-		Category:    CategoryHardening,
-		Status:      StatusPass,
-		Description: "Management endpoints must be clustered under dedicated subrouters with mandatory RoleAdmin middleware.",
-		Evidence:    "User management, system posture, backup/restore, and LDAP endpoints grouped under rbac.RequireRole(RoleAdmin).",
-		Remediation: "Verify all new administrative endpoints are registered inside Admin subrouters.",
-		OWASPTag:    "A01:2021-Broken Access Control",
-	}
+	return notVerified(28, 2, "Administrative Route Isolation", CategoryHardening, "A01:2021-Broken Access Control",
+		"Administrative endpoints must sit behind the admin role.",
+		"Review route registration for administrative endpoints outside rbac.RequireRole(RoleAdmin).")
 }
 
 func (e *Evaluator) checkDefaultPasswordChanged(ctx context.Context) CheckItem {
@@ -753,13 +595,27 @@ func (e *Evaluator) checkDefaultPasswordChanged(ctx context.Context) CheckItem {
 
 func (e *Evaluator) checkTamperEvidentAuditChain(ctx context.Context) CheckItem {
 	status := StatusPass
-	evidence := "Audit log records state mutations with SHA-256 chain links (audit-chain-v1)."
-	remediation := "Periodically export and back up audit logs to a secure external syslog or WORM archive."
+	var evidence string
+	remediation := "Periodically export the audit log to external storage."
 
-	var auditCount int
-	err := e.db.GetContext(ctx, &auditCount, `SELECT COUNT(*) FROM audit_logs`)
-	if err == nil {
-		evidence = fmt.Sprintf("Tamper-evident audit table active with %d logged mutation event(s).", auditCount)
+	// The chain is verified, not counted: a row count says nothing about
+	// whether a row was edited or deleted.
+	rep, err := audit.VerifyChain(ctx, e.db)
+	switch {
+	case err != nil:
+		status = StatusWarn
+		evidence = "The audit chain could not be verified: " + err.Error()
+		remediation = "Check the database connection and rerun the audit."
+	case !rep.OK:
+		status = StatusFail
+		evidence = fmt.Sprintf("The audit chain is broken at entry %s: %s.", rep.BreakID, rep.Reason)
+		remediation = "Investigate who changed the audit log; compare against an exported copy."
+	case rep.Checked == 0:
+		status = StatusWarn
+		evidence = "The audit log has no chained entries to verify yet."
+		remediation = "Entries are chained as they are written; rerun the audit after some activity."
+	default:
+		evidence = fmt.Sprintf("%d chained audit entries verified intact.", rep.Checked)
 	}
 
 	return CheckItem{
@@ -769,7 +625,7 @@ func (e *Evaluator) checkTamperEvidentAuditChain(ctx context.Context) CheckItem 
 		Title:       "Tamper-Evident Audit Logging",
 		Category:    CategoryPipeline,
 		Status:      status,
-		Description: "All administrative actions, device lifecycle events, and policy dispatches must be recorded in an immutable audit log.",
+		Description: "Administrative actions must be recorded in an audit log whose integrity can be verified.",
 		Evidence:    evidence,
 		Remediation: remediation,
 		OWASPTag:    "A09:2021-Security Logging and Monitoring Failures",
@@ -777,27 +633,35 @@ func (e *Evaluator) checkTamperEvidentAuditChain(ctx context.Context) CheckItem 
 }
 
 func (e *Evaluator) checkWebhookVerification() CheckItem {
-	return CheckItem{
-		ID:          31,
-		Part:        2,
-		Number:      31,
-		Title:       "Webhook Cryptographic Signatures",
-		Category:    CategoryPipeline,
-		Status:      StatusPass,
-		Description: "Outbound alerts and webhooks should carry HMAC-SHA256 signature headers so receiving servers can verify authenticity.",
-		Evidence:    "Alert notification webhooks calculate HMAC-SHA256 signature over payload using configured secret key.",
-		Remediation: "Ensure receiving webhook endpoints verify the X-Signature-256 header before processing.",
-		OWASPTag:    "A08:2021-Software and Data Integrity Failures",
-	}
+	return notVerified(31, 2, "Webhook Authenticity", CategoryPipeline, "A08:2021-Software and Data Integrity Failures",
+		"Receivers should be able to verify that an alert webhook came from this server.",
+		"Confirm whether your webhook receiver can authenticate the sender; restrict it to this server's address otherwise.")
 }
 
 func (e *Evaluator) checkLicenseCompliance(ctx context.Context) CheckItem {
 	status := StatusPass
-	remediation := "Review license expiry dates regularly under Asset & License management."
+	remediation := "Review license allocations and expiry under Asset & License management."
 
-	var count int
-	_ = e.db.GetContext(ctx, &count, `SELECT COUNT(*) FROM software_licenses`)
-	evidence := fmt.Sprintf("Software license tracking table initialized with %d managed license pool(s).", count)
+	var over, expired int
+	errOver := e.db.GetContext(ctx, &over, `
+		SELECT COUNT(*) FROM software_licenses l
+		 WHERE (SELECT COUNT(*) FROM license_allocations a WHERE a.license_id = l.id) > l.total_seats`)
+	errExp := e.db.GetContext(ctx, &expired, `
+		SELECT COUNT(*) FROM software_licenses l
+		 WHERE l.expires_at IS NOT NULL AND l.expires_at < CURRENT_TIMESTAMP
+		   AND EXISTS (SELECT 1 FROM license_allocations a WHERE a.license_id = l.id)`)
+	var evidence string
+	switch {
+	case errOver != nil || errExp != nil:
+		status = StatusWarn
+		evidence = "License data could not be read."
+		remediation = "Check the database connection and rerun the audit."
+	case over > 0 || expired > 0:
+		status = StatusWarn
+		evidence = fmt.Sprintf("%d license(s) allocated beyond their seats; %d expired license(s) still allocated.", over, expired)
+	default:
+		evidence = "No license is allocated beyond its seats or used after expiry."
+	}
 
 	return CheckItem{
 		ID:          32,
@@ -806,7 +670,7 @@ func (e *Evaluator) checkLicenseCompliance(ctx context.Context) CheckItem {
 		Title:       "Asset & License Compliance",
 		Category:    CategoryHardening,
 		Status:      status,
-		Description: "Software license entitlements and enterprise asset allocations must be tracked to prevent non-compliant software usage.",
+		Description: "Software must not be deployed beyond licensed seats or after the license expires.",
 		Evidence:    evidence,
 		Remediation: remediation,
 		OWASPTag:    "A05:2021-Security Misconfiguration",
@@ -841,131 +705,121 @@ func (e *Evaluator) checkReleaseAntiTamper() CheckItem {
 }
 
 func (e *Evaluator) checkIDORProtection() CheckItem {
-	return CheckItem{
-		ID:          34,
-		Part:        2,
-		Number:      34,
-		Title:       "Insecure Direct Object Reference (IDOR) Defense",
-		Category:    CategoryHardening,
-		Status:      StatusPass,
-		Description: "Resource IDs passed in URL parameters must be verified against current session authorization and device ownership.",
-		Evidence:    "Agent endpoints verify device secret hash matching the specific device_id; user endpoints restrict access to self or admin.",
-		Remediation: "Ensure all device queries filter by verified caller identity.",
-		OWASPTag:    "A01:2021-Broken Access Control",
-	}
+	return notVerified(34, 2, "Insecure Direct Object Reference (IDOR) Defense", CategoryHardening, "A01:2021-Broken Access Control",
+		"An identifier in a URL must not let a caller reach a record they are not entitled to.",
+		"Test agent endpoints with one device's credentials against another device's id.")
 }
 
 func (e *Evaluator) checkLogSanitization() CheckItem {
-	return CheckItem{
-		ID:          35,
-		Part:        2,
-		Number:      35,
-		Title:       "Log Credential & Token Redaction",
-		Category:    CategoryHardening,
-		Status:      StatusPass,
-		Description: "Authentication tokens, passwords, and private keys must be masked or excluded from application log files.",
-		Evidence:    "Structured zerolog logger omits authorization headers and redacts sensitive parameters from request logs.",
-		Remediation: "Never print raw credentials or full request headers into stdout or log files.",
-		OWASPTag:    "A09:2021-Security Logging and Monitoring Failures",
-	}
+	return notVerified(35, 2, "Log Credential & Token Redaction", CategoryHardening, "A09:2021-Security Logging and Monitoring Failures",
+		"Tokens, passwords and keys must not be written to logs.",
+		"Search the server and agent logs for tokens, secrets and Authorization headers.")
 }
 
 func (e *Evaluator) checkPrivateSourceMap() CheckItem {
-	status := StatusPass
-	evidence := "Frontend production build configured with sourcemaps disabled."
-	remediation := "Keep sourcemap generation disabled for production builds."
-
-	distPath := "web-console/dist"
-	if entries, err := os.ReadDir(distPath); err == nil {
-		for _, entry := range entries {
-			if strings.HasSuffix(entry.Name(), ".map") {
-				status = StatusWarn
-				evidence = "Source map files (.map) detected in frontend distribution folder."
-				remediation = "Set build.sourcemap: false in web-console/vite.config.ts."
-				break
-			}
-		}
-	}
-
-	return CheckItem{
-		ID:          36,
-		Part:        2,
-		Number:      36,
-		Title:       "Frontend Source Map Privacy",
-		Category:    CategoryPipeline,
-		Status:      status,
-		Description: "Production frontend builds must avoid exposing TypeScript source maps to prevent exposing internal codebase structure.",
-		Evidence:    evidence,
-		Remediation: remediation,
-		OWASPTag:    "A05:2021-Security Misconfiguration",
-	}
+	return notVerified(36, 2, "Frontend Source Map Privacy", CategoryPipeline, "A05:2021-Security Misconfiguration",
+		"Production frontend builds should not ship source maps.",
+		"Request a script URL with .map appended and confirm a 404.")
 }
 
 func (e *Evaluator) checkDependencyHygiene() CheckItem {
-	return CheckItem{
-		ID:          37,
-		Part:        2,
-		Number:      37,
-		Title:       "Dependency Vulnerability Management",
-		Category:    CategoryPipeline,
-		Status:      StatusPass,
-		Description: "Dependencies in go.mod and package.json must be kept up-to-date and audited against known CVEs.",
-		Evidence:    "Go 1.24 and Node 24 baseline dependencies managed with lockfiles (go.sum and package-lock.json).",
-		Remediation: "Run 'govulncheck ./...' and 'npm audit' in CI/CD pipeline.",
-		OWASPTag:    "A06:2021-Vulnerable and Outdated Components",
-	}
+	return notVerified(37, 2, "Dependency Vulnerability Management", CategoryPipeline, "A06:2021-Vulnerable and Outdated Components",
+		"Dependencies must be kept current and checked against known vulnerabilities.",
+		"Run govulncheck ./... and npm audit for each release.")
 }
 
 func (e *Evaluator) checkBackupRestoreCapability() CheckItem {
-	status := StatusPass
-	evidence := "Online database backup (VACUUM INTO) and pre-flight restore validation supported."
-	remediation := "Configure BACKUP_DIR and test database restore periodically."
-
-	if e.cfg.BackupDir != "" {
-		evidence = fmt.Sprintf("Periodic automated backups active targeting %s with %d retention.", e.cfg.BackupDir, e.cfg.BackupRetain)
-	}
-
+	status, evidence, remediation := e.backupFindings(time.Now())
 	return CheckItem{
 		ID:          38,
 		Part:        2,
 		Number:      38,
-		Title:       "Disaster Recovery & Restore Testing",
+		Title:       "Recent Database Backup",
 		Category:    CategoryPipeline,
 		Status:      status,
-		Description: "Disaster recovery workflows must support point-in-time database backups and verified restore operations.",
+		Description: "A recent backup of the database must exist so the server can be restored.",
 		Evidence:    evidence,
 		Remediation: remediation,
 		OWASPTag:    "A04:2021-Insecure Design",
 	}
 }
 
-func (e *Evaluator) checkSecurityHeaders() CheckItem {
-	return CheckItem{
-		ID:          39,
-		Part:        2,
-		Number:      39,
-		Title:       "HTTP Security Headers Hardening",
-		Category:    CategoryNetwork,
-		Status:      StatusPass,
-		Description: "HTTP responses must include defense-in-depth headers: HSTS, X-Content-Type-Options: nosniff, X-Frame-Options: DENY, and CSP.",
-		Evidence:    "SecurityHeaders middleware attaches HSTS (max-age=31536000), X-Content-Type-Options: nosniff, X-Frame-Options: DENY, and Referrer-Policy.",
-		Remediation: "Ensure TLS certificate is valid for HSTS preload eligibility.",
-		OWASPTag:    "A05:2021-Security Misconfiguration",
+// backupFindings looks for the newest backup file. The check used to pass
+// whenever a backup directory was configured, whether or not anything had
+// ever been written to it.
+func (e *Evaluator) backupFindings(now time.Time) (CheckStatus, string, string) {
+	if e.cfg.DBDriver == "postgres" || strings.HasPrefix(e.cfg.DBURL, "postgres") {
+		return StatusWarn, "The database is PostgreSQL; the server's built-in backups cover SQLite only.",
+			"Back up PostgreSQL with pg_dump or your database's own backup service."
 	}
+	if e.cfg.BackupDir == "" {
+		return StatusWarn, "No backup directory is configured.", "Set BACKUP_DIR."
+	}
+	entries, err := os.ReadDir(e.cfg.BackupDir)
+	if err != nil {
+		return StatusWarn, fmt.Sprintf("The backup directory %s cannot be read: %v.", e.cfg.BackupDir, err),
+			"Check that BACKUP_DIR exists and is readable by the service."
+	}
+	var newest time.Time
+	for _, ent := range entries {
+		if ent.IsDir() || !strings.HasSuffix(ent.Name(), ".db") {
+			continue
+		}
+		if info, err := ent.Info(); err == nil && info.ModTime().After(newest) {
+			newest = info.ModTime()
+		}
+	}
+	if newest.IsZero() {
+		return StatusWarn, fmt.Sprintf("No backup file found in %s.", e.cfg.BackupDir),
+			"Create a backup from Settings > Backup & restore, and check that scheduled backups run."
+	}
+	// Scheduled backups run every BACKUP_INTERVAL; two missed runs and a
+	// margin is old.
+	limit := 24 * time.Hour
+	if e.cfg.BackupInterval > 0 {
+		limit = 2*e.cfg.BackupInterval + time.Hour
+	}
+	age := now.Sub(newest).Round(time.Minute)
+	if age > limit {
+		return StatusWarn, fmt.Sprintf("The newest backup in %s is %s old.", e.cfg.BackupDir, age),
+			"Check that scheduled backups are running (BACKUP_INTERVAL) and that the disk is not full."
+	}
+	return StatusPass, fmt.Sprintf("The newest backup in %s is %s old.", e.cfg.BackupDir, age),
+		"Test a restore periodically; a backup that has never been restored is not proven."
+}
+
+func (e *Evaluator) checkSecurityHeaders() CheckItem {
+	return notVerified(39, 2, "HTTP Security Headers Hardening", CategoryNetwork, "A05:2021-Security Misconfiguration",
+		"Responses should carry HSTS, X-Content-Type-Options, X-Frame-Options and a Content-Security-Policy.",
+		"Inspect the response headers of the public URL, e.g. curl -I https://your-server/.")
 }
 
 func (e *Evaluator) checkLiveSecuritySelfTest() CheckItem {
-	h := sha256.Sum256([]byte(time.Now().String()))
+	status := StatusPass
+	var evidence string
+	remediation := "Keep TLS in place for every route, including agent WebSockets."
+	switch {
+	case e.cfg.TLSCertFile != "" && e.cfg.TLSKeyFile != "":
+		evidence = "The server serves HTTPS itself (TLS_CERT_FILE and TLS_KEY_FILE are set)."
+	case len(e.cfg.TrustedProxies) > 0:
+		evidence = fmt.Sprintf("The server serves plain HTTP behind a trusted reverse proxy (%s), which is expected to terminate TLS.",
+			strings.Join(e.cfg.TrustedProxies, ", "))
+		remediation = "Confirm the reverse proxy serves HTTPS only and that the server's own port is not reachable from outside."
+	default:
+		status = StatusWarn
+		evidence = "The server serves plain HTTP and no trusted reverse proxy is configured: passwords, tokens and remote sessions cross the network unencrypted unless something in front of it adds TLS."
+		remediation = "Set TLS_CERT_FILE and TLS_KEY_FILE, or put the server behind an HTTPS reverse proxy and set TRUSTED_PROXIES."
+	}
 	return CheckItem{
 		ID:          40,
 		Part:        2,
 		Number:      40,
-		Title:       "Automated Pre-Launch Security Engine",
-		Category:    CategoryPipeline,
-		Status:      StatusPass,
-		Description: "A self-auditing security engine must continuously evaluate the 40 pre-launch security criteria.",
-		Evidence:    fmt.Sprintf("Live evaluator engine executed successfully (Run ID: %x). All 40 criteria evaluated.", h[:4]),
-		Remediation: "Run this security audit before every production version deployment.",
-		OWASPTag:    "A04:2021-Insecure Design",
+		Title:       "Transport Encryption (TLS)",
+		Category:    CategoryNetwork,
+		Status:      status,
+		Description: "Console, API and agent traffic must be encrypted in transit.",
+		Evidence:    evidence,
+		Remediation: remediation,
+		OWASPTag:    "A02:2021-Cryptographic Failures",
 	}
 }
