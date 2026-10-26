@@ -10,6 +10,16 @@ Riwayat sebelum v1.5.4 ada di `git log`.
 
 ## [Unreleased]
 
+### Diperbaiki
+- **Kebijakan akun admin terkelola gagal di sinkronisasi kedua ("powershell provision admin user ...: exit status 1
+  (output: )").** Akun dibuat lewat skrip PowerShell. Bila modul LocalAccounts tidak termuat di bawah akun layanan agen,
+  skrip memakai `net.exe` yang membuang pesan errornya dan tidak bisa diulang: pada setiap sinkronisasi setelah yang
+  pertama, akun sudah ada dan sudah anggota Administrators, `net localgroup /add` menolak "already a member", dan
+  kebijakan dilaporkan gagal tanpa alasan. Akun kini dikelola langsung lewat Windows Network Management API (tanpa
+  PowerShell): akun yang sudah ada diperbarui password dan statusnya, keanggotaan yang sudah ada dianggap berhasil, akun
+  yang dinonaktifkan manual diaktifkan kembali, dan penolakan dilaporkan dengan jelas, misalnya password yang tidak
+  memenuhi kebijakan password domain. Perlu agen versi berikutnya.
+
 ## [1.6.1] - 2026-10-25
 
 - Perlu server **dan** agen v1.6.1: perbarui server dengan `update.sh`, lalu agen dari **Agent Updates → Impor dari Paket

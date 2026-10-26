@@ -612,8 +612,8 @@ func applyScreenSaverPolicy(timeoutMinutes int, passwordRequired bool) error {
 	return errs.err()
 }
 
-// applyAdminAccountPolicy provisions or updates a managed local administrator account.
-// Passwords are submitted via stdin to PowerShell to avoid process command-line exposure.
+// applyAdminAccountPolicy provisions or updates the managed local
+// administrator account. See admin_windows.go.
 func applyAdminAccountPolicy(s PolicySettings) error {
 	if !s.AdminAccountEnabled || s.AdminAccountUsername == "" || s.AdminAccountPassword == "" {
 		return nil
@@ -634,51 +634,5 @@ func applyAdminAccountPolicy(s PolicySettings) error {
 	if desc == "" {
 		desc = "Central IT Managed Administrator Account"
 	}
-
-	neverExpiresStr := "$false"
-	if s.AdminAccountNeverExpires {
-		neverExpiresStr = "$true"
-	}
-
-	// PowerShell script using stdin to read password securely.
-	// Resolves S-1-5-32-544 to correctly identify Administrators group across all Windows language localizations.
-	psScript := fmt.Sprintf(`$ErrorActionPreference = 'Stop'
-$rawPass = [Console]::In.ReadLine()
-$secPass = ConvertTo-SecureString $rawPass -AsPlainText -Force
-$adminGroup = ([System.Security.Principal.SecurityIdentifier]'S-1-5-32-544').Translate([System.Security.Principal.NTAccount]).Value.Split('\')[-1]
-if (Get-Command New-LocalUser -ErrorAction SilentlyContinue) {
-    $u = Get-LocalUser -Name '%s' -ErrorAction SilentlyContinue
-    if (-not $u) {
-        New-LocalUser -Name '%s' -Password $secPass -FullName '%s' -Description '%s' -PasswordNeverExpires:%s
-    } else {
-        Set-LocalUser -Name '%s' -Password $secPass -FullName '%s' -Description '%s' -PasswordNeverExpires:%s
-        Enable-LocalUser -Name '%s'
-    }
-    Add-LocalGroupMember -Group $adminGroup -Member '%s' -ErrorAction SilentlyContinue
-} else {
-    & net.exe user '%s' $rawPass /add /comment:'%s' /fullname:'%s' 2>$null
-    if ($LASTEXITCODE -ne 0) {
-        & net.exe user '%s' $rawPass /active:yes 2>$null
-    }
-    & net.exe localgroup $adminGroup '%s' /add 2>$null
-}
-`,
-		username,
-		username, fullName, desc, neverExpiresStr,
-		username, fullName, desc, neverExpiresStr,
-		username,
-		username,
-		username, desc, fullName,
-		username,
-		username,
-	)
-
-	cmd := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", psScript)
-	cmd.Stdin = strings.NewReader(s.AdminAccountPassword + "\n")
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("powershell provision admin user '%s': %w (output: %s)", username, err, strings.TrimSpace(string(out)))
-	}
-
-	return nil
+	return provisionAdmin(netapiAccounts{}, username, s.AdminAccountPassword, fullName, desc, s.AdminAccountNeverExpires)
 }
