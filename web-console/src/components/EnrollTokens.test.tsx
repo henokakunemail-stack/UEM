@@ -45,11 +45,31 @@ describe('enrollCommands', () => {
 
   // Re-running a command must not spend another use of a multi-device token.
   it('enrolls with -enroll-only or the installer', () => {
-    expect(byId['windows-installer']).toBe('EndpointAgent-Setup.exe /S /SERVER=https://mgmt:8443 /TOKEN=tok123')
+    expect(byId['windows-installer']).toBe('EndpointAgent-Setup.exe /S /SERVER="https://mgmt:8443" /TOKEN="tok123"')
     expect(byId['windows-cli']).toContain('-enroll-only')
     expect(byId['macos']).toContain('-enroll-only')
     expect(byId['macos']).toContain('-creds /etc/endpoint-agent/creds.json')
     expect(byId['linux']).toContain('--token tok123')
+  })
+
+  // agent.nsi's .onInit reads /SERVER= and /TOKEN= with NSIS's GetOptions,
+  // which takes everything up to the next "/" rather than the next space: an
+  // unquoted https:// URL's own slashes end the value there, and GetOptions
+  // returns "https:" for the server. Built and run against a copy of
+  // agent.nsi's own GetOptions calls, that is exactly what happened; quoting
+  // both values is what carried the URL through whole. Only /SERVER and
+  // /TOKEN go through GetOptions on the command line -- /SITE does too when
+  // present, but no enrollCommands.ts command ever sets it (see the
+  // never-passes-a-site test above).
+  it('quotes the values GetOptions parses by splitting on every slash', () => {
+    const withSlashyToken = enrollCommands('https://mgmt:8443', 'tok123')
+    const text = Object.fromEntries(withSlashyToken.map((c) => [c.id, c.text]))['windows-installer']
+    expect(text).toContain('/SERVER="https://mgmt:8443"')
+    expect(text).toContain('/TOKEN="tok123"')
+    // Confirms the match above isn't satisfied by an unquoted value that
+    // merely contains the quoted substring elsewhere.
+    expect(text).not.toMatch(/\/SERVER=https/)
+    expect(text).not.toMatch(/\/TOKEN=(?!")/)
   })
 
   // %ALLUSERSPROFILE% is not expanded in PowerShell, and a bare exe name only

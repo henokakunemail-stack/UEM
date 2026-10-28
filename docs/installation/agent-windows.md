@@ -150,8 +150,14 @@ menerima `/SERVER=`, `/TOKEN=` dan `/SITE=` (opsional), melakukan enroll, lalu
 mendaftarkan dan menyalakan service-nya sendiri:
 
 ```cmd
-EndpointAgent-Setup.exe /S /SERVER=https://server:8443 /TOKEN=<TOKEN>
+EndpointAgent-Setup.exe /S /SERVER="https://server:8443" /TOKEN="<TOKEN>"
 ```
+
+Tanda kutip di sekitar nilai wajib ada: `.onInit` installer membaca `/SERVER=`
+dan `/TOKEN=` dengan NSIS `GetOptions`, yang mengambil semuanya sampai `/`
+berikutnya, bukan sampai spasi berikutnya. Tanpa kutip, `/` di dalam
+`https://` mengakhiri nilainya di situ dan server URL yang terbaca hanya
+`https:`.
 
 Gunakan token **multi-device**. Menjalankan installer lagi di mesin yang sudah
 terdaftar tidak memakai kuota token. Lihat

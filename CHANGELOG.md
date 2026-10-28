@@ -11,6 +11,15 @@ Riwayat sebelum v1.5.4 ada di `git log`.
 ## [Unreleased]
 
 ### Diperbaiki
+- **Perintah instalasi silent di menu Devices → Generate Enrollment Token membuat enrollment gagal.** Tombol salin
+  "Windows Installer" menghasilkan `EndpointAgent-Setup.exe /S /SERVER=https://... /TOKEN=...` tanpa tanda kutip.
+  `.onInit` installer membaca `/SERVER=` dan `/TOKEN=` dengan NSIS `GetOptions`, yang mengambil nilai sampai `/`
+  berikutnya, bukan sampai spasi berikutnya — dibuktikan dengan membangun ulang pemanggilan `GetOptions` milik
+  `agent.nsi` dan menjalankannya. Tanpa kutip, `/` di dalam `https://` mengakhiri nilai server di situ dan
+  `$ServerURL` menjadi `https:` saja. Perintah silent kini mengutip kedua nilai:
+  `/SERVER="https://..." /TOKEN="..."`, sama seperti skrip GPO dan README. Contoh yang belum dikutip di
+  `docs/installation/agent-windows.md` ikut diperbaiki. Hanya console; agen tidak perlu di-update.
+
 - **Security audit tidak lagi melaporkan hasil "lulus" yang tidak diperiksa.** Dari 40 pemeriksaan di
   `GET /api/system/security-audit`, 26 selalu mengembalikan "pass" dengan teks bukti tetap (sebagian keliru, misalnya
   menyebut Go 1.24), dan tesnya sendiri mewajibkan minimal 30 lulus pada konfigurasi kosong. Kini:

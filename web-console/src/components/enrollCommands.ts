@@ -25,9 +25,19 @@ export function enrollCommands(server: string, token: string): EnrollCommand[] {
     {
       // The installer enrolls, registers the service and starts it; /S makes it
       // usable from GPO or a deployment tool.
+      //
+      // /SERVER and /TOKEN are quoted. NSIS's GetOptions macro (agent.nsi's
+      // .onInit) takes everything after "=" up to the next "/", not up to the
+      // next space: an unquoted https:// URL's own slashes end the value
+      // there, so /SERVER=https://uem.example.com silently became
+      // $ServerURL == "https:" -- confirmed by building agent.nsi's GetOptions
+      // calls and running them with and without quotes. A device installed
+      // from this one-liner then failed enrollment with a server URL of
+      // "https:" and no indication that the command, not the token or the
+      // network, was the cause.
       id: 'windows-installer',
       labelKey: 'enroll.cmd_windows_installer',
-      text: `EndpointAgent-Setup.exe /S /SERVER=${server} /TOKEN=${token}`,
+      text: `EndpointAgent-Setup.exe /S /SERVER="${server}" /TOKEN="${token}"`,
     },
     {
       // For a machine that already has the agent installed. PowerShell syntax:
