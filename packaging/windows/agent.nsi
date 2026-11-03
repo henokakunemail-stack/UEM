@@ -186,6 +186,23 @@ Section "Install Agent" SecInstall
             SetErrorLevel 2
             Abort
         ${EndIf}
+        ; GetOptions takes an option's value up to the next "/", not up to the
+        ; next space, so an *unquoted* /SERVER=https://host is cut at the "/"
+        ; right after the scheme: $ServerURL becomes "https:" -- present, not
+        ; empty, so the check above does not catch it. NormalizeServerURL would
+        ; then turn that into "https://https:", a host that can never resolve,
+        ; and the device is left showing "Pending Enrollment" with no on-screen
+        ; indication that the command line, not the server or the token, was
+        ; the cause. Any value truncated this way ends in a bare scheme colon,
+        ; which a real URL or host:port never does, so that shape is caught
+        ; here by name before it reaches NormalizeServerURL.
+        StrCpy $3 $ServerURL 1 -1
+        ${If} $3 == ":"
+            DetailPrint "ERROR: /SERVER=$ServerURL looks cut off at a '/': the value was not quoted."
+            MessageBox MB_ICONSTOP|MB_OK "Server URL looks cut off: '$ServerURL'.$\r$\n$\r$\nQuote the value on the command line:$\r$\n/SERVER=$\"https://server:8443$\" /TOKEN=$\"<token>$\"$\r$\n$\r$\nAn unquoted https:// URL is cut at its own first '/' by this installer's command-line parser." /SD IDOK
+            SetErrorLevel 2
+            Abort
+        ${EndIf}
         Call NormalizeServerURL
         DetailPrint "Enrolling device with central server..."
         ${If} $SiteLocation != ""

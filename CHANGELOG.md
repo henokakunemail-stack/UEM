@@ -20,6 +20,19 @@ Riwayat sebelum v1.5.4 ada di `git log`.
   `/SERVER="https://..." /TOKEN="..."`, sama seperti skrip GPO dan README. Contoh yang belum dikutip di
   `docs/installation/agent-windows.md` ikut diperbaiki. Hanya console; agen tidak perlu di-update.
 
+- **Installer agent kini menolak perintah `/SERVER=` yang terpotong, alih-alih mencoba enroll ke server yang tidak
+  ada.** Perintah `/SERVER=` tanpa tanda kutip bisa muncul dari skrip pihak ketiga (installer pembungkus, GPO buatan
+  sendiri) yang menyalin pola lama, bukan hanya dari console ini. Tanpa kutip, `$ServerURL` terpotong menjadi
+  `https:`, lalu dilengkapi installer sendiri menjadi `https://https:` — alamat yang tidak akan pernah bisa
+  dihubungi — dan perangkat tertahan selamanya di status **"Pending Enrollment"** tanpa pesan yang menunjuk ke
+  penyebabnya. `.onInit` kini memeriksa nilai `/SERVER=` sebelum dipakai: nilai yang berakhir dengan titik dua
+  polos (ciri khas pemotongan ini) ditolak dengan pesan yang menyebut penyebabnya dan contoh perintah yang benar.
+  Dibuktikan dengan membangun ulang pemeriksaan ini secara terpisah dan menjalankannya: perintah tanpa kutip
+  ditolak, perintah berkutip dan `/SERVER=host:port` tanpa skema (sah, tidak mengandung `/`) tetap lolos seperti
+  biasa. Token yang gagal karena ini **belum terpakai** (permintaannya tidak pernah sampai ke server) dan bisa
+  dipakai ulang setelah perintahnya diperbaiki; perangkat "Pending Enrollment" yang sudah ada akan terisi otomatis,
+  tidak perlu dihapus. Perlu installer baru (agent instalasi awal); agen yang sudah ter-enroll tidak perlu di-update.
+
 - **Security audit tidak lagi melaporkan hasil "lulus" yang tidak diperiksa.** Dari 40 pemeriksaan di
   `GET /api/system/security-audit`, 26 selalu mengembalikan "pass" dengan teks bukti tetap (sebagian keliru, misalnya
   menyebut Go 1.24), dan tesnya sendiri mewajibkan minimal 30 lulus pada konfigurasi kosong. Kini:
