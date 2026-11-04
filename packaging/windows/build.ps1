@@ -64,6 +64,14 @@ try {
         # documented in osinfo.go but no build script ever passed it, so every
         # binary reported the compiled-in 0.1.0 default.
         $Ldflags = "-s -w -X github.com/henokakunemail-stack/Endpoint-Manager/agent/shared/osinfo.Version=$Version"
+        # Pin the release-signing public key into the binary when the release
+        # process provides one, so this agent trusts only that key rather than
+        # whatever /api/agent/config hands it at runtime (see agent/shared/update/keys.go).
+        # Not fatal if unset: a build with no key falls back to the weaker,
+        # server-trusting path, same as every build before this one.
+        if ($env:UPDATE_SIGNING_PUBLIC_KEY) {
+            $Ldflags += " -X github.com/henokakunemail-stack/Endpoint-Manager/agent/shared/update.EmbeddedPublicKey=$env:UPDATE_SIGNING_PUBLIC_KEY"
+        }
         & go build -ldflags="$Ldflags" -o $AgentExe ./agent/cmd/agent
         if ($LASTEXITCODE -ne 0) {
             throw "Go build failed with exit code $LASTEXITCODE"

@@ -26,8 +26,15 @@ OUT_BIN="$SCRIPT_DIR/agent-linux-$ARCH"
 mkdir -p "$(dirname "$OUT_BIN")"
 
 echo "[1/3] Compiling agent binary for linux/$ARCH..."
+LDFLAGS="-s -w -X github.com/henokakunemail-stack/Endpoint-Manager/agent/shared/osinfo.Version=$VERSION"
+# Pin the release-signing public key when the release process provides one
+# (see agent/shared/update/keys.go). Not fatal if unset: falls back to the
+# weaker, server-trusting path.
+if [ -n "${UPDATE_SIGNING_PUBLIC_KEY:-}" ]; then
+  LDFLAGS="$LDFLAGS -X github.com/henokakunemail-stack/Endpoint-Manager/agent/shared/update.EmbeddedPublicKey=$UPDATE_SIGNING_PUBLIC_KEY"
+fi
 CGO_ENABLED=0 GOOS=linux GOARCH="$ARCH" \
-  go build -ldflags="-s -w -X github.com/henokakunemail-stack/Endpoint-Manager/agent/shared/osinfo.Version=$VERSION" -o "$OUT_BIN" ./agent/cmd/agent
+  go build -ldflags="$LDFLAGS" -o "$OUT_BIN" ./agent/cmd/agent
 
 # Also copy to root for general convenience
 cp "$OUT_BIN" "$REPO_ROOT/agent-linux-$ARCH"

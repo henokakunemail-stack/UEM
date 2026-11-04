@@ -253,6 +253,72 @@ func TestPolicyVersionIsNotAPasswordOracle(t *testing.T) {
 	}
 }
 
+// The database must never hold the real password: a copy of the DB file (a
+// backup, disk access to the server) must not hand out a working local-admin
+// credential.
+func TestAdminPasswordStoredEncryptedAtRest(t *testing.T) {
+	e := newPolicyEnv(t)
+	id := e.createAdminPolicy()
+
+	var rawJSON string
+	if err := e.repo.db.Get(&rawJSON, `SELECT settings_json FROM system_policies WHERE id = ?`, id); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(rawJSON, secretPw) {
+		t.Fatalf("settings_json stored the password in plaintext: %s", rawJSON)
+	}
+	if !strings.Contains(rawJSON, encPrefix) {
+		t.Fatalf("settings_json does not carry an encrypted password: %s", rawJSON)
+	}
+
+	// The repository itself must still be able to use it: dispatch to the
+	// agent needs the real password, not the ciphertext.
+	p, err := e.repo.GetByID(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Settings.AdminAccountPassword != secretPw {
+		t.Fatalf("GetByID did not decrypt the stored password, got %q", p.Settings.AdminAccountPassword)
+	}
+}
+
+// A row written by a server version before this encryption existed must
+// still work: read it as plaintext, and upgrade it to ciphertext the next
+// time its policy is saved, with no separate migration step.
+func TestLegacyPlaintextPasswordRowIsUpgradedOnNextSave(t *testing.T) {
+	e := newPolicyEnv(t)
+	now := time.Now().UTC()
+	legacySettings, _ := json.Marshal(PolicyConfig{
+		SettingsVersion: 2, AdminAccountEnabled: trueOnly(true),
+		AdminAccountUsername: "sysadmin", AdminAccountPassword: secretPw,
+	})
+	e.repo.db.MustExec(`INSERT INTO system_policies
+		(id, name, description, target_type, target_id, is_enabled, priority, settings_json, created_by, created_at, updated_at)
+		VALUES ('legacy-1', 'Legacy', '', 'all', '', 1, 100, ?, 'tester', ?, ?)`, string(legacySettings), now, now)
+
+	p, err := e.repo.GetByID(context.Background(), "legacy-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Settings.AdminAccountPassword != secretPw {
+		t.Fatalf("legacy plaintext row did not decode, got %q", p.Settings.AdminAccountPassword)
+	}
+
+	if err := e.repo.Update(context.Background(), p); err != nil {
+		t.Fatal(err)
+	}
+	var rawJSON string
+	if err := e.repo.db.Get(&rawJSON, `SELECT settings_json FROM system_policies WHERE id = 'legacy-1'`); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(rawJSON, secretPw) {
+		t.Fatalf("saving the legacy row again left it in plaintext: %s", rawJSON)
+	}
+	if !strings.Contains(rawJSON, encPrefix) {
+		t.Fatalf("saving the legacy row again did not encrypt it: %s", rawJSON)
+	}
+}
+
 // The agent still has to receive the password to set the account.
 func TestDispatchStillCarriesThePassword(t *testing.T) {
 	b, err := systemPolicyApplyEnvelope(&CompiledPolicy{Version: "v", Settings: PolicySettings{

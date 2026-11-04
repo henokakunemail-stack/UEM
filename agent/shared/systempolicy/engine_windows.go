@@ -253,9 +253,15 @@ func applyWallpaper(client *http.Client, serverURL, wallpaperURL string, style W
 		if err != nil {
 			return fmt.Errorf("write wallpaper file: %w", err)
 		}
-	} else if _, err := os.Stat(wallpaperURL); err == nil {
-		// Local file path
-		destPath = wallpaperURL
+	} else {
+		// The console only ever produces an http(s):// or /api/... relative
+		// URL (via wallpaper upload); anything else is not a URL this policy
+		// is allowed to apply. A prior fallback that treated it as a local
+		// path on this machine let a policy field point the Wallpaper
+		// registry value (and SystemParametersInfoW) at an arbitrary
+		// pre-existing file, with no sanitization -- removed rather than
+		// sanitized, since the console never needs it.
+		return fmt.Errorf("wallpaper url is not http(s) or a server-relative path: %q", wallpaperURL)
 	}
 
 	// Style code:

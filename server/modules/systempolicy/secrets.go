@@ -2,10 +2,76 @@ package systempolicy
 
 import (
 	"context"
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
+	"fmt"
+	"strings"
 
 	"github.com/rs/zerolog/log"
 )
+
+// encPrefix marks a password sealed with AES-256-GCM under the repository's
+// encKey. A stored value without it is plaintext written by a server version
+// before this encryption existed; decryptPassword returns it as-is, and the
+// next write that touches the row re-encrypts it (see encryptPassword at the
+// Create/Update call sites in repository.go).
+const encPrefix = "aesgcm:v1:"
+
+// encryptPassword seals plain with AES-256-GCM, nonce-prefixed and
+// base64-encoded. An empty plain stays empty: "no password set" must not
+// become a ciphertext of the empty string, since keepStoredPassword and
+// AdminAccountPasswordSet both depend on "" meaning "none".
+func encryptPassword(key []byte, plain string) (string, error) {
+	if plain == "" {
+		return "", nil
+	}
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return "", fmt.Errorf("admin password cipher: %w", err)
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", fmt.Errorf("admin password gcm: %w", err)
+	}
+	nonce := make([]byte, gcm.NonceSize())
+	if _, err := rand.Read(nonce); err != nil {
+		return "", fmt.Errorf("admin password nonce: %w", err)
+	}
+	sealed := gcm.Seal(nonce, nonce, []byte(plain), nil)
+	return encPrefix + base64.StdEncoding.EncodeToString(sealed), nil
+}
+
+// decryptPassword reverses encryptPassword. A value with no encPrefix is a
+// legacy plaintext row and is returned unchanged.
+func decryptPassword(key []byte, stored string) (string, error) {
+	if stored == "" || !strings.HasPrefix(stored, encPrefix) {
+		return stored, nil
+	}
+	raw, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(stored, encPrefix))
+	if err != nil {
+		return "", fmt.Errorf("admin password decode: %w", err)
+	}
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return "", fmt.Errorf("admin password cipher: %w", err)
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", fmt.Errorf("admin password gcm: %w", err)
+	}
+	if len(raw) < gcm.NonceSize() {
+		return "", fmt.Errorf("admin password ciphertext too short")
+	}
+	nonce, ciphertext := raw[:gcm.NonceSize()], raw[gcm.NonceSize():]
+	plain, err := gcm.Open(nil, nonce, ciphertext, nil)
+	if err != nil {
+		return "", fmt.Errorf("admin password open: %w", err)
+	}
+	return string(plain), nil
+}
 
 // The managed local-administrator password is the one secret a policy holds.
 // The agent needs it, so it travels in the policy dispatch over the agent's

@@ -86,13 +86,20 @@ try {
         $env:GOOS = "windows"
         $env:GOARCH = "amd64"
         $ldflags = "-s -w -X github.com/henokakunemail-stack/Endpoint-Manager/agent/shared/osinfo.Version=$Version"
+        # Pin the release-signing public key into the agent binary when the
+        # release process provides one (see agent/shared/update/keys.go).
+        # Not fatal if unset: falls back to the weaker, server-trusting path.
+        $agentLdflags = $ldflags
+        if ($env:UPDATE_SIGNING_PUBLIC_KEY) {
+            $agentLdflags += " -X github.com/henokakunemail-stack/Endpoint-Manager/agent/shared/update.EmbeddedPublicKey=$env:UPDATE_SIGNING_PUBLIC_KEY"
+        }
 
         Write-Host "      Compiling server binary: server-windows-amd64.exe..." -ForegroundColor DarkGray
         & go build -ldflags="$ldflags" -o "server-windows-amd64.exe" ./server/cmd/server
         if ($LASTEXITCODE -ne 0) { throw "Server go build failed" }
 
         Write-Host "      Compiling agent binary: agent-windows-amd64.exe..." -ForegroundColor DarkGray
-        & go build -ldflags="$ldflags" -o "agent-windows-amd64.exe" ./agent/cmd/agent
+        & go build -ldflags="$agentLdflags" -o "agent-windows-amd64.exe" ./agent/cmd/agent
         if ($LASTEXITCODE -ne 0) { throw "Agent go build failed" }
         Write-Host "      Go binaries compiled successfully." -ForegroundColor Green
     } else {

@@ -73,6 +73,15 @@ try {
     )
     $ServerLd = "-s -w -X main.serverVersion=$CleanVer"
     $AgentLd = "-s -w -X github.com/henokakunemail-stack/Endpoint-Manager/agent/shared/osinfo.Version=$CleanVer"
+    # Pin the release-signing public key into every shipped agent when the
+    # release process provides one (see agent/shared/update/keys.go): this is
+    # the official release pipeline, so this is the build that matters most.
+    # Not fatal if unset: falls back to the weaker, server-trusting path.
+    if ($env:UPDATE_SIGNING_PUBLIC_KEY) {
+        $AgentLd += " -X github.com/henokakunemail-stack/Endpoint-Manager/agent/shared/update.EmbeddedPublicKey=$env:UPDATE_SIGNING_PUBLIC_KEY"
+    } else {
+        Write-Host "      WARNING: UPDATE_SIGNING_PUBLIC_KEY is not set -- shipped agents will trust whatever signing key the server hands them at runtime." -ForegroundColor Yellow
+    }
     $env:CGO_ENABLED = "0"
     foreach ($t in $Targets) {
         $env:GOOS = $t.GOOS

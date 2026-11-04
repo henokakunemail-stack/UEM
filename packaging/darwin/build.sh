@@ -48,6 +48,12 @@ mkdir -p "$PAYLOAD_DIR/usr/local/bin" "$SCRIPTS_DIR" "$COMPONENT_DIR"
 # 1. Agent binaries (Apple Silicon + Intel)
 cd "$REPO_ROOT"
 LDFLAGS="-s -w -X github.com/henokakunemail-stack/Endpoint-Manager/agent/shared/osinfo.Version=$VERSION"
+# Pin the release-signing public key when the release process provides one
+# (see agent/shared/update/keys.go). Not fatal if unset: falls back to the
+# weaker, server-trusting path.
+if [ -n "${UPDATE_SIGNING_PUBLIC_KEY:-}" ]; then
+  LDFLAGS="$LDFLAGS -X github.com/henokakunemail-stack/Endpoint-Manager/agent/shared/update.EmbeddedPublicKey=$UPDATE_SIGNING_PUBLIC_KEY"
+fi
 ARM64_BIN="${AGENT_DARWIN_ARM64:-}"
 AMD64_BIN="${AGENT_DARWIN_AMD64:-}"
 if [ -z "$ARM64_BIN" ] || [ -z "$AMD64_BIN" ]; then

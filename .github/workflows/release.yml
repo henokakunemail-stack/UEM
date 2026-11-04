@@ -61,6 +61,14 @@ jobs:
 
       - name: Build release assets
         shell: pwsh
+        # UPDATE_SIGNING_PUBLIC_KEY pins every shipped agent to the fleet's
+        # release-signing key (see agent/shared/update/keys.go); it is the
+        # base64 public half of the ED25519_PRIVATE_KEY secret sign-release.yml
+        # already uses. Not fatal if the secret is unset: build-release.ps1
+        # then falls back to the weaker, server-trusting path, same as every
+        # release before this one.
+        env:
+          UPDATE_SIGNING_PUBLIC_KEY: ${{ secrets.UPDATE_SIGNING_PUBLIC_KEY }}
         run: |
           # choco does not put NSIS on this step's PATH; build-release.ps1
           # looks in the default install directories as well.

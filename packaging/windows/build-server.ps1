@@ -115,7 +115,14 @@ try {
             $env:CGO_ENABLED = "0"
             $env:GOOS = $a.GOOS
             $env:GOARCH = $a.GOARCH
-            & go build -ldflags="-s -w -X github.com/henokakunemail-stack/Endpoint-Manager/agent/shared/osinfo.Version=$Version" -o $dest ./agent/cmd/agent
+            $agentLdflags = "-s -w -X github.com/henokakunemail-stack/Endpoint-Manager/agent/shared/osinfo.Version=$Version"
+            # Pin the release-signing public key when the release process
+            # provides one (see agent/shared/update/keys.go). Not fatal if
+            # unset: falls back to the weaker, server-trusting path.
+            if ($env:UPDATE_SIGNING_PUBLIC_KEY) {
+                $agentLdflags += " -X github.com/henokakunemail-stack/Endpoint-Manager/agent/shared/update.EmbeddedPublicKey=$env:UPDATE_SIGNING_PUBLIC_KEY"
+            }
+            & go build -ldflags="$agentLdflags" -o $dest ./agent/cmd/agent
             if ($LASTEXITCODE -ne 0) { throw "Go build of $($a.Name) failed with exit code $LASTEXITCODE" }
         }
     }

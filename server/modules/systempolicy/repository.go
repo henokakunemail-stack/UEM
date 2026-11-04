@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/jmoiron/sqlx"
+	"github.com/rs/zerolog/log"
 
 	"github.com/henokakunemail-stack/Endpoint-Manager/protocol"
 )
@@ -24,23 +25,37 @@ type Repository struct {
 	// the version (visible to every console role) cannot be used to test
 	// password guesses offline.
 	versionKey []byte
+	// encKey seals AdminAccountPassword at rest (AES-256-GCM) so a copy of the
+	// database or a backup file does not hand out real local-admin passwords
+	// in plaintext. Derived the same way as versionKey, under a different
+	// label, so the two never share key material.
+	encKey []byte
 }
 
 func NewRepository(db *sqlx.DB) *Repository {
-	// A random key until WithVersionKey sets the server's: versions are then
-	// only stable for this process, which costs a re-apply after a restart but
-	// never leaks anything.
+	// Random keys until WithVersionKey sets the server's: stable only for this
+	// process. versionKey costs a re-apply after a restart but never leaks
+	// anything; encKey would make already-stored passwords undecryptable
+	// after a restart, so production must always chain WithVersionKey (it
+	// unconditionally does, from the always-present JWT_SECRET).
 	key := make([]byte, 32)
 	_, _ = rand.Read(key)
-	return &Repository{db: db, versionKey: key}
+	enc := make([]byte, 32)
+	_, _ = rand.Read(enc)
+	return &Repository{db: db, versionKey: key, encKey: enc}
 }
 
-// WithVersionKey derives the version key from a server secret (JWT_SECRET),
-// which every node of a cluster shares, so all nodes compute the same version.
+// WithVersionKey derives the version key and the at-rest encryption key from
+// a server secret (JWT_SECRET), which every node of a cluster shares, so all
+// nodes compute the same version and can decrypt each other's writes.
 func (r *Repository) WithVersionKey(secret string) *Repository {
 	m := hmac.New(sha256.New, []byte(secret))
 	m.Write([]byte("systempolicy/admin-password/v1"))
 	r.versionKey = m.Sum(nil)
+
+	e := hmac.New(sha256.New, []byte(secret))
+	e.Write([]byte("systempolicy/admin-password/enc/v1"))
+	r.encKey = e.Sum(nil)
 	return r
 }
 
@@ -68,6 +83,12 @@ func (r *Repository) List(ctx context.Context) ([]SystemPolicy, error) {
 	}
 	for i := range rows {
 		_ = rows[i].UnmarshalSettings()
+		if pw, err := decryptPassword(r.encKey, rows[i].Settings.AdminAccountPassword); err == nil {
+			rows[i].Settings.AdminAccountPassword = pw
+		} else {
+			log.Warn().Err(err).Str("policy", rows[i].ID).Msg("system policy: could not decrypt stored admin password")
+			rows[i].Settings.AdminAccountPassword = ""
+		}
 	}
 	if rows == nil {
 		rows = []SystemPolicy{}
@@ -87,6 +108,12 @@ func (r *Repository) GetByID(ctx context.Context, id string) (*SystemPolicy, err
 		return nil, fmt.Errorf("get system policy %s: %w", id, err)
 	}
 	_ = p.UnmarshalSettings()
+	if pw, err := decryptPassword(r.encKey, p.Settings.AdminAccountPassword); err == nil {
+		p.Settings.AdminAccountPassword = pw
+	} else {
+		log.Warn().Err(err).Str("policy", p.ID).Msg("system policy: could not decrypt stored admin password")
+		p.Settings.AdminAccountPassword = ""
+	}
 	return &p, nil
 }
 
@@ -97,13 +124,18 @@ func (r *Repository) Create(ctx context.Context, p *SystemPolicy) error {
 	now := time.Now().UTC()
 	p.CreatedAt = now
 	p.UpdatedAt = now
+	enc, err := encryptPassword(r.encKey, p.Settings.AdminAccountPassword)
+	if err != nil {
+		return fmt.Errorf("encrypt admin password: %w", err)
+	}
+	p.Settings.AdminAccountPassword = enc
 	if err := p.MarshalSettings(); err != nil {
 		return fmt.Errorf("marshal policy settings: %w", err)
 	}
 
 	q := `INSERT INTO system_policies (id, name, description, target_type, target_id, is_enabled, priority, settings_json, created_by, created_at, updated_at)
 	      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(q),
+	_, err = r.db.ExecContext(ctx, r.db.Rebind(q),
 		p.ID, p.Name, p.Description, p.TargetType, p.TargetID,
 		boolToInt(p.IsEnabled), p.Priority, p.SettingsJSON,
 		p.CreatedBy, p.CreatedAt, p.UpdatedAt,
@@ -116,6 +148,11 @@ func (r *Repository) Create(ctx context.Context, p *SystemPolicy) error {
 
 func (r *Repository) Update(ctx context.Context, p *SystemPolicy) error {
 	p.UpdatedAt = time.Now().UTC()
+	enc, err := encryptPassword(r.encKey, p.Settings.AdminAccountPassword)
+	if err != nil {
+		return fmt.Errorf("encrypt admin password: %w", err)
+	}
+	p.Settings.AdminAccountPassword = enc
 	if err := p.MarshalSettings(); err != nil {
 		return fmt.Errorf("marshal policy settings: %w", err)
 	}
@@ -324,6 +361,12 @@ func (r *Repository) CompileEffectivePolicyWithSources(ctx context.Context, devi
 
 	for i := range matched {
 		_ = matched[i].UnmarshalSettings()
+		if pw, err := decryptPassword(r.encKey, matched[i].Settings.AdminAccountPassword); err == nil {
+			matched[i].Settings.AdminAccountPassword = pw
+		} else {
+			log.Warn().Err(err).Str("policy", matched[i].ID).Msg("system policy: could not decrypt stored admin password")
+			matched[i].Settings.AdminAccountPassword = ""
+		}
 	}
 
 	// 3. Sort policies from lowest precedence to highest precedence so that higher precedence overwrites

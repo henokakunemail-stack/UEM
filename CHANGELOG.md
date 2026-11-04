@@ -11,6 +11,40 @@ Riwayat sebelum v1.5.4 ada di `git log`.
 ## [Unreleased]
 
 ### Diperbaiki
+- **Password akun admin lokal terkelola (managed admin account) disimpan plaintext di database.** Kolom
+  `system_policies.settings_json` menyimpan `admin_account_password` apa adanya, tanpa enkripsi — siapa pun yang bisa
+  membaca database langsung (file backup, akses disk server, atau bug SQL-injection di masa depan) mendapat password
+  admin Windows yang valid untuk setiap endpoint yang jadi target policy, sampai seluruh armada jika target-nya
+  "all". Repository ini tidak punya mekanisme enkripsi field apa pun sebelumnya (tim ini sendiri sengaja menghindari
+  pola ini untuk password bind LDAP, lihat migrasi `0019_directory_sync.sql`, tapi aturan itu tidak diterapkan ke
+  password admin). Kini password dienkripsi AES-256-GCM sebelum disimpan (`system_policy/secrets.go`), dengan kunci
+  diturunkan dari `JWT_SECRET` server (pola yang sama dengan kunci versi policy yang sudah ada). Baris lama yang masih
+  plaintext otomatis terenkripsi ulang begitu policy-nya disimpan lagi; tidak perlu migrasi manual. Hanya server;
+  agen tidak berubah (password tetap dikirim lewat socket terautentikasi seperti sebelumnya).
+
+- **Kunci publik penandatanganan update agent tidak pernah ditanam ke binary agent yang dirilis.** Setiap build
+  script (`build-release.ps1`, `build-all.ps1`, `build.ps1`, `build-server.ps1`, skrip Linux/macOS) hanya menanam
+  versi, tidak pernah `update.EmbeddedPublicKey` — jadi setiap agen yang dirilis mempercayai kunci apa pun yang
+  diberikan server lewat `/api/agent/config` (endpoint tanpa autentikasi) saat runtime, bukan kunci yang ditanam di
+  build. Ini melemahkan tujuan menyimpan private key di luar server: kalau server dikompromikan atau di-MITM dengan
+  sertifikat yang dipercaya, penyerang bisa menyajikan kunci publik palsu dan menandatangani manifest update
+  berbahaya sendiri. Build script kini menanam `UPDATE_SIGNING_PUBLIC_KEY` (base64, env var opsional) ke
+  `EmbeddedPublicKey` lewat ldflags kalau nilainya diset — tidak mengubah perilaku kalau belum diset. **Catatan
+  operasional**: saat ini belum ada pasangan kunci Ed25519 yang dibuat, dan `.env` server ini belum mengeset
+  `UPDATE_SIGNING_PUBLIC_KEY` sama sekali, jadi update agen saat ini berjalan checksum-only (sudah ditandai
+  `StatusWarn` oleh modul security-audit sendiri) — menutup gap ini sepenuhnya butuh membuat pasangan kunci baru dan
+  mengisi secret `UPDATE_SIGNING_PUBLIC_KEY`/`ED25519_PRIVATE_KEY` serta `.env` produksi, langkah operasional yang
+  belum dilakukan di commit ini.
+
+- **Policy wallpaper bisa diarahkan ke path file lokal sembarang di endpoint.** `applyWallpaper` (agen Windows)
+  punya jalur fallback: kalau nilai `wallpaper_url` bukan `http(s)://` atau path relatif server, dan kebetulan ada
+  file dengan path itu di endpoint, path itu ditulis mentah-mentah ke registry Wallpaper dan dipakai langsung di
+  `SystemParametersInfoW` tanpa sanitasi. Butuh role Admin untuk mengisi field ini (sama seperti yang bisa mengatur
+  password admin di atas) dan tidak menulis file baru, jadi dampaknya rendah — tapi tetap path tak terduga masuk ke
+  registry dan API Win32 tanpa validasi. Fallback ini dihapus; console sendiri hanya pernah menghasilkan
+  `http(s)://` atau path relatif `/api/...`, jadi fallback itu tidak pernah dibutuhkan jalur normal. Perlu agen baru
+  (Windows) untuk menutup gap ini di endpoint yang sudah terpasang.
+
 - **Perintah instalasi silent di menu Devices → Generate Enrollment Token membuat enrollment gagal.** Tombol salin
   "Windows Installer" menghasilkan `EndpointAgent-Setup.exe /S /SERVER=https://... /TOKEN=...` tanpa tanda kutip.
   `.onInit` installer membaca `/SERVER=` dan `/TOKEN=` dengan NSIS `GetOptions`, yang mengambil nilai sampai `/`

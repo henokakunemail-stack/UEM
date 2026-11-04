@@ -798,9 +798,9 @@
     "semantic_hash": "2e209e0d800f863f3376b18a548af9d3"
   },
   "packaging/darwin/build.sh": {
-    "mtime": 1792634574.0075955,
-    "seen": 1792650332.9494884,
-    "ast_hash": "cbd58a8c1c79b2dc17ce5f2d0c6d23e3",
+    "mtime": 1793761784.0026033,
+    "seen": 1793762734.9102573,
+    "ast_hash": "8c63a78cb76524f6d821d32c84995b06",
     "semantic_hash": ""
   },
   "packaging/darwin/pkg/scripts/postinstall": {
@@ -816,10 +816,10 @@
     "semantic_hash": ""
   },
   "packaging/linux/build.sh": {
-    "mtime": 1791273433.3211763,
-    "seen": 1792650332.9495056,
-    "ast_hash": "a16e4c4d1282581d74cf1739c002a3a8",
-    "semantic_hash": "a16e4c4d1282581d74cf1739c002a3a8"
+    "mtime": 1793761769.6135168,
+    "seen": 1793762734.9102724,
+    "ast_hash": "d3bdf636d1474e507d7cce6e843334ba",
+    "semantic_hash": ""
   },
   "packaging/linux/deb/DEBIAN/postinst": {
     "mtime": 1792600058.5414977,
@@ -906,22 +906,22 @@
     "semantic_hash": ""
   },
   "packaging/windows/build-all.ps1": {
-    "mtime": 1791602659.2478907,
-    "seen": 1792650332.9495413,
-    "ast_hash": "fd4467ef2d5171ee9a01db45887e76b3",
+    "mtime": 1793761718.4411504,
+    "seen": 1793762734.9102993,
+    "ast_hash": "2cac46e7970fbda4859369f102f88a40",
     "semantic_hash": ""
   },
   "packaging/windows/build-server.ps1": {
-    "mtime": 1792634609.0986264,
-    "seen": 1792650332.9495437,
-    "ast_hash": "f3d5e04d5011dcaec72d24b0041e06ee",
+    "mtime": 1793761734.5970588,
+    "seen": 1793762734.910301,
+    "ast_hash": "ae3e998e81eeb7b6e23e9b855246793e",
     "semantic_hash": ""
   },
   "packaging/windows/build.ps1": {
-    "mtime": 1791297496.1027684,
-    "seen": 1792650332.949546,
-    "ast_hash": "d3e5c1bbe9a818f725cb0483fb1d145f",
-    "semantic_hash": "d3e5c1bbe9a818f725cb0483fb1d145f"
+    "mtime": 1793761694.8056488,
+    "seen": 1793762734.9103026,
+    "ast_hash": "4669d6f22b397a7dd7c8f9b867be9a45",
+    "semantic_hash": ""
   },
   "packaging/windows/scripts/install-agent.ps1": {
     "mtime": 1792130119.795469,
@@ -1110,9 +1110,9 @@
     "semantic_hash": "288877d6ee703aa767eca246d0ffc537"
   },
   "server/cmd/server/main.go": {
-    "mtime": 1792640422.1047173,
-    "seen": 1792650332.9496355,
-    "ast_hash": "55c8d0a938e0fe4f7f86faac1027650b",
+    "mtime": 1792996703.829322,
+    "seen": 1792997126.9724739,
+    "ast_hash": "56d3ce8636126a41d47c98c5a1a9604f",
     "semantic_hash": ""
   },
   "server/cmd/server/route_contract_test.go": {
@@ -2682,9 +2682,9 @@
     "semantic_hash": ""
   },
   ".github/workflows/release.yml": {
-    "mtime": 1792637033.3070576,
-    "seen": 1792650332.9511888,
-    "ast_hash": "b532e703d450ce47b24aab5d0b1d6276",
+    "mtime": 1793761813.417348,
+    "seen": 1793762734.9114194,
+    "ast_hash": "c916276b325686deb041edeb2292dc38",
     "semantic_hash": ""
   },
   ".github/workflows/sign-release.yml": {
@@ -2826,9 +2826,9 @@
     "semantic_hash": ""
   },
   "docs/installation/agent-windows.md": {
-    "mtime": 1792600058.117266,
-    "seen": 1792650332.9513037,
-    "ast_hash": "dce3df65fe83fd7a4786a72b59e5a159",
+    "mtime": 1793172043.7773216,
+    "seen": 1793172168.1181943,
+    "ast_hash": "5cded222d3e91c7bb6d11ccd20a92270",
     "semantic_hash": ""
   },
   "docs/installation/docker.md": {
@@ -3012,9 +3012,9 @@
     "semantic_hash": ""
   },
   "agent/shared/systempolicy/engine_windows.go": {
-    "mtime": 1792989306.3711784,
-    "seen": 1792989645.4166968,
-    "ast_hash": "7e17575efac9ba83da4890096d9e817b",
+    "mtime": 1793761611.5744457,
+    "seen": 1793762734.9101856,
+    "ast_hash": "8ff6e39270aea3b778f3df64150a3d67",
     "semantic_hash": ""
   },
   "scripts/e2e-system-policy.ps1": {
@@ -3048,9 +3048,9 @@
     "semantic_hash": ""
   },
   "server/modules/systempolicy/repository.go": {
-    "mtime": 1792640422.9126878,
-    "seen": 1792650332.95053,
-    "ast_hash": "f3ee4acac720e6b5372eb0a05c5d499c",
+    "mtime": 1793761458.3725083,
+    "seen": 1793762734.910996,
+    "ast_hash": "6cdc4f8dca3353fa6fa932c910a87c6f",
     "semantic_hash": ""
   },
   "web-console/src/pages/SystemPolicyPage.tsx": {
@@ -3144,15 +3144,15 @@
     "semantic_hash": ""
   },
   "server/modules/securityaudit/audit_test.go": {
-    "mtime": 1792487984.043753,
-    "seen": 1792650332.9504654,
-    "ast_hash": "3cecc1c94871195aac54ddfcf906b095",
+    "mtime": 1792996624.4798217,
+    "seen": 1792997126.9730158,
+    "ast_hash": "d0ed597e197afde8d5e7b4a550c5a2ef",
     "semantic_hash": ""
   },
   "server/modules/securityaudit/evaluator.go": {
-    "mtime": 1792547428.1977627,
-    "seen": 1792650332.9504757,
-    "ast_hash": "976fa7ba3833880f0fce05332f655c1c",
+    "mtime": 1792997030.5506945,
+    "seen": 1792997126.973022,
+    "ast_hash": "fd365531c801f3015b1b20bbf0db6d6c",
     "semantic_hash": ""
   },
   "server/modules/securityaudit/handler.go": {
@@ -3162,9 +3162,9 @@
     "semantic_hash": ""
   },
   "server/modules/securityaudit/model.go": {
-    "mtime": 1792059690.7153635,
-    "seen": 1792650332.9504812,
-    "ast_hash": "d35693f897df4dbea4a727db29e81549",
+    "mtime": 1792996360.3889332,
+    "seen": 1792997126.9730256,
+    "ast_hash": "6dce619c2cd95d519f0939aa3284fe76",
     "semantic_hash": ""
   },
   "server/core/httpguard/apiratelimit.go": {
@@ -4170,15 +4170,15 @@
     "semantic_hash": ""
   },
   "server/modules/systempolicy/secrets.go": {
-    "mtime": 1792640422.9142683,
-    "seen": 1792650332.9505327,
-    "ast_hash": "b3df5bd56897ce01ddbe61e960c4e36d",
+    "mtime": 1793761369.5665612,
+    "seen": 1793762734.910998,
+    "ast_hash": "44b20c9a521c83d3db90993aa73b79e7",
     "semantic_hash": ""
   },
   "server/modules/systempolicy/secrets_test.go": {
-    "mtime": 1792640422.9142683,
-    "seen": 1792650332.950535,
-    "ast_hash": "a9c105f92c5299e9cc998bb84dcceec8",
+    "mtime": 1793762170.1898007,
+    "seen": 1793762734.9109998,
+    "ast_hash": "46b363cd9fbf958d883a37c7c6352176",
     "semantic_hash": ""
   },
   "server/modules/taskscheduler/lifecycle_test.go": {
@@ -4200,9 +4200,9 @@
     "semantic_hash": ""
   },
   "web-console/src/components/EnrollTokens.test.tsx": {
-    "mtime": 1792599903.825008,
-    "seen": 1792650332.9506822,
-    "ast_hash": "3a1778edf64e17870c37a05dfc717b2a",
+    "mtime": 1793171889.1536663,
+    "seen": 1793172168.1172717,
+    "ast_hash": "c298960aec5741ecdf99700ae17e6296",
     "semantic_hash": ""
   },
   "web-console/src/components/EnrollTokensPanel.tsx": {
@@ -4230,9 +4230,9 @@
     "semantic_hash": ""
   },
   "web-console/src/components/enrollCommands.ts": {
-    "mtime": 1792599943.0195572,
-    "seen": 1792650332.9507465,
-    "ast_hash": "6bb7d061d290d8e6d742ef973c1740d2",
+    "mtime": 1793171975.920202,
+    "seen": 1793172168.1173754,
+    "ast_hash": "d9c843ba98c241439bc9eb4581c17357",
     "semantic_hash": ""
   },
   "web-console/src/components/remoteInput.ts": {
@@ -4458,9 +4458,9 @@
     "semantic_hash": ""
   },
   "scripts/build-release.ps1": {
-    "mtime": 1792634686.30812,
-    "seen": 1792650332.949576,
-    "ast_hash": "f3a8014d3feaa3e78f53c054fbdb4f50",
+    "mtime": 1793761754.0471883,
+    "seen": 1793762734.910325,
+    "ast_hash": "b367a5452136f294f836c221f4378e91",
     "semantic_hash": ""
   },
   "scripts/e2e-agent-selfupdate.ps1": {
@@ -4650,9 +4650,9 @@
     "semantic_hash": ""
   },
   "CHANGELOG.md": {
-    "mtime": 1792989784.2741537,
-    "seen": 1792989851.349774,
-    "ast_hash": "6d84592d1a0a420bb1f8db0b0e86110f",
+    "mtime": 1793761900.0633993,
+    "seen": 1793762734.9114249,
+    "ast_hash": "f1402166fbd4405d13ae9a8950d51301",
     "semantic_hash": ""
   },
   "docs/architecture/policy-resolution.md": {
