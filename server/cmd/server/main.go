@@ -916,6 +916,10 @@ func buildServer(cfg config.Config, database *sqlx.DB) (*http.Server, *serverApp
 	// Earlier versions stored the managed admin password in every device's
 	// state row; clear those once.
 	sysPolicyRepo.ScrubStoredStatePasswords(context.Background())
+	// Earlier versions stored it in plaintext in the policy itself, too; a
+	// policy nobody edited since keeps that plaintext forever otherwise,
+	// since a read never rewrites it.
+	sysPolicyRepo.ReencryptLegacyPasswords(context.Background())
 	sysPolicyH := systempolicy.NewHandler(sysPolicyRepo, hub, deviceRepo, &auditAdapter{db: database}, jwtSvc.RequireAuth).
 		WithDataDir(cfg.DataDir)
 	sysPolicyH.Register(r)

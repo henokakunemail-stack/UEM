@@ -11,6 +11,28 @@ Riwayat sebelum v1.5.4 ada di `git log`.
 ## [Unreleased]
 
 ### Diperbaiki
+- **Viewer bisa membaca webhook URL semua alert rule lewat endpoint daftar, padahal endpoint lihat
+  per-rule dibatasi Admin.** `GET /api/alerts/rules` (daftar) cuma butuh login biasa, sementara
+  `GET /api/alerts/rules/{id}` (satu rule) butuh role Admin — tapi keduanya mengembalikan field
+  `webhook_url` yang sama tanpa disensor. Untuk webhook gaya Slack/Discord/PagerDuty, URL itu
+  **adalah** kredensialnya sendiri (tidak ada header auth terpisah saat dikirim) — jadi siapa pun
+  yang login (termasuk Viewer) bisa kumpulkan semua URL webhook organisasi lewat endpoint daftar,
+  menembus pembatasan Admin di endpoint satunya sepenuhnya. Pola perbaikannya sudah ada di modul
+  lain (`redactLicenseKey` di assetlicense untuk kasus yang sama persis dengan product key
+  software) tapi belum diterapkan di modul alerting. Kini `webhook_url` disensor jadi kosong untuk
+  siapa pun selain Admin di endpoint daftar. Hanya server; tidak perlu update agen.
+
+- **Password admin akun lokal yang dibuat sebelum perbaikan enkripsi di atas tetap plaintext
+  selamanya kalau policy-nya tidak pernah diedit ulang.** Perbaikan enkripsi sebelumnya membuat
+  pembacaan bisa mendekode baris plaintext lama dengan benar, tapi tidak ada yang menulis ulang
+  baris itu — hanya membuat/mengedit policy yang memicu enkripsi. Tidak ada migrasi startup untuk
+  tabel `system_policies` (berbeda dengan tabel `device_system_policy_states` yang sudah punya
+  `ScrubStoredStatePasswords`), jadi policy yang dibuat sekali dan tidak pernah disentuh lagi
+  menyimpan password plaintext selamanya — termasuk di file backup yang diambil setelah perbaikan
+  sebelumnya. Kini ada `ReencryptLegacyPasswords` yang jalan sekali saat startup, persis seperti
+  pola yang sudah ada untuk tabel sebelah: baris lama otomatis dienkripsi ulang tanpa perlu
+  siapa pun mengedit policy-nya. Hanya server; tidak perlu update agen.
+
 - **Password akun admin lokal terkelola (managed admin account) disimpan plaintext di database.** Kolom
   `system_policies.settings_json` menyimpan `admin_account_password` apa adanya, tanpa enkripsi — siapa pun yang bisa
   membaca database langsung (file backup, akses disk server, atau bug SQL-injection di masa depan) mendapat password

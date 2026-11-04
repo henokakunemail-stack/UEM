@@ -63,7 +63,27 @@ func (h *Handler) listRules(w http.ResponseWriter, r *http.Request) {
 	if rules == nil {
 		rules = []AlertRule{}
 	}
+	for i := range rules {
+		redactWebhookURL(&rules[i], r)
+	}
 	writeJSON(w, http.StatusOK, rules)
+}
+
+// redactWebhookURL blanks the webhook URL on the way out to a non-Admin.
+//
+// listRules is RoleViewer+ (handler.go:40) while getRule is RoleAdmin-only
+// (handler.go:42), but both serialize the same AlertRule, and a webhook URL
+// for Slack/Discord/PagerDuty-style incoming webhooks IS the credential: the
+// evaluator (evaluator.go, sendWebhook) POSTs to it verbatim with no separate
+// auth header. Without this, any Viewer could collect every rule's webhook
+// URL through the list route, defeating the Admin gate on the single-rule
+// route entirely. Mirrors assetlicense.redactLicenseKey for the same bug
+// class.
+func redactWebhookURL(rule *AlertRule, r *http.Request) {
+	if rbac.RoleFromContext(r.Context()) == rbac.RoleAdmin {
+		return
+	}
+	rule.WebhookURL = ""
 }
 
 type createRuleReq struct {

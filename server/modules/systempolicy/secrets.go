@@ -155,6 +155,55 @@ func keepStoredPassword(incoming *PolicyConfig, stored PolicyConfig) {
 	}
 }
 
+// ReencryptLegacyPasswords finds system_policies rows whose admin password is
+// still in the plaintext form a server before this encryption existed wrote,
+// and rewrites them through encryptPassword. Without this, a policy that was
+// never edited again after that version keeps a plaintext password in
+// settings_json indefinitely -- decryptPassword reads it fine, but reading
+// never rewrites it, only Create/Update do. Mirrors ScrubStoredStatePasswords
+// for the sibling device_system_policy_states table. Runs once at startup;
+// rows already encrypted (or with no password at all) are left untouched.
+func (r *Repository) ReencryptLegacyPasswords(ctx context.Context) {
+	var rows []struct {
+		ID           string `db:"id"`
+		SettingsJSON string `db:"settings_json"`
+	}
+	q := `SELECT id, settings_json FROM system_policies
+	      WHERE settings_json LIKE '%admin_account_password"%' AND settings_json NOT LIKE '%` + encPrefix + `%'`
+	if err := r.db.SelectContext(ctx, &rows, r.db.Rebind(q)); err != nil {
+		log.Warn().Err(err).Msg("system policy: could not scan policies for legacy plaintext passwords")
+		return
+	}
+	upgraded := 0
+	for _, row := range rows {
+		cfg, err := decodePolicyConfig([]byte(row.SettingsJSON))
+		if err != nil || cfg.AdminAccountPassword == "" {
+			continue
+		}
+		enc, err := encryptPassword(r.encKey, cfg.AdminAccountPassword)
+		if err != nil {
+			log.Warn().Err(err).Str("policy", row.ID).Msg("system policy: could not encrypt legacy password")
+			continue
+		}
+		cfg.AdminAccountPassword = enc
+		cfg.SettingsVersion = settingsVersion
+		clean, err := json.Marshal(cfg)
+		if err != nil {
+			continue
+		}
+		if _, err := r.db.ExecContext(ctx, r.db.Rebind(
+			`UPDATE system_policies SET settings_json = ? WHERE id = ?`),
+			string(clean), row.ID); err != nil {
+			log.Warn().Err(err).Str("policy", row.ID).Msg("system policy: re-encrypt legacy password")
+			continue
+		}
+		upgraded++
+	}
+	if upgraded > 0 {
+		log.Info().Int("rows", upgraded).Msg("system policy: encrypted managed admin passwords a prior server version stored in plaintext")
+	}
+}
+
 // ScrubStoredStatePasswords removes passwords that earlier versions stored in
 // device_system_policy_states. It runs once at startup; rows already clean are
 // not touched.

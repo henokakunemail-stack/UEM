@@ -319,6 +319,54 @@ func TestLegacyPlaintextPasswordRowIsUpgradedOnNextSave(t *testing.T) {
 	}
 }
 
+// A policy nobody edits after upgrading to encrypted-at-rest storage must not
+// keep its password in plaintext forever: the startup backfill has to find
+// and re-encrypt it without anyone touching that policy again.
+func TestReencryptLegacyPasswordsUpgradesUntouchedPolicies(t *testing.T) {
+	e := newPolicyEnv(t)
+	now := time.Now().UTC()
+	legacySettings, _ := json.Marshal(PolicyConfig{
+		SettingsVersion: 2, AdminAccountEnabled: trueOnly(true),
+		AdminAccountUsername: "sysadmin", AdminAccountPassword: secretPw,
+	})
+	e.repo.db.MustExec(`INSERT INTO system_policies
+		(id, name, description, target_type, target_id, is_enabled, priority, settings_json, created_by, created_at, updated_at)
+		VALUES ('legacy-2', 'Legacy', '', 'all', '', 1, 100, ?, 'tester', ?, ?)`, string(legacySettings), now, now)
+
+	e.repo.ReencryptLegacyPasswords(context.Background())
+
+	var rawJSON string
+	if err := e.repo.db.Get(&rawJSON, `SELECT settings_json FROM system_policies WHERE id = 'legacy-2'`); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(rawJSON, secretPw) {
+		t.Fatalf("the backfill left the password in plaintext: %s", rawJSON)
+	}
+	if !strings.Contains(rawJSON, encPrefix) {
+		t.Fatalf("the backfill did not encrypt the password: %s", rawJSON)
+	}
+
+	// Still usable afterward: GetByID must decrypt it back to the real value.
+	p, err := e.repo.GetByID(context.Background(), "legacy-2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Settings.AdminAccountPassword != secretPw {
+		t.Fatalf("after the backfill, GetByID returned %q instead of the real password", p.Settings.AdminAccountPassword)
+	}
+
+	// A policy with no password, or already encrypted, is left alone: running
+	// it again must not error or double-encrypt anything.
+	e.repo.ReencryptLegacyPasswords(context.Background())
+	var rawJSON2 string
+	if err := e.repo.db.Get(&rawJSON2, `SELECT settings_json FROM system_policies WHERE id = 'legacy-2'`); err != nil {
+		t.Fatal(err)
+	}
+	if rawJSON2 != rawJSON {
+		t.Fatalf("running the backfill twice changed an already-encrypted row:\nfirst:  %s\nsecond: %s", rawJSON, rawJSON2)
+	}
+}
+
 // The agent still has to receive the password to set the account.
 func TestDispatchStillCarriesThePassword(t *testing.T) {
 	b, err := systemPolicyApplyEnvelope(&CompiledPolicy{Version: "v", Settings: PolicySettings{

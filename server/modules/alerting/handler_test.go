@@ -2,6 +2,7 @@ package alerting
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 	"github.com/jmoiron/sqlx"
 
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/db"
+	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/rbac"
 )
 
 // stubAudit records that the handler was allowed to reach the audit call at
@@ -95,5 +97,49 @@ func TestUpdateRuleKeepsTheFieldsTheClientDidNotSend(t *testing.T) {
 	}
 	if got.WebhookURL != "https://hooks.example.com/disk" {
 		t.Errorf("webhook_url was blanked to %q, incidents would no longer be dispatched", got.WebhookURL)
+	}
+}
+
+// listRules used to be Viewer-reachable with no redaction, while the single
+// getRule route it shares AlertRule's shape with was Admin-only -- any
+// Viewer could already read every rule's webhook_url (a bearer-style
+// credential, since the evaluator POSTs to it with no separate auth header)
+// through the less-restricted list route.
+func TestListRulesRedactsWebhookURLForNonAdmin(t *testing.T) {
+	h, _ := newRuleFixture(t)
+	rule := &AlertRule{
+		Name: "disk-low", RuleType: "disk_low", ThresholdVal: 15, Severity: "critical",
+		WebhookURL: "https://hooks.example.com/disk?token=secret", IsEnabled: true, CreatedBy: "u1",
+	}
+	if err := h.repo.CreateRule(context.Background(), rule); err != nil {
+		t.Fatal(err)
+	}
+
+	list := func(role string) AlertRule {
+		req := httptest.NewRequest(http.MethodGet, "/api/alerts/rules", nil)
+		req = req.WithContext(rbac.WithRole(req.Context(), role))
+		rec := httptest.NewRecorder()
+		h.listRules(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("list as %s: %d %s", role, rec.Code, rec.Body.String())
+		}
+		var rules []AlertRule
+		if err := json.Unmarshal(rec.Body.Bytes(), &rules); err != nil {
+			t.Fatal(err)
+		}
+		if len(rules) != 1 {
+			t.Fatalf("expected 1 rule, got %d", len(rules))
+		}
+		return rules[0]
+	}
+
+	if got := list(rbac.RoleViewer).WebhookURL; got != "" {
+		t.Errorf("viewer received the webhook url: %q", got)
+	}
+	if got := list(rbac.RoleTechnician).WebhookURL; got != "" {
+		t.Errorf("technician received the webhook url: %q", got)
+	}
+	if got := list(rbac.RoleAdmin).WebhookURL; got != rule.WebhookURL {
+		t.Errorf("admin did not receive the real webhook url, got %q", got)
 	}
 }
