@@ -60,6 +60,7 @@ func main() {
 		rcWorkerCreds        string
 		uninstallToken       string
 		verifyUninstallToken string
+		wallpaperRefresh     string
 	)
 	flag.StringVar(&serverURL, "server", envOr("AGENT_SERVER", "http://localhost:8443"), "central server URL")
 	flag.StringVar(&enrollToken, "enroll", "", "one-time enrollment token (first run only)")
@@ -75,7 +76,20 @@ func main() {
 	// user's session. Not an operator-facing flag — see runRCWorker.
 	flag.StringVar(&rcWorkerArg, "rc-worker", "", "internal: base64 remote control session config (session worker mode)")
 	flag.StringVar(&rcWorkerCreds, "rc-creds", "", "internal: credential path for the session worker")
+	// Internal: started by the service as the signed-in user to put the policy
+	// wallpaper on that user's desktop. Not an operator-facing flag.
+	flag.StringVar(&wallpaperRefresh, systempolicy.WallpaperRefreshFlag, "", "internal: wallpaper image path to apply to the signed-in user's desktop")
 	flag.Parse()
+
+	// Before everything else: this process runs as the user, not as SYSTEM, and
+	// must not touch credentials, logs or enrollment.
+	if wallpaperRefresh != "" {
+		if err := systempolicy.RunWallpaperRefresh(wallpaperRefresh); err != nil {
+			fmt.Fprintf(os.Stderr, "wallpaper refresh: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
 
 	if enrollOnly {
 		if err := runEnrollOnly(serverURL, enrollToken, enrollSite, credsPath); err != nil {
@@ -117,6 +131,10 @@ func main() {
 		if f := setupFileLog(filepath.Dir(credsPath), "agent"); f != nil {
 			defer f.Close()
 		}
+		// Per-user policy (the wallpaper) is written when a user signs in, and
+		// for whoever is already signed in when the service starts.
+		service.OnSessionLogon = systempolicy.ReapplyWallpaperAtLogon
+		go systempolicy.ReapplyWallpaperAtStartup()
 		if err := service.Serve("endpoint-agent", func() error {
 			runAgent(serverURL, enrollToken, enrollSite, credsPath, heartbeatSecs)
 			return nil

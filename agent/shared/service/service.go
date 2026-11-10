@@ -7,6 +7,11 @@ import (
 	"strings"
 )
 
+// OnSessionLogon, when set, is called with the session id each time a user
+// signs in while the agent runs as a Windows service. Other platforms never
+// call it.
+var OnSessionLogon func(sessionID uint32)
+
 var (
 	ErrNotSupported     = errors.New("service management not supported on this OS")
 	ErrAlreadyInstalled = errors.New("service is already installed")

@@ -264,127 +264,29 @@ func applyWallpaper(client *http.Client, serverURL, wallpaperURL string, style W
 		return fmt.Errorf("wallpaper url is not http(s) or a server-relative path: %q", wallpaperURL)
 	}
 
-	// Style code:
-	// Fill: 10, Fit: 6, Stretch: 2, Center: 0, Tile: 1 (with TileWallpaper="1")
-	var styleCode string
-	tileCode := "0"
-	switch style {
-	case WallpaperFit:
-		styleCode = "6"
-	case WallpaperStretch:
-		styleCode = "2"
-	case WallpaperCenter:
-		styleCode = "0"
-	case WallpaperTile:
-		styleCode = "1"
-		tileCode = "1"
-	default:
-		styleCode = "10" // Fill
+	styleCode, tileCode, policyCode := wallpaperStyleCodes(style)
+	digest, err := fileDigest(destPath)
+	if err != nil {
+		return fmt.Errorf("read wallpaper file: %w", err)
 	}
+	state := wallpaperState{Path: destPath, Style: styleCode, Tile: tileCode, PolicyStyle: policyCode, Locked: locked, Digest: digest}
 
-	// The registry writes below used to be discarded, so a wallpaper the policy
-	// key refused still reported as enforced.
-	var errs regErrs
-
-	// Set GPO Group Policy registry key in Policies\System
-	if sysPolKey, err := openPolicyKey(registry.LOCAL_MACHINE, `SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System`); err != nil {
-		errs.add("open Policies\\System", err)
-	} else {
-		errs.add("Wallpaper", sysPolKey.SetStringValue("Wallpaper", destPath))
-		errs.add("WallpaperStyle", sysPolKey.SetStringValue("WallpaperStyle", styleCode))
-		sysPolKey.Close()
-	}
-
-	// Lock or unlock wallpaper changes via GPO
-	for _, keyPath := range []string{
-		`SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\ActiveDesktop`,
-		`SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System`,
-	} {
-		k, err := openPolicyKey(registry.LOCAL_MACHINE, keyPath)
-		if err != nil {
-			errs.add("open "+keyPath, err)
-			continue
-		}
-		for _, name := range []string{"NoChangingWallPaper", "NoChangingWallpaper"} {
-			if locked {
-				errs.add(name, k.SetDWordValue(name, 1))
-			} else {
-				errs.add(name, k.DeleteValue(name))
-			}
-		}
-		k.Close()
-	}
-
-	// Set Default user desktop for new logins
-	if defDesktopKey, err := openPolicyKey(registry.USERS, `.DEFAULT\Control Panel\Desktop`); err != nil {
-		errs.add("open .DEFAULT desktop", err)
-	} else {
-		errs.add("default Wallpaper", defDesktopKey.SetStringValue("Wallpaper", destPath))
-		errs.add("default WallpaperStyle", defDesktopKey.SetStringValue("WallpaperStyle", styleCode))
-		errs.add("default TileWallpaper", defDesktopKey.SetStringValue("TileWallpaper", tileCode))
-		defDesktopKey.Close()
-	}
-	if err := errs.err(); err != nil {
+	cleanupLegacyWallpaper(destPath)
+	if err := saveWallpaperState(state); err != nil {
 		return err
 	}
-
-	// Live refresh interactive desktop wallpaper via Win32 API
-	user32 := windows.NewLazySystemDLL("user32.dll")
-	procSystemParametersInfoW := user32.NewProc("SystemParametersInfoW")
-	targetUTF16, err := windows.UTF16PtrFromString(destPath)
-	if err == nil {
-		// SPI_SETDESKWALLPAPER = 0x0014, SPIF_UPDATEINIFILE = 0x01, SPIF_SENDCHANGE = 0x02
-		_, _, _ = procSystemParametersInfoW.Call(
-			0x0014,
-			0,
-			uintptr(unsafe.Pointer(targetUTF16)),
-			0x01|0x02,
-		)
-	}
-
-	// Broadcast parameter change to running explorer sessions
-	_ = exec.Command("rundll32.exe", "user32.dll,UpdatePerUserSystemParameters", "1,", "True").Run()
-
-	return nil
+	return applyWallpaperToUsers(state)
 }
 
+// revertWallpaper runs whenever the effective policy sets no wallpaper. Users
+// keep the picture they have; this agent's lock on it is lifted.
 func revertWallpaper() {
-	sysPolKey, err := registry.OpenKey(
-		registry.LOCAL_MACHINE,
-		`SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System`,
-		registry.SET_VALUE,
-	)
-	if err == nil {
-		defer sysPolKey.Close()
-		_ = sysPolKey.DeleteValue("Wallpaper")
-		_ = sysPolKey.DeleteValue("WallpaperStyle")
+	cleanupLegacyWallpaper(filepath.Join(`C:\ProgramData\EndpointManager`, "corporate-wallpaper.jpg"))
+	_ = clearWallpaperState()
+	hives, _ := listUserHives()
+	for _, sid := range hives {
+		_ = releaseHive(sid)
 	}
-
-	for _, keyPath := range []string{
-		`SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\ActiveDesktop`,
-		`SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System`,
-	} {
-		if k, err := registry.OpenKey(registry.LOCAL_MACHINE, keyPath, registry.SET_VALUE); err == nil {
-			_ = k.DeleteValue("NoChangingWallPaper")
-			_ = k.DeleteValue("NoChangingWallpaper")
-			k.Close()
-		}
-	}
-
-	defKey, err := registry.OpenKey(
-		registry.USERS,
-		`.DEFAULT\Control Panel\Desktop`,
-		registry.SET_VALUE,
-	)
-	if err == nil {
-		defer defKey.Close()
-		_ = defKey.DeleteValue("Wallpaper")
-		_ = defKey.DeleteValue("WallpaperStyle")
-		_ = defKey.DeleteValue("TileWallpaper")
-	}
-
-	// Broadcast refresh to reset desktop
-	_ = exec.Command("rundll32.exe", "user32.dll,UpdatePerUserSystemParameters", "1,", "True").Run()
 }
 
 func applyInactivityLock(minutes int) error {

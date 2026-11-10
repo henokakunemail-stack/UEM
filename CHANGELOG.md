@@ -11,6 +11,24 @@ Riwayat sebelum v1.5.4 ada di `git log`.
 ## [Unreleased]
 
 ### Diperbaiki
+- **Wallpaper dari Group Policy tidak pernah tampil di PC Windows, padahal dashboard menunjukkan "Wallpaper:
+  Enforced".** Agen menulis wallpaper ke `HKLM\...\Policies\System` dan `HKEY_USERS\.DEFAULT`. Windows tidak membaca
+  keduanya untuk desktop user: kebijakan "Desktop Wallpaper" dan "Prevent changing desktop background" adalah kebijakan
+  per-user yang dibaca dari hive user sendiri (HKCU), dan `.DEFAULT` adalah hive akun SYSTEM, bukan template user baru.
+  Panggilan `SystemParametersInfo` untuk menyegarkan tampilan juga dijalankan dari service di Session 0, sehingga hanya
+  mengubah desktop yang tidak dilihat siapa pun. Akibatnya wallpaper tidak berubah, bahkan setelah sign out lalu sign in
+  (dilaporkan dari PC produksi). Selain itu nilai `WallpaperStyle` pada kunci kebijakan memakai penomoran Control Panel
+  (Fill = 10), padahal kebijakan memakai penomoran sendiri (Fill = 4).
+  Kini service agen menulis wallpaper (dan kuncinya, kalau policy mengunci wallpaper) langsung ke hive setiap user yang
+  sedang login (`HKEY_USERS\<SID>`), lalu menjalankan proses singkat **sebagai user tersebut** di sesinya untuk
+  menyegarkan desktop, jadi wallpaper berganti tanpa logoff. User yang login belakangan mendapatkannya saat login: agen
+  kini menerima notifikasi login dari Windows, dan menerapkan ulang juga saat service start. Wallpaper yang tidak
+  dikunci diterapkan sekali per gambar, sehingga user tetap bisa menggantinya sendiri. Status "Enforced" kini hanya
+  muncul kalau penulisan per-user dan penyegaran desktop benar-benar berhasil. Nilai lama di HKLM/`.DEFAULT` dibersihkan
+  hanya kalau menunjuk ke gambar milik agen ini. Saat policy tidak lagi mengatur wallpaper, kunci yang dipasang agen
+  dilepas, sedangkan kunci dari GPO domain tidak disentuh. **Perlu agen versi berikutnya**; setelah agen diperbarui,
+  tekan Force Sync pada policy.
+
 - **Viewer bisa membaca webhook URL semua alert rule lewat endpoint daftar, padahal endpoint lihat
   per-rule dibatasi Admin.** `GET /api/alerts/rules` (daftar) cuma butuh login biasa, sementara
   `GET /api/alerts/rules/{id}` (satu rule) butuh role Admin — tapi keduanya mengembalikan field

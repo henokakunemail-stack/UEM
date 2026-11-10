@@ -24,9 +24,9 @@
     "semantic_hash": "22bf7b338bb5b22d45ecaa309db6914f"
   },
   "agent/cmd/agent/main.go": {
-    "mtime": 1792721656.6080978,
-    "seen": 1792721802.348417,
-    "ast_hash": "8acbb7efdaef5ae66c0d803b0915fc44",
+    "mtime": 1794300037.1858633,
+    "seen": 1794300598.345605,
+    "ast_hash": "fde3008b3f0d33e8f7740f1878baa182",
     "semantic_hash": ""
   },
   "agent/cmd/agent/osinfo_darwin.go": {
@@ -444,16 +444,16 @@
     "semantic_hash": "b72ec1b609b298549f325378aeede14a"
   },
   "agent/shared/service/scm_windows.go": {
-    "mtime": 1790234421.944188,
-    "seen": 1792650332.9493062,
-    "ast_hash": "d3b434f0a154f9d664a212f0a22bab4e",
-    "semantic_hash": "d3b434f0a154f9d664a212f0a22bab4e"
+    "mtime": 1794300473.9083524,
+    "seen": 1794300598.345893,
+    "ast_hash": "da51b0bed4b2b204076026866a6e23ec",
+    "semantic_hash": ""
   },
   "agent/shared/service/service.go": {
-    "mtime": 1791337690.4484646,
-    "seen": 1792650332.9493086,
-    "ast_hash": "7cb4782ee14cbd76a9592d97bdb5e4d7",
-    "semantic_hash": "7cb4782ee14cbd76a9592d97bdb5e4d7"
+    "mtime": 1794299946.772406,
+    "seen": 1794300598.3458955,
+    "ast_hash": "d155380c625dd776e11f22943d3af499",
+    "semantic_hash": ""
   },
   "agent/shared/service/service_darwin.go": {
     "mtime": 1790235270.6899137,
@@ -3012,9 +3012,9 @@
     "semantic_hash": ""
   },
   "agent/shared/systempolicy/engine_windows.go": {
-    "mtime": 1793761611.5744457,
-    "seen": 1793762734.9101856,
-    "ast_hash": "8ff6e39270aea3b778f3df64150a3d67",
+    "mtime": 1794300117.0727038,
+    "seen": 1794300598.3459942,
+    "ast_hash": "ead99328c75482b2f1ab665d0b97878b",
     "semantic_hash": ""
   },
   "scripts/e2e-system-policy.ps1": {
@@ -4650,9 +4650,9 @@
     "semantic_hash": ""
   },
   "CHANGELOG.md": {
-    "mtime": 1793764993.1957781,
-    "seen": 1793765425.4009745,
-    "ast_hash": "a95b3c8dedd470c99643e29204a18a49",
+    "mtime": 1794300326.635499,
+    "seen": 1794300598.3473387,
+    "ast_hash": "65e1d5e2c964cf7392922f0a4f9c71fb",
     "semantic_hash": ""
   },
   "docs/architecture/policy-resolution.md": {
@@ -4863,6 +4863,24 @@
     "mtime": 1792990240.329764,
     "seen": 1792990270.9677355,
     "ast_hash": "01a1917afd98cbb80723cd3f2a731684",
+    "semantic_hash": ""
+  },
+  "agent/shared/systempolicy/wallpaper_other.go": {
+    "mtime": 1794299960.9010537,
+    "seen": 1794300598.346013,
+    "ast_hash": "ae90f498194867708f78df2cceef5d0f",
+    "semantic_hash": ""
+  },
+  "agent/shared/systempolicy/wallpaper_windows.go": {
+    "mtime": 1794300276.0486374,
+    "seen": 1794300598.3460155,
+    "ast_hash": "eee9148f5a71b848145a18dc1a9be956",
+    "semantic_hash": ""
+  },
+  "agent/shared/systempolicy/wallpaper_windows_test.go": {
+    "mtime": 1794300249.141695,
+    "seen": 1794300598.3460176,
+    "ast_hash": "3cc078a18f6c942624c7655823b2d6fa",
     "semantic_hash": ""
   }
 }

@@ -6,7 +6,9 @@ import (
 	"runtime/debug"
 	"sync/atomic"
 	"time"
+	"unsafe"
 
+	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/svc"
 )
 
@@ -45,7 +47,10 @@ type scmHandler struct {
 }
 
 func (h *scmHandler) Execute(args []string, r <-chan svc.ChangeRequest, changes chan<- svc.Status) (bool, uint32) {
-	const accepted = svc.AcceptStop | svc.AcceptShutdown
+	// AcceptSessionChange: the SCM tells a service about sign-ins only when it
+	// asks. Policy that lives in a user's own hive (the wallpaper) can only be
+	// written once that user's hive is loaded, which is at sign-in.
+	const accepted = svc.AcceptStop | svc.AcceptShutdown | svc.AcceptSessionChange
 
 	changes <- svc.Status{State: svc.StartPending}
 
@@ -89,6 +94,18 @@ func (h *scmHandler) Execute(args []string, r <-chan svc.ChangeRequest, changes 
 				changes <- c.CurrentStatus
 			case svc.Stop, svc.Shutdown:
 				return stop()
+			case svc.SessionChange:
+				if c.EventType == wtsSessionLogon && c.EventData != 0 && OnSessionLogon != nil {
+					// EventData is the SCM's pointer to a WTSSESSION_NOTIFICATION,
+					// valid only during this call, so the id is read here. Reading
+					// it through the field's own storage keeps go vet's
+					// uintptr-to-pointer check satisfied.
+					n := (*windows.WTSSESSION_NOTIFICATION)(*(*unsafe.Pointer)(unsafe.Pointer(&c.EventData)))
+					id := n.SessionID
+					// The handler waits for the user's profile to load; the
+					// SCM's control loop must not wait with it.
+					go OnSessionLogon(id)
+				}
 			}
 		case <-done:
 			// The agent exited on its own; nothing left to supervise.
@@ -100,3 +117,7 @@ func (h *scmHandler) Execute(args []string, r <-chan svc.ChangeRequest, changes 
 		}
 	}
 }
+
+// wtsSessionLogon is WTS_SESSION_LOGON, the SERVICE_CONTROL_SESSIONCHANGE event
+// for a user signing in.
+const wtsSessionLogon = 5
