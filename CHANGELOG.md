@@ -10,6 +10,14 @@ Riwayat sebelum v1.5.4 ada di `git log`.
 
 ## [Unreleased]
 
+## [1.6.3] - 2026-11-10
+
+- Perlu server **dan** agen v1.6.3: perbarui server dengan `update.sh`, lalu agen dari **Agent Updates → Impor dari
+  Paket Server** dan kampanye ke 1.6.3. Untuk perbaikan wallpaper, uji dulu di satu PC: setelah agennya 1.6.3, tekan
+  **Force Sync** pada kebijakan grup dan pastikan wallpaper berganti tanpa logoff, baru jalankan ke semua PC.
+- Installer agent (`EndpointAgent-Setup.exe`) juga berubah: perintah `/SERVER=` yang terpotong kini ditolak dengan
+  pesan jelas. Pakai installer dari rilis ini untuk instalasi baru.
+
 ### Diperbaiki
 - **Wallpaper dari Group Policy tidak pernah tampil di PC Windows, padahal dashboard menunjukkan "Wallpaper:
   Enforced".** Agen menulis wallpaper ke `HKLM\...\Policies\System` dan `HKEY_USERS\.DEFAULT`. Windows tidak membaca
