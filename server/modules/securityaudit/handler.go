@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 
@@ -84,9 +85,9 @@ func (h *Handler) runSecurityAudit(w http.ResponseWriter, r *http.Request) {
 	if h.auditor != nil {
 		actorID := auth.UserIDFromContext(r.Context())
 		_ = h.auditor.Log(r.Context(), "user", actorID, "security.audit_run", "system", map[string]string{
-			"score":  string(rune(report.Score)),
+			"score":  strconv.Itoa(report.Score),
 			"grade":  report.Grade,
-			"passed": string(rune(report.Passed)),
+			"passed": strconv.Itoa(report.Passed),
 		})
 	}
 

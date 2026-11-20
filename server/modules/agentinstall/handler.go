@@ -13,6 +13,7 @@ import (
 	_ "embed"
 	"encoding/hex"
 	"fmt"
+	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/httpguard"
 	"io"
 	"net/http"
 	"os"
@@ -115,7 +116,7 @@ func (h *Handler) serveBinary(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="agent-%s-%s"`, osName, arch))
 	w.Header().Set("Cache-Control", "no-store")
-	http.ServeFile(w, r, path)
+	http.ServeFile(httpguard.LongTransfer(w, httpguard.TransferIdleTimeout), r, path)
 }
 
 // locate prefers an uploaded release, so an operator who publishes a new agent

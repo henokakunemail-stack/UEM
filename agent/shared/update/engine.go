@@ -264,14 +264,14 @@ func (e *Engine) ApplyUpdate(ctx context.Context, params UpdateParams) error {
 
 	// Backup running binary: rename current -> current.old
 	// On Windows, moving/renaming a running binary is permitted, whereas overwriting is not.
-	if err := os.Rename(currentExec, backupExec); err != nil {
+	if err := renameWithRetry(currentExec, backupExec); err != nil {
 		_ = os.Remove(tempFile)
 		_ = e.ReportProgress(ctx, params.TaskID, "failed", params.TargetVersion, fmt.Sprintf("backup rename failed: %v", err))
 		return fmt.Errorf("backup binary: %w", err)
 	}
 
 	// Move new binary into place
-	if err := os.Rename(tempFile, currentExec); err != nil {
+	if err := renameWithRetry(tempFile, currentExec); err != nil {
 		// Rollback immediately if rename fails
 		_ = os.Rename(backupExec, currentExec)
 		_ = os.Remove(tempFile)

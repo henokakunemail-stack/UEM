@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/httpguard"
 	"io"
 	"net/http"
 	"os"
@@ -726,7 +727,7 @@ func (h *Handler) downloadPackage(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Package-SHA256", pkg.SHA256)
 	w.Header().Set("Content-Length", strconv.FormatInt(pkg.FileSize, 10))
 
-	http.ServeContent(w, r, pkg.FileName, pkg.UpdatedAt, f)
+	http.ServeContent(httpguard.LongTransfer(w, httpguard.TransferIdleTimeout), r, pkg.FileName, pkg.UpdatedAt, f)
 }
 
 func (h *Handler) reportProgress(w http.ResponseWriter, r *http.Request) {

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/httpguard"
 	"io"
 	"net/http"
 	"os"
@@ -774,5 +775,5 @@ func (h *Handler) serveWallpaper(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	http.ServeFile(w, r, filePath)
+	http.ServeFile(httpguard.LongTransfer(w, httpguard.TransferIdleTimeout), r, filePath)
 }

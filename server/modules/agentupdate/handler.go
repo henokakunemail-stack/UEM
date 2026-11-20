@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/httpguard"
 	"io"
 	"net/http"
 	"os"
@@ -442,7 +443,7 @@ func (h *Handler) handleDownloadRelease(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "release not found"})
 		return
 	}
-	http.ServeFile(w, r, rel.FilePath)
+	http.ServeFile(httpguard.LongTransfer(w, httpguard.TransferIdleTimeout), r, rel.FilePath)
 }
 
 func (h *Handler) handleAgentDownload(w http.ResponseWriter, r *http.Request) {
@@ -455,7 +456,7 @@ func (h *Handler) handleAgentDownload(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "release not found"})
 		return
 	}
-	http.ServeFile(w, r, rel.FilePath)
+	http.ServeFile(httpguard.LongTransfer(w, httpguard.TransferIdleTimeout), r, rel.FilePath)
 }
 
 func (h *Handler) handleCreateCampaign(w http.ResponseWriter, r *http.Request) {

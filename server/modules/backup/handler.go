@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/httpguard"
 	"io"
 	"net/http"
 	"os"
@@ -275,7 +276,7 @@ func (h *Handler) handleDownload(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/x-sqlite3")
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", info.Size()))
-	_, _ = io.Copy(w, f)
+	_, _ = io.Copy(httpguard.LongTransfer(w, httpguard.TransferIdleTimeout), f)
 }
 
 func (h *Handler) handleDownloadActive(w http.ResponseWriter, r *http.Request) {
@@ -322,7 +323,7 @@ func (h *Handler) handleDownloadActive(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/x-sqlite3")
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", info.Size()))
-	_, _ = io.Copy(w, f)
+	_, _ = io.Copy(httpguard.LongTransfer(w, httpguard.TransferIdleTimeout), f)
 }
 
 func (h *Handler) handleDelete(w http.ResponseWriter, r *http.Request) {
