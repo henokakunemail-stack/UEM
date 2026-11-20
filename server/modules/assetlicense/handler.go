@@ -21,6 +21,11 @@ type Handler struct {
 	repo    *Repository
 	auditor Auditor
 	authMw  func(http.Handler) http.Handler
+
+	// Organization is printed on the lifecycle summary's cover (ORG_NAME).
+	Organization string
+	// Now is the clock; nil means time.Now. Tests set it.
+	Now func() time.Time
 }
 
 func NewHandler(repo *Repository, auditor Auditor, authMw func(http.Handler) http.Handler) *Handler {
@@ -37,6 +42,10 @@ func (h *Handler) Register(r chi.Router) {
 
 		// Assets
 		cr.With(rbac.RequireRole(rbac.RoleViewer)).Get("/api/assets/summary", h.handleGetAssetSummary)
+		cr.With(rbac.RequireRole(rbac.RoleViewer)).Get("/api/assets/lifecycle", h.handleLifecycle)
+		cr.With(rbac.RequireRole(rbac.RoleViewer)).Get("/api/assets/lifecycle/settings", h.handleGetLifecycleSettings)
+		cr.With(rbac.RequireRole(rbac.RoleAdmin)).Put("/api/assets/lifecycle/settings", h.handlePutLifecycleSettings)
+		cr.With(rbac.RequireRole(rbac.RoleViewer)).Get("/api/assets/lifecycle/report", h.handleLifecycleReport)
 		cr.With(rbac.RequireRole(rbac.RoleViewer)).Get("/api/assets", h.handleListAssets)
 		cr.With(rbac.RequireRole(rbac.RoleViewer)).Get("/api/assets/{id}", h.handleGetAsset)
 		cr.With(rbac.RequireRole(rbac.RoleTechnician)).Post("/api/assets", h.handleCreateAsset)
@@ -141,6 +150,9 @@ func (h *Handler) handleCreateAsset(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "asset_tag and model_name are required"})
 		return
 	}
+	if !validCategory(w, a.Category) {
+		return
+	}
 	if !h.validDeviceRef(w, r, a.DeviceID) {
 		return
 	}
@@ -218,6 +230,12 @@ func (h *Handler) handleUpdateAsset(w http.ResponseWriter, r *http.Request) {
 	if req.Notes != nil {
 		existing.Notes = *req.Notes
 	}
+	if req.Category != nil {
+		existing.Category = *req.Category
+	}
+	if !validCategory(w, existing.Category) {
+		return
+	}
 
 	if !h.validDeviceRef(w, r, existing.DeviceID) {
 		return
@@ -237,6 +255,7 @@ func (h *Handler) handleUpdateAsset(w http.ResponseWriter, r *http.Request) {
 	_ = h.auditor.Log(r.Context(), "user", actorID, "asset.update", id, map[string]string{
 		"asset_tag": existing.AssetTag,
 		"status":    existing.Status,
+		"category":  existing.Category,
 	})
 
 	writeJSON(w, http.StatusOK, existing)

@@ -40,6 +40,8 @@ import type {
   DirectoryConfigDTO,
   DirectorySyncPlanDTO,
   AssetSummaryDTO,
+  LifecycleReport,
+  LifecycleSettings,
   SoftwareLicenseDTO,
   LicenseComplianceSummaryDTO,
   AgentReleaseDTO,
@@ -872,6 +874,27 @@ export const api = {
 
   async getAssetSummary(): Promise<AssetSummaryDTO> {
     return request<AssetSummaryDTO>('/api/assets/summary')
+  },
+
+  async getAssetLifecycle(): Promise<LifecycleReport> {
+    return request<LifecycleReport>('/api/assets/lifecycle')
+  },
+
+  async getLifecycleSettings(): Promise<LifecycleSettings> {
+    return request<LifecycleSettings>('/api/assets/lifecycle/settings')
+  },
+
+  async saveLifecycleSettings(s: LifecycleSettings): Promise<LifecycleSettings> {
+    return request<LifecycleSettings>('/api/assets/lifecycle/settings', {
+      method: 'PUT',
+      body: JSON.stringify(s),
+    })
+  },
+
+  async downloadLifecycleReport(): Promise<Blob> {
+    const res = await fetchRaw('/api/assets/lifecycle/report')
+    if (!res.ok) throw new Error(`Download failed: HTTP ${res.status}`)
+    return res.blob()
   },
 
   async createAsset(data: Partial<HardwareAssetDTO>): Promise<HardwareAssetDTO> {

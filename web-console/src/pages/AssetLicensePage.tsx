@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react'
 import {
   AlertTriangle,
   Award,
+  CalendarClock,
   Cpu,
   DollarSign,
   Key,
@@ -22,6 +23,7 @@ import { useT } from '../i18n/core'
 import { DataTable } from '../components/ui/DataTable'
 import { ConfirmDialog } from '../components/ui/ConfirmDialog'
 import { Modal } from '../components/ui/Modal'
+import { AssetLifecyclePanel } from '../components/AssetLifecyclePanel'
 import type {
   AssetSummaryDTO,
   DeviceDTO,
@@ -31,7 +33,7 @@ import type {
   SoftwareLicenseDTO,
 } from '../types/api'
 
-export type AssetTab = 'hardware' | 'licenses'
+export type AssetTab = 'hardware' | 'licenses' | 'lifecycle'
 
 const ASSET_STATUSES: HardwareAssetDTO['status'][] = [
   'in_use',
@@ -67,6 +69,7 @@ const emptyAssetForm = (): Partial<HardwareAssetDTO> => ({
   purchase_cost: 0,
   warranty_expires_at: null,
   status: 'in_use',
+  category: '',
   notes: '',
   device_id: null,
 })
@@ -233,6 +236,7 @@ export const AssetLicensePage: React.FC<AssetLicensePageProps> = ({ activeTab: s
       purchase_cost: a.purchase_cost,
       warranty_expires_at: a.warranty_expires_at ?? null,
       status: a.status,
+      category: a.category ?? '',
       notes: a.notes,
     })
     setIsAssetModalOpen(true)
@@ -463,7 +467,17 @@ export const AssetLicensePage: React.FC<AssetLicensePageProps> = ({ activeTab: s
           <Key size={16} />
           <span>{t('assets.tab_licenses')}</span>
         </button>
+        <button
+          type="button"
+          className={`tab-btn ${subTab === 'lifecycle' ? 'active' : ''}`}
+          onClick={() => setSubTab('lifecycle')}
+        >
+          <CalendarClock size={16} />
+          <span>{t('lifecycle.tab')}</span>
+        </button>
       </div>
+
+      {subTab === 'lifecycle' && <AssetLifecyclePanel />}
 
       {/* Tab 1: Hardware Assets */}
       {subTab === 'hardware' && (
@@ -828,6 +842,23 @@ export const AssetLicensePage: React.FC<AssetLicensePageProps> = ({ activeTab: s
                     {statusLabel(s)}
                   </option>
                 ))}
+              </select>
+            </div>
+            <div className="form-field">
+              <label className="form-label" htmlFor="asset-category">
+                {t('assets.field_category')}
+              </label>
+              <select
+                id="asset-category"
+                className="form-select"
+                value={newAsset.category ?? ''}
+                onChange={(e) => setNewAsset({ ...newAsset, category: e.target.value as HardwareAssetDTO['category'] })}
+              >
+                <option value="">{t('assets.category_auto')}</option>
+                <option value="laptop">{t('lifecycle.cat_laptop')}</option>
+                <option value="desktop">{t('lifecycle.cat_desktop')}</option>
+                <option value="server">{t('lifecycle.cat_server')}</option>
+                <option value="other">{t('assets.category_other')}</option>
               </select>
             </div>
           </div>

@@ -953,6 +953,7 @@ func buildServer(cfg config.Config, database *sqlx.DB) (*http.Server, *serverApp
 	// Phase 14: asset & license management.
 	assetRepo := assetlicense.NewRepository(database)
 	assetH := assetlicense.NewHandler(assetRepo, &auditAdapter{db: database}, jwtSvc.RequireAuth)
+	assetH.Organization = cfg.OrgName
 	assetH.Register(r)
 
 	// Phase 15: device maintenance.

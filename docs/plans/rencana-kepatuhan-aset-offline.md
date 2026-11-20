@@ -76,7 +76,7 @@ laporan kepatuhan patch tidak bisa dipercaya.
 
 **A4. Isi `LastBootUTC`** di ketiga OS.
 
-### Status implementasi (2026-11-19, belum di-commit)
+### Status implementasi (2026-11-19, di-commit 2026-11-20)
 
 - **Selesai:** A1 untuk Windows (kolektor `agent/windows/posture_windows.go`), A2 (tabel `device_posture` dan
   `device_posture_history`, API `GET /api/devices/{id}/posture`), A3 (`PATCH_SCAN_INTERVAL`, default 24 jam), A4
@@ -143,7 +143,7 @@ kontrol/site/grup), detail per device dengan bukti mentah (misalnya nilai regist
 
 **B5. Laporan terjadwal** (bulanan) yang disimpan di server dan bisa diunduh ulang (arsip bukti untuk audit berikutnya).
 
-### Status implementasi (2026-11-20, belum di-commit)
+### Status implementasi (2026-11-20, sudah di-commit)
 
 - **Selesai:** B1 (profil, tabel `compliance_profiles`, profil default dari ambang di atas), B2 (mesin evaluasi
   `server/modules/compliance`), B3 (halaman **Kepatuhan perangkat**: ringkasan, filter per kontrol/site/status, detail
@@ -247,7 +247,7 @@ Di luar cakupan aplikasi**, bukti yang dilampirkan, dan catatan. Kontrol yang ti
 
 **C4. Penafian di setiap laporan:** laporan ini adalah *paket bukti teknis*, bukan sertifikasi atau opini hukum.
 
-### Status implementasi (2026-11-20, belum di-commit)
+### Status implementasi (2026-11-20, sudah di-commit)
 
 - **Selesai:**
   - C1: template sebagai file JSON. Template bawaan ditanam di server (`server/modules/compliance/frameworks/`), dan
@@ -331,6 +331,42 @@ biaya pengganti per kategori, metode depresiasi garis lurus.
 Grafik dibuat dengan SVG/CSS sederhana di console (tanpa menambah library), mengikuti gaya yang sudah ada.
 
 **D4. Ekspor PDF ringkasan manajemen** memakai mesin Fase B.
+
+### Status implementasi (2026-11-20, belum di-commit)
+
+- **Selesai:**
+  - D1: umur dengan sumbernya (tanggal beli → BIOS → instal OS → tidak diketahui).
+  - D2: pengaturan per kategori, dengan nilai rekomendasi K5 sebagai default: laptop 4 tahun, desktop 5, server 5,
+    lainnya 5, biaya diisi Admin.
+  - D3: tab **Siklus hidup & biaya** di halaman Aset & lisensi.
+  - D4: PDF ringkasan, yang SHA-256-nya dicatat ke audit log.
+- **Penyesuaian dari rencana:**
+  - Aset mendapat kolom **kategori** (migrasi 0033). Bila kosong, kategori diambil dari jenis casing yang kini
+    dilaporkan agen: Windows `PCSystemType`, Linux `chassis_type` SMBIOS, dan nama model untuk macOS. Tanpa jenis
+    casing, kategori "umur pakai per kategori" untuk 180 PC harus diisi satu per satu.
+  - Aset berkategori **Lainnya** (monitor, dock) tidak memakai tanggal BIOS atau instal OS dari PC yang ditautkan.
+  - Armada = aset yang belum pensiun/dibuang, ditambah device aktif yang belum punya aset.
+  - Tanggal BIOS di Linux dibaca dari `/sys/class/dmi/id/bios_date` dan dikirim di model hardware. Windows tetap
+    lewat postur (Fase A). Tanggal placeholder sebelum 1995 ditolak.
+  - Prediksi: satu penggantian per unit. Biaya diambil dari biaya kategori; bila belum diatur, dari harga beli aset;
+    bila keduanya kosong, unit dihitung "tanpa biaya" dan tidak dianggap Rp 0.
+  - Seat tak dipakai = seat − perangkat yang dialokasikan **atau** terpasang (dihitung sekali per perangkat).
+    Lisensi situs (`site_license`) tidak dihitung per seat. Alokasi ke PC tanpa inventory dihitung "belum ada
+    inventory", bukan "tanpa instalasi".
+  - PDF ringkasan tidak diarsipkan seperti laporan kepatuhan. File-nya dibuat saat diunduh, dan hash-nya tercatat
+    di audit log.
+- **Diverifikasi:**
+  - Tes dengan data uji kriteria di bawah: 7 umur dari tanggal beli, 2 dari BIOS (satu dari postur Windows, satu dari
+    model Linux), 1 tidak diketahui. Unit yang umurnya tidak diketahui tidak masuk prediksi dan tercatat di
+    `missing_age`. Lisensi: 4 seat (Rp 4.000.000) dan 2 alokasi tanpa instalasi (Rp 2.000.000).
+  - 18 mutasi kode semuanya tertangkap tes.
+  - Server uji: database dibuat oleh versi sebelum Fase D lalu dibuka versi baru. Migrasi 0033 berjalan pada data
+    yang sudah ada. Hash PDF sama di `certutil`, header unduhan, dan audit log. Tampilan console dicek di lebar desktop
+    dan 390 px.
+- **Belum:**
+  - Jenis casing dan BIOS dari agen baru terisi setelah rilis agen. Rilis ini sebaiknya digabung dengan rilis agen
+    Fase A.
+  - Uji dengan data armada nyata.
 
 ### Kriteria selesai
 
@@ -469,7 +505,7 @@ Effective Policy menandai setting yang tidak berlaku untuk OS device itu.
 
 ## Prasyarat yang sebaiknya diselesaikan dulu
 
-1. ~~**Perbaikan batas waktu unduhan server (60 detik)**~~ **Selesai 2026-11-19** (belum di-commit): unduhan file kini
+1. ~~**Perbaikan batas waktu unduhan server (60 detik)**~~ **Selesai 2026-11-19**: unduhan file kini
    hanya diputus bila macet lebih dari 2 menit; rename di agen dicoba ulang ±12 detik saat file dikunci antivirus.
 2. **Code signing agen** (Authenticode) tetap disarankan sebelum rilis agen berikutnya ke banyak PC, karena antivirus
    dan kasus "Access is denied" saat update.

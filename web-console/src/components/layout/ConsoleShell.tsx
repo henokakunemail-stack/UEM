@@ -40,6 +40,7 @@ const groups: { labelKey: string; items: NavItem[] }[] = [
     { labelKey: 'nav.assets_licenses', path: '/assets', icon: Boxes, children: [
       { labelKey: 'nav.hardware_assets', path: '/assets/hardware', icon: Monitor },
       { labelKey: 'nav.software_licenses', path: '/assets/licenses', icon: KeyRound },
+      { labelKey: 'nav.asset_lifecycle', path: '/assets/lifecycle', icon: CalendarClock },
     ] },
     { labelKey: 'nav.agent_updates', path: '/updates', icon: Rocket, children: [
       { labelKey: 'nav.releases', path: '/updates/releases', icon: Package },

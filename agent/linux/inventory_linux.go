@@ -226,11 +226,17 @@ func (c *linuxCollector) collectModel() *inventory.Model {
 	vendor, _ := os.ReadFile("/sys/class/dmi/id/board_vendor")
 	product, _ := os.ReadFile("/sys/class/dmi/id/product_name")
 	serial, _ := os.ReadFile("/sys/class/dmi/id/product_serial")
+	chassis, _ := os.ReadFile("/sys/class/dmi/id/chassis_type")
+	biosDate, _ := os.ReadFile("/sys/class/dmi/id/bios_date")
 
 	m := &inventory.Model{
 		Vendor:       strings.TrimSpace(string(vendor)),
 		Product:      strings.TrimSpace(string(product)),
 		SerialNumber: strings.TrimSpace(string(serial)),
+		BIOSDate:     inventory.ParseDMIBIOSDate(string(biosDate)),
+	}
+	if n, err := strconv.Atoi(strings.TrimSpace(string(chassis))); err == nil {
+		m.ChassisType = inventory.ChassisFromSMBIOS(n)
 	}
 	if m.Vendor == "" && m.Product == "" && m.SerialNumber == "" {
 		return nil

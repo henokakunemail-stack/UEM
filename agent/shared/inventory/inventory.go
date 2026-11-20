@@ -56,6 +56,13 @@ type Model struct {
 	Vendor       string `json:"vendor"`
 	Product      string `json:"product"`
 	SerialNumber string `json:"serial_number"`
+	// ChassisType is laptop | desktop | server, or empty when the firmware
+	// does not say. The server uses it as the asset category for lifecycle
+	// planning when the asset register has none.
+	ChassisType string `json:"chassis_type,omitempty"`
+	// BIOSDate is the firmware release date, YYYY-MM-DD, on platforms that
+	// report it here (Linux). Windows reports it in the posture instead.
+	BIOSDate string `json:"bios_date,omitempty"`
 }
 
 // Software is one installed program.

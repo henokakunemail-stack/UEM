@@ -3513,7 +3513,34 @@ body {
 .compliance-editor legend { font-size: 0.8125rem; font-weight: 600; padding: 0 0.25rem; }
 .compliance-check { display: inline-flex; align-items: center; gap: 0.4rem; font-size: 0.8125rem; }
 .compliance-num { max-width: 16rem; }
+.lifecycle { display: grid; gap: 1.25rem; }
+.lifecycle-toolbar { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; justify-content: flex-end; }
+.lifecycle-toolbar > .text-dim { margin-right: auto; font-size: 0.8125rem; }
+.lifecycle-grid { display: grid; gap: 1.25rem; grid-template-columns: repeat(auto-fit, minmax(min(100%, 24rem), 1fr)); }
+.lifecycle-section { padding: 1rem 1.25rem; }
+.lifecycle-title { font-size: 0.9375rem; font-weight: 600; margin: 0 0 0.75rem; }
+.lifecycle-sub { font-size: 0.8125rem; font-weight: 600; margin: 1rem 0 0.4rem; }
+.lifecycle-note { font-size: 0.8125rem; margin: 0.5rem 0 0; }
+.lifecycle-bars { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.45rem; }
+.lifecycle-bars li { display: grid; grid-template-columns: 9rem 1fr minmax(7rem, auto); gap: 0.6rem; align-items: center; font-size: 0.8125rem; }
+.lifecycle-bar { height: 0.6rem; border-radius: 999px; background: var(--bg-surface-subtle); overflow: hidden; }
+.lifecycle-bar > span { display: block; height: 100%; background: var(--color-primary); }
+.lifecycle-bar-bad > span { background: var(--color-danger); }
+.lifecycle-count { text-align: right; font-variant-numeric: tabular-nums; }
+.lifecycle-sources, .lifecycle-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.35rem; font-size: 0.8125rem; }
+.lifecycle-sources li { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; }
+.lifecycle-list li { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
+.lifecycle-list li > span:first-child { flex: 1 1 10rem; }
+.lifecycle-quarters { margin-top: 0.75rem; font-size: 0.8125rem; }
+.lifecycle-quarters summary { cursor: pointer; margin-bottom: 0.5rem; }
+.lifecycle-settings { display: grid; gap: 0.75rem; grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr)); }
+.lifecycle-settings fieldset { border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 0.6rem 0.8rem; margin: 0; display: grid; gap: 0.5rem; }
+.lifecycle-settings legend { font-size: 0.8125rem; font-weight: 600; padding: 0 0.25rem; }
+.lifecycle-settings .form-label { display: grid; gap: 0.25rem; }
+.lifecycle-section > .btn { margin-top: 0.75rem; }
 @media (max-width: 640px) {
+  .lifecycle-bars li { grid-template-columns: 1fr minmax(6rem, auto); }
+  .lifecycle-bars li .lifecycle-bar { grid-column: 1 / -1; grid-row: 2; }
   .compliance-controls li { grid-template-columns: 1fr 3rem; }
   .compliance-controls li .compliance-bar, .compliance-controls li > .text-dim { grid-column: 1 / -1; }
 }

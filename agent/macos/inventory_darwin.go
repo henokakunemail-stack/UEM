@@ -92,6 +92,7 @@ func (c *macCollector) collectHardware() (inventory.Hardware, error) {
 			Vendor:       "Apple",
 			Product:      firstNonEmpty(h.ModelName, h.ModelIdentifier),
 			SerialNumber: h.SerialNumber,
+			ChassisType:  inventory.ChassisFromMacModel(h.ModelName),
 		}
 		if kb, err := macParseMemory(h.Memory); err == nil {
 			hw.RAMTotalBytes = kb * 1024

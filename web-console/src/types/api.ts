@@ -523,12 +523,106 @@ export interface HardwareAssetDTO {
   purchase_cost: number
   warranty_expires_at?: string | null
   status: 'in_use' | 'in_stock' | 'in_repair' | 'disposed' | 'retired'
+  /** laptop | desktop | server | other, or '' to follow the linked device's
+   *  chassis type. Older servers omit it. */
+  category?: AssetCategory | ''
   notes: string
   created_at: string
   updated_at: string
   /** Hostname of the linked device, from the server's LEFT JOIN. Empty when
    *  the asset is unlinked or its device has since been retired. */
   device_hostname?: string
+}
+
+// Asset lifecycle dashboard (GET /api/assets/lifecycle).
+export type AssetCategory = 'laptop' | 'desktop' | 'server' | 'other'
+export type AgeSource = 'purchase' | 'bios' | 'os_install' | 'unknown'
+
+export interface CategoryLife {
+  useful_life_years: number
+  replacement_cost: number
+}
+
+export interface LifecycleSettings {
+  categories: Record<AssetCategory, CategoryLife>
+  min_ram_gb: number
+  min_disk_free_percent: number
+}
+
+export interface LifecycleUnit {
+  asset_id?: string
+  asset_tag?: string
+  device_id?: string
+  hostname?: string
+  model?: string
+  site?: string
+  category: AssetCategory
+  category_source: 'asset' | 'device' | 'default'
+  age_source: AgeSource
+  start_date?: string
+  age_years?: number
+  useful_life_years: number
+  due_date?: string
+  overdue: boolean
+  replacement_cost?: number
+  cost_source?: 'category' | 'purchase'
+  purchase_cost: number
+  book_value?: number
+  ram_bytes?: number
+  disk_free_pct?: number
+  below_spec: ('ram' | 'disk')[]
+  warranty_expires_at?: string
+}
+
+export interface BudgetLine {
+  label: string
+  start: string
+  end: string
+  units: number
+  cost: number
+  units_without_cost: number
+}
+
+export interface LicenseWaste {
+  license_id: string
+  software_name: string
+  license_type: string
+  total_seats: number
+  cost: number
+  seat_cost?: number
+  allocated: number
+  installed: number
+  expires_at?: string
+  in_use: number
+  unused_seats: number
+  unused_value?: number
+  allocated_not_installed: number
+  allocated_not_installed_value?: number
+  allocated_unverified: number
+  applicable: boolean
+}
+
+export interface LifecycleReport {
+  generated_at: string
+  settings: LifecycleSettings
+  units: LifecycleUnit[]
+  age_sources: Record<AgeSource, number>
+  age_buckets: { key: '0-1' | '1-3' | '3-5' | '5+' | 'unknown'; count: number }[]
+  overdue: number
+  below_spec: number
+  forecast: {
+    overdue: BudgetLine
+    quarters: BudgetLine[]
+    years: BudgetLine[]
+    missing_age: number
+  }
+  book_value: { purchase_total: number; book_total: number; assets: number; excluded: number }
+  licenses: LicenseWaste[]
+  unused_seat_value: number
+  allocated_not_installed_value: number
+  expiring_licenses: { license_id: string; software_name: string; expires_at: string; days_left: number; cost: number }[]
+  expiring_warranties: { asset_id: string; asset_tag: string; hostname?: string; model: string; expires_at: string; days_left: number }[]
+  warranties_expired: number
 }
 
 // Phase 16: Directory (LDAP/AD) sync. A contact is NOT a console account --

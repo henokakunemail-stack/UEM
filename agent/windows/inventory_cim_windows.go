@@ -108,7 +108,7 @@ func (c *winCollector) collectRAM() (int64, error) {
 // instead of a fabricated value.
 func (c *winCollector) collectModel() *inventory.Model {
 	cs, err := cimQuery(context.Background(), "Win32_ComputerSystem",
-		[]string{"Manufacturer", "Model"})
+		[]string{"Manufacturer", "Model", "PCSystemType"})
 	if err != nil || len(cs) == 0 {
 		return nil
 	}
@@ -118,6 +118,9 @@ func (c *winCollector) collectModel() *inventory.Model {
 	}
 	if s, ok := cs[0]["Model"].(string); ok {
 		m.Product = strings.TrimSpace(s)
+	}
+	if n, ok := asInt64(cs[0]["PCSystemType"]); ok {
+		m.ChassisType = inventory.ChassisFromPCSystemType(n)
 	}
 
 	if bios, err := cimQuery(context.Background(), "Win32_BIOS",

@@ -26,9 +26,12 @@ type HardwareAsset struct {
 	PurchaseCost      float64    `db:"purchase_cost" json:"purchase_cost"`
 	WarrantyExpiresAt *time.Time `db:"warranty_expires_at" json:"warranty_expires_at,omitempty"`
 	Status            string     `db:"status" json:"status"`
-	Notes             string     `db:"notes" json:"notes"`
-	CreatedAt         time.Time  `db:"created_at" json:"created_at"`
-	UpdatedAt         time.Time  `db:"updated_at" json:"updated_at"`
+	// Category is laptop | desktop | server | other, or empty to follow the
+	// linked device's chassis type. See lifecycle.go.
+	Category  string    `db:"category" json:"category"`
+	Notes     string    `db:"notes" json:"notes"`
+	CreatedAt time.Time `db:"created_at" json:"created_at"`
+	UpdatedAt time.Time `db:"updated_at" json:"updated_at"`
 
 	// DeviceHostname comes from the LEFT JOIN in ListAssets, not from the
 	// hardware_assets table. It is the only way the console can show which
@@ -57,6 +60,7 @@ type UpdateAssetRequest struct {
 	PurchaseCost      *float64   `json:"purchase_cost"`
 	WarrantyExpiresAt *time.Time `json:"warranty_expires_at"`
 	Status            *string    `json:"status"`
+	Category          *string    `json:"category"`
 	Notes             *string    `json:"notes"`
 }
 
@@ -131,13 +135,13 @@ func (r *Repository) CreateAsset(ctx context.Context, a *HardwareAsset) error {
 		INSERT INTO hardware_assets (
 			id, asset_tag, device_id, model_name, serial_number, vendor,
 			site, department, assigned_user, purchase_date, purchase_cost,
-			warranty_expires_at, status, notes, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			warranty_expires_at, status, category, notes, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
 	_, err := r.db.ExecContext(ctx, query,
 		a.ID, a.AssetTag, a.DeviceID, a.ModelName, a.SerialNumber, a.Vendor,
 		a.Site, a.Department, a.AssignedUser, a.PurchaseDate, a.PurchaseCost,
-		a.WarrantyExpiresAt, a.Status, a.Notes, a.CreatedAt, a.UpdatedAt,
+		a.WarrantyExpiresAt, a.Status, a.Category, a.Notes, a.CreatedAt, a.UpdatedAt,
 	)
 	if err != nil {
 		return fmt.Errorf("create asset: %w", err)
@@ -169,7 +173,7 @@ func (r *Repository) GetAsset(ctx context.Context, id string) (*HardwareAsset, e
 	err := r.db.GetContext(ctx, &a, `
 		SELECT a.id, a.asset_tag, a.device_id, a.model_name, a.serial_number,
 		       a.vendor, a.site, a.department, a.assigned_user, a.purchase_date,
-		       a.purchase_cost, a.warranty_expires_at, a.status, a.notes,
+		       a.purchase_cost, a.warranty_expires_at, a.status, a.category, a.notes,
 		       a.created_at, a.updated_at,
 		       COALESCE(d.hostname, '') AS device_hostname
 		FROM hardware_assets a
@@ -215,7 +219,7 @@ func (r *Repository) ListAssets(ctx context.Context, site, status string) ([]*Ha
 	query := `
 		SELECT a.id, a.asset_tag, a.device_id, a.model_name, a.serial_number,
 		       a.vendor, a.site, a.department, a.assigned_user, a.purchase_date,
-		       a.purchase_cost, a.warranty_expires_at, a.status, a.notes,
+		       a.purchase_cost, a.warranty_expires_at, a.status, a.category, a.notes,
 		       a.created_at, a.updated_at,
 		       COALESCE(d.hostname, '') AS device_hostname
 		FROM hardware_assets a
@@ -251,13 +255,13 @@ func (r *Repository) UpdateAsset(ctx context.Context, a *HardwareAsset) error {
 			asset_tag = ?, device_id = ?, model_name = ?, serial_number = ?,
 			vendor = ?, site = ?, department = ?, assigned_user = ?,
 			purchase_date = ?, purchase_cost = ?, warranty_expires_at = ?,
-			status = ?, notes = ?, updated_at = ?
+			status = ?, category = ?, notes = ?, updated_at = ?
 		WHERE id = ?
 	`
 	_, err := r.db.ExecContext(ctx, query,
 		a.AssetTag, a.DeviceID, a.ModelName, a.SerialNumber, a.Vendor,
 		a.Site, a.Department, a.AssignedUser, a.PurchaseDate, a.PurchaseCost,
-		a.WarrantyExpiresAt, a.Status, a.Notes, a.UpdatedAt, a.ID,
+		a.WarrantyExpiresAt, a.Status, a.Category, a.Notes, a.UpdatedAt, a.ID,
 	)
 	return err
 }

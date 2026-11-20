@@ -16,6 +16,9 @@ Riwayat sebelum v1.5.4 ada di `git log`.
   keamanan belum dilaporkan" untuk device itu. Scan patch terjadwal sudah jalan dengan agen yang ada sekarang.
 - Halaman **Kepatuhan perangkat** dan laporan PDF hanya butuh server versi baru. Device dengan agen lama tetap tampil,
   dengan status **Tidak diketahui** untuk kontrol postur, sampai agennya diperbarui.
+- Dashboard **Siklus hidup & biaya** hanya butuh server versi baru. Umur dari tanggal BIOS (Windows), jenis casing
+  (laptop/desktop/server), dan tanggal BIOS di Linux baru terisi setelah agen diperbarui. Sebelum itu, umur diambil
+  dari tanggal beli di register aset atau tanggal instal OS.
 
 ### Ditambahkan
 - **Postur keamanan per device (tab Keamanan di detail device).** Agen Windows kini melaporkan:
@@ -76,6 +79,27 @@ Riwayat sebelum v1.5.4 ada di `git log`.
   - **Template adalah file JSON.** Salin file ke `DATA_DIR/compliance-templates/` untuk mengubah atau menambah
     kerangka. Perubahan langsung berlaku tanpa build ulang atau restart, dan file yang salah ditampilkan di console
     beserta alasannya, tanpa menggantikan template bawaan.
+- **Dashboard siklus hidup & biaya aset (Aset & lisensi → Siklus hidup & biaya).**
+  - **Umur setiap unit dengan sumbernya.** Umur diambil dari tanggal beli di register aset. Bila kosong, dari
+    tanggal BIOS yang dilaporkan agen, lalu dari tanggal instal OS. Dua yang terakhir ditandai sebagai **perkiraan**.
+    Unit tanpa ketiganya tampil sebagai **Tidak diketahui** dan tidak dimasukkan ke prediksi anggaran.
+  - **Armada mencakup** semua aset terdaftar yang belum dipensiunkan, ditambah device aktif yang belum punya aset,
+    supaya PC yang belum didaftarkan tetap terhitung.
+  - **Prediksi anggaran penggantian 3 tahun**, per kuartal dan per tahun, ditambah unit yang sudah melewati umur
+    pakai. Unit yang biayanya belum diatur ditampilkan terpisah, bukan dihitung Rp 0.
+  - **Nilai buku** (garis lurus) dibanding harga beli, hanya untuk aset yang punya tanggal dan harga beli.
+  - **PC dengan spesifikasi di bawah batas**: RAM kurang dari 8 GB atau ruang kosong disk kurang dari 10%.
+  - **Lisensi terbuang dalam rupiah**: seat yang tidak dipakai, dan alokasi ke PC yang tidak memasang
+    software-nya. PC yang belum mengirim inventory tidak dihitung sebagai "tanpa instalasi".
+  - **Lisensi dan garansi yang habis dalam 90 hari.**
+  - **Pengaturan (Admin)**: umur pakai dan biaya pengganti per kategori (laptop 4 tahun, desktop 5, server 5,
+    lainnya 5), serta batas spesifikasi.
+  - **PDF ringkasan manajemen** dalam Bahasa Indonesia. SHA-256 file-nya dicatat ke audit log
+    (`asset.lifecycle.report`).
+  - **Aset kini punya kategori** (laptop, desktop, server, lainnya). Bila kosong, kategori diambil dari jenis casing
+    yang dilaporkan agen. Aset berkategori **Lainnya** (monitor, dock) tidak ikut memakai tanggal BIOS PC yang
+    ditautkan.
+  - **Agen kini melaporkan jenis casing** (Windows, Linux, macOS) dan **tanggal BIOS di Linux**.
 
 ### Diperbaiki
 - **Update agen dari dashboard gagal dengan `unexpected EOF` di PC yang koneksinya lambat.** Server memotong setiap
