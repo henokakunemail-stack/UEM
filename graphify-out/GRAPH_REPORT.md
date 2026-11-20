@@ -1,17 +1,17 @@
 # Graph Report - Desktop Manage  (2026-11-20)
 
 ## Corpus Check
-- 853 files · ~730,111 words
+- 866 files · ~743,985 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 23 file(s) not represented in the graph (top: (none) 8, .nsi 4, .template 2)
 
 ## Summary
-- 7220 nodes · 26453 edges · 394 communities (273 shown, 121 thin omitted)
-- Extraction: 94% EXTRACTED · 6% INFERRED · 0% AMBIGUOUS · INFERRED: 1589 edges (avg confidence: 0.85)
+- 7371 nodes · 26976 edges · 386 communities (266 shown, 120 thin omitted)
+- Extraction: 94% EXTRACTED · 6% INFERRED · 0% AMBIGUOUS · INFERRED: 1619 edges (avg confidence: 0.85)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `48f224c0`
+- Built from commit: `f4c35592`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -22,16 +22,16 @@
 - newEnv
 - newQueueFixture
 - Repository
-- FilterBulkAddModal.tsx
+- NetworkFilterPage.tsx
 - types/api.ts
 - useT
 - NewRepository
 - damage.go
-- evidence.go
+- EvidenceContext
 - maintenance/repository_test.go
 - user-management/handler_test.go
-- net/http/httptest.ResponseRecorder
-- UserIDFromContext
+- WithRole
+- net/http.Request
 - chain_test.go
 - restorePoller.ts
 - Evaluator
@@ -39,12 +39,12 @@
 - CheckItem
 - silent_uninstall_windows.go
 - WSHandler
-- patchFixture
+- lifecycle_pdf.go
 - package.json
 - App.tsx
 - NewSession
-- linux/osinfo_linux.go
-- Repository
+- agent/osinfo_windows.go
+- maintenance/repository.go
 - LinuxCapturer
 - newPackageFixture
 - 1. Brainstorming
@@ -52,42 +52,44 @@
 - Handler
 - Repository
 - Handler
-- core.ts
+- DashboardPage.tsx
 - InputEvent
-- wallpaper_windows_test.go
+- wallpaper_windows.go
 - Handler
-- RemoteControlModal.tsx
+- DeviceDTO
 - net/http.HandlerFunc
-- transport_test.go
+- lifecycle.go
 - Handler
 - os/exec.Cmd
 - rcRouteFixture
-- admin_windows_test.go
-- go_pkg_net_http
-- newRunFixture
-- Handler
+- provisionAdmin
+- NewClientIPResolver
+- assetlicense/lifecycle_test.go
+- .deviceRunFor
+- AuthenticateAgent
 - Contact
 - UEM: Open-Source, Self-Hosted Endpoint Management
 - Handler
 - time.Time
 - Handler
 - SecurityHeaders
-- Hub
+- github.com/gorilla/websocket.Conn
 - RelayManager
 - ToastContext.tsx
 - Handler
 - Session
 - github.com/jmoiron/sqlx.DB
 - compilerOptions
-- Posture
+- posture_windows.go
 - policy_update_test.go
 - RequireRole
 - newGen
 - newTestDB
 - Rencana: Kepatuhan, Aset, Paritas Linux/macOS, dan Mode Offline
+- AssetLicensePage.tsx
 - service.go
 - Handler
-- features.go
+- .handleFeatureMessage
 - rotatingFile
 - sync.Mutex
 - en/app.json
@@ -99,35 +101,35 @@
 - id/app.json
 - compilerOptions
 - Repository
-- NewHandler
-- golang.org/x/sys/windows/registry.Key
+- agentinstall/handler_test.go
+- windows/inventory_windows.go
 - Engine
 - WindowsCapturer
 - Conn
-- newRemoteExecEnv
-- dnsBackup
+- dxgi_source_test.go
+- dnsadapter.go
 - 4. Audit & Readiness Report
 - installedProgram
 - evaluate.go
-- inventory/domain.go
-- runProcess
+- linux/inventory_linux.go
+- admin_windows_test.go
 - pdf.go
 - 0001_init.sql
 - server/main.go
-- status_test.go
-- AuthenticateAgent
+- statusEnv
+- Handler
+- evaluate_test.go
 - Repository
-- compliance/repository.go
 - make_agent_icon.py
-- runAgent
+- newRunFixture
 - Fase 0 — Brainstorming Arsitektur Keseluruhan
 - setupTestDB
 - Metode B: Instalasi Manual Langkah-demi-Langkah
 - Client
 - LoginHandler
 - uninstall.go
-- appendLog
-- summarizePosture
+- maintenance.go
+- CompiledPolicy
 - deployment_tasks
 - net/http.ResponseWriter
 - sync.RWMutex
@@ -135,16 +137,16 @@
 - 0006_patch_management.sql
 - Handler
 - alerting/lifecycle_test.go
-- main
+- models.go
 - remotecontrol/scale_test.go
 - firewallBackend
 - scanner_windows_test.go
 - Panduan Instalasi Server Windows (Windows Server 2016 - 2025)
-- net/http.Request
+- Handler
 - devices
 - 0005_remote_execution.sql
 - 0009_task_scheduler.sql
-- time.Duration
+- inventory/scheduler.go
 - CLAUDE.md
 - Repository
 - LongTransfer
@@ -158,16 +160,16 @@
 - 0013_asset_license_management.sql
 - 0014_maintenance.sql
 - stubHub
-- enroll_test.go
+- runAgent
 - capturingHub
-- newConnectFixture
+- NewHub
 - Read-AgentCommand
 - 0011_network_filter.sql
 - 0012_agent_self_update.sql
 - .oxlintrc.json
 - dxgi_windows.go
 - SessionStore
-- Collector
+- uninstallFixture
 - 0026_reusable_enrollment_tokens.sql
 - wedgedHub
 - 0019_directory_sync.sql
@@ -188,8 +190,8 @@
 - acceptingHub
 - net/http.Handler
 - captureHub
-- systempolicy/engine.go
-- .Apply
+- unix_policy_test.go
+- net.IP
 - 0017_wsticket.sql
 - Repository
 - offlineHub
@@ -222,7 +224,7 @@
 - Instalasi Agen Windows
 - silentHub
 - update-server.sh
-- audit_test.go
+- devDependencies
 - Fase 4 — Arsitektur & Perencanaan: Software Deployment
 - Architectural Blueprint — Fase 9: Alerting & Notification Engine
 - recordingHub
@@ -235,7 +237,7 @@
 - 1. Opsi Instalasi Klien Linux
 - Panduan Packaging & UI Installer Agen Endpoint
 - PolicySettings
-- Software
+- macos/inventory_darwin.go
 - engine_windows.go
 - Fase 13 — Architectural Blueprint: Agent Self-Update & Rollout Management
 - Fase 7 — Architectural Blueprint: User Management
@@ -247,24 +249,24 @@
 - Fase 8 — Readiness Report: Reports & Export Engine
 - Fase 9 — Readiness Report: Alerting & Notification Engine
 - macOS: Installer Agen & Server
-- .Run
+- NewRepository
 - Fase 14 — Architectural Blueprint: Asset & License Management
 - Fase 8 — Architectural Blueprint: Reports & Export Engine
 - uninstall_darwin.go
 - React + TypeScript + Vite
 - dxgi_fallback_windows_test.go
 - NewEngine
-- agentinstall/handler_test.go
+- newSoftwareEnv
 - filetransfer_test.go
-- Handler
+- UserIDFromContext
 - remote_control_sessions
 - Production Readiness Review: Active Directory Group Policy Engine (`systempolicy`)
 - fakeKey
-- SpawnSessionWorker
+- go_pkg_golang_org_x_sys_windows
 - install-linux.sh
 - README.md
-- diffInventory
-- stepOutcome
+- diffSoftware
+- PolicySettings
 - software-deployment/sweep_test.go
 - busyHub
 - onlineHub
@@ -272,22 +274,22 @@
 - .Open
 - TerminalManager
 - devicesQuery.ts
-- github.com/gorilla/websocket.Conn
+- flow_test.go
 - requests.go
-- Report
+- inventory.go
 - darwinManager
 - linuxManager
 - doJSON
-- models.go
+- Repository
 - fakeUnix
-- queue_test.go
+- Move
 - utf8carry.go
 - TestXvfbCaptureInputAndWindows
 - darwin/scripts/install-agent.sh
 - darwin/scripts/install-server.sh
 - darwin/scripts/uninstall-agent.sh
 - darwin/scripts/uninstall-server.sh
-- terminalFixture
+- execFixture
 - Engine
 - Pengumpulan Inventory: Alur, Route, dan Penyimpanan
 - TestE2EGroups
@@ -298,66 +300,58 @@
 - TestE2EEnrollConnectCommand
 - MembershipObserver
 - reportingHub
-- update_manifest.go
-- linuxCollector
+- applyAdminAccountNonWindows
+- Repository
 - xauth.go
 - Post
 - persist_test.go
 - 0030_device_posture.sql
-- newDevice.ts
+- user-management/model.go
 - packdist/main.go
 - secrets_test.go
 - pty_unix_test.go
-- run
+- Scheduler
 - Prasyarat dan Aplikasi Pendukung
 - features_session_test.go
-- inventory_cim_test.go
-- syncInputDesktop
+- inventory_cim_windows.go
+- capture_windows.go
 - pipeline_bench_test.go
 - discover.go
-- applyToHive
-- removeOldFiles
+- dependencies
+- go_pkg_syscall
 - Menjalankan Dua Server atau Lebih (High Availability)
-- setupTestServer
-- CheckStatus
-- DevicePosturePanel.tsx
+- Leader
+- .SetClipboardText
+- hwModel
 - TerminalRelay
 - crypto/ed25519.PublicKey
 - 0031_compliance.sql
-- Report
+- hookHub
 - restart_test.go
-- MonitorInfo
+- 0033_asset_lifecycle.sql
 - APIRateLimiter
-- openDatabase
 - TaskQueue
 - newProgressFixture
-- syncInstallRecord
 - newQualityController
 - applyFrom
 - renameWithRetry
-- overlayFS
 - ReleaseManifest
-- TerminalManager
 - verifySwappedBinary
-- Handler
 - sync/atomic.Bool
 - bytesReader
 - newSafeWebhookClient
-- recordingAudit
-- httpError
-- unsupportedFirewall
 
 ## God Nodes (most connected - your core abstractions)
-1. `useT()` - 108 edges
-2. `buildServer()` - 89 edges
-3. `UserIDFromContext()` - 88 edges
+1. `useT()` - 110 edges
+2. `UserIDFromContext()` - 90 edges
+3. `buildServer()` - 89 edges
 4. `NewRepository()` - 65 edges
 5. `HashToken()` - 57 edges
-6. `react` - 53 edges
+6. `react` - 54 edges
 7. `Posture` - 50 edges
-8. `DataTable()` - 48 edges
-9. `Modal()` - 47 edges
-10. `useToast()` - 47 edges
+8. `DataTable()` - 50 edges
+9. `useToast()` - 49 edges
+10. `Modal()` - 47 edges
 
 ## Surprising Connections (you probably didn't know these)
 - `1. Analisis Kebutuhan & Tujuan` --references--> `device()`  [INFERRED]
@@ -374,75 +368,75 @@
 ## Import Cycles
 - None detected.
 
-## Communities (394 total, 121 thin omitted)
+## Communities (386 total, 120 thin omitted)
 
 ### Community 0 - "CompliancePage.tsx"
-Cohesion: 0.08
-Nodes (38): choices(), ComplianceFrameworks(), FrameworkRow(), Props, thisMonth(), tone(), CompliancePage(), ControlIcon() (+30 more)
+Cohesion: 0.07
+Nodes (36): choices(), ComplianceFrameworks(), FrameworkRow(), Props, thisMonth(), tone(), ControlIcon(), DEFAULT_RULES (+28 more)
 
 ### Community 1 - "context.Context"
 Cohesion: 0.02
-Nodes (50): tokens, discardAuditor, noopAuditor, stubAudit, nopAuditor, mockAuditor, dbAuditor, AgentVersionCount (+42 more)
+Nodes (61): tokens, discardAuditor, noopAuditor, stubAudit, nopAuditor, mockAuditor, dbAuditor, AgentVersionCount (+53 more)
 
 ### Community 2 - "testing.T"
 Cohesion: 0.02
-Nodes (165): TestDomainIsOmittedWhenUnknown(), TestRebootPendingOnLinux(), TestLinuxCapturerAgainstXvfb(), TestACapturedFrameIsRawPixelsSizedToTheDesktop(), TestACapturerWorksFromMoreThanOneThread(), TestInjectKeyboardEventSucceeds(), TestInjectMouseEventSucceeds(), TestKeyboardTrackingIsSafeUnderConcurrency() (+157 more)
+Nodes (154): TestRebootPendingOnLinux(), TestLinuxCapturerAgainstXvfb(), TestACapturedFrameIsRawPixelsSizedToTheDesktop(), TestACapturerWorksFromMoreThanOneThread(), TestInjectKeyboardEventSucceeds(), TestInjectMouseEventSucceeds(), TestKeyboardTrackingIsSafeUnderConcurrency(), TestTheProbeAndTheCaptureAgreeOnThisHost() (+146 more)
 
 ### Community 3 - "newEnv"
 Cohesion: 0.11
 Nodes (49): env, httpResult, TokenKind, TestALockedAccountIsRefusedWithTheRightPassword(), TestAnAccountLocksAfterTheFailureLimit(), TestConcurrentFailuresAreAllCounted(), Claims, JWTService (+41 more)
 
 ### Community 4 - "newQueueFixture"
-Cohesion: 0.07
-Nodes (32): recordingHub, buildGoBinary(), queueFixture, TestAnUploadWhoseBinaryContradictsTheFormIsRefused(), TestBundledAgentsAreImportedWithTheirOwnPlatformAndVersion(), TestBundledImportRefusesNamesOutsideTheBundle(), uploadRaw(), queueFixture (+24 more)
+Cohesion: 0.06
+Nodes (35): recordingHub, buildGoBinary(), queueFixture, TestAnUploadWhoseBinaryContradictsTheFormIsRefused(), TestBundledAgentsAreImportedWithTheirOwnPlatformAndVersion(), TestBundledImportRefusesNamesOutsideTheBundle(), uploadRaw(), queueFixture (+27 more)
 
 ### Community 5 - "Repository"
 Cohesion: 0.10
 Nodes (10): TestANonIntervalScheduleHasNoNextRun(), boolToInt(), CalculateSHA256(), Repository, NewID(), nextRunAt(), ScheduledTaskDeviceRun, ScheduledTaskRun (+2 more)
 
-### Community 6 - "FilterBulkAddModal.tsx"
-Cohesion: 0.21
-Nodes (10): FILTER_REASON_KEYS, Props, api, policy, HEADER_CELLS, MAX_BULK_PATTERNS, parseDomainLines(), SINK_ADDRESSES (+2 more)
+### Community 6 - "NetworkFilterPage.tsx"
+Cohesion: 0.12
+Nodes (21): FILTER_REASON_KEYS, FilterBulkAddModal(), Props, api, policy, handleSubmit(), NetworkFilterPage(), PolicyScopeFields() (+13 more)
 
 ### Community 7 - "types/api.ts"
 Cohesion: 0.04
-Nodes (89): AuthContext, AuthContextType, AuthProvider(), AgentUpdatesPageProps, STATUS_KEYS, TARGET_KEYS, api, draft (+81 more)
+Nodes (87): DevicePosturePanel(), Props, Reason(), StateBadge(), api, show(), tone(), AuthContext (+79 more)
 
 ### Community 8 - "useT"
 Cohesion: 0.08
-Nodes (76): lucide-react, react, DeviceDetailModal(), DeviceDetailModalProps, formatAge(), useNow(), EnrollCommand, enrollCommands() (+68 more)
+Nodes (70): lucide-react, react, DeviceDetailModal(), formatAge(), useNow(), EnrollTokenModal(), EnrollTokenModalProps, EnrollTokensPanel() (+62 more)
 
 ### Community 9 - "NewRepository"
-Cohesion: 0.07
-Nodes (61): tokenRoutes, NewJWTService(), NewIPRateLimiter(), TestForgedForwardingCannotEvadeLoginLockout(), TestIPRateLimiter_LockoutAndRecovery(), TestIPRateLimiter_SuccessResets(), seedAgentVersions(), TestAgentVersionsAreListedNewestFirstWithCounts() (+53 more)
+Cohesion: 0.06
+Nodes (73): tokenRoutes, mockExecHub, NewJWTService(), assertRefused(), seedAgentVersions(), TestAgentVersionsAreListedNewestFirstWithCounts(), TestDevicesCanBeFilteredByAgentVersion(), mustTime() (+65 more)
 
 ### Community 10 - "damage.go"
-Cohesion: 0.17
-Nodes (12): encodeAll(), EncodeFrameQuality(), encodeJobs(), encodeRect(), encodeWorkers(), tierQuality(), TestSmallDamageStaysOneRectangle(), Damage (+4 more)
+Cohesion: 0.13
+Nodes (19): DecodeFrame(), encodeAll(), EncodeFrameQuality(), encodeJobs(), encodeWorkers(), tierQuality(), jpegFloor(), paintFrames() (+11 more)
 
-### Community 11 - "evidence.go"
-Cohesion: 0.16
-Nodes (11): EvidenceRef, EvidenceResult, policyStateRow, TemplateControl, capList(), EvidenceContext, humanDuration(), jsonTrue() (+3 more)
+### Community 11 - "EvidenceContext"
+Cohesion: 0.08
+Nodes (24): ControlAssessment, EvidenceRef, EvidenceResult, FrameworkRequest, FrameworkSnapshot, FrameworkSummary, policyStateRow, PreviousFramework (+16 more)
 
 ### Community 12 - "maintenance/repository_test.go"
 Cohesion: 0.12
-Nodes (38): stubHub, call(), newHandlerTest(), newStubHub(), roleContext(), seedOnlineDevice(), seedTaskForReport(), TestAgentResultRejectsBodyTaskIDMismatch() (+30 more)
+Nodes (37): stubHub, call(), newHandlerTest(), newStubHub(), seedOnlineDevice(), seedTaskForReport(), TestAgentResultRejectsBodyTaskIDMismatch(), TestAgentResultRejectsCrossDeviceReport() (+29 more)
 
 ### Community 13 - "user-management/handler_test.go"
-Cohesion: 0.13
-Nodes (36): ComparePassword(), TestAnAdminCannotDeactivateThemselvesViaEdit(), TestConcurrentRemovalsLeaveAnActiveAdmin(), TestTheLastActiveAdminCannotBeRemoved(), TestUpdateAuditRecordsWhatChanged(), newEnv(), strictEnv(), TestADeactivatedUserKeepsTheirAuditTrail() (+28 more)
+Cohesion: 0.15
+Nodes (31): ComparePassword(), TestAnAdminCannotDeactivateThemselvesViaEdit(), TestConcurrentRemovalsLeaveAnActiveAdmin(), TestTheLastActiveAdminCannotBeRemoved(), TestUpdateAuditRecordsWhatChanged(), newEnv(), TestADeactivatedUserKeepsTheirAuditTrail(), TestADeactivatedUserLosesApiAccess() (+23 more)
 
-### Community 14 - "net/http/httptest.ResponseRecorder"
-Cohesion: 0.08
-Nodes (38): RequirePermission(), TestRequirePermission(), TestUnknownPermissionPanics(), WithRole(), assertRefused(), assetFixture(), createAsset(), seedDevice() (+30 more)
+### Community 14 - "WithRole"
+Cohesion: 0.07
+Nodes (53): RequirePermission(), TestRequirePermission(), TestUnknownPermissionPanics(), WithRole(), assetFixture(), createAsset(), seedDevice(), TestADuplicateAssetTagIsRefusedWithAMessageNotAConstraintError() (+45 more)
 
-### Community 15 - "UserIDFromContext"
-Cohesion: 0.10
-Nodes (17): Handler, hubSender, Log(), UserIDFromContext(), toDTO(), toSharedTokenDTO(), writeErr(), writeErrCode() (+9 more)
+### Community 15 - "net/http.Request"
+Cohesion: 0.09
+Nodes (23): Handler, hubSender, Log(), newID(), hexEncode(), readRand(), validateOrigin(), ValidateWebSocketOrigin() (+15 more)
 
 ### Community 16 - "chain_test.go"
-Cohesion: 0.07
-Nodes (56): ChainReport, Entry, verifyRow, Options, Result, TableResult, List(), newID() (+48 more)
+Cohesion: 0.09
+Nodes (47): ChainReport, Entry, verifyRow, List(), chainLockFor(), EntryHash(), entryHashOf(), hashTimeOf() (+39 more)
 
 ### Community 17 - "restorePoller.ts"
 Cohesion: 0.29
@@ -453,48 +447,48 @@ Cohesion: 0.11
 Nodes (10): activeIncident, AlertIncident, AlertRule, EvalResult, Evaluator, IncidentAuditor, IncidentCounts, Repository (+2 more)
 
 ### Community 19 - "SystemPolicyPage.tsx"
-Cohesion: 0.09
-Nodes (35): [1.6.3] - 2026-11-10, Diperbaiki, vitest, EffectivePolicyPanel(), Props, api, KPICard(), KPICardProps (+27 more)
+Cohesion: 0.12
+Nodes (28): EffectivePolicyPanel(), Props, PolicyResultsList(), MINUTE_CHOICES, SAVE_ERROR_KEYS, boolValueKeys(), DEFAULT_CONFIG, EffectiveRow (+20 more)
 
 ### Community 20 - "CheckItem"
-Cohesion: 0.16
-Nodes (3): CheckItem, Evaluator, notVerified()
+Cohesion: 0.06
+Nodes (35): AuditReport, CheckCategory, CheckItem, CheckStatus, TestDBPathForBackupDefault(), TestDBPathForBackupNeedsNoJWTSecret(), TestDBPathForBackupReadsEnvFile(), unsetForEnvFileTest() (+27 more)
 
 ### Community 21 - "silent_uninstall_windows.go"
-Cohesion: 0.15
-Nodes (12): Serve(), NewManager(), extractUninstallerBase(), frameworkSilentSwitches(), isElevated(), isInnoExeName(), isRebootRequiredExit(), requireElevatedForUninstall() (+4 more)
+Cohesion: 0.23
+Nodes (9): Serve(), extractUninstallerBase(), frameworkSilentSwitches(), isElevated(), isInnoExeName(), requireElevatedForUninstall(), resolveSilentArgs(), readUninstallProgram() (+1 more)
 
 ### Community 22 - "WSHandler"
 Cohesion: 0.09
-Nodes (12): Envelope, TestResultError(), NewWSHandler(), resultError(), CommandResultReceiver, FilterSyncer, InventoryReceiver, ReconnectQueue (+4 more)
+Nodes (11): Envelope, TestResultError(), resultError(), CommandResultReceiver, FilterSyncer, InventoryReceiver, ReconnectQueue, SystemPolicySyncer (+3 more)
 
-### Community 23 - "patchFixture"
-Cohesion: 0.12
-Nodes (31): seedScanDevice(), TestAutoScanPicksOnlyDueOnlineCapableDevices(), TestAutoScanRespectsBatchAndDisable(), TestAutoScanRetriesARefusedSend(), jobError(), TestAFinishedJobIsNotRewritten(), TestAnAgentRefusalFailsTheJob(), TestAScanSayingNoRebootClearsTheFlag() (+23 more)
+### Community 23 - "lifecycle_pdf.go"
+Cohesion: 0.08
+Nodes (25): Column, Document, Tone, ageSourceLabel(), allocText(), bucketLabel(), categoryLabel(), costText() (+17 more)
 
 ### Community 24 - "package.json"
-Cohesion: 0.03
-Nodes (53): jsdom, oxlint, react-dom, tailwindcss, @tailwindcss/vite, @testing-library/dom, @types/node, @types/react (+45 more)
+Cohesion: 0.05
+Nodes (31): jsdom, oxlint, tailwindcss, @tailwindcss/vite, @testing-library/dom, @types/node, @types/react, @types/react-dom (+23 more)
 
 ### Community 25 - "App.tsx"
 Cohesion: 0.05
-Nodes (51): AgentUpdatesPage, AlertsPage, AssetLicensePage, AuditPage, CompliancePage, ConsoleRoot(), DashboardPage, DevicesPage (+43 more)
+Nodes (54): react-dom, AgentUpdatesPage, AlertsPage, App(), AssetLicensePage, AuditPage, CompliancePage, ConsoleRoot() (+46 more)
 
 ### Community 26 - "NewSession"
-Cohesion: 0.13
-Nodes (25): defaultTransfersDir(), TestStatsReportTheQualityActuallyUsed(), readControls(), relayPair(), TestAnUnavailableDesktopIsExplained(), TestKeyLocationPicksTheRightModifier(), TestRecoveryFromAReportedFailureSendsAFrame(), TestRefusedInputIsReportedOnce() (+17 more)
+Cohesion: 0.14
+Nodes (23): DecodeFrameHeader(), TestAnUnknownLayoutVersionIsRefused(), defaultTransfersDir(), TestStatsReportTheQualityActuallyUsed(), readControls(), relayPair(), TestAnUnavailableDesktopIsExplained(), TestKeyLocationPicksTheRightModifier() (+15 more)
 
-### Community 27 - "linux/osinfo_linux.go"
+### Community 27 - "agent/osinfo_windows.go"
 Cohesion: 0.14
 Nodes (14): newOSInfoProvider(), newOSInfoProvider(), newOSInfoProvider(), New(), parseOSRelease(), readKey(), New(), swVers() (+6 more)
 
-### Community 28 - "Repository"
-Cohesion: 0.08
-Nodes (21): DeviceTarget, Job, JobFilter, JobProgress, JobStats, RunRequest, TargetType, Task (+13 more)
+### Community 28 - "maintenance/repository.go"
+Cohesion: 0.09
+Nodes (20): DeviceTarget, Job, JobFilter, JobProgress, JobStats, RunRequest, TargetType, Task (+12 more)
 
 ### Community 30 - "newPackageFixture"
-Cohesion: 0.14
-Nodes (26): packageFixture, msiFields(), newPackageFixture(), seedPackage(), TestADeploymentDispatchesToOnlineAgentsAndMarksThoseTasksDispatched(), TestADeploymentToAnAgentThatCannotRunItIsRefused(), TestADeploymentToNothingIsRefused(), TestAGroupTargetOnlyReachesItsOwnMembers() (+18 more)
+Cohesion: 0.10
+Nodes (34): packageFixture, msiFields(), newPackageFixture(), seedPackage(), TestADeploymentDispatchesToOnlineAgentsAndMarksThoseTasksDispatched(), TestADeploymentToAnAgentThatCannotRunItIsRefused(), TestADeploymentToNothingIsRefused(), TestAGroupTargetOnlyReachesItsOwnMembers() (+26 more)
 
 ### Community 31 - "1. Brainstorming"
 Cohesion: 0.04
@@ -505,72 +499,76 @@ Cohesion: 0.09
 Nodes (7): rebindConn, rebindDriver, mockBindConn, mockBindDriver, rebind(), setupMockDB(), TestPolicyRepository_PostgresIntegerBinding()
 
 ### Community 33 - "Handler"
-Cohesion: 0.19
+Cohesion: 0.18
 Nodes (10): AuditLogger, DeviceValidator, Handler, HubDispatcher, clampTermSize(), NewHandler(), strPtr(), termSize() (+2 more)
 
 ### Community 34 - "Repository"
 Cohesion: 0.06
-Nodes (13): AgentRelease, AgentReleaseDTO, CampaignLogItem, CampaignTaskDetail, DeviceUpdateTask, Repository, UpdateCampaign, UpdateCampaignDTO (+5 more)
+Nodes (17): AgentRelease, AgentReleaseDTO, CampaignLogItem, CampaignTaskDetail, DeviceUpdateTask, HubDispatcher, Repository, UpdateCampaign (+9 more)
 
 ### Community 35 - "Handler"
 Cohesion: 0.17
 Nodes (11): isRunnableScheduleType(), NewHandler(), normalizeTaskStatus(), writeErr(), writeErrCode(), writeJSON(), TestTheTypeTheSchedulerRunsIsAccepted(), TestScriptTypeAllowlist() (+3 more)
 
-### Community 36 - "core.ts"
-Cohesion: 0.08
-Nodes (36): react-router-dom, AlertsList(), AlertsListProps, formatRelativeTime(), getIcon(), FALLBACK, OS_CONFIG, OSDistribution() (+28 more)
+### Community 36 - "DashboardPage.tsx"
+Cohesion: 0.10
+Nodes (27): AlertsList(), AlertsListProps, formatRelativeTime(), getIcon(), KPICard(), KPICardProps, FALLBACK, OS_CONFIG (+19 more)
 
 ### Community 37 - "InputEvent"
 Cohesion: 0.08
-Nodes (11): TestCapabilitiesAdvertisesTheCommandName(), normalizeKey(), TestACaptureIsRawPixelsSizedToTheDesktop(), TestAFailedProbeIsReportedVerbatim(), Capabilities, DarwinCapturer, fakeCapturer, InputEvent (+3 more)
+Nodes (10): TestACaptureIsRawPixelsSizedToTheDesktop(), TestAFailedProbeIsReportedVerbatim(), Capabilities, DarwinCapturer, fakeCapturer, InputEvent, OtherCapturer, refusingCapturer (+2 more)
 
-### Community 38 - "wallpaper_windows_test.go"
-Cohesion: 0.17
-Nodes (20): applyWallpaper(), applyWallpaperToUsers(), cleanupLegacyWallpaper(), fileDigest(), isUserSID(), loadedUserHives(), saveWallpaperState(), TestFailedRefreshIsReported() (+12 more)
+### Community 38 - "wallpaper_windows.go"
+Cohesion: 0.09
+Nodes (32): applyWallpaper(), revertWallpaper(), applyToHive(), applyWallpaperToUsers(), cleanupLegacyWallpaper(), clearWallpaperState(), fileDigest(), isUserSID() (+24 more)
 
 ### Community 39 - "Handler"
 Cohesion: 0.17
 Nodes (10): AuditLogger, Handler, Hub, NormalizeDomainPattern(), TestNormalizeDomainPattern(), filterApplyEnvelope(), NewHandler(), writeErr() (+2 more)
 
-### Community 40 - "RemoteControlModal.tsx"
-Cohesion: 0.08
-Nodes (25): api, device, emptyFrame(), FakeSocket, openSession(), BROWSER_KEYS, FileTransfer, formatBytes() (+17 more)
+### Community 40 - "DeviceDTO"
+Cohesion: 0.06
+Nodes (34): DeviceDetailModalProps, InteractiveTerminalModalProps, api, device, emptyFrame(), FakeSocket, openSession(), BROWSER_KEYS (+26 more)
 
 ### Community 41 - "net/http.HandlerFunc"
 Cohesion: 0.16
 Nodes (8): chiRouter, chiRouter, LimitJSONBody(), LimitJSONBodyFunc(), TestABodyOverTheCapIsRejectedAt413(), TestABodyUnderTheCapIsUnaffected(), TestLimitJSONBodyFuncMatchesLimitJSONBody(), TestTheCapIsNotOffByTheEnvelope()
 
-### Community 42 - "transport_test.go"
-Cohesion: 0.37
-Nodes (8): softwareEntry, agentFilterReportReq, bulkRuleReq, BulkRuleResult, createPolicyReq, updatePolicyReq, startSessionReq, UpdatePackageRequest
+### Community 42 - "lifecycle.go"
+Cohesion: 0.15
+Nodes (22): AgeBucket, BookValueSummary, BudgetLine, CategoryLife, Forecast, LicenseExpiry, LicenseWaste, LifecycleReport (+14 more)
 
 ### Community 43 - "Handler"
 Cohesion: 0.15
 Nodes (11): checkExtensionMatches(), commandFor(), DeviceLookup, NewHandler(), writeErr(), writeJSON(), NewID(), TestCheckExtensionMatches() (+3 more)
 
 ### Community 44 - "os/exec.Cmd"
-Cohesion: 0.10
-Nodes (11): TerminalManager, ptyShellCmd(), shellPath(), createShellCmd(), createShellCmd(), createShellCmd(), createShellCmd(), processTree (+3 more)
+Cohesion: 0.09
+Nodes (12): TerminalManager, ptyShellCmd(), shellPath(), createShellCmd(), createShellCmd(), createShellCmd(), createShellCmd(), processTree (+4 more)
 
 ### Community 45 - "rcRouteFixture"
-Cohesion: 0.08
-Nodes (36): busyHub, rowState, TestRemoteControlFeaturesEndToEnd(), dev1Headers(), issueTicket(), mustExecDevices(), rcRouteFixture(), startSessionRequest() (+28 more)
-
-### Community 46 - "admin_windows_test.go"
-Cohesion: 0.09
-Nodes (18): netErr(), provisionAdmin(), setInfo(), contains(), deleteLocalUser(), isElevated(), newFake(), TestADisabledManagedAdminIsReenabled() (+10 more)
-
-### Community 47 - "go_pkg_net_http"
-Cohesion: 0.15
-Nodes (21): createRuleReq, updateRuleReq, contextKey, loginRequest, BackupFileDTO, RestoreResponseDTO, frameworkInfo, createEnrollTokenReq (+13 more)
-
-### Community 49 - "newRunFixture"
 Cohesion: 0.07
-Nodes (44): TestADisabledScheduleIsNotClaimed(), TestOnlyOneClaimerFiresADueSchedule(), runFixture, TestACancelledScriptClosesTheRun(), TestALateReportDoesNotRewriteAFinishedDeviceRun(), TestARetiredGroupMemberIsNotATarget(), TestARunningScheduleIsNotOverlapped(), TestARunWithNoTargetsFailsAndSaysWhy() (+36 more)
+Nodes (41): busyHub, rowState, TestRemoteControlFeaturesEndToEnd(), dev1Headers(), issueTicket(), mustExecDevices(), rcRouteFixture(), startSessionRequest() (+33 more)
 
-### Community 50 - "Handler"
-Cohesion: 0.24
-Nodes (7): SecretLookup, AuditLogger, Handler, Hub, NewHandler(), writeErr(), writeJSON()
+### Community 46 - "provisionAdmin"
+Cohesion: 0.15
+Nodes (6): netErr(), provisionAdmin(), setInfo(), localAccounts, netapiAccounts, userInfo1
+
+### Community 47 - "NewClientIPResolver"
+Cohesion: 0.12
+Nodes (20): loginEnv, loginResult, seenAddr(), TestChiRealIPWouldHaveTrustedASpoofedHeader(), TestClientIPMiddlewareTrustsForwardedOnlyFromProxies(), newLoginEnv(), TestAccountLockIsAuditedExactlyOnce(), TestDisabledAccountWithAWrongPasswordLooksLikeBadCredentials() (+12 more)
+
+### Community 48 - "assetlicense/lifecycle_test.go"
+Cohesion: 0.21
+Nodes (19): recAuditor, seedAsset, call(), day(), getLifecycle(), insertAsset(), lifecycleFixture(), pdfText() (+11 more)
+
+### Community 49 - ".deviceRunFor"
+Cohesion: 0.18
+Nodes (15): runFixture, newRunFixtureWithHub(), TestADeviceCanStillReportItsOwnResult(), TestAFullyFailedRunIsFailedNotCompleted(), TestAFullySuccessfulRunReachesATerminalStatus(), TestAMixedRunIsNotClosedEarly(), TestAnAgentCannotReportAnotherDevicesResult(), TestAnOfflineDeviceDispatchedFirstDoesNotCloseTheRun() (+7 more)
+
+### Community 50 - "AuthenticateAgent"
+Cohesion: 0.16
+Nodes (13): SecretLookup, AuditLogger, Handler, Hub, AuthenticateAgent(), TestAuthenticateAgent_AcceptsMatchingPair(), TestAuthenticateAgent_RejectsMissingCredentials(), TestAuthenticateAgent_RejectsSecretBoundToAnotherDevice() (+5 more)
 
 ### Community 51 - "Contact"
 Cohesion: 0.07
@@ -581,88 +579,92 @@ Cohesion: 0.10
 Nodes (21): Architecture, Build from source, Configuration, Contributing, Docker Compose, Documentation, FAQ, Features (+13 more)
 
 ### Community 53 - "Handler"
-Cohesion: 0.12
+Cohesion: 0.11
 Nodes (16): NewHandler(), settledState(), validateConfig(), writeErr(), writeErrCode(), writeJSON(), PolicyConfig, keepStoredPassword() (+8 more)
 
 ### Community 54 - "time.Time"
-Cohesion: 0.05
-Nodes (35): offlineTarget, LicenseAllocation, UpdateAssetRequest, ownerEntry, createEnrollTokenResp, deviceDTO, postureHistoryRow, postureResponse (+27 more)
+Cohesion: 0.03
+Nodes (48): offlineTarget, LicenseAllocation, UnitFacts, UpdateAssetRequest, accountLockout, Node, ownerEntry, factRow (+40 more)
 
 ### Community 55 - "Handler"
-Cohesion: 0.13
-Nodes (17): Auditor, Handler, recordingAudit, RestoreMarker, QuickCheck(), Snapshot(), writeErr(), writeErrCode() (+9 more)
+Cohesion: 0.11
+Nodes (21): Auditor, Handler, recordingAudit, RestoreMarker, copyFile(), QuickCheck(), quickCheck(), Restore() (+13 more)
 
 ### Community 56 - "SecurityHeaders"
 Cohesion: 0.14
 Nodes (13): cspResponseWriter, fakeHijackerRecorder, SecurityHeadersConfig, DefaultSecurityHeaders(), isTLS(), itoa(), SecurityHeaders(), TestDefaultSecurityHeadersConfig() (+5 more)
 
-### Community 57 - "Hub"
-Cohesion: 0.17
+### Community 57 - "github.com/gorilla/websocket.Conn"
+Cohesion: 0.16
 Nodes (4): Hub, newConn(), Conn, Router
 
 ### Community 58 - "RelayManager"
-Cohesion: 0.12
-Nodes (8): activeRelay, nullAuditor, RelayManager, TestFrameWriteDeadlineGrowsWithTheFrame(), frameWriteDeadline(), NewRelayManager(), startKeepalive(), TestTheRelayPingsSoItsOwnDeadlineCanBeRefreshed()
+Cohesion: 0.13
+Nodes (7): activeRelay, nullAuditor, RelayManager, TestFrameWriteDeadlineGrowsWithTheFrame(), frameWriteDeadline(), startKeepalive(), TestTheRelayPingsSoItsOwnDeadlineCanBeRefreshed()
 
 ### Community 59 - "ToastContext.tsx"
-Cohesion: 0.06
-Nodes (42): @testing-library/react, App(), api, device, domainCard(), snapshot(), wrap(), ThemeProvider() (+34 more)
+Cohesion: 0.05
+Nodes (53): react-router-dom, @testing-library/react, vitest, api, renderPanel(), report, role, settings (+45 more)
 
 ### Community 60 - "Handler"
 Cohesion: 0.19
 Nodes (8): AuditLogger, DeviceValidator, Handler, HubDispatcher, NewHandler(), writeErr(), writeJSON(), TestAnUndeliveredInstallFailsTheJob()
 
 ### Community 61 - "Session"
-Cohesion: 0.16
-Nodes (5): NewPlatformCapturer(), NewPlatformCapturer(), NewPlatformCapturer(), Session, ScreenCapturer
+Cohesion: 0.14
+Nodes (7): NewPlatformCapturer(), NewPlatformCapturer(), NewPlatformCapturer(), Session, normalizeKey(), NewUnavailableCapturer(), ScreenCapturer
 
 ### Community 62 - "github.com/jmoiron/sqlx.DB"
-Cohesion: 0.04
-Nodes (80): recordingCache, recordingSender, dialect, auditBridge, NewBus(), addDevice(), TestPostgres_ADeadNodeOwnsNothing(), TestPostgres_BusDeliversACommandToTheNodeHoldingTheAgent() (+72 more)
+Cohesion: 0.03
+Nodes (100): recordingCache, dialect, auditBridge, TestConfig_ReadsPostgresSettings(), TestOpenDatabase_DefaultsToSQLite(), TestOpenDatabase_IgnoresBareSQLiteDriver(), TestOpenDatabase_SQLiteDriverIsExplicit(), applyPoolSettings() (+92 more)
 
 ### Community 63 - "compilerOptions"
 Cohesion: 0.10
 Nodes (19): compilerOptions, allowArbitraryExtensions, allowImportingTsExtensions, erasableSyntaxOnly, jsx, lib, module, moduleDetection (+11 more)
 
-### Community 64 - "Posture"
-Cohesion: 0.10
-Nodes (41): TestCollectPostureLive(), facts(), TestAntivirusStateDecoding(), TestBitLockerMissingNamespaceIsNotApplicable(), TestBitLockerVolumes(), TestBuildPostureFromRecordedPC(), TestFirewallUnparseableProfileIsUnknown(), TestScriptFailureLeavesNothingReported() (+33 more)
+### Community 64 - "posture_windows.go"
+Cohesion: 0.09
+Nodes (38): TestCollectPostureLive(), facts(), TestAntivirusStateDecoding(), TestBitLockerMissingNamespaceIsNotApplicable(), TestBitLockerVolumes(), TestBuildPostureFromRecordedPC(), TestFirewallUnparseableProfileIsUnknown(), TestScriptFailureLeavesNothingReported() (+30 more)
 
 ### Community 65 - "policy_update_test.go"
 Cohesion: 0.17
 Nodes (21): addRuleReq, policyRow(), putPolicy(), scopedPolicyFixture(), TestAnEmptyPolicyUpdateChangesNothing(), TestAPartialPolicyUpdateKeepsTheScopeItDoesNotMention(), TestAPolicyUpdateRefusesAValueItCannotStore(), TestAScopedPolicyCanBeWidenedBackToTheWholeFleet() (+13 more)
 
 ### Community 67 - "newGen"
-Cohesion: 0.15
-Nodes (30): collect(), evidenceCtx(), TestBackupEvidence(), TestDeviceEvidence(), TestOtherEvidence(), TestUSBPolicyEvidence(), loadBuiltin(), TestBuiltinTemplatesLoad() (+22 more)
+Cohesion: 0.14
+Nodes (31): percent(), Summarize(), collect(), evidenceCtx(), TestBackupEvidence(), TestDeviceEvidence(), TestOtherEvidence(), TestUSBPolicyEvidence() (+23 more)
 
 ### Community 68 - "newTestDB"
-Cohesion: 0.13
-Nodes (24): chanObserver, TestGroupAndSiteFiltersAgree(), NewInventoryHandler(), newInventoryHandler(), newInventoryRepository(), newTestDB(), seedDevice(), TestAcceptInventoryMalformedTimestamp() (+16 more)
+Cohesion: 0.09
+Nodes (32): auditWriter, chanObserver, TestGroupAndSiteFiltersAgree(), NewInventoryHandler(), newInventoryHandler(), newInventoryRepository(), newTestDB(), seedDevice() (+24 more)
 
 ### Community 69 - "Rencana: Kepatuhan, Aset, Paritas Linux/macOS, dan Mode Offline"
 Cohesion: 0.05
-Nodes (38): 0. Ringkasan dan urutan kerja, Fase A — Fondasi: data postur keamanan perangkat, Fase B — Fitur 1: Laporan kepatuhan perangkat (PDF), Fase C — Fitur 3: Paket kepatuhan regulasi Indonesia, Fase D — Fitur 4: Dashboard biaya & umur aset, Fase E — Fitur 5: Mode offline, Fase F — Fitur 2: Paritas Linux/macOS di Group Policy, Hal di luar cakupan rencana ini (+30 more)
+Nodes (39): 0. Ringkasan dan urutan kerja, Fase A — Fondasi: data postur keamanan perangkat, Fase B — Fitur 1: Laporan kepatuhan perangkat (PDF), Fase C — Fitur 3: Paket kepatuhan regulasi Indonesia, Fase D — Fitur 4: Dashboard biaya & umur aset, Fase E — Fitur 5: Mode offline, Fase F — Fitur 2: Paritas Linux/macOS di Group Policy, Hal di luar cakupan rencana ini (+31 more)
+
+### Community 70 - "AssetLicensePage.tsx"
+Cohesion: 0.12
+Nodes (22): AssetLifecyclePanel(), CATEGORIES, date(), gb(), rupiah(), saveBlob(), unitName(), ASSET_STATUS_KEYS (+14 more)
 
 ### Community 71 - "service.go"
 Cohesion: 0.22
-Nodes (12): triggerRestart(), DefaultConfig(), GetExecutablePath(), systemdUnit(), TestDefaultConfigNamesTheServiceThePackagingInstalls(), TestGetExecutablePathIsAbsolute(), TestSystemdUnitCarriesTheArgumentsAndTheRecoverySettings(), TestSystemdUnitWithoutArgumentsHasNoTrailingSpace() (+4 more)
+Nodes (12): handleServiceAction(), DefaultConfig(), GetExecutablePath(), systemdUnit(), TestDefaultConfigNamesTheServiceThePackagingInstalls(), TestGetExecutablePathIsAbsolute(), TestSystemdUnitCarriesTheArgumentsAndTheRecoverySettings(), TestSystemdUnitWithoutArgumentsHasNoTrailingSpace() (+4 more)
 
 ### Community 72 - "Handler"
 Cohesion: 0.24
-Nodes (9): bootstrapAdmin(), HashPassword(), NewHandler(), writeErr(), writeErrCode(), writeJSON(), AuditLogger, Handler (+1 more)
+Nodes (9): HashPassword(), NewHandler(), writeErr(), writeErrCode(), writeJSON(), TestPasswordHashAndCompare(), AuditLogger, Handler (+1 more)
 
-### Community 73 - "features.go"
-Cohesion: 0.17
-Nodes (7): comboEvents(), Session, TestClipboardTextIsCappedOnACharacterBoundary(), TestKeyCombosReleaseInReverseAndBalance(), truncateUTF8(), clipboardAccess, cursorReporter
+### Community 73 - ".handleFeatureMessage"
+Cohesion: 0.13
+Nodes (8): comboEvents(), Session, TestClipboardTextIsCappedOnACharacterBoundary(), TestKeyCombosReleaseInReverseAndBalance(), truncateUTF8(), clipboardAccess, cursorReporter, monitorSelector
 
 ### Community 74 - "rotatingFile"
 Cohesion: 0.12
 Nodes (14): setupFileLog(), openPTY(), openPTY(), rotatingFile, incomingFile, init(), Init(), InitWithRotation() (+6 more)
 
 ### Community 75 - "sync.Mutex"
-Cohesion: 0.15
-Nodes (4): recHub, recordingAudit, scriptedCapturer, cappedWriter
+Cohesion: 0.13
+Nodes (5): recordingSender, recHub, recordingAudit, cappedWriter, recordingAuditor
 
 ### Community 76 - "en/app.json"
 Cohesion: 0.08
@@ -674,11 +676,11 @@ Nodes (8): AuditLogger, Handler, ruleProblem, NewHandler(), validateRule(), writ
 
 ### Community 78 - "MaintenancePage.tsx"
 Cohesion: 0.08
-Nodes (32): formatBytes(), formatTime(), isJobStatus(), isRunningStatus(), jobPill(), MaintenancePage(), STATUS_KEYS, statusLabel() (+24 more)
+Nodes (33): formatBytes(), formatTime(), isJobStatus(), isRunningStatus(), jobPill(), MaintenancePage(), STATUS_KEYS, statusLabel() (+25 more)
 
 ### Community 79 - "Repository"
-Cohesion: 0.10
-Nodes (11): AutoScan, DevicePatch, FleetPatchSummary, InstallRequest, PatchInstallJob, PatchInstallReport, PatchScanReport, Repository (+3 more)
+Cohesion: 0.11
+Nodes (10): AutoScan, DevicePatch, FleetPatchSummary, InstallRequest, PatchInstallJob, PatchInstallReport, PatchScanReport, Repository (+2 more)
 
 ### Community 80 - "check-css.mjs"
 Cohesion: 0.10
@@ -697,16 +699,16 @@ Cohesion: 0.12
 Nodes (16): compilerOptions, allowImportingTsExtensions, erasableSyntaxOnly, lib, module, moduleDetection, noEmit, noFallthroughCasesInSwitch (+8 more)
 
 ### Community 84 - "Repository"
-Cohesion: 0.13
-Nodes (13): changedFields(), deref(), NewID(), getUser(), isUniqueViolation(), removesActiveAdmin(), updateUser(), ChangePasswordRequest (+5 more)
+Cohesion: 0.16
+Nodes (9): changedFields(), deref(), getUser(), isUniqueViolation(), removesActiveAdmin(), updateUser(), Repository, UpdateUserRequest (+1 more)
 
-### Community 85 - "NewHandler"
-Cohesion: 0.21
-Nodes (15): NewHandler(), setupTestDB(), TestBackup_DownloadAndDelete(), TestBackup_ListAndCreate(), TestBackup_RBAC(), TestBackup_Restore(), TestBackup_UploadRestore(), newRestoreID() (+7 more)
+### Community 85 - "agentinstall/handler_test.go"
+Cohesion: 0.15
+Nodes (23): get(), server(), TestBinaryComesWithItsChecksum(), TestBinaryNeedsAValidEnrollmentToken(), TestMissingBinaryAndUnsupportedPlatformsExplainThemselves(), TestScriptIsPublic(), TestUploadedReleaseIsPreferredOverTheBundle(), writeFile() (+15 more)
 
-### Community 86 - "golang.org/x/sys/windows/registry.Key"
-Cohesion: 0.14
-Nodes (10): rootName(), isARPVisible(), isUpdateDisplayName(), isUpdateReleaseType(), regGetString(), regIsOne(), TestIsARPVisible(), TestRegIsOne() (+2 more)
+### Community 86 - "windows/inventory_windows.go"
+Cohesion: 0.11
+Nodes (20): syncInstallRecord(), newInventoryCollector(), rootName(), SyncInstallRecord(), syncInstallRecord(), TestAnAgentRunFromElsewhereLeavesTheEntryAlone(), TestNoControlPanelEntryIsCreatedWhereThereWasNone(), TestTheControlPanelEntryFollowsTheRunningAgent() (+12 more)
 
 ### Community 87 - "Engine"
 Cohesion: 0.26
@@ -720,12 +722,12 @@ Nodes (7): cleanWin32Err(), WindowsCapturer, newDIBSurface(), reattachInputDeskt
 Cohesion: 0.15
 Nodes (5): NewConn(), pad4(), padded(), Conn, TestRefusedConnectionReportsTheReason()
 
-### Community 90 - "newRemoteExecEnv"
-Cohesion: 0.11
-Nodes (18): TestNoCOMHelperCallIsHandedAGoAddress(), mockExecHub, TestBuildServer_DoesNotDeferCloseInsideIt(), TestTheCleanupClosureStopsEverythingBuildServerStarted(), NewID(), takesLock(), TestAcceptTerminalRejectsMismatchedDevice(), TestClosedIsOnlyWrittenUnderItsOwnLock() (+10 more)
+### Community 90 - "dxgi_source_test.go"
+Cohesion: 0.32
+Nodes (3): TestNoCOMHelperCallIsHandedAGoAddress(), TestBuildServer_DoesNotDeferCloseInsideIt(), TestTheCleanupClosureStopsEverythingBuildServerStarted()
 
-### Community 91 - "dnsBackup"
-Cohesion: 0.15
+### Community 91 - "dnsadapter.go"
+Cohesion: 0.19
 Nodes (12): getActiveLinuxInterface(), getConnectedWindowsAdapters(), GetPrimaryUpstreamDNS(), getWindowsDNSBackup(), rewriteResolvConf(), upstreamFromBackup(), TestRewriteResolvConfDropsOtherNameservers(), adapterBackup (+4 more)
 
 ### Community 92 - "4. Audit & Readiness Report"
@@ -733,52 +735,52 @@ Cohesion: 0.07
 Nodes (26): 1.1 Scope Fase 1 (fondasi untuk semua modul lain), 1.2 Keputusan desain & trade-off, 1.3 Perbedaan OS di fase ini (memenuhi konstrain spec), 1.4 Risiko & mitigasi, 1. Brainstorming, 2.1 Struktur folder yang akan dibuat, 2.2 Data model (migrasi 0001), 2.3 API contract (+18 more)
 
 ### Community 93 - "installedProgram"
-Cohesion: 0.27
-Nodes (9): isRebootRequiredExit(), resolveSilentArgs(), findDpkgInstalled(), findInstalled(), findRpmInstalled(), firstLine(), runPlatformUninstall(), runPlatformUninstall() (+1 more)
+Cohesion: 0.14
+Nodes (20): runProcess(), terminate(), isRebootRequiredExit(), resolveSilentArgs(), isRebootRequiredExit(), runPlatformUninstall(), ExecuteUninstall(), isMSISuccessCode() (+12 more)
 
 ### Community 94 - "evaluate.go"
-Cohesion: 0.13
-Nodes (46): ControlResult, ControlSummary, DeviceFacts, DeviceResult, evaluationResponse, FleetSummary, MissingPatch, PreviousReport (+38 more)
+Cohesion: 0.17
+Nodes (25): ControlResult, DeviceFacts, DeviceResult, MissingPatch, Rules, AntivirusPosture, AVProduct, capFirst() (+17 more)
 
-### Community 95 - "inventory/domain.go"
-Cohesion: 0.21
-Nodes (16): collectDomain(), macDomain(), DomainMembership, iniSections(), LinuxDomain(), MacDomain(), parseSmbADS(), parseSSSD() (+8 more)
+### Community 95 - "linux/inventory_linux.go"
+Cohesion: 0.10
+Nodes (29): collectDomain(), linuxUnescapeMount(), readCPUInfo(), utsString(), macDomain(), ParseProcStatBtime(), TestParseProcStatBtime(), ChassisFromMacModel() (+21 more)
 
-### Community 96 - "runProcess"
-Cohesion: 0.21
-Nodes (8): runProcess(), terminate(), msiProductCode(), runMsiUninstall(), runPlatformUninstall(), linuxRunner, runResult, windowsRunner
+### Community 96 - "admin_windows_test.go"
+Cohesion: 0.19
+Nodes (12): contains(), deleteLocalUser(), isElevated(), newFake(), TestADisabledManagedAdminIsReenabled(), TestANewManagedAdminIsCreatedAndMadeAnAdministrator(), TestAPasswordPolicyRefusalSaysSo(), TestProvisioningARealAccountTwice() (+4 more)
 
 ### Community 97 - "pdf.go"
-Cohesion: 0.08
-Nodes (38): cell, col, ControlAssessment, FrameworkRequest, FrameworkSnapshot, FrameworkSummary, PreviousFramework, renderer (+30 more)
+Cohesion: 0.15
+Nodes (23): col, renderer, rgb, Snapshot, FormatDate(), assessFill(), AssessLabel(), RenderFrameworkPDF() (+15 more)
 
 ### Community 98 - "0001_init.sql"
 Cohesion: 0.20
 Nodes (12): agent_commands, audit_logs, idx_audit_created, idx_commands_created, idx_commands_device_status, idx_devices_last_seen, idx_devices_status, auth_sessions (+4 more)
 
 ### Community 99 - "server/main.go"
-Cohesion: 0.03
-Nodes (25): TestMain(), newPlatformRunner(), newPlatformRunner(), newPlatformRunner(), newPlatformRunner(), setDeathSignal(), setDeathSignal(), diskTarget (+17 more)
+Cohesion: 0.06
+Nodes (48): TestMain(), createRuleReq, diskTarget, patchTarget, updateRuleReq, contextKey, loginRequest, BackupFileDTO (+40 more)
 
-### Community 100 - "status_test.go"
-Cohesion: 0.22
-Nodes (11): policyEnv, reconnectWith(), statusEnv(), TestLegacyReportWithoutResultsAccepted(), TestPendingWrittenBeforeSend(), TestReconnectRepushesFailedPartial(), TestReconnectSkipsUnsupportedOnlyPartial(), TestResultsDerivePartial() (+3 more)
+### Community 100 - "statusEnv"
+Cohesion: 0.33
+Nodes (7): policyEnv, statusEnv(), TestLegacyReportWithoutResultsAccepted(), TestPendingWrittenBeforeSend(), TestResultsDerivePartial(), TestStaleReportIgnored(), TestUnknownStatusRejected()
 
-### Community 101 - "AuthenticateAgent"
+### Community 101 - "Handler"
 Cohesion: 0.08
-Nodes (25): RoleReader, WebSocketTicketIssuer, AuditLogger, Handler, Hub, OriginChecker, ClaimsForUser(), CurrentRoleReader() (+17 more)
+Nodes (23): RoleReader, WebSocketTicketIssuer, AuditLogger, Handler, Hub, OriginChecker, ClaimsForUser(), CurrentRoleReader() (+15 more)
 
-### Community 102 - "Repository"
+### Community 102 - "evaluate_test.go"
+Cohesion: 0.32
+Nodes (19): DefaultRules(), bp(), control(), goodFacts(), goodPosture(), ip(), TestAntivirus(), TestDisabledControlsAreNotEvaluated() (+11 more)
+
+### Community 103 - "Repository"
 Cohesion: 0.08
-Nodes (10): runDeploymentSweep(), Repository, isTerminalTaskStatus(), AgentCommand, DeploymentTask, DeviceCapability, QueuedTask, SoftwareDeployment (+2 more)
+Nodes (17): Auditor, ControlSummary, evaluationResponse, FleetSummary, PreviousReport, Profile, profileRow, Report (+9 more)
 
-### Community 103 - "compliance/repository.go"
-Cohesion: 0.09
-Nodes (15): Auditor, factRow, Profile, profileRow, Report, Repository, Request, ServerAuditResult (+7 more)
-
-### Community 105 - "runAgent"
-Cohesion: 0.13
-Nodes (21): guardAgentGoroutine(), inventoryPeriod(), inventoryStaggerWindow(), runAgent(), enrollError(), Exchange(), ShouldEnroll(), identityServer() (+13 more)
+### Community 105 - "newRunFixture"
+Cohesion: 0.16
+Nodes (14): runFixture, TestACancelledScriptClosesTheRun(), TestALateReportDoesNotRewriteAFinishedDeviceRun(), TestARetiredGroupMemberIsNotATarget(), TestARunningScheduleIsNotOverlapped(), TestARunWithNoTargetsFailsAndSaysWhy(), TestAStaleRunOnAnOnlineDeviceIsReaped(), TestScheduleValidationRefusesWhatCannotRun() (+6 more)
 
 ### Community 106 - "Fase 0 — Brainstorming Arsitektur Keseluruhan"
 Cohesion: 0.10
@@ -793,40 +795,40 @@ Cohesion: 0.10
 Nodes (21): 1. Persyaratan Sistem, 2. Pilihan Instalasi, 3. Verifikasi Status Layanan, 4. Manajemen Backup & Retensi, 5. Prosedur Upgrade & Rollback, Backup Manual via CLI, Kalau Anda menjalankan biner secara manual, bukan lewat systemd, Langkah 1: Pasang Paket Dependensi (+13 more)
 
 ### Community 109 - "Client"
-Cohesion: 0.11
-Nodes (11): GetTLSConfig(), NewWebSocketDialer(), TestGetTLSConfig_Defaults(), TestGetTLSConfig_InsecureSkipVerify(), TestNewWebSocketDialer_Configuration(), mergeHello(), inventoryReport, timeOrZero (+3 more)
+Cohesion: 0.10
+Nodes (12): GetTLSConfig(), NewWebSocketDialer(), TestGetTLSConfig_Defaults(), TestGetTLSConfig_InsecureSkipVerify(), TestNewWebSocketDialer_Configuration(), mergeHello(), inventoryReport, timeOrZero (+4 more)
 
 ### Community 110 - "LoginHandler"
 Cohesion: 0.08
 Nodes (14): ipRecord, liveUser, EnrollmentHandler, LoginHandler, writeErr(), writeErrCode(), writeJSON(), writeTooManyAttempts() (+6 more)
 
 ### Community 111 - "uninstall.go"
-Cohesion: 0.13
-Nodes (19): compact(), nameMatches(), normalizeProgramName(), TestUninstallReportsAnAbsentPackageWithItsReason(), exactMatches(), isRegularFile(), resolveTarget(), resolveUninstallerPath() (+11 more)
+Cohesion: 0.20
+Nodes (13): exactMatches(), isRegularFile(), resolveTarget(), resolveUninstallerPath(), TestComponentNameLeavesBothCandidates(), TestExactMatchesBeatsLongerPrefix(), TestNameMatches(), TestResolveUninstallerPathRefusesWhatItCannotVerify() (+5 more)
 
-### Community 112 - "appendLog"
-Cohesion: 0.16
-Nodes (23): linuxLogMaintenance(), countFiles(), countScheduledTasks(), countStoppedServices(), runStepOS(), windowsCleanupTemp(), windowsDiskCheck(), windowsFlushDNS() (+15 more)
+### Community 112 - "maintenance.go"
+Cohesion: 0.10
+Nodes (59): lockFile(), TestCleanupTempStaysGreenWithALockedFileInTheRoot(), TestLockedFileIsNotAPrivilegeRefusal(), TestPermissionDeniedIsStillARefusal(), countOrphanedLaunchAgents(), darwinCleanupTemp(), darwinDiskCheck(), darwinFlushDNS() (+51 more)
 
-### Community 113 - "summarizePosture"
-Cohesion: 0.33
-Nodes (7): controlState(), onPartialOff(), summarizePosture(), boolp(), fullPosture(), TestSummarizePosture(), TestSummarizePostureUnrecognisedStateIsUnknown()
+### Community 113 - "CompiledPolicy"
+Cohesion: 0.18
+Nodes (11): systemPolicyApplyEnvelope(), TestDispatchStillCarriesThePassword(), policyEnv, TestCompiledEnvelopeShapeUnchanged(), TestDevicePolicyEndpointIncludesSources(), TestEqualPriorityTieBreak(), TestExplicitAllowOverridesLowerBlock(), TestLegacyRequestBodyConverted() (+3 more)
 
 ### Community 115 - "deployment_tasks"
 Cohesion: 0.31
 Nodes (9): deployment_tasks, idx_deploy_tasks_deploy, idx_deploy_tasks_device, idx_deploy_tasks_status, idx_packages_target, software_deployments, software_packages, idx_software_deployments_action (+1 more)
 
 ### Community 116 - "net/http.ResponseWriter"
-Cohesion: 0.14
-Nodes (9): Auditor, Handler, Handler, progressDeadlineWriter, NewHandler(), redactLicenseKey(), writeJSON(), writeErr() (+1 more)
+Cohesion: 0.11
+Nodes (11): Auditor, Handler, progressDeadlineWriter, Handler, NewHandler(), redactLicenseKey(), writeJSON(), Handler (+3 more)
 
 ### Community 117 - "sync.RWMutex"
-Cohesion: 0.24
-Nodes (6): NewDispatcher(), sessionCache, sessionCacheEntry, getSessionCache(), CommandHandler, Dispatcher
+Cohesion: 0.12
+Nodes (9): TerminalManager, taskContext(), NewDispatcher(), sessionCache, sessionCacheEntry, ProcessSession, getSessionCache(), CommandHandler (+1 more)
 
 ### Community 118 - "networkfilter/engine_test.go"
-Cohesion: 0.09
-Nodes (27): defaultHostsPath(), NewEngine(), setResolver(), setResolverFor(), TestApplyClearsPreviousFirewallRules(), TestApplyNarrowsRatherThanAccumulates(), TestApplySurvivesAnUnavailableFirewallButReportsIt(), TestChunkIPsCoversEverything() (+19 more)
+Cohesion: 0.23
+Nodes (12): setResolver(), setResolverFor(), TestApplyClearsPreviousFirewallRules(), TestApplyNarrowsRatherThanAccumulates(), TestApplySurvivesAnUnavailableFirewallButReportsIt(), TestCleanApplyIsNotMarkedDegraded(), testEngine(), TestHostsWriteFailureIsFatal() (+4 more)
 
 ### Community 119 - "0006_patch_management.sql"
 Cohesion: 0.36
@@ -840,9 +842,9 @@ Nodes (9): Auditor, ConfigView, Handler, boolStr(), itoa(), NewHandler(), viewOf
 Cohesion: 0.32
 Nodes (9): alertFixture, newAlertFixture(), TestAFailedQueryResolvesNothing(), TestAnIncidentClosesWhenItsConditionClears(), TestDisablingARuleClosesItsIncidents(), TestIncidentCountsAreNotCappedByTheList(), TestOfflineHonoursItsThresholdAndIgnoresPendingRows(), TestRuleValidation() (+1 more)
 
-### Community 122 - "main"
-Cohesion: 0.09
-Nodes (29): TestDBPathForBackupDefault(), TestDBPathForBackupNeedsNoJWTSecret(), TestDBPathForBackupReadsEnvFile(), unsetForEnvFileTest(), TestLoadEnvFileAppliesKeyValues(), TestLoadEnvFileDoesNotOverrideARealEnvironmentValue(), TestLoadEnvFileRejectsAMalformedLine(), TestLoadEnvFileReportsAMissingFile() (+21 more)
+### Community 122 - "models.go"
+Cohesion: 0.27
+Nodes (14): reportStatus(), decodePolicyConfig(), fromLegacy(), DeviceSystemPolicyState, PolicyConfig, PolicySettings, USBStorageMode, WallpaperStyle (+6 more)
 
 ### Community 123 - "remotecontrol/scale_test.go"
 Cohesion: 0.14
@@ -853,16 +855,16 @@ Cohesion: 0.38
 Nodes (5): applyFirewall(), newFirewallBackend(), newFirewallBackend(), newFirewallBackend(), firewallBackend
 
 ### Community 125 - "scanner_windows_test.go"
-Cohesion: 0.25
-Nodes (15): searchOf(), TestDriverUpdateIsClassifiedAsDriver(), TestHiddenUpdateIsSkipped(), TestSecurityCategoryIsFoundBeyondTheFirst(), update(), runScanScript(), comShim(), emptySearch() (+7 more)
+Cohesion: 0.15
+Nodes (24): searchOf(), TestDriverUpdateIsClassifiedAsDriver(), TestHiddenUpdateIsSkipped(), TestInstallScriptSearchesEveryUpdateType(), TestSecurityCategoryIsFoundBeyondTheFirst(), update(), buildInstallScript(), installOSWithPrefix() (+16 more)
 
 ### Community 126 - "Panduan Instalasi Server Windows (Windows Server 2016 - 2025)"
 Cohesion: 0.11
 Nodes (19): 10. Prosedur Pembaruan (Upgrade) Biner di Windows, 1. Persyaratan Sistem, 2. Struktur Direktori Rekomendasi, 3. Kompilasi & Penempatan Biner, 4. Konfigurasi Environment (`.env`), 5. Menjalankan Server Sebagai Windows Service, 6. Opsi Terminasi TLS / HTTPS, 7. Konfigurasi Windows Firewall (+11 more)
 
-### Community 127 - "net/http.Request"
-Cohesion: 0.21
-Nodes (9): Handler, validateOrigin(), ValidateWebSocketOrigin(), TestValidateWebSocketOrigin(), decodeProfile(), frameworkErr(), NewHandler(), writeErr() (+1 more)
+### Community 127 - "Handler"
+Cohesion: 0.25
+Nodes (6): Handler, decodeProfile(), frameworkErr(), NewHandler(), writeErr(), writeJSON()
 
 ### Community 128 - "devices"
 Cohesion: 0.23
@@ -876,25 +878,25 @@ Nodes (8): users, idx_remote_exec_device, idx_remote_exec_started, idx_remote_ex
 Cohesion: 0.44
 Nodes (8): idx_sched_device_runs_dev, idx_sched_device_runs_run, idx_scheduled_runs_sched, idx_task_schedules_enabled, scheduled_task_device_runs, scheduled_task_runs, script_templates, task_schedules
 
-### Community 131 - "time.Duration"
-Cohesion: 0.06
-Nodes (21): CollectOnce(), hashReport(), initialOffset(), NewScheduler(), TestInitialOffset(), TestScheduler_HashDiffing(), TestScheduler_ImmediateAndCancel(), accountLockout (+13 more)
+### Community 131 - "inventory/scheduler.go"
+Cohesion: 0.11
+Nodes (17): newInventoryCollector(), newInventoryCollector(), NewCollector(), NewCollector(), Collector, CollectOnce(), hashReport(), initialOffset() (+9 more)
 
 ### Community 134 - "Repository"
-Cohesion: 0.12
-Nodes (7): AssetSummary, HardwareAsset, LicenseComplianceSummary, Repository, SoftwareLicense, countInstalls(), newID()
+Cohesion: 0.11
+Nodes (8): AssetSummary, HardwareAsset, LicenseComplianceSummary, LicenseUsage, SoftwareLicense, countInstalls(), Repository, newID()
 
 ### Community 135 - "LongTransfer"
-Cohesion: 0.13
+Cohesion: 0.12
 Nodes (15): cachedHash, Handler, ReleaseFinder, TokenChecker, LongTransfer(), fetchLen(), newSlowServer(), slowBody() (+7 more)
 
 ### Community 136 - "Bus"
-Cohesion: 0.10
-Nodes (6): Bus, LocalSender, Node, SessionCache, Hub, Scheduler
+Cohesion: 0.18
+Nodes (4): Bus, LocalSender, SessionCache, NewBus()
 
 ### Community 137 - "maintenance_test.go"
-Cohesion: 0.13
-Nodes (28): NewEngine(), engineFor(), jsonTags(), newCaptureServer(), TestABusyEngineReportsTheRejection(), TestABusyFullScanReportsItsFirstStep(), TestAFailedDiskCheckStepIsNotReportedClean(), TestAFullScanWhoseFirstStepFailsDoesNotEndGreen() (+20 more)
+Cohesion: 0.07
+Nodes (47): Allowed(), assertDistinctMirrors(), NewEngine(), stepTimeout(), engineFor(), jsonTags(), newCaptureServer(), setModTime() (+39 more)
 
 ### Community 138 - "0002_device_mgmt.sql"
 Cohesion: 0.43
@@ -928,13 +930,13 @@ Nodes (6): idx_maint_jobs_started, idx_maint_tasks_device, idx_maint_tasks_job, 
 Cohesion: 0.22
 Nodes (4): lastOnlineHub, offlineHub, oneOnlineHub, stubHub
 
-### Community 146 - "enroll_test.go"
-Cohesion: 0.16
-Nodes (22): TestRunEnrollOnly_DeviceIDMismatch_OverwritesWithBackup(), TestRunEnrollOnly_InvalidToken(), TestRunEnrollOnly_KeepsAnIdentityTheServerAccepts(), TestRunEnrollOnly_MissingServer(), TestRunEnrollOnly_MissingToken(), TestRunEnrollOnly_Success(), TestRunEnrollOnly_WithSite(), defaultCredsPath() (+14 more)
+### Community 146 - "runAgent"
+Cohesion: 0.07
+Nodes (46): TestRunEnrollOnly_DeviceIDMismatch_OverwritesWithBackup(), TestRunEnrollOnly_InvalidToken(), TestRunEnrollOnly_KeepsAnIdentityTheServerAccepts(), TestRunEnrollOnly_MissingServer(), TestRunEnrollOnly_MissingToken(), TestRunEnrollOnly_Success(), TestRunEnrollOnly_WithSite(), defaultCredsPath() (+38 more)
 
-### Community 148 - "newConnectFixture"
-Cohesion: 0.09
-Nodes (24): fakeHub, callRuleRoute(), connectFixture, TestAddRuleRejectsInvalidAndDuplicate(), TestBulkAddIsAtomic(), TestBulkAddReportsPerLineAndDispatchesOnce(), TestFilterPendingWrittenBeforeSend(), TestReconnectRepushesWithoutPersistCapability() (+16 more)
+### Community 148 - "NewHub"
+Cohesion: 0.20
+Nodes (13): newTestHandler(), TestCommandResult_ClaimedByModuleReceiver(), TestHello_FlushesReconnectQueues(), TestHello_ReconcilesBeforeFlushingQueuedUpdates(), NewHub(), dialAgent(), TestDisconnectWithdrawsAndClosesAgentSocket(), TestSendIsNotClosed() (+5 more)
 
 ### Community 150 - "0011_network_filter.sql"
 Cohesion: 0.53
@@ -949,16 +951,16 @@ Cohesion: 0.33
 Nodes (5): plugins, rules, react/only-export-components, react/rules-of-hooks, $schema
 
 ### Community 153 - "dxgi_windows.go"
-Cohesion: 0.39
-Nodes (12): comCall(), comRelease(), duplicateOnAdapter(), duplicateOutput(), hrErr(), newDXGIDuplicator(), vmethod(), d3d11MappedSubresource (+4 more)
+Cohesion: 0.35
+Nodes (13): comCall(), comRelease(), duplicateOnAdapter(), duplicateOutput(), hrErr(), newDXGIDuplicator(), vmethod(), MonitorInfo (+5 more)
 
 ### Community 154 - "SessionStore"
-Cohesion: 0.14
-Nodes (3): Session, purgeSessions(), SessionStore
+Cohesion: 0.11
+Nodes (4): unitRow, Session, purgeSessions(), SessionStore
 
-### Community 155 - "Collector"
-Cohesion: 0.31
-Nodes (8): newInventoryCollector(), newInventoryCollector(), newInventoryCollector(), NewCollector(), NewCollector(), Collector, NewCollector(), TestLiveCollectorRunsWithoutPanic()
+### Community 155 - "uninstallFixture"
+Cohesion: 0.29
+Nodes (11): commandRows(), postUninstall(), TestUninstallByNameDispatchesToAnOnlineCapableAgent(), TestUninstallByNameRefusesADeviceWithNoStoredCapabilities(), TestUninstallByNameRefusesAnAgentThatCannotHandleIt(), TestUninstallByNameRefusesAnEmptyName(), TestUninstallByNameRefusesAnOfflineEndpoint(), TestUninstallByNameRefusesAnUnknownDevice() (+3 more)
 
 ### Community 156 - "0026_reusable_enrollment_tokens.sql"
 Cohesion: 0.83
@@ -977,8 +979,8 @@ Cohesion: 0.67
 Nodes (3): device_system_policy_states, idx_system_policies_target, system_policies
 
 ### Community 165 - "damage_test.go"
-Cohesion: 0.18
-Nodes (26): DecodeFrame(), DecodeFrameHeader(), EncodeFrame(), NewDamage(), absInt(), solidFrame(), TestAdaptiveQualityReducesLargeDamagePayload(), TestAFrameSurvivesTheRoundTrip() (+18 more)
+Cohesion: 0.22
+Nodes (22): EncodeFrame(), encodeRect(), NewDamage(), absInt(), solidFrame(), TestAdaptiveQualityReducesLargeDamagePayload(), TestAFrameSurvivesTheRoundTrip(), TestAMosaicOfChangesCollapsesToOneFrame() (+14 more)
 
 ### Community 167 - "Contributing to Endpoint Management Platform"
 Cohesion: 0.14
@@ -993,16 +995,16 @@ Cohesion: 0.13
 Nodes (14): Batasan per OS, Cakupan subdomain, Dukungan per OS, Input domain, Kebijakan tanpa rule, Kebijakan yang dibuat sebelum aturan ini, Network filter, Penentuan Kebijakan: System Policy & Network Filter (+6 more)
 
 ### Community 175 - "net/http.Handler"
-Cohesion: 0.11
-Nodes (14): CORSOptions, Handler, JWTService, CORS(), TestCORS_PreflightAndHeaders(), passthroughAuth(), markCount(), NewHandler() (+6 more)
+Cohesion: 0.10
+Nodes (17): CORSOptions, Handler, JWTService, CORS(), TestCORS_PreflightAndHeaders(), adminAuthMw(), viewerAuthMw(), verify() (+9 more)
 
-### Community 177 - "systempolicy/engine.go"
-Cohesion: 0.11
-Nodes (27): applied(), failed(), PolicySettings, USBStorageMode, WallpaperStyle, WindowsUpdateMode, NewEngine(), outcome() (+19 more)
+### Community 177 - "unix_policy_test.go"
+Cohesion: 0.18
+Nodes (17): applied(), failed(), outcome(), unsupported(), resultFor(), TestDarwinUSBUnsupported(), TestLinuxAdminFailureReported(), TestLinuxUSBBlockAppliesAndUnloadsModules() (+9 more)
 
-### Community 178 - ".Apply"
-Cohesion: 0.33
-Nodes (3): isNotFound(), runNFT(), nftablesFirewall
+### Community 178 - "net.IP"
+Cohesion: 0.11
+Nodes (14): TestChunkIPsCoversEverything(), TestNormalizeDomainStripsWhatOperatorsPaste(), chunkIPs(), isNotFound(), runNFT(), joinIPs(), netsh(), newResolver() (+6 more)
 
 ### Community 180 - "Repository"
 Cohesion: 0.13
@@ -1025,8 +1027,8 @@ Cohesion: 0.23
 Nodes (3): Engine, expiringFirewall, RecoveredPolicy
 
 ### Community 229 - "buildServer"
-Cohesion: 0.08
-Nodes (40): buildServer(), mustJSON(), writeJSON(), get(), opsServer(), TestHealthReportsNodeAndVersion(), TestMetricsEndpointAndToken(), TestReadinessFailsWhileDraining() (+32 more)
+Cohesion: 0.06
+Nodes (52): Auditor, Handler, buildServer(), mustJSON(), writeJSON(), get(), opsServer(), TestHealthReportsNodeAndVersion() (+44 more)
 
 ### Community 231 - "installation/README.md"
 Cohesion: 0.25
@@ -1065,8 +1067,8 @@ Cohesion: 0.40
 Nodes (5): idx_audit_created_seq, idx_node_outbox_node, login_failures, node_outbox, server_nodes
 
 ### Community 240 - "decodeOutput"
-Cohesion: 0.27
-Nodes (8): decodeOutput(), decodeUTF16(), looksUTF16LE(), encodeUTF16(), TestDecodeOutput(), utf16be(), utf16le(), darwinRunner
+Cohesion: 0.18
+Nodes (10): decodeOutput(), decodeUTF16(), looksUTF16LE(), encodeUTF16(), TestDecodeOutput(), utf16be(), utf16le(), darwinRunner (+2 more)
 
 ### Community 241 - "Fase 5 — Arsitektur & Perencanaan: Remote Execution & Interactive Terminal"
 Cohesion: 0.22
@@ -1076,9 +1078,9 @@ Nodes (8): 1. Kebutuhan & Spesifikasi Fungsional, 2. Skema Database (`0005_remot
 Cohesion: 0.22
 Nodes (9): 1. Yang Anda butuhkan, 2. Buat Enrollment Token, 3. Pasang binary, 4. Jalankan, 5. Daftarkan sebagai service, 6. Uninstall, 7. Verifikasi, 8. Pemasangan massal (+1 more)
 
-### Community 245 - "audit_test.go"
-Cohesion: 0.22
-Nodes (21): applyPoolSettings(), run(), Config, byID(), evalCfg(), TestAFailureCapsTheGrade(), TestALongAccessTokenLifetimeIsAWarning(), TestAnEditedAuditEntryFailsTheChainCheck() (+13 more)
+### Community 245 - "devDependencies"
+Cohesion: 0.14
+Nodes (14): devDependencies, jsdom, oxlint, tailwindcss, @tailwindcss/vite, @testing-library/dom, @testing-library/react, @types/node (+6 more)
 
 ### Community 246 - "Fase 4 — Arsitektur & Perencanaan: Software Deployment"
 Cohesion: 0.29
@@ -1120,9 +1122,9 @@ Nodes (7): 1. Opsi Instalasi Klien Linux, 2. Cara Membangun Paket Linux, Linux A
 Cohesion: 0.25
 Nodes (8): 1. Windows (`packaging/windows/`), 2. Linux (`packaging/linux/`), 3. macOS (`packaging/darwin/`), Catatan Build Lintas Platform, Detail per Platform, Paket Server, Panduan Packaging & UI Installer Agen Endpoint, Ringkasan Format Distribusi per OS
 
-### Community 258 - "Software"
-Cohesion: 0.16
-Nodes (13): parseDpkgStatus(), queryRpm(), firstNonEmpty(), macParseMemory(), macProfileHardware(), macReadAppInfo(), macSysctl(), ParseMacBoottime() (+5 more)
+### Community 258 - "macos/inventory_darwin.go"
+Cohesion: 0.25
+Nodes (9): firstNonEmpty(), macParseMemory(), macProfileHardware(), macReadAppInfo(), macSysctl(), ParseMacBoottime(), TestParseMacBoottime(), macCollector (+1 more)
 
 ### Community 259 - "engine_windows.go"
 Cohesion: 0.22
@@ -1138,7 +1140,7 @@ Nodes (5): 1. Latar Belakang & Kebutuhan Bisnis, 2. Skema Basis Data, 3. REST AP
 
 ### Community 262 - "Manager"
 Cohesion: 0.12
-Nodes (5): NewManager(), NewManager(), NewManager(), Manager, windowsManager
+Nodes (5): NewManager(), NewManager(), Manager, otherManager, windowsManager
 
 ### Community 263 - "Repository"
 Cohesion: 0.23
@@ -1168,9 +1170,9 @@ Nodes (5): 1. Ringkasan Eksekutif, 2. Bukti Ground-Truth Pengujian (Live E2E Har
 Cohesion: 0.25
 Nodes (7): 1. Agen lewat `.pkg`, 2. Agen lewat tarball, 3. Uninstall agen, 4. Server di macOS, 5. Update agen dari konsol, macOS: Installer Agen & Server, Membangun `.pkg` secara lokal (di Mac)
 
-### Community 270 - ".Run"
-Cohesion: 0.16
-Nodes (14): Allowed(), assertDistinctMirrors(), failureCause(), StepReport, stepsFor(), stepTimeout(), TestAllowedRejectsUnknown(), TestFullScanOrderEndsOnDiskCheck() (+6 more)
+### Community 270 - "NewRepository"
+Cohesion: 0.30
+Nodes (11): intervalSchedule(), openScheduleDB(), TestChangingTheIntervalMovesTheNextRun(), TestDisablingAScheduleClearsItsNextRun(), TestFiringAScheduleAdvancesItsNextRun(), TestTheNextRunColumnIsFilled(), NewRepository(), TestATriggerAgainstOfflineDevicesReportsTheFinishedRunNotARunningOne() (+3 more)
 
 ### Community 271 - "Fase 14 — Architectural Blueprint: Asset & License Management"
 Cohesion: 0.40
@@ -1181,32 +1183,32 @@ Cohesion: 0.40
 Nodes (4): 1. Latar Belakang & Kebutuhan Bisnis, 2. REST API Endpoints, 3. Rencana Eksekusi Bertahap, Fase 8 — Architectural Blueprint: Reports & Export Engine
 
 ### Community 273 - "uninstall_darwin.go"
-Cohesion: 0.53
-Nodes (5): findInstalled(), lastComponent(), listReceipts(), receiptVersion(), runPlatformUninstall()
+Cohesion: 0.29
+Nodes (8): compact(), nameMatches(), normalizeProgramName(), findInstalled(), lastComponent(), listReceipts(), receiptVersion(), findInstalled()
 
 ### Community 274 - "React + TypeScript + Vite"
 Cohesion: 0.50
 Nodes (3): Expanding the Oxlint configuration, React Compiler, React + TypeScript + Vite
 
 ### Community 275 - "dxgi_fallback_windows_test.go"
-Cohesion: 0.31
+Cohesion: 0.28
 Nodes (11): capturerOrSkip(), isDuplicated(), scriptSources(), TestADuplicationWithNoFrameYetIsKept(), TestALostDuplicationIsReleasedAndRebuilt(), TestAnUnavailableDuplicationFallsBackToGDIAndBacksOff(), TestDuplicationAndGDISeeTheSameDesktop(), TestDuplicationFramesAreUsedWhenAvailable() (+3 more)
 
 ### Community 276 - "NewEngine"
 Cohesion: 0.21
 Nodes (11): TestApplyUpdate_EmptyDownloadURLDoesNotPanic(), NewEngine(), TestAnUpdateDoesNotDependOnTheSystemTempDirectory(), runApply(), TestAChecksumMismatchStillRollsBack(), TestAnUnbootableReleaseIsNotReportedAsASuccessfulUpdate(), TestTheOriginalBinaryIsRestoredAfterAFailedHealthCheck(), TestAgentEngineManifestVerification() (+3 more)
 
-### Community 277 - "agentinstall/handler_test.go"
-Cohesion: 0.10
-Nodes (31): loginEnv, loginResult, mockHub, uninstallEnv, newLoginEnv(), TestAccountLockIsAuditedExactlyOnce(), TestDisabledAccountWithAWrongPasswordLooksLikeBadCredentials(), TestDisabledAccountWithTheRightPasswordSaysDisabled() (+23 more)
+### Community 277 - "newSoftwareEnv"
+Cohesion: 0.20
+Nodes (15): mockHub, uninstallEnv, NewRepository(), newMockHub(), newSoftwareEnv(), TestE2ESoftwareDeployment(), readBody(), setupUninstall() (+7 more)
 
 ### Community 278 - "filetransfer_test.go"
 Cohesion: 0.21
 Nodes (11): newFileReceiver(), sanitizeFileName(), entries(), send(), TestCloseAllRemovesPartialFiles(), TestOutOfOrderChunkAbortsAndCleansUp(), TestReservedAndHostileNamesAreMadeSafe(), TestShortOrOversizedUploadIsRejected() (+3 more)
 
-### Community 279 - "Handler"
-Cohesion: 0.09
-Nodes (13): Auditor, binaryFacts, BundledAgent, HubDispatcher, importResult, Handler, inspectBinary(), Handler (+5 more)
+### Community 279 - "UserIDFromContext"
+Cohesion: 0.10
+Nodes (13): Auditor, binaryFacts, BundledAgent, importResult, UserIDFromContext(), Handler, inspectBinary(), TestNormalizeArch() (+5 more)
 
 ### Community 280 - "remote_control_sessions"
 Cohesion: 0.70
@@ -1216,8 +1218,8 @@ Nodes (4): idx_rc_sessions_device, idx_rc_sessions_operator, idx_rc_sessions_sta
 Cohesion: 0.50
 Nodes (3): 1. Verifikasi Ruang Lingkup, 2. Hasil Eksekusi Uji, Production Readiness Review: Active Directory Group Policy Engine (`systempolicy`)
 
-### Community 283 - "SpawnSessionWorker"
-Cohesion: 0.19
+### Community 283 - "go_pkg_golang_org_x_sys_windows"
+Cohesion: 0.11
 Nodes (13): goChildArgv(), TestWorkerCommandLineCarriesNoSecret(), TestWorkerCommandLineReachesAGoChildIntact(), TestWorkerFlagNamesMatchTheWorkerMain(), SpawnSessionWorker(), activeInteractiveSession(), primaryToken(), quoteArg() (+5 more)
 
 ### Community 284 - "install-linux.sh"
@@ -1225,71 +1227,71 @@ Cohesion: 0.70
 Nodes (4): die(), info(), ok(), install-linux.sh script
 
 ### Community 285 - "README.md"
-Cohesion: 0.12
+Cohesion: 0.13
 Nodes (12): Catatan, Kalau perlu kembali ke SQLite, Langkah-langkah, Pindah dari SQLite ke PostgreSQL, Yang dilakukan perintah ini, Disclosure Process, Known gaps, Reporting a Vulnerability (+4 more)
 
-### Community 286 - "diffInventory"
-Cohesion: 0.09
-Nodes (24): hwJSON, hwModel, inventoryDiff, osJSON, softwareDiff, decodeHW(), decodeOS(), decodeSoftwareNames() (+16 more)
+### Community 286 - "diffSoftware"
+Cohesion: 0.25
+Nodes (6): inventoryDiff, softwareDiff, decodeSoftwareNames(), diffSoftware(), TestDiffSoftwareAddRemove(), TestDiffSoftwareMalformed()
 
-### Community 287 - "stepOutcome"
-Cohesion: 0.31
-Nodes (16): countOrphanedLaunchAgents(), darwinCleanupTemp(), darwinDiskCheck(), darwinFlushDNS(), darwinLogMaintenance(), darwinMemoryHygiene(), darwinPerUserTempDirs(), darwinSecurityAudit() (+8 more)
+### Community 287 - "PolicySettings"
+Cohesion: 0.22
+Nodes (8): PolicySettings, USBStorageMode, WallpaperStyle, WindowsUpdateMode, newPlatformBackend(), newPlatformBackend(), Engine, platformBackend
 
 ### Community 288 - "software-deployment/sweep_test.go"
-Cohesion: 0.21
-Nodes (14): TestDevicesWithoutCapability(), TestDevicesWithoutCapabilityIgnoresUnknownIDs(), TestDevicesWithoutCapabilityReportsOnlyTheIncapableOnes(), idStr(), mustExec(), TestSyncDeploymentStatusRollsUpFailedWhenNothingSucceeded(), addTask(), sweepFixture() (+6 more)
+Cohesion: 0.27
+Nodes (13): TestDevicesWithoutCapability(), TestDevicesWithoutCapabilityIgnoresUnknownIDs(), TestDevicesWithoutCapabilityReportsOnlyTheIncapableOnes(), idStr(), mustExec(), TestSyncDeploymentStatusRollsUpFailedWhenNothingSucceeded(), addTask(), sweepFixture() (+5 more)
 
 ### Community 291 - "monitors_windows.go"
-Cohesion: 0.17
-Nodes (12): attachToInputDesktop(), NewPlatformCapturer(), WindowsCapturer, openClipboard(), enumMonitors(), monitorInfo, WindowsCapturer, primaryScreen() (+4 more)
+Cohesion: 0.27
+Nodes (8): enumMonitors(), monitorInfo, WindowsCapturer, primaryScreen(), virtualScreen(), cursorInfo, dxgiOutputDesc, rect32
 
 ### Community 292 - ".Open"
-Cohesion: 0.04
-Nodes (71): campaignFixture, BackupConfig, TestSessionStore_CacheHitAndInvalidation(), TestTheOnlySQLiteNodeIsLeader(), Backup(), DefaultBackupConfig(), isAutoSnapshotName(), pruneOldest() (+63 more)
+Cohesion: 0.03
+Nodes (76): defaultHostsPath(), NewEngine(), campaignFixture, BackupConfig, overlayFS, fakeHub, TestSessionStore_CacheHitAndInvalidation(), Backup() (+68 more)
 
 ### Community 295 - "devicesQuery.ts"
 Cohesion: 0.19
 Nodes (13): P(), buildDevicesQuery(), DEVICE_STATUSES, DEVICE_TABS, DevicesQuery, DeviceStatus, DeviceTab, MAX_PAGE (+5 more)
 
-### Community 301 - "github.com/gorilla/websocket.Conn"
-Cohesion: 0.29
+### Community 301 - "flow_test.go"
+Cohesion: 0.30
 Nodes (11): ackRelay(), logFrames(), sendInput(), TestAConsoleThatStopsAcknowledgingStopsTheStream(), TestAnOlderConsoleStillReceivesAStream(), TestFramesSentBeforeTheConsoleAttachedDoNotHoldTheWindowShut(), TestLowBandwidthModeSendsHalfSizeFrames(), TestTheWindowClosesAfterTwoUnacknowledgedFrames() (+3 more)
 
 ### Community 302 - "requests.go"
 Cohesion: 0.22
 Nodes (7): clampToScreen(), Monitor, shift(), toBGRA(), TestToBGRA(), Screen, Visual
 
-### Community 305 - "Report"
-Cohesion: 0.18
-Nodes (9): CollectNICs(), CPU, Disk, Hardware, OSDetail, Report, archName(), winCollector (+1 more)
+### Community 305 - "inventory.go"
+Cohesion: 0.14
+Nodes (14): parseDpkgStatus(), queryRpm(), CollectNICs(), DedupeSoftware(), CPU, Disk, Hardware, Model (+6 more)
 
 ### Community 316 - "doJSON"
 Cohesion: 0.27
 Nodes (14): directoryFixture(), directoryFixtureWithClient(), doJSON(), doJSONAs(), saveConfig(), TestAConfigMissingItsRequiredFieldsIsRefusedByName(), TestADepartedContactStaysInTheDatabaseAfterApply(), TestADirectoryThatCannotBeReadIsNotAnEmptyDirectory() (+6 more)
 
-### Community 317 - "models.go"
-Cohesion: 0.10
-Nodes (21): reportStatus(), decodePolicyConfig(), fromLegacy(), DeviceSystemPolicyState, PolicyConfig, PolicySettings, USBStorageMode, WallpaperStyle (+13 more)
+### Community 317 - "Repository"
+Cohesion: 0.12
+Nodes (8): boolToInt(), DeviceSystemPolicyState, Repository, NewID(), decryptPassword(), encryptPassword(), Repository, SystemPolicy
 
-### Community 319 - "queue_test.go"
-Cohesion: 0.27
-Nodes (8): packageFixture, TestABusySendIsRetried(), TestAFinishedTaskIsNotReopened(), TestAnAgentRefusalFailsTheTask(), TestAnUnknownCapabilityIsSettledWhenTheDeviceAnswers(), TestAQueuedTaskIsSentAfterTheDeviceReconnects(), queueHub, sentEnvelope
+### Community 319 - "Move"
+Cohesion: 0.20
+Nodes (11): Options, Result, TableResult, contains(), copyTable(), indexOf(), Move(), nullIfEmpty() (+3 more)
 
 ### Community 321 - "TestXvfbCaptureInputAndWindows"
 Cohesion: 0.33
 Nodes (6): Keymap, NewKeymap(), VKToKeysym(), TestVKToKeysymAndKeymap(), startXvfb(), TestXvfbCaptureInputAndWindows()
 
-### Community 326 - "terminalFixture"
-Cohesion: 0.17
-Nodes (13): recordingHub, dialTerminal(), firstFrame(), sessionRow(), terminalFixture(), TestADroppedTerminalOpenIsNotAnnouncedAsAShell(), TestATerminalThatIsAcceptedStillOpens(), TestTheBrowserIsToldWhyTheTerminalRefused() (+5 more)
+### Community 326 - "execFixture"
+Cohesion: 0.07
+Nodes (38): recordingHub, dsn(), DSNForPath(), execFixture(), execRow(), execSchema(), resultReportAs(), TestADispatchTheAgentAcceptsStillCreatesARunningExecution() (+30 more)
 
 ### Community 328 - "Engine"
 Cohesion: 0.18
 Nodes (10): canonicalOSName(), Engine, releaseArch(), releaseOSName(), TestAManifestNamingThePlatformByGOOSVerifies(), TestCanonicalOSNameFoldsDarwinIntoMacOS(), belowMinimum(), parseVersion() (+2 more)
 
 ### Community 329 - "Pengumpulan Inventory: Alur, Route, dan Penyimpanan"
-Cohesion: 0.25
+Cohesion: 0.22
 Nodes (8): 1. Agent: kapan mengumpulkan, 2. Agent: apa yang dikumpulkan, 3. Server: menerima dan menyimpan, 4. Route HTTP, 5. Siapa yang memakai `device_inventory`, Pengumpulan Inventory: Alur, Route, dan Penyimpanan, Ringkasan alur, Status domain (`os.domain`)
 
 ### Community 330 - "TestE2EGroups"
@@ -1298,7 +1300,7 @@ Nodes (17): invDelete(), invDeleteCode(), invDo(), invGet(), invGetCode(), invPo
 
 ### Community 331 - "Changelog"
 Cohesion: 0.06
-Nodes (31): [1.5.5] - 2026-10-22, [1.5.6] - 2026-10-22, [1.5.7] - 2026-10-23, [1.5.8] - 2026-10-23, [1.5.9] - 2026-10-23, [1.6.0] - 2026-10-24, [1.6.1] - 2026-10-25, [1.6.2] - 2026-10-26 (+23 more)
+Nodes (33): [1.5.5] - 2026-10-22, [1.5.6] - 2026-10-22, [1.5.7] - 2026-10-23, [1.5.8] - 2026-10-23, [1.5.9] - 2026-10-23, [1.6.0] - 2026-10-24, [1.6.1] - 2026-10-25, [1.6.2] - 2026-10-26 (+25 more)
 
 ### Community 332 - "process_test.go"
 Cohesion: 0.21
@@ -1312,13 +1314,9 @@ Nodes (13): Apakah perangkat bisa terdaftar dua kali?, Cara kerja skrip, Deploy 
 Cohesion: 0.21
 Nodes (13): TestWsURL(), env, contains(), dialAgent(), enroll(), expectDialFail(), postJSON(), readEnv() (+5 more)
 
-### Community 339 - "update_manifest.go"
-Cohesion: 0.12
-Nodes (12): applyAdminAccountNonWindows(), newPlatformBackend(), Summarize(), TestUSBPolicyAppliesAndRefreshesWhenWritesSucceed(), useFakeKeys(), TestSummarizeLegacyStatus(), TestEnvelopeRoundTripsEveryField(), TestOmitEmptyFieldsWired() (+4 more)
-
-### Community 340 - "linuxCollector"
-Cohesion: 0.21
-Nodes (7): linuxUnescapeMount(), readCPUInfo(), utsString(), ParseProcStatBtime(), TestParseProcStatBtime(), linuxCollector, linuxProcCPUInfo
+### Community 340 - "Repository"
+Cohesion: 0.28
+Nodes (3): RemoteControlSession, Repository, NewID()
 
 ### Community 341 - "xauth.go"
 Cohesion: 0.20
@@ -1326,83 +1324,67 @@ Nodes (11): parseXauthority(), ReadXauthority(), multipartBody(), newUploadRoute
 
 ### Community 345 - "Post"
 Cohesion: 0.05
-Nodes (51): TestInstallScriptSearchesEveryUpdateType(), NewEngine(), installOS(), installOS(), installOS(), buildInstallScript(), installOS(), installOSWithPrefix() (+43 more)
+Nodes (46): NewEngine(), installOS(), installOS(), installOS(), installOS(), scanOS(), aptCategory(), scanApt() (+38 more)
 
 ### Community 346 - "persist_test.go"
-Cohesion: 0.25
-Nodes (10): persistEngine(), TestApplyPolicyPersistsForNextStart(), TestBackupPersistedBeforeAdapterChange(), TestEmptyWhitelistDegraded(), TestPartialAdapterFailureDegraded(), TestRecoverReappliesWhitelistFromPersistedBackup(), TestRecoverRestoresDNSWhenNotWhitelist(), TestWhitelistUnsupportedOSFails() (+2 more)
+Cohesion: 0.19
+Nodes (12): persistEngine(), TestApplyPolicyPersistsForNextStart(), TestBackupPersistedBeforeAdapterChange(), TestEmptyWhitelistDegraded(), TestPartialAdapterFailureDegraded(), TestRecoverReappliesWhitelistFromPersistedBackup(), TestRecoverRestoresDNSWhenNotWhitelist(), TestRefreshReappliesExpiringFirewall() (+4 more)
 
 ### Community 347 - "0030_device_posture.sql"
 Cohesion: 0.48
 Nodes (6): device_posture, device_posture_history, idx_device_posture_av, idx_device_posture_disk, idx_device_posture_fw, idx_device_posture_history_device
 
-### Community 348 - "newDevice.ts"
-Cohesion: 0.47
-Nodes (3): isNewDevice(), NEW_DEVICE_WINDOW_MS, now
+### Community 348 - "user-management/model.go"
+Cohesion: 0.25
+Nodes (7): strictEnv(), NewID(), NewRepository(), TestUserManagement_CRUD(), ChangePasswordRequest, CreateUserRequest, ResetPasswordRequest
 
 ### Community 349 - "packdist/main.go"
 Cohesion: 0.30
 Nodes (8): entry, dirsOf(), main(), mode(), parse(), write(), writeTar(), writeZip()
 
 ### Community 350 - "secrets_test.go"
-Cohesion: 0.13
-Nodes (22): systemPolicyApplyEnvelope(), policyEnv, newPolicyEnv(), TestAdminPasswordStoredEncryptedAtRest(), TestBlankPasswordKeepsStoredAndDisablingClearsIt(), TestDispatchStillCarriesThePassword(), TestEnablingTheAccountWithoutAPasswordIsRejected(), TestLegacyPlaintextPasswordRowIsUpgradedOnNextSave() (+14 more)
+Cohesion: 0.24
+Nodes (11): policyEnv, newPolicyEnv(), TestAdminPasswordStoredEncryptedAtRest(), TestBlankPasswordKeepsStoredAndDisablingClearsIt(), TestEnablingTheAccountWithoutAPasswordIsRejected(), TestLegacyPlaintextPasswordRowIsUpgradedOnNextSave(), TestNoReadEndpointReturnsThePassword(), TestReencryptLegacyPasswordsUpgradesUntouchedPolicies() (+3 more)
 
 ### Community 351 - "pty_unix_test.go"
 Cohesion: 0.33
 Nodes (8): startPTY(), TestPTYSessionDeliversCtrlCToTheForegroundJob(), TestPTYSessionHasTheRequestedSizeAndFollowsResize(), TestPTYSessionIsARealTerminal(), TestPTYSessionReportsCloseWhenTheShellExits(), TestResizeRejectsPipeSessionsAndZeroSizes(), NewTerminalManager(), ptyHarness
-
-### Community 352 - "run"
-Cohesion: 0.35
-Nodes (12): countFailedUnits(), linuxCleanupTemp(), linuxDiskCheck(), linuxFlushDNS(), linuxMemoryHygiene(), linuxSecurityAudit(), linuxServiceCleanup(), linuxSystemIntegrity() (+4 more)
 
 ### Community 353 - "Prasyarat dan Aplikasi Pendukung"
 Cohesion: 0.33
 Nodes (6): Agen di Linux, Agen di Windows, Prasyarat dan Aplikasi Pendukung, Server di Linux, Server di Windows, Untuk membangun dari sumber
 
 ### Community 354 - "features_session_test.go"
-Cohesion: 0.27
+Cohesion: 0.23
 Nodes (6): newFeatureSession(), TestFullControlAppliesClipboardKeysAndFiles(), TestHelloAdvertisesOptionalFeaturesOnlyWhenCapturing(), TestOrdinaryInputIsNotClaimedAsAFeature(), TestViewOnlyAllowsMonitorSelectionAndNothingThatChangesTheEndpoint(), featureCapturer
 
-### Community 355 - "inventory_cim_test.go"
-Cohesion: 0.23
-Nodes (9): Model, TestAsInt64(), TestCimAcceptsBareObjectEvenThoughCompressDoesNotEmitOne(), TestCimRejectsBrokenOutput(), TestCimShapeIsExactlyWhatPowerShellEmits(), asInt64(), cimQuery(), winCollector (+1 more)
+### Community 355 - "inventory_cim_windows.go"
+Cohesion: 0.27
+Nodes (8): TestAsInt64(), TestCimAcceptsBareObjectEvenThoughCompressDoesNotEmitOne(), TestCimRejectsBrokenOutput(), TestCimShapeIsExactlyWhatPowerShellEmits(), asInt64(), cimQuery(), winCollector, parseCIMRows()
 
-### Community 356 - "syncInputDesktop"
-Cohesion: 0.23
-Nodes (7): desktopName(), isExtendedVK(), keyFlags(), syncInputDesktop(), TestExtendedKeyTable(), keyboardInput, mouseInput
+### Community 356 - "capture_windows.go"
+Cohesion: 0.19
+Nodes (12): attachToInputDesktop(), desktopName(), isExtendedVK(), keyFlags(), NewPlatformCapturer(), syncInputDesktop(), TestExtendedKeyTable(), bitmapInfo (+4 more)
 
 ### Community 357 - "pipeline_bench_test.go"
-Cohesion: 0.31
-Nodes (5): BenchmarkDiff1080p(), BenchmarkEncodeFullFrame1080p(), syntheticDesktop(), TestALargeRectangleIsSentAsStripesThatTileIt(), wideCapturer
+Cohesion: 0.36
+Nodes (4): BenchmarkDiff1080p(), BenchmarkEncodeFullFrame1080p(), syntheticDesktop(), wideCapturer
 
 ### Community 360 - "discover.go"
 Cohesion: 0.52
 Nodes (6): FindSessions(), parseEnviron(), procUID(), xserverAuth(), Candidate, Sessions
 
-### Community 361 - "applyToHive"
-Cohesion: 0.23
-Nodes (9): applyToHive(), loadWallpaperState(), ReapplyWallpaperAtLogon(), ReapplyWallpaperAtStartup(), releaseHive(), removeUserPolicyValues(), waitForHive(), regErrs (+1 more)
-
-### Community 362 - "removeOldFiles"
+### Community 361 - "dependencies"
 Cohesion: 0.29
-Nodes (11): lockFile(), TestCleanupTempStaysGreenWithALockedFileInTheRoot(), TestLockedFileIsNotAPrivilegeRefusal(), TestPermissionDeniedIsStillARefusal(), isPermissionDenied(), removeOldFiles(), setModTime(), TestDirSizeSkipsNewFiles() (+3 more)
+Nodes (7): dependencies, lucide-react, react, react-dom, react-router-dom, @xterm/addon-fit, @xterm/xterm
 
 ### Community 363 - "Menjalankan Dua Server atau Lebih (High Availability)"
 Cohesion: 0.29
 Nodes (7): Cara kerjanya, Langkah pemasangan (contoh dua node), Menjalankan Dua Server atau Lebih (High Availability), Pemantauan, Syarat, Update tanpa downtime, Yang sudah diuji
 
-### Community 364 - "setupTestServer"
-Cohesion: 0.20
-Nodes (7): queueFixture, TestAReleaseUploadedAsDarwinUpdatesAMacOSDevice(), releaseDownloadURL(), setupTestServer(), TestAgentConfigEndpoint(), TestSignReleaseEndpoint(), uploadReleaseFixture()
-
-### Community 365 - "CheckStatus"
-Cohesion: 0.24
-Nodes (5): CheckStatus, classifyDBMode(), Evaluator, rank(), TestClassifyDBMode()
-
-### Community 366 - "DevicePosturePanel.tsx"
-Cohesion: 0.29
-Nodes (9): DevicePosturePanel(), Props, Reason(), StateBadge(), api, show(), tone(), DevicePostureResponse (+1 more)
+### Community 366 - "hwModel"
+Cohesion: 0.50
+Nodes (5): hwJSON, hwModel, decodeHW(), hwModelValue(), modelsEqual()
 
 ### Community 368 - "crypto/ed25519.PublicKey"
 Cohesion: 0.27
@@ -1412,21 +1394,13 @@ Nodes (4): Engine, parsePublicKey(), loadPublicKey(), agentConfig
 Cohesion: 0.60
 Nodes (4): compliance_profiles, compliance_reports, idx_compliance_reports_file_hash, idx_compliance_reports_profile
 
-### Community 370 - "Report"
-Cohesion: 0.29
-Nodes (3): dynamicCollector, mockCollector, mockReporter
-
 ### Community 371 - "restart_test.go"
 Cohesion: 0.52
-Nodes (5): serviceRestartCommand(), envOf(), TestLinuxAndWindowsRestartThroughTheirServiceManagers(), TestMacOSRestartAddressesTheLaunchdLabel(), TestMacOSRestartFromAShellReSpawns()
+Nodes (6): serviceRestartCommand(), triggerRestart(), envOf(), TestLinuxAndWindowsRestartThroughTheirServiceManagers(), TestMacOSRestartAddressesTheLaunchdLabel(), TestMacOSRestartFromAShellReSpawns()
 
 ### Community 374 - "APIRateLimiter"
 Cohesion: 0.32
 Nodes (4): APIRateLimiter, rateRecord, NewAPIRateLimiter(), TestAPIRateLimiter_AllowAndHeaders()
-
-### Community 375 - "openDatabase"
-Cohesion: 0.32
-Nodes (7): TestConfig_ReadsPostgresSettings(), TestOpenDatabase_DefaultsToSQLite(), TestOpenDatabase_IgnoresBareSQLiteDriver(), TestOpenDatabase_SQLiteDriverIsExplicit(), openDatabase(), withStatementTimeout(), TestStatementTimeoutIsAddedToPostgresURLsOnly()
 
 ### Community 376 - "TaskQueue"
 Cohesion: 0.28
@@ -1435,10 +1409,6 @@ Nodes (3): shortID(), task, TaskQueue
 ### Community 377 - "newProgressFixture"
 Cohesion: 0.39
 Nodes (7): newProgressFixture(), reportAs(), taskRow(), TestAnAgentCannotReportProgressForAnotherDevicesTask(), TestAnAgentCanStillReportItsOwnTask(), TestAnUnauthenticatedAgentCannotReportProgress(), TestProgressOnAnUnknownTaskIsIndistinguishableFromAnotherDevicesTask()
-
-### Community 378 - "syncInstallRecord"
-Cohesion: 0.38
-Nodes (7): syncInstallRecord(), SyncInstallRecord(), syncInstallRecord(), TestAnAgentRunFromElsewhereLeavesTheEntryAlone(), TestNoControlPanelEntryIsCreatedWhereThereWasNone(), TestTheControlPanelEntryFollowsTheRunningAgent(), testUninstallKey()
 
 ### Community 379 - "newQualityController"
 Cohesion: 0.43
@@ -1456,10 +1426,6 @@ Nodes (6): isTransientLock(), renameWithRetry(), stubRename(), TestRenameWithRet
 Cohesion: 0.50
 Nodes (4): TestTheFormatCheckItself(), TestAZeroLengthFileIsRejectedDirectly(), TestVerifySwappedBinaryTruncated(), verifySwappedBinary()
 
-### Community 387 - "Handler"
-Cohesion: 0.25
-Nodes (4): Auditor, AuditReport, CheckCategory, Handler
-
 ### Community 389 - "bytesReader"
 Cohesion: 0.40
 Nodes (3): bytesReader(), countingReader, countingReader
@@ -1469,24 +1435,24 @@ Cohesion: 0.50
 Nodes (4): isPrivateOrBlockedIP(), newSafeWebhookClient(), TestIsPrivateOrBlockedIP(), TestSafeWebhookClientRejectsPrivateIP()
 
 ## Knowledge Gaps
-- **18 isolated node(s):** `TerminalManager`, `TerminalManager`, `github.com/henokakunemail-stack/Endpoint-Manager`, `LoginHandler`, `queueFixture` (+13 more)
-  These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 1369 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
-- **121 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+- **19 isolated node(s):** `TerminalManager`, `TerminalManager`, `github.com/henokakunemail-stack/Endpoint-Manager`, `LoginHandler`, `queueFixture` (+14 more)
+  These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 1398 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
+- **120 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `UserIDFromContext()` connect `UserIDFromContext` to `context.Context`, `newEnv`, `user-management/handler_test.go`, `Handler`, `Handler`, `Handler`, `Handler`, `Handler`, `go_pkg_net_http`, `Handler`, `Handler`, `Handler`, `Handler`, `Handler`, `Handler`, `AuthenticateAgent`, `buildServer`, `LoginHandler`, `net/http.ResponseWriter`, `Handler`, `net/http.Request`?**
+- **Why does `UserIDFromContext()` connect `UserIDFromContext` to `context.Context`, `newEnv`, `net/http.Request`, `Handler`, `Handler`, `Handler`, `Handler`, `AuthenticateAgent`, `Handler`, `Handler`, `Handler`, `Handler`, `Handler`, `user-management/model.go`, `server/main.go`, `Handler`, `buildServer`, `LoginHandler`, `net/http.ResponseWriter`, `Handler`, `Handler`?**
   _High betweenness centrality (0.010) - this node is a cross-community bridge._
 - **What connects `TerminalManager`, `TerminalManager`, `github.com/henokakunemail-stack/Endpoint-Manager` to the rest of the system?**
-  _18 weakly-connected nodes found - possible documentation gaps or missing edges._
+  _19 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `CompliancePage.tsx` be split into smaller, more focused modules?**
-  _Cohesion score 0.07781649245063879 - nodes in this community are weakly interconnected._
-- **Why does `oneOnlineHub` connect `stubHub` to `transport_test.go`?**
-  _High betweenness centrality (0.008) - this node is a cross-community bridge._
+  _Cohesion score 0.07179487179487179 - nodes in this community are weakly interconnected._
+- **Why does `WSHandler` connect `WSHandler` to `context.Context`, `server/main.go`, `Handler`, `NewHub`, `time.Time`, `github.com/jmoiron/sqlx.DB`?**
+  _High betweenness centrality (0.009) - this node is a cross-community bridge._
 - **Should `context.Context` be split into smaller, more focused modules?**
-  _Cohesion score 0.021280353200883003 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.018354818907305094 - nodes in this community are weakly interconnected._
+- **Why does `linuxManager` connect `linuxManager` to `server/main.go`?**
+  _High betweenness centrality (0.008) - this node is a cross-community bridge._
 - **Should `testing.T` be split into smaller, more focused modules?**
-  _Cohesion score 0.019756200084068937 - nodes in this community are weakly interconnected._
-- **Should `newEnv` be split into smaller, more focused modules?**
-  _Cohesion score 0.10764360018091361 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.021419828641370868 - nodes in this community are weakly interconnected._
