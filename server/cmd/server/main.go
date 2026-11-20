@@ -45,6 +45,7 @@ import (
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/modules/alerting"
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/modules/assetlicense"
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/modules/backup"
+	"github.com/henokakunemail-stack/Endpoint-Manager/server/modules/compliance"
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/modules/dashboard"
 	devicemgmt "github.com/henokakunemail-stack/Endpoint-Manager/server/modules/device-management"
 	"github.com/henokakunemail-stack/Endpoint-Manager/server/modules/directory"
@@ -795,6 +796,27 @@ func buildServer(cfg config.Config, database *sqlx.DB) (*http.Server, *serverApp
 	reportsH := reports.NewHandler(reportsRepo, jwtSvc.RequireAuth)
 	reportsH.Register(r)
 
+	// Device compliance: profiles, live evaluation, archived PDF reports.
+	complianceRepo := compliance.NewRepository(database)
+	if err := complianceRepo.EnsureDefaultProfile(context.Background()); err != nil {
+		log.Error().Err(err).Msg("create default compliance profile")
+	}
+	complianceGen := &compliance.Generator{Repo: complianceRepo, Audit: &auditAdapter{db: database},
+		DataDir: cfg.DataDir, Organization: cfg.OrgName,
+		BackupDir: cfg.BackupDir, BackupInterval: cfg.BackupInterval, DBDriver: database.DriverName(),
+		ServerAudit: func(ctx context.Context) (*compliance.ServerAuditResult, error) {
+			rep := securityaudit.NewEvaluator(&cfg, database).Evaluate(ctx)
+			res := &compliance.ServerAuditResult{Grade: rep.Grade, Score: rep.Score, Passed: rep.Passed,
+				Warned: rep.Warned, Failed: rep.Failed, NotVerified: rep.NotVerified}
+			for _, c := range rep.Checks {
+				if c.Status == "fail" {
+					res.FailedTitles = append(res.FailedTitles, c.Title)
+				}
+			}
+			return res, nil
+		}}
+	compliance.NewHandler(complianceGen, jwtSvc.RequireAuth).Register(r)
+
 	// Background loops that run for the life of the process. The cancel is owned
 	// by the cleanup closure at the end of this function; see the note there.
 	bgCtx, stopBackground := context.WithCancel(context.Background())
@@ -1037,6 +1059,12 @@ func buildServer(cfg config.Config, database *sqlx.DB) (*http.Server, *serverApp
 	})
 	// Patch install jobs with no result for 30 minutes are failed as no_report.
 	leaderOnly = append(leaderOnly, func(ctx context.Context) { patchRepo.StartSweep(ctx, patchmgmt.SweepInterval) })
+	// Scheduled patch scans keep every online device's pending-patch list no
+	// older than PATCH_SCAN_INTERVAL; leader-only so two nodes do not both send.
+	patchAutoScan := &patchmgmt.AutoScan{DB: database, Hub: hub, Interval: cfg.PatchScanInterval}
+	leaderOnly = append(leaderOnly, func(ctx context.Context) { go patchAutoScan.Start(ctx) })
+	// Last month's compliance report, once per profile with monthly reports on.
+	leaderOnly = append(leaderOnly, func(ctx context.Context) { go complianceGen.StartMonthly(ctx, compliance.ScheduleTick) })
 	// Enrollment rows that never checked in are retired a week after their
 	// token expired, so they stop counting as offline devices.
 	leaderOnly = append(leaderOnly, func(ctx context.Context) { go invH.RunPendingSweep(ctx, time.Hour) })

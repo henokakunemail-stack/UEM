@@ -16,6 +16,7 @@ const RUNTIME_BUILT = {
   'toast-': ['toast-card.toast-success', 'toast-card.toast-error', 'toast-card.toast-warning', 'toast-card.toast-info'],
   'log-line-': ['log-line-error', 'log-line-warn', 'log-line-info', 'log-line-debug'],
   'ui-modal-': ['ui-modal-sm', 'ui-modal-md', 'ui-modal-lg', 'ui-modal-xl', 'ui-modal-full'],
+  'posture-': ['posture-badge.posture-ok', 'posture-badge.posture-warn', 'posture-badge.posture-bad', 'posture-badge.posture-neutral', 'posture-badge.posture-unknown'],
 }
 
 export function loadTs() {

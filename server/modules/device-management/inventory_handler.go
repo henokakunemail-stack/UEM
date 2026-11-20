@@ -177,7 +177,7 @@ func (h *inventoryHandler) acceptInventory(ctx context.Context, deviceID string,
 	}
 
 	collected := rep.CollectedAt
-	return h.repo.upsertInventory(ctx, DeviceInventory{
+	if err := h.repo.upsertInventory(ctx, DeviceInventory{
 		ID:            NewID(),
 		DeviceID:      deviceID,
 		HW:            string(hwJSON),
@@ -187,7 +187,22 @@ func (h *inventoryHandler) acceptInventory(ctx context.Context, deviceID string,
 		HWDiskFreePct: freePct,
 		HWCPUModel:    cpuModel,
 		CollectedAt:   time.Time(collected),
-	})
+	}); err != nil {
+		return err
+	}
+
+	// Posture is stored after the inventory it arrived with, and a bad posture
+	// section costs only the posture: the hardware and software in the same
+	// report are still valid and must not be thrown away with it.
+	if len(rep.Posture) > 0 && string(rep.Posture) != "null" {
+		var p protocol.Posture
+		if err := json.Unmarshal(rep.Posture, &p); err != nil {
+			log.Warn().Err(err).Str("device_id", deviceID).Msg("inventory: undecodable posture section ignored")
+		} else if err := h.repo.storePosture(ctx, deviceID, p, time.Time(collected)); err != nil {
+			log.Error().Err(err).Str("device_id", deviceID).Msg("inventory: store posture")
+		}
+	}
+	return nil
 }
 
 // freePctOf returns the percentage of a volume that is free, or 100 when the
@@ -210,6 +225,8 @@ func (h *inventoryHandler) routes(r chi.Router) {
 	r.Group(func(r chi.Router) {
 		r.With(h.authMW, rbac.RequireRole(rbac.RoleViewer)).
 			Get("/api/devices/{id}/inventory", h.getInventory)
+		r.With(h.authMW, rbac.RequireRole(rbac.RoleViewer)).
+			Get("/api/devices/{id}/posture", h.getPosture)
 		r.With(h.authMW, rbac.RequireRole(rbac.RoleTechnician)).
 			Post("/api/devices/{id}/inventory/collect", h.collectNow)
 		r.With(h.authMW, rbac.RequireRole(rbac.RoleAdmin)).
@@ -240,6 +257,8 @@ type inventoryReport struct {
 	Software    json.RawMessage `json:"software"`
 	OS          json.RawMessage `json:"os"`
 	CollectedAt timeOrZero      `json:"collected_at"`
+	// Posture is absent from agents that predate it.
+	Posture json.RawMessage `json:"posture"`
 }
 
 // getInventory returns the last collected snapshot.

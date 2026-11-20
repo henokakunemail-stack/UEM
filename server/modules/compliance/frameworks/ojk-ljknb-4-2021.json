@@ -1,0 +1,49 @@
+{
+  "id": "ojk-ljknb-4-2021",
+  "family": "ojk-ljknb",
+  "name": "OJK - LJK Non-Bank: POJK 4/POJK.05/2021 (Manajemen risiko TI)",
+  "regulation": "POJK 4/POJK.05/2021 dengan SEOJK 22/SEOJK.05/2021",
+  "reviewed_at": "2026-11-19",
+  "source_note": "Pasal batang tubuh POJK dicek dari ojk.go.id. Ringkasan pasal adalah ringkasan buatan sendiri.",
+  "pending": [
+    "Rincian teknis di SEOJK 22/SEOJK.05/2021 belum dipetakan per butir."
+  ],
+  "default_out_of_scope_reason": "Kewajiban tata kelola, pelaporan, atau proses LJK yang tidak dapat dibuktikan dari data Endpoint Manager.",
+  "controls": [
+    {
+      "ref": "Pasal 17",
+      "group": "Keamanan informasi",
+      "title": "Pengamanan informasi",
+      "evidence": ["device.disk_encryption", "device.antivirus", "device.firewall", "device.password_policy", "device.screen_lock", "access.rbac"],
+      "coverage": "partial"
+    },
+    {
+      "ref": "Pasal 18",
+      "group": "Pengendalian intern",
+      "title": "Pengendalian intern atas penyelenggaraan TI",
+      "evidence": ["access.rbac", "audit.chain", "policy.applied"],
+      "coverage": "partial"
+    },
+    {
+      "ref": "Pasal 19",
+      "group": "Audit trail",
+      "title": "Jejak audit",
+      "evidence": ["audit.chain"],
+      "coverage": "partial"
+    },
+    {
+      "ref": "Pasal 22",
+      "group": "Backup",
+      "title": "Backup data",
+      "evidence": ["backup.recent"],
+      "coverage": "partial",
+      "note": "Hanya backup database server Endpoint Manager."
+    },
+    {
+      "ref": "Pasal 31",
+      "group": "Pelaporan",
+      "title": "Laporan insiden kritis kepada OJK paling lambat 5 hari kerja",
+      "evidence": []
+    }
+  ]
+}

@@ -132,19 +132,7 @@ func (h *Handler) triggerScan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	scanEnv := transport.Envelope{
-		Type:    transport.TypeCommand,
-		ID:      NewID(),
-		Command: "patch.scan",
-		Payload: map[string]any{},
-	}
-	b, err := json.Marshal(scanEnv)
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "failed to marshal scan envelope")
-		return
-	}
-
-	if !h.hub.SendTo(deviceID, b) {
+	if !sendScan(h.hub, deviceID) {
 		writeErr(w, http.StatusConflict, "failed to send scan command to agent")
 		return
 	}

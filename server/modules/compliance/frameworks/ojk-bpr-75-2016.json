@@ -1,0 +1,40 @@
+{
+  "id": "ojk-bpr-75-2016",
+  "family": "ojk-bpr",
+  "name": "OJK - BPR/BPRS: POJK 75/POJK.03/2016 (Standar Penyelenggaraan TI)",
+  "regulation": "POJK 75/POJK.03/2016",
+  "effective_until": "2026-12-17",
+  "reviewed_at": "2026-11-19",
+  "source_note": "Berlaku sampai digantikan POJK 34 Tahun 2025 (sekitar 18 Desember 2026, perlu dipastikan). Nomor pasal POJK ini belum diverifikasi dari teks resmi, sehingga laporan hanya mencantumkan topik kontrol tanpa nomor pasal.",
+  "pending": [
+    "Nomor pasal POJK 75/POJK.03/2016 belum diverifikasi dari teks resmi."
+  ],
+  "default_out_of_scope_reason": "Kewajiban tata kelola, pelaporan, atau proses BPR yang tidak dapat dibuktikan dari data Endpoint Manager.",
+  "controls": [
+    {
+      "ref": "Manajemen risiko TI",
+      "verified": false,
+      "group": "Manajemen risiko TI",
+      "title": "Penerapan manajemen risiko TI",
+      "evidence": ["device.disk_encryption", "device.antivirus", "device.firewall", "device.patches"],
+      "coverage": "partial"
+    },
+    {
+      "ref": "Pengamanan informasi",
+      "verified": false,
+      "group": "Keamanan informasi",
+      "title": "Pengamanan informasi dan pengendalian akses",
+      "evidence": ["access.rbac", "device.password_policy", "device.screen_lock", "audit.chain"],
+      "coverage": "partial"
+    },
+    {
+      "ref": "Backup",
+      "verified": false,
+      "group": "Backup",
+      "title": "Backup data",
+      "evidence": ["backup.recent"],
+      "coverage": "partial",
+      "note": "Hanya backup database server Endpoint Manager."
+    }
+  ]
+}

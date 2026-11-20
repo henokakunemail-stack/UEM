@@ -3,7 +3,11 @@
 // same shape; each OS provides its own Collector behind a build tag.
 package inventory
 
-import "time"
+import (
+	"time"
+
+	"github.com/henokakunemail-stack/Endpoint-Manager/protocol"
+)
 
 // Hardware is the machine-level facts. Pointer/optional fields are those with no
 // reliable source on some operating systems; senders must leave them nil rather
@@ -89,6 +93,9 @@ type Report struct {
 	// know when an agent actually read the hardware, and an agent behind a NAT
 	// may deliver a report long after collecting it.
 	CollectedAt time.Time `json:"collected_at"`
+	// Posture is the security posture. Nil on a platform whose collector does
+	// not read it yet; the server shows that as unknown, never as compliant.
+	Posture *protocol.Posture `json:"posture,omitempty"`
 }
 
 // Collector gathers facts for the current OS. Implementations are build-tagged.

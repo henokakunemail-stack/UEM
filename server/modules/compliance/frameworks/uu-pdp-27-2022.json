@@ -1,0 +1,62 @@
+{
+  "id": "uu-pdp-27-2022",
+  "family": "uu-pdp",
+  "name": "UU No. 27 Tahun 2022 tentang Pelindungan Data Pribadi",
+  "regulation": "UU No. 27 Tahun 2022 (berlaku penuh sejak 17 Oktober 2024)",
+  "reviewed_at": "2026-11-19",
+  "source_note": "Pasal dicek dari peraturan.bpk.go.id. Ringkasan pasal di laporan ini adalah ringkasan buatan sendiri, bukan kutipan resmi. Putusan MK 151/PUU-XXII/2024 mengubah pembacaan Pasal 53 ayat (1) huruf b, yang tidak dipetakan di sini.",
+  "pending": [
+    "PP 33 Tahun 2026 (peraturan pelaksana UU PDP) belum ditemukan di portal resmi; pasal-pasalnya belum dicantumkan.",
+    "Lembaga pengawas PDP belum terbentuk; ketentuan pelaporan kepada lembaga mengikuti peraturan pelaksana."
+  ],
+  "default_out_of_scope_reason": "Kewajiban hukum atau proses organisasi yang tidak dapat dibuktikan dari data Endpoint Manager.",
+  "controls": [
+    {
+      "ref": "Pasal 35",
+      "group": "Kewajiban Pengendali Data Pribadi",
+      "title": "Langkah teknis operasional untuk melindungi data pribadi, sesuai sifat dan risikonya",
+      "evidence": ["device.disk_encryption", "device.antivirus", "device.firewall", "device.patches", "device.password_policy", "device.screen_lock"],
+      "coverage": "partial",
+      "note": "Aplikasi membuktikan langkah teknis pada perangkat endpoint; penilaian risiko dan langkah organisasi di luar cakupan."
+    },
+    {
+      "ref": "Pasal 36",
+      "group": "Kewajiban Pengendali Data Pribadi",
+      "title": "Menjaga kerahasiaan data pribadi",
+      "evidence": ["device.disk_encryption", "access.rbac"],
+      "coverage": "partial",
+      "note": "Enkripsi disk perangkat dan pembatasan akses console."
+    },
+    {
+      "ref": "Pasal 37",
+      "group": "Kewajiban Pengendali Data Pribadi",
+      "title": "Mengawasi setiap pihak yang terlibat dalam pemrosesan data pribadi",
+      "evidence": ["access.rbac", "audit.chain"],
+      "coverage": "partial",
+      "note": "Hanya pengawasan terhadap pengguna console Endpoint Manager melalui peran dan audit log."
+    },
+    {
+      "ref": "Pasal 38",
+      "group": "Kewajiban Pengendali Data Pribadi",
+      "title": "Melindungi data pribadi dari pemrosesan yang tidak sah",
+      "evidence": ["policy.usb_block", "network.web_filter", "device.firewall"],
+      "coverage": "partial",
+      "note": "Pembatasan media USB, penyaringan domain, dan firewall perangkat."
+    },
+    {
+      "ref": "Pasal 39",
+      "group": "Kewajiban Pengendali Data Pribadi",
+      "title": "Mencegah akses tidak sah dengan sistem elektronik yang andal dan aman",
+      "evidence": ["device.password_policy", "device.screen_lock", "device.patches", "device.antivirus", "backup.recent"],
+      "coverage": "partial"
+    },
+    {
+      "ref": "Pasal 46",
+      "group": "Kegagalan pelindungan data pribadi",
+      "title": "Pemberitahuan tertulis paling lambat 3 x 24 jam bila terjadi kegagalan pelindungan data pribadi",
+      "evidence": ["audit.chain"],
+      "coverage": "partial",
+      "note": "Proses pemberitahuan di luar aplikasi; audit log hanya membantu penelusuran kejadian di perangkat yang dikelola."
+    }
+  ]
+}

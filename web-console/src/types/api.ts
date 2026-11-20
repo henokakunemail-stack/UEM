@@ -1060,3 +1060,242 @@ export interface RestoreMarkerDTO {
   rolled_back?: boolean
 }
 
+/** Security posture as the agent reported it (protocol/posture.go). */
+export type PostureControlState = 'reported' | 'unknown' | 'not_applicable'
+export type PostureSummaryValue = 'on' | 'partial' | 'off' | 'unknown' | 'not_applicable' | 'reported'
+
+export interface PostureSummary {
+  disk_encryption: PostureSummaryValue
+  antivirus: PostureSummaryValue
+  firewall: PostureSummaryValue
+  password_policy: PostureSummaryValue
+  screen_lock: PostureSummaryValue
+}
+
+export interface DevicePosture {
+  schema_version: number
+  disk_encryption: {
+    state: PostureControlState
+    reason?: string
+    volumes?: {
+      mount: string
+      system: boolean
+      protected: boolean
+      method?: string
+      percent_encrypted?: number
+      status?: string
+    }[]
+  }
+  antivirus: {
+    state: PostureControlState
+    reason?: string
+    products?: {
+      name: string
+      enabled?: boolean
+      real_time?: boolean
+      up_to_date?: boolean
+      signature_age_days?: number
+    }[]
+  }
+  firewall: { state: PostureControlState; reason?: string; profiles?: { name: string; enabled: boolean }[] }
+  password_policy: {
+    state: PostureControlState
+    reason?: string
+    min_length?: number
+    max_age_days?: number
+    history_count?: number
+    lockout_threshold?: number
+  }
+  screen_lock: { state: PostureControlState; reason?: string; timeout_seconds?: number; require_password?: boolean }
+  last_boot_utc?: string
+  logged_on_users?: string[]
+  bios_release_date?: string
+}
+
+export interface DevicePostureResponse {
+  reported: boolean
+  reason?: string
+  summary?: PostureSummary
+  posture?: DevicePosture
+  collected_at?: string
+  history?: (PostureSummary & { changed_at: string })[]
+}
+
+// --- Device compliance (server/modules/compliance) ---
+
+export type ComplianceControl =
+  | 'disk_encryption'
+  | 'antivirus'
+  | 'firewall'
+  | 'patches'
+  | 'password_policy'
+  | 'screen_lock'
+
+export type ComplianceControlStatus = 'pass' | 'fail' | 'unknown' | 'not_applicable'
+export type ComplianceDeviceStatus = 'compliant' | 'noncompliant' | 'unknown' | 'not_applicable'
+
+export interface ComplianceRules {
+  require_disk_encryption: boolean
+  require_antivirus: boolean
+  require_real_time: boolean
+  max_signature_age_days: number
+  require_firewall_all_profiles: boolean
+  require_patches: boolean
+  max_missing_patch_age_days: number
+  max_patch_scan_age_days: number
+  require_password_policy: boolean
+  min_password_length: number
+  max_lockout_threshold: number
+  require_screen_lock: boolean
+  max_screen_lock_minutes: number
+  max_posture_age_days: number
+}
+
+export interface ComplianceProfile {
+  id: string
+  name: string
+  description: string
+  rules: ComplianceRules
+  scope_site: string
+  scope_group_id: string
+  is_default: boolean
+  monthly_report: boolean
+  created_at?: string
+  updated_at?: string
+}
+
+export interface ComplianceControlResult {
+  control: ComplianceControl
+  status: ComplianceControlStatus
+  reason: string
+  evidence?: string[]
+  observed_at?: string
+}
+
+export interface ComplianceDeviceResult {
+  device: {
+    id: string
+    hostname: string
+    os_name: string
+    os_version?: string
+    site?: string
+    agent_version?: string
+    online: boolean
+    last_seen_at?: string
+    posture_collected_at?: string
+    last_patch_scan_at?: string
+  }
+  status: ComplianceDeviceStatus
+  controls: ComplianceControlResult[] | null
+}
+
+export interface ComplianceControlSummary {
+  control: ComplianceControl
+  pass: number
+  fail: number
+  unknown: number
+  not_applicable: number
+  pass_percent: number | null
+}
+
+export interface ComplianceFleetSummary {
+  devices: number
+  compliant: number
+  noncompliant: number
+  unknown: number
+  not_applicable: number
+  score: number | null
+  controls: ComplianceControlSummary[] | null
+}
+
+export interface ComplianceEvaluation {
+  profile: ComplianceProfile
+  scope: string
+  evaluated_at: string
+  summary: ComplianceFleetSummary
+  devices: ComplianceDeviceResult[]
+}
+
+export interface ComplianceReport {
+  id: string
+  profile_id: string
+  profile_name: string
+  period: string
+  kind: 'manual' | 'scheduled'
+  generated_by: string
+  generated_at: string
+  file_sha256: string
+  content_sha256: string
+  size_bytes: number
+  summary?: ComplianceFleetSummary
+  framework_id?: string
+  framework_name?: string
+  framework_summary?: ComplianceFrameworkSummary
+}
+
+export interface ComplianceVerifyResult {
+  match: boolean
+  report?: ComplianceReport
+}
+
+export type FrameworkStatus = 'supported' | 'partial' | 'gap' | 'no_data' | 'out_of_scope'
+
+export interface ComplianceFrameworkInfo {
+  id: string
+  family: string
+  name: string
+  regulation: string
+  effective_from?: string
+  effective_until?: string
+  reviewed_at: string
+  origin: 'builtin' | 'custom'
+  file?: string
+  controls: number
+  mapped: number
+  pending?: string[]
+}
+
+export interface ComplianceFrameworkList {
+  frameworks: ComplianceFrameworkInfo[]
+  errors: { file: string; error: string }[]
+  template_dir: string
+}
+
+export interface ComplianceEvidenceResult {
+  source: string
+  title: string
+  status: FrameworkStatus
+  summary: string
+  details?: string[]
+}
+
+export interface ComplianceControlAssessment {
+  ref: string
+  ref_verified: boolean
+  group?: string
+  title: string
+  status: FrameworkStatus
+  coverage?: string
+  note?: string
+  reason?: string
+  evidence?: ComplianceEvidenceResult[]
+}
+
+export interface ComplianceFrameworkSummary {
+  controls: number
+  supported: number
+  partial: number
+  gap: number
+  no_data: number
+  out_of_scope: number
+}
+
+export interface ComplianceFrameworkAssessment {
+  period: string
+  generated_at: string
+  template: ComplianceFrameworkInfo & { source_note?: string }
+  profile_name: string
+  scope: string
+  summary: ComplianceFrameworkSummary
+  controls: ComplianceControlAssessment[]
+}

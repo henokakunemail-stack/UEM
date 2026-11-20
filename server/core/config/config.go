@@ -49,6 +49,12 @@ type Config struct {
 	BackupInterval time.Duration
 	BackupRetain   int
 
+	// PatchScanInterval is how old a device's last patch scan may get before
+	// the server sends it a new one. 0 turns scheduled scanning off.
+	PatchScanInterval time.Duration
+	// OrgName is printed on the cover of compliance reports (ORG_NAME).
+	OrgName string
+
 	// AllowedOriginDomains lists extra browser origins permitted to open a
 	// WebSocket to this server, beyond loopback and same-host. Entries may be
 	// exact ("console.example.com") or wildcard ("*.example.com" matches any
@@ -163,6 +169,8 @@ func Load() (Config, error) {
 		AgentBundleDir:       getEnv("AGENT_BUNDLE_DIR", ""),
 		BackupInterval:       getDuration("BACKUP_INTERVAL", time.Hour),
 		BackupRetain:         getEnvInt("BACKUP_RETAIN", 24),
+		PatchScanInterval:    getDuration("PATCH_SCAN_INTERVAL", 24*time.Hour),
+		OrgName:              getEnv("ORG_NAME", ""),
 		AllowedOriginDomains: getCSVEnv("ALLOWED_ORIGIN_DOMAINS"),
 		TrustedProxies:       getCSVEnv("TRUSTED_PROXIES"),
 		// Read verbatim rather than trimmed: a whitespace typo in a base64 key is

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Link, NavLink, useLocation } from 'react-router-dom'
-import { Activity, Bell, Boxes, CalendarClock, ChevronDown, ChevronRight, Database, FileChartColumn, Globe, History, KeyRound, LayoutDashboard, LogOut, Menu, Monitor, Package, Rocket, ScreenShare, ScrollText, Settings, ShieldCheck, Sliders, Users, Wrench, X, type LucideIcon } from 'lucide-react'
+import { Activity, Bell, Boxes, CalendarClock, ChevronDown, ChevronRight, ClipboardCheck, Database, FileChartColumn, Globe, History, KeyRound, LayoutDashboard, LogOut, Menu, Monitor, Package, Rocket, ScreenShare, ScrollText, Settings, ShieldCheck, Sliders, Users, Wrench, X, type LucideIcon } from 'lucide-react'
 import { useAuth } from '../../context/AuthContext'
 import { ThemeToggle } from '../../context/ThemeContext'
 import { LanguageToggle } from '../../i18n/LanguageToggle'
@@ -34,6 +34,7 @@ const groups: { labelKey: string; items: NavItem[] }[] = [
   ] },
   { labelKey: 'nav.security_assets', items: [
     { labelKey: 'nav.patch_management', path: '/patches', icon: ShieldCheck },
+    { labelKey: 'nav.compliance', path: '/compliance', icon: ClipboardCheck },
     { labelKey: 'nav.network_filter', path: '/filter', icon: Globe },
     { labelKey: 'nav.group_policy', path: '/system-policy', icon: Sliders },
     { labelKey: 'nav.assets_licenses', path: '/assets', icon: Boxes, children: [

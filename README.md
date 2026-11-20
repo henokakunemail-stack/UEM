@@ -157,6 +157,8 @@ The server reads environment variables. On Linux they live in `/etc/endpoint-mgm
 | `TRUSTED_PROXIES` | none | Reverse proxies whose `X-Forwarded-For` is trusted. |
 | `ALLOWED_ORIGIN_DOMAINS` | none | Extra origins allowed to call the API (CORS). |
 | `BACKUP_INTERVAL` / `BACKUP_RETAIN` | `1h` / `24` | Automatic SQLite snapshot schedule and how many to keep. |
+| `PATCH_SCAN_INTERVAL` | `24h` | How old a device's last patch scan may get before the server sends a new one (20 devices per 5 minutes). `0` disables scheduled scans. |
+| `ORG_NAME` | *(empty)* | Organisation name printed on the cover of device compliance PDF reports. |
 | `LDAP_BIND_PASSWORD` | none | Bind password for LDAP / Active Directory directory sync. |
 | `LOG_LEVEL` / `LOG_FILE` | `info` / stdout | Logging. |
 

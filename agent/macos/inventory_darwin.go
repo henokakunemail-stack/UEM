@@ -199,6 +199,9 @@ func (c *macCollector) collectOSDetail() inventory.OSDetail {
 		osd.Architecture = arch
 	}
 	osd.Domain = macDomain()
+	if bt, err := macSysctl("kern.boottime"); err == nil {
+		osd.LastBootUTC = inventory.ParseMacBoottime(bt)
+	}
 	return osd
 }
 

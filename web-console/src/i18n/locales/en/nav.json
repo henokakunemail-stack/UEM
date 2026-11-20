@@ -49,5 +49,6 @@
   "count_online": "{count} online",
   "sign_out": "Sign out",
   "footer_product": "Enterprise Endpoint Manager",
-  "footer_workspace": "Operations workspace"
+  "footer_workspace": "Operations workspace",
+  "compliance": "Device compliance"
 }

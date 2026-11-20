@@ -194,6 +194,8 @@ func (r *inventoryRepository) deleteDevice(ctx context.Context, id string) error
 // there outright.
 var devicePurgeQueries = []string{
 	`DELETE FROM device_inventory WHERE device_id = ?`,
+	`DELETE FROM device_posture WHERE device_id = ?`,
+	`DELETE FROM device_posture_history WHERE device_id = ?`,
 	`DELETE FROM device_uninstall_tokens WHERE device_id = ?`,
 	`DELETE FROM device_group_members WHERE device_id = ?`,
 	`DELETE FROM agent_commands WHERE device_id = ?`,

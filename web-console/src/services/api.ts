@@ -1,9 +1,16 @@
 import type {
+  ComplianceFrameworkAssessment,
+  ComplianceFrameworkList,
+  ComplianceEvaluation,
+  ComplianceProfile,
+  ComplianceReport,
+  ComplianceVerifyResult,
   ActivityItem,
   AlertItem,
   DashboardSummary,
   DeviceDTO,
   DeviceInventorySnapshot,
+  DevicePostureResponse,
   DeviceListResponse,
   SharedEnrollmentTokenDTO,
   EnrollmentTokenDTO,
@@ -336,6 +343,79 @@ export const api = {
 
   async getDeviceInventory(id: string): Promise<DeviceInventorySnapshot> {
     return request<DeviceInventorySnapshot>(`/api/devices/${id}/inventory`)
+  },
+
+  async getDevicePosture(id: string): Promise<DevicePostureResponse> {
+    return request<DevicePostureResponse>(`/api/devices/${id}/posture`)
+  },
+
+  // --- Device compliance ---
+  async getComplianceProfiles(): Promise<ComplianceProfile[]> {
+    return request<ComplianceProfile[]>('/api/compliance/profiles')
+  },
+
+  async createComplianceProfile(p: ComplianceProfile): Promise<ComplianceProfile> {
+    return request<ComplianceProfile>('/api/compliance/profiles', { method: 'POST', body: JSON.stringify(p) })
+  },
+
+  async updateComplianceProfile(p: ComplianceProfile): Promise<ComplianceProfile> {
+    const profileId = encodeURIComponent(p.id)
+    return request<ComplianceProfile>(`/api/compliance/profiles/${profileId}`, {
+      method: 'PUT',
+      body: JSON.stringify(p),
+    })
+  },
+
+  async deleteComplianceProfile(id: string): Promise<void> {
+    const profileId = encodeURIComponent(id)
+    await request<{ status: string }>(`/api/compliance/profiles/${profileId}`, { method: 'DELETE' })
+  },
+
+  async getComplianceEvaluation(profileId?: string): Promise<ComplianceEvaluation> {
+    const q = profileId ? `?profile_id=${encodeURIComponent(profileId)}` : ''
+    return request<ComplianceEvaluation>(`/api/compliance/evaluation${q}`)
+  },
+
+  async getComplianceReports(): Promise<ComplianceReport[]> {
+    return request<ComplianceReport[]>('/api/compliance/reports')
+  },
+
+  async generateComplianceReport(profileId: string): Promise<ComplianceReport> {
+    return request<ComplianceReport>('/api/compliance/reports', {
+      method: 'POST',
+      body: JSON.stringify({ profile_id: profileId }),
+    })
+  },
+
+  async downloadComplianceReport(id: string): Promise<Blob> {
+    const reportId = encodeURIComponent(id)
+    const res = await fetchRaw(`/api/compliance/reports/${reportId}/pdf`)
+    if (!res.ok) throw new Error(`Download failed: HTTP ${res.status}`)
+    return res.blob()
+  },
+
+  async getComplianceFrameworks(): Promise<ComplianceFrameworkList> {
+    return request<ComplianceFrameworkList>('/api/compliance/frameworks')
+  },
+
+  async getFrameworkAssessment(key: string, profileId: string, period: string): Promise<ComplianceFrameworkAssessment> {
+    const frameworkKey = encodeURIComponent(key)
+    const q = new URLSearchParams({ profile_id: profileId, period }).toString()
+    return request<ComplianceFrameworkAssessment>(`/api/compliance/frameworks/${frameworkKey}/assessment?${q}`)
+  },
+
+  async generateFrameworkReport(framework: string, profileId: string, period: string): Promise<ComplianceReport> {
+    return request<ComplianceReport>('/api/compliance/frameworks/reports', {
+      method: 'POST',
+      body: JSON.stringify({ framework, profile_id: profileId, period }),
+    })
+  },
+
+  async verifyComplianceReport(sha256: string): Promise<ComplianceVerifyResult> {
+    return request<ComplianceVerifyResult>('/api/compliance/reports/verify', {
+      method: 'POST',
+      body: JSON.stringify({ sha256 }),
+    })
   },
 
   async collectInventory(id: string): Promise<{ status: string }> {

@@ -1,0 +1,608 @@
+{
+  "id": "iso27001-2022",
+  "family": "iso27001",
+  "name": "ISO/IEC 27001:2022 Annex A",
+  "regulation": "ISO/IEC 27001:2022 + Amd 1:2024",
+  "reviewed_at": "2026-11-19",
+  "source_note": "Edisi berlaku dicek dari sumber sekunder (iso.org menolak akses saat dicek). Judul kontrol di laporan ini adalah ringkasan buatan sendiri, bukan teks standar ISO yang berhak cipta.",
+  "default_out_of_scope_reason": "Kontrol organisasi, orang, fisik, atau proses yang tidak dapat dibuktikan dari data Endpoint Manager.",
+  "controls": [
+    {
+      "ref": "A.5.1",
+      "group": "5 Kontrol organisasi",
+      "title": "Kebijakan keamanan informasi"
+    },
+    {
+      "ref": "A.5.2",
+      "group": "5 Kontrol organisasi",
+      "title": "Peran dan tanggung jawab keamanan informasi"
+    },
+    {
+      "ref": "A.5.3",
+      "group": "5 Kontrol organisasi",
+      "title": "Pemisahan tugas"
+    },
+    {
+      "ref": "A.5.4",
+      "group": "5 Kontrol organisasi",
+      "title": "Tanggung jawab manajemen"
+    },
+    {
+      "ref": "A.5.5",
+      "group": "5 Kontrol organisasi",
+      "title": "Hubungan dengan otoritas"
+    },
+    {
+      "ref": "A.5.6",
+      "group": "5 Kontrol organisasi",
+      "title": "Hubungan dengan kelompok minat khusus"
+    },
+    {
+      "ref": "A.5.7",
+      "group": "5 Kontrol organisasi",
+      "title": "Intelijen ancaman"
+    },
+    {
+      "ref": "A.5.8",
+      "group": "5 Kontrol organisasi",
+      "title": "Keamanan informasi dalam manajemen proyek"
+    },
+    {
+      "ref": "A.5.9",
+      "group": "5 Kontrol organisasi",
+      "title": "Inventaris informasi dan aset terkait",
+      "evidence": [
+        "inventory.coverage",
+        "assets.register"
+      ],
+      "coverage": "partial",
+      "note": "Aplikasi membuktikan inventaris perangkat dan aset perangkat keras; aset informasi lain (data, dokumen, layanan) di luar cakupan."
+    },
+    {
+      "ref": "A.5.10",
+      "group": "5 Kontrol organisasi",
+      "title": "Penggunaan aset yang dapat diterima"
+    },
+    {
+      "ref": "A.5.11",
+      "group": "5 Kontrol organisasi",
+      "title": "Pengembalian aset"
+    },
+    {
+      "ref": "A.5.12",
+      "group": "5 Kontrol organisasi",
+      "title": "Klasifikasi informasi"
+    },
+    {
+      "ref": "A.5.13",
+      "group": "5 Kontrol organisasi",
+      "title": "Pelabelan informasi"
+    },
+    {
+      "ref": "A.5.14",
+      "group": "5 Kontrol organisasi",
+      "title": "Pengiriman informasi"
+    },
+    {
+      "ref": "A.5.15",
+      "group": "5 Kontrol organisasi",
+      "title": "Kontrol akses",
+      "evidence": [
+        "access.rbac"
+      ],
+      "coverage": "partial",
+      "note": "Bukti hanya untuk akses ke console Endpoint Manager, bukan kebijakan akses organisasi secara keseluruhan."
+    },
+    {
+      "ref": "A.5.16",
+      "group": "5 Kontrol organisasi",
+      "title": "Manajemen identitas"
+    },
+    {
+      "ref": "A.5.17",
+      "group": "5 Kontrol organisasi",
+      "title": "Informasi autentikasi",
+      "evidence": [
+        "device.password_policy",
+        "access.rbac"
+      ],
+      "coverage": "partial",
+      "note": "Kebijakan password lokal perangkat dan pengelolaan kredensial console."
+    },
+    {
+      "ref": "A.5.18",
+      "group": "5 Kontrol organisasi",
+      "title": "Hak akses",
+      "evidence": [
+        "access.rbac"
+      ],
+      "coverage": "partial",
+      "note": "Hak akses console per peran; peninjauan hak akses organisasi di luar cakupan."
+    },
+    {
+      "ref": "A.5.19",
+      "group": "5 Kontrol organisasi",
+      "title": "Keamanan informasi dalam hubungan dengan pemasok"
+    },
+    {
+      "ref": "A.5.20",
+      "group": "5 Kontrol organisasi",
+      "title": "Keamanan informasi dalam perjanjian pemasok"
+    },
+    {
+      "ref": "A.5.21",
+      "group": "5 Kontrol organisasi",
+      "title": "Keamanan rantai pasok TIK"
+    },
+    {
+      "ref": "A.5.22",
+      "group": "5 Kontrol organisasi",
+      "title": "Pemantauan dan perubahan layanan pemasok"
+    },
+    {
+      "ref": "A.5.23",
+      "group": "5 Kontrol organisasi",
+      "title": "Keamanan penggunaan layanan cloud"
+    },
+    {
+      "ref": "A.5.24",
+      "group": "5 Kontrol organisasi",
+      "title": "Perencanaan manajemen insiden"
+    },
+    {
+      "ref": "A.5.25",
+      "group": "5 Kontrol organisasi",
+      "title": "Penilaian kejadian keamanan informasi"
+    },
+    {
+      "ref": "A.5.26",
+      "group": "5 Kontrol organisasi",
+      "title": "Respons terhadap insiden"
+    },
+    {
+      "ref": "A.5.27",
+      "group": "5 Kontrol organisasi",
+      "title": "Pembelajaran dari insiden"
+    },
+    {
+      "ref": "A.5.28",
+      "group": "5 Kontrol organisasi",
+      "title": "Pengumpulan bukti",
+      "evidence": [
+        "audit.chain"
+      ],
+      "coverage": "partial",
+      "note": "Audit log berantai hash dapat menjadi bukti tindakan administratif di aplikasi ini."
+    },
+    {
+      "ref": "A.5.29",
+      "group": "5 Kontrol organisasi",
+      "title": "Keamanan informasi saat gangguan"
+    },
+    {
+      "ref": "A.5.30",
+      "group": "5 Kontrol organisasi",
+      "title": "Kesiapan TIK untuk kelangsungan bisnis"
+    },
+    {
+      "ref": "A.5.31",
+      "group": "5 Kontrol organisasi",
+      "title": "Persyaratan hukum, regulasi, dan kontrak"
+    },
+    {
+      "ref": "A.5.32",
+      "group": "5 Kontrol organisasi",
+      "title": "Hak kekayaan intelektual",
+      "evidence": [
+        "licenses.tracked"
+      ],
+      "coverage": "partial",
+      "note": "Pencatatan lisensi perangkat lunak dan seat yang dipakai."
+    },
+    {
+      "ref": "A.5.33",
+      "group": "5 Kontrol organisasi",
+      "title": "Perlindungan catatan",
+      "evidence": [
+        "audit.chain"
+      ],
+      "coverage": "partial",
+      "note": "Integritas catatan administratif aplikasi ini."
+    },
+    {
+      "ref": "A.5.34",
+      "group": "5 Kontrol organisasi",
+      "title": "Privasi dan perlindungan data pribadi"
+    },
+    {
+      "ref": "A.5.35",
+      "group": "5 Kontrol organisasi",
+      "title": "Tinjauan independen keamanan informasi"
+    },
+    {
+      "ref": "A.5.36",
+      "group": "5 Kontrol organisasi",
+      "title": "Kepatuhan terhadap kebijakan dan standar keamanan"
+    },
+    {
+      "ref": "A.5.37",
+      "group": "5 Kontrol organisasi",
+      "title": "Prosedur operasi terdokumentasi"
+    },
+    {
+      "ref": "A.6.1",
+      "group": "6 Kontrol orang",
+      "title": "Penyaringan calon karyawan"
+    },
+    {
+      "ref": "A.6.2",
+      "group": "6 Kontrol orang",
+      "title": "Syarat dan ketentuan kerja"
+    },
+    {
+      "ref": "A.6.3",
+      "group": "6 Kontrol orang",
+      "title": "Kesadaran, pendidikan, dan pelatihan keamanan"
+    },
+    {
+      "ref": "A.6.4",
+      "group": "6 Kontrol orang",
+      "title": "Proses disipliner"
+    },
+    {
+      "ref": "A.6.5",
+      "group": "6 Kontrol orang",
+      "title": "Tanggung jawab setelah berhenti atau pindah tugas"
+    },
+    {
+      "ref": "A.6.6",
+      "group": "6 Kontrol orang",
+      "title": "Perjanjian kerahasiaan"
+    },
+    {
+      "ref": "A.6.7",
+      "group": "6 Kontrol orang",
+      "title": "Kerja jarak jauh"
+    },
+    {
+      "ref": "A.6.8",
+      "group": "6 Kontrol orang",
+      "title": "Pelaporan kejadian keamanan informasi"
+    },
+    {
+      "ref": "A.7.1",
+      "group": "7 Kontrol fisik",
+      "title": "Perimeter keamanan fisik"
+    },
+    {
+      "ref": "A.7.2",
+      "group": "7 Kontrol fisik",
+      "title": "Akses masuk fisik"
+    },
+    {
+      "ref": "A.7.3",
+      "group": "7 Kontrol fisik",
+      "title": "Pengamanan kantor, ruangan, dan fasilitas"
+    },
+    {
+      "ref": "A.7.4",
+      "group": "7 Kontrol fisik",
+      "title": "Pemantauan keamanan fisik"
+    },
+    {
+      "ref": "A.7.5",
+      "group": "7 Kontrol fisik",
+      "title": "Perlindungan dari ancaman fisik dan lingkungan"
+    },
+    {
+      "ref": "A.7.6",
+      "group": "7 Kontrol fisik",
+      "title": "Bekerja di area aman"
+    },
+    {
+      "ref": "A.7.7",
+      "group": "7 Kontrol fisik",
+      "title": "Meja bersih dan layar bersih",
+      "evidence": [
+        "device.screen_lock"
+      ],
+      "coverage": "partial",
+      "note": "Hanya bagian layar bersih (kunci layar otomatis); meja bersih di luar cakupan."
+    },
+    {
+      "ref": "A.7.8",
+      "group": "7 Kontrol fisik",
+      "title": "Penempatan dan perlindungan peralatan"
+    },
+    {
+      "ref": "A.7.9",
+      "group": "7 Kontrol fisik",
+      "title": "Keamanan aset di luar lokasi"
+    },
+    {
+      "ref": "A.7.10",
+      "group": "7 Kontrol fisik",
+      "title": "Media penyimpanan",
+      "evidence": [
+        "policy.usb_block"
+      ],
+      "coverage": "partial",
+      "note": "Pembatasan media USB lewat Kebijakan Grup."
+    },
+    {
+      "ref": "A.7.11",
+      "group": "7 Kontrol fisik",
+      "title": "Utilitas pendukung"
+    },
+    {
+      "ref": "A.7.12",
+      "group": "7 Kontrol fisik",
+      "title": "Keamanan kabel"
+    },
+    {
+      "ref": "A.7.13",
+      "group": "7 Kontrol fisik",
+      "title": "Pemeliharaan peralatan"
+    },
+    {
+      "ref": "A.7.14",
+      "group": "7 Kontrol fisik",
+      "title": "Pemusnahan atau penggunaan ulang peralatan"
+    },
+    {
+      "ref": "A.8.1",
+      "group": "8 Kontrol teknologi",
+      "title": "Perangkat endpoint pengguna",
+      "evidence": [
+        "device.disk_encryption",
+        "device.antivirus",
+        "device.firewall",
+        "device.screen_lock"
+      ],
+      "coverage": "partial",
+      "note": "Kontrol teknis endpoint; kebijakan penggunaan perangkat di luar cakupan."
+    },
+    {
+      "ref": "A.8.2",
+      "group": "8 Kontrol teknologi",
+      "title": "Hak akses istimewa",
+      "evidence": [
+        "access.rbac"
+      ],
+      "coverage": "partial",
+      "note": "Pembagian peran Admin/Technician/Viewer di console."
+    },
+    {
+      "ref": "A.8.3",
+      "group": "8 Kontrol teknologi",
+      "title": "Pembatasan akses informasi"
+    },
+    {
+      "ref": "A.8.4",
+      "group": "8 Kontrol teknologi",
+      "title": "Akses ke kode sumber"
+    },
+    {
+      "ref": "A.8.5",
+      "group": "8 Kontrol teknologi",
+      "title": "Autentikasi aman",
+      "evidence": [
+        "device.password_policy",
+        "access.rbac"
+      ],
+      "coverage": "partial",
+      "note": "Kebijakan password perangkat dan sesi console yang dapat dicabut."
+    },
+    {
+      "ref": "A.8.6",
+      "group": "8 Kontrol teknologi",
+      "title": "Manajemen kapasitas"
+    },
+    {
+      "ref": "A.8.7",
+      "group": "8 Kontrol teknologi",
+      "title": "Perlindungan terhadap malware",
+      "evidence": [
+        "device.antivirus"
+      ],
+      "coverage": "full"
+    },
+    {
+      "ref": "A.8.8",
+      "group": "8 Kontrol teknologi",
+      "title": "Manajemen kerentanan teknis",
+      "evidence": [
+        "device.patches"
+      ],
+      "coverage": "partial",
+      "note": "Hanya update sistem operasi dari Windows Update; kerentanan aplikasi pihak ketiga tidak dipindai."
+    },
+    {
+      "ref": "A.8.9",
+      "group": "8 Kontrol teknologi",
+      "title": "Manajemen konfigurasi",
+      "evidence": [
+        "policy.applied"
+      ],
+      "coverage": "partial",
+      "note": "Konfigurasi yang diterapkan lewat Kebijakan Grup aplikasi ini."
+    },
+    {
+      "ref": "A.8.10",
+      "group": "8 Kontrol teknologi",
+      "title": "Penghapusan informasi"
+    },
+    {
+      "ref": "A.8.11",
+      "group": "8 Kontrol teknologi",
+      "title": "Penyamaran data"
+    },
+    {
+      "ref": "A.8.12",
+      "group": "8 Kontrol teknologi",
+      "title": "Pencegahan kebocoran data",
+      "evidence": [
+        "policy.usb_block"
+      ],
+      "coverage": "partial",
+      "note": "Pembatasan USB; saluran kebocoran lain (email, cloud) di luar cakupan."
+    },
+    {
+      "ref": "A.8.13",
+      "group": "8 Kontrol teknologi",
+      "title": "Backup informasi",
+      "evidence": [
+        "backup.recent"
+      ],
+      "coverage": "partial",
+      "note": "Backup database server Endpoint Manager; backup data pengguna di perangkat di luar cakupan."
+    },
+    {
+      "ref": "A.8.14",
+      "group": "8 Kontrol teknologi",
+      "title": "Redundansi fasilitas pemrosesan informasi"
+    },
+    {
+      "ref": "A.8.15",
+      "group": "8 Kontrol teknologi",
+      "title": "Pencatatan log",
+      "evidence": [
+        "audit.chain"
+      ],
+      "coverage": "partial",
+      "note": "Log tindakan administratif aplikasi ini."
+    },
+    {
+      "ref": "A.8.16",
+      "group": "8 Kontrol teknologi",
+      "title": "Aktivitas pemantauan",
+      "evidence": [
+        "inventory.coverage"
+      ],
+      "coverage": "partial",
+      "note": "Perangkat yang melapor ke server secara berkala."
+    },
+    {
+      "ref": "A.8.17",
+      "group": "8 Kontrol teknologi",
+      "title": "Sinkronisasi waktu"
+    },
+    {
+      "ref": "A.8.18",
+      "group": "8 Kontrol teknologi",
+      "title": "Penggunaan program utilitas istimewa",
+      "evidence": [
+        "policy.admin_tools_block"
+      ],
+      "coverage": "partial",
+      "note": "Pemblokiran Command Prompt, Registry Editor, dan PowerShell lewat Kebijakan Grup."
+    },
+    {
+      "ref": "A.8.19",
+      "group": "8 Kontrol teknologi",
+      "title": "Instalasi perangkat lunak pada sistem operasional",
+      "evidence": [
+        "software.deployment",
+        "inventory.coverage"
+      ],
+      "coverage": "partial",
+      "note": "Instalasi terpusat dan inventaris perangkat lunak terpasang."
+    },
+    {
+      "ref": "A.8.20",
+      "group": "8 Kontrol teknologi",
+      "title": "Keamanan jaringan",
+      "evidence": [
+        "device.firewall"
+      ],
+      "coverage": "partial",
+      "note": "Firewall host di perangkat; perangkat jaringan di luar cakupan."
+    },
+    {
+      "ref": "A.8.21",
+      "group": "8 Kontrol teknologi",
+      "title": "Keamanan layanan jaringan"
+    },
+    {
+      "ref": "A.8.22",
+      "group": "8 Kontrol teknologi",
+      "title": "Segregasi jaringan"
+    },
+    {
+      "ref": "A.8.23",
+      "group": "8 Kontrol teknologi",
+      "title": "Penyaringan web",
+      "evidence": [
+        "network.web_filter"
+      ],
+      "coverage": "partial",
+      "note": "Penyaringan domain lewat filter jaringan aplikasi ini."
+    },
+    {
+      "ref": "A.8.24",
+      "group": "8 Kontrol teknologi",
+      "title": "Penggunaan kriptografi",
+      "evidence": [
+        "device.disk_encryption"
+      ],
+      "coverage": "partial",
+      "note": "Enkripsi disk perangkat; kriptografi untuk data dalam transit dan kunci di luar cakupan."
+    },
+    {
+      "ref": "A.8.25",
+      "group": "8 Kontrol teknologi",
+      "title": "Siklus pengembangan yang aman"
+    },
+    {
+      "ref": "A.8.26",
+      "group": "8 Kontrol teknologi",
+      "title": "Persyaratan keamanan aplikasi"
+    },
+    {
+      "ref": "A.8.27",
+      "group": "8 Kontrol teknologi",
+      "title": "Arsitektur sistem yang aman"
+    },
+    {
+      "ref": "A.8.28",
+      "group": "8 Kontrol teknologi",
+      "title": "Pemrograman yang aman"
+    },
+    {
+      "ref": "A.8.29",
+      "group": "8 Kontrol teknologi",
+      "title": "Pengujian keamanan dalam pengembangan dan penerimaan"
+    },
+    {
+      "ref": "A.8.30",
+      "group": "8 Kontrol teknologi",
+      "title": "Pengembangan oleh pihak luar"
+    },
+    {
+      "ref": "A.8.31",
+      "group": "8 Kontrol teknologi",
+      "title": "Pemisahan lingkungan pengembangan, uji, dan produksi"
+    },
+    {
+      "ref": "A.8.32",
+      "group": "8 Kontrol teknologi",
+      "title": "Manajemen perubahan",
+      "evidence": [
+        "software.deployment",
+        "audit.chain"
+      ],
+      "coverage": "partial",
+      "note": "Perubahan perangkat lunak dan konfigurasi yang dijalankan lewat aplikasi ini tercatat."
+    },
+    {
+      "ref": "A.8.33",
+      "group": "8 Kontrol teknologi",
+      "title": "Informasi uji"
+    },
+    {
+      "ref": "A.8.34",
+      "group": "8 Kontrol teknologi",
+      "title": "Perlindungan sistem informasi saat audit"
+    }
+  ]
+}

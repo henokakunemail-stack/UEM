@@ -10,6 +10,90 @@ Riwayat sebelum v1.5.4 ada di `git log`.
 
 ## [Unreleased]
 
+- Perbaikan unduhan di sisi server langsung berlaku setelah server diperbarui. Perbaikan rename di agen baru berlaku
+  setelah agen diperbarui ke rilis berikutnya.
+- Postur keamanan perlu server **dan** agen versi baru. Sampai agen diperbarui, tab **Keamanan** menampilkan "Postur
+  keamanan belum dilaporkan" untuk device itu. Scan patch terjadwal sudah jalan dengan agen yang ada sekarang.
+- Halaman **Kepatuhan perangkat** dan laporan PDF hanya butuh server versi baru. Device dengan agen lama tetap tampil,
+  dengan status **Tidak diketahui** untuk kontrol postur, sampai agennya diperbarui.
+
+### Ditambahkan
+- **Postur keamanan per device (tab Keamanan di detail device).** Agen Windows kini melaporkan:
+  - status BitLocker per volume (terlindungi atau tidak, metode, persen terenkripsi);
+  - antivirus yang terdaftar di Windows Security Center, termasuk real-time protection dan umur signature Defender;
+  - firewall per profil (Domain/Private/Public);
+  - kebijakan password lokal (panjang minimum, umur maksimum, riwayat, ambang lockout);
+  - kunci layar otomatis untuk seluruh mesin;
+  - boot terakhir, tanggal BIOS, dan user yang sedang login.
+
+  Data ini ikut dalam laporan inventory (saat agen start, tiap 4 jam, dan saat tombol "Collect" ditekan). Kontrol yang
+  gagal dibaca tampil **Tidak diketahui** beserta alasannya, dan BitLocker di Windows Home tampil **Tidak berlaku**.
+  Agen tidak pernah mengisi "aman" sebagai nilai bawaan. Setiap perubahan status dicatat di riwayat, jadi bisa dilihat
+  sejak kapan sebuah device tidak patuh. Agen Linux dan macOS belum mengirim postur (menyusul di fase paritas
+  Linux/macOS), tapi kini mengisi waktu boot terakhir.
+- **Scan patch terjadwal.** Server kini mengirim scan patch ke setiap device online yang hasil scan terakhirnya lebih
+  tua dari 24 jam, atau belum pernah di-scan sama sekali. Sebelumnya scan hanya jalan kalau tombol "Scan" ditekan,
+  jadi daftar patch sebagian besar device bisa basi berminggu-minggu. Scan dikirim bertahap, maksimal 20 device per 5
+  menit, supaya Windows Update/WSUS tidak dibanjiri saat semua PC menyala pagi hari. Interval diatur lewat
+  `PATCH_SCAN_INTERVAL` (mis. `12h`), dan `0` mematikannya.
+
+- **Kepatuhan perangkat (menu Keamanan & aset → Kepatuhan perangkat).** Setiap device dinilai terhadap sebuah
+  **profil kepatuhan** untuk enam kontrol: enkripsi disk sistem, antivirus (aktif, real-time, umur signature),
+  firewall di semua profil, update keamanan yang hilang terlalu lama, kebijakan password, dan kunci layar otomatis.
+  Hasilnya per kontrol **Lulus / Gagal / Tidak diketahui / Tidak berlaku**, dengan alasan dan bukti mentahnya.
+  - **Skor armada hanya dihitung dari device yang bisa dinilai**, yaitu patuh / (patuh + tidak patuh). Device dengan
+    agen lama, data postur lebih tua dari 7 hari, atau belum pernah di-scan patch ditampilkan terpisah sebagai
+    **Tidak diketahui**, tidak pernah dihitung sebagai patuh.
+  - Profil default disediakan: enkripsi wajib; antivirus real-time dengan signature ≤ 7 hari; firewall di semua
+    profil; tidak ada update keamanan yang hilang > 30 hari (scan ≤ 7 hari); password ≥ 8 karakter dengan lockout
+    ≤ 10 percobaan; layar terkunci ≤ 15 menit. Admin bisa mengubahnya dan membuat profil lain per site atau grup.
+  - **Laporan PDF siap audit** (tombol "Buat laporan PDF", Technician ke atas), dalam Bahasa Indonesia: sampul,
+    ringkasan eksekutif dengan tren dibanding laporan sebelumnya, daftar pengecualian beserta alasannya, lampiran
+    status per device, metodologi dan keterbatasan, serta halaman verifikasi.
+  - **Arsip dan verifikasi.** Setiap laporan disimpan di server (`DATA_DIR/compliance-reports/`), dan SHA-256 file-nya
+    dicatat ke audit log berantai hash. Bagian **Verifikasi laporan** menghitung hash PDF yang diterima langsung di
+    browser lalu mencocokkannya dengan arsip. File yang diubah satu byte saja tidak akan cocok.
+  - **Laporan bulanan otomatis** untuk profil yang mengaktifkannya (default: aktif). Laporan dibuat pada awal bulan
+    untuk bulan sebelumnya. Profil tidak membuat laporan untuk bulan sebelum profil itu ada, jadi setelah
+    server diperbarui, laporan bulanan pertama terbit pada awal bulan berikutnya.
+  - Nama organisasi di sampul diatur lewat `ORG_NAME`.
+- **Bukti kepatuhan regulasi: ISO 27001, UU PDP, POJK** (bagian baru di halaman Kepatuhan perangkat). Data aplikasi
+  dipetakan ke kontrol regulasi, dan setiap kontrol mendapat status **Didukung bukti / Sebagian / Ada celah / Belum ada
+  data / Di luar cakupan aplikasi** beserta buktinya: hasil kepatuhan perangkat, inventaris, register aset, lisensi,
+  Kebijakan Grup (USB, alat administrasi), filter web, backup database, keutuhan audit log, peran console, dan
+  pemeriksaan keamanan server.
+  - Template bawaan:
+    - ISO/IEC 27001:2022 Annex A, dengan seluruh 93 kontrol. 25 kontrol dipetakan ke bukti aplikasi, dan sisanya
+      tercantum sebagai di luar cakupan, tidak dianggap patuh.
+    - UU No. 27/2022 (PDP): Pasal 35–39 dan 46.
+    - POJK Bank Umum 11/2022, POJK LJK Non-Bank 4/2021, dan POJK BPR dalam dua versi. Versi BPR dipilih otomatis
+      menurut periode laporan: 75/2016 sampai 17 Desember 2026, lalu 34/2025.
+  - Rujukan yang belum diverifikasi dari teks resmi tidak pernah dicetak sebagai nomor pasal.
+  - Bila aplikasi hanya bisa membuktikan sebagian isi kontrol, statusnya paling tinggi "Sebagian", walaupun datanya
+    sempurna. Bukti perangkat juga paling tinggi "Sebagian" selama masih ada device yang tidak dapat dinilai.
+  - **PDF regulasi** dengan penafian di setiap laporan (paket bukti teknis, bukan sertifikasi atau opini hukum). PDF
+    ini diarsipkan dan diverifikasi dengan cara yang sama seperti laporan perangkat.
+  - **Template adalah file JSON.** Salin file ke `DATA_DIR/compliance-templates/` untuk mengubah atau menambah
+    kerangka. Perubahan langsung berlaku tanpa build ulang atau restart, dan file yang salah ditampilkan di console
+    beserta alasannya, tanpa menggantikan template bawaan.
+
+### Diperbaiki
+- **Update agen dari dashboard gagal dengan `unexpected EOF` di PC yang koneksinya lambat.** Server memotong setiap
+  respons yang belum selesai dalam 60 detik (`WriteTimeout`), termasuk unduhan file. Agen 15–30 MB lewat jaringan
+  cabang yang lambat butuh lebih dari itu, jadi unduhannya putus di tengah dan percobaan ulang selalu putus di titik
+  yang sama. Kini unduhan file (biner agen, paket software, installer agen, wallpaper, backup) tidak dibatasi total
+  waktunya selama data terus mengalir. Unduhan yang berhenti total lebih dari 2 menit tetap ditutup, supaya klien yang
+  macet tidak menahan koneksi selamanya.
+- **Update agen gagal dengan `Access is denied` saat mengganti file agen.** Antivirus dan Windows Search membuka file
+  `.exe` baru untuk dipindai tepat setelah unduhan selesai. Selama file itu masih dipegang, rename gagal, dan update
+  langsung dilaporkan gagal padahal beberapa detik kemudian rename sudah bisa jalan. Kini agen mencoba ulang rename
+  sampai sekitar 12 detik, khusus untuk galat kunci file (`Access is denied`, sharing violation). Galat lain tetap
+  langsung gagal.
+- **Skor dan jumlah cek lulus security audit tidak terbaca di audit log.** Saat audit keamanan server dijalankan, entri
+  audit log `security.audit_run` menyimpan `score` dan `passed` sebagai satu karakter, bukan angka. Contohnya, skor 77
+  tercatat sebagai "M" dan 7 cek lulus sebagai karakter kontrol yang tidak tampil. Kini keduanya tercatat sebagai
+  angka biasa. Entri lama tidak berubah, karena audit log berantai hash tidak boleh diubah.
+
 ## [1.6.3] - 2026-11-10
 
 - Perlu server **dan** agen v1.6.3: perbarui server dengan `update.sh`, lalu agen dari **Agent Updates → Impor dari

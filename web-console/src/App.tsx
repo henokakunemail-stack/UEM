@@ -27,6 +27,7 @@ const MaintenancePage = lazy(() => import('./pages/MaintenancePage').then(m => (
 const NetworkFilterPage = lazy(() => import('./pages/NetworkFilterPage').then(m => ({ default: m.NetworkFilterPage })))
 const PatchesPage = lazy(() => import('./pages/PatchesPage').then(m => ({ default: m.PatchesPage })))
 const ReportsPage = lazy(() => import('./pages/ReportsPage').then(m => ({ default: m.ReportsPage })))
+const CompliancePage = lazy(() => import('./pages/CompliancePage').then(m => ({ default: m.CompliancePage })))
 const RemoteControlPage = lazy(() => import('./pages/RemoteControlPage').then(m => ({ default: m.RemoteControlPage })))
 const SettingsPage = lazy(() => import('./pages/SettingsPage').then(m => ({ default: m.SettingsPage })))
 const SoftwarePage = lazy(() => import('./pages/SoftwarePage').then(m => ({ default: m.SoftwarePage })))
@@ -123,6 +124,7 @@ function ConsoleRoot() {
           <Route path="/assets/:tab?" element={<SubtabPage section="assets" />} />
           <Route path="/updates/:tab?" element={<SubtabPage section="updates" />} />
           <Route path="/patches" element={<PatchesPage />} />
+          <Route path="/compliance" element={<CompliancePage />} />
           <Route path="/maintenance" element={<MaintenancePage />} />
           <Route path="/remotecontrol" element={<RemoteControlPage onOpenSession={setRcDevice} onOpenTerminal={(device, shell) => { setTermShell(shell); setTermDevice(device) }} />} />
           <Route path="/filter" element={<NetworkFilterPage />} />

@@ -3443,3 +3443,77 @@ body {
   background: var(--color-primary);
   transition: width 0.3s ease;
 }
+
+/* Device security posture tab */
+.posture-badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  padding: 0.15rem 0.5rem;
+  border-radius: var(--radius-sm);
+  text-transform: uppercase;
+  border: 1px solid transparent;
+}
+.posture-badge.posture-ok { background-color: var(--color-success-subtle); color: var(--color-success); }
+.posture-badge.posture-warn { background-color: var(--color-warning-subtle); color: var(--color-warning); }
+.posture-badge.posture-bad { background-color: var(--color-danger-subtle); color: var(--color-danger); }
+.posture-badge.posture-neutral { background-color: var(--color-primary-subtle); color: var(--color-primary); }
+.posture-badge.posture-unknown {
+  background-color: var(--bg-surface-subtle);
+  color: var(--text-muted);
+  border-color: var(--border-subtle);
+}
+.posture-reason { color: var(--color-warning); }
+.posture-collected { font-size: 0.75rem; color: var(--text-dim); margin-bottom: 0.75rem; }
+.posture-history ul { list-style: none; padding: 0; margin: 0; display: grid; gap: 0.4rem; font-size: 0.75rem; }
+.posture-history li { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
+.posture-history-when { color: var(--text-dim); min-width: 11rem; }
+
+/* Device compliance page */
+.compliance-scope { font-size: 0.8125rem; color: var(--text-dim); margin: 0 0 0.75rem; }
+.compliance-section-title { display: flex; align-items: center; gap: 0.5rem; font-size: 1rem; font-weight: 600; margin: 0 0 0.5rem; color: var(--text-main); }
+.compliance-section-sub { margin: 0 0 0.75rem; }
+.compliance-controls { padding: 1rem 1.25rem; margin-bottom: 1.25rem; }
+.compliance-control-name { font-weight: 500; }
+.compliance-controls ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.5rem; }
+.compliance-controls li { display: grid; grid-template-columns: minmax(9rem, 12rem) minmax(4rem, 1fr) 3rem auto; gap: 0.75rem; align-items: center; font-size: 0.8125rem; }
+.compliance-bar { height: 0.5rem; border-radius: 999px; background: var(--color-danger-subtle); overflow: hidden; }
+.compliance-bar > span { display: block; height: 100%; background: var(--color-success); }
+.compliance-toolbar { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
+.compliance-toolbar .search-wrap { flex: 1 1 14rem; }
+.compliance-toolbar .form-select { width: auto; flex: 0 1 13rem; min-width: 9rem; }
+.compliance-row { cursor: pointer; }
+.compliance-expand { display: inline-flex; align-items: center; gap: 0.35rem; background: none; border: 0; padding: 0; color: inherit; cursor: pointer; font: inherit; }
+.compliance-detail > td { background: var(--bg-surface-subtle); }
+.compliance-detail dl { margin: 0; display: grid; gap: 0.6rem; }
+.compliance-detail-item dt { font-weight: 600; font-size: 0.8125rem; }
+.compliance-detail-item dd { margin: 0.2rem 0 0; font-size: 0.8125rem; }
+.compliance-evidence { margin: 0.25rem 0 0; padding-left: 1.1rem; color: var(--text-muted); font-size: 0.75rem; }
+.compliance-kind { margin-left: 0.4rem; }
+.compliance-verify { padding: 1rem 1.25rem; margin-top: 1.25rem; }
+.compliance-frameworks { padding: 1rem 1.25rem; margin-bottom: 1.25rem; }
+.compliance-fw-toolbar { margin-bottom: 0.5rem; }
+.compliance-fw-toolbar .form-input { width: auto; flex: 0 1 11rem; }
+.compliance-fw-counts { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.5rem 0 0.75rem; }
+.compliance-fw-out { margin: 0.75rem 0; font-size: 0.8125rem; }
+.compliance-verify-row { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin-bottom: 0.75rem; }
+.compliance-verify-row .form-input { flex: 1 1 22rem; min-width: 0; }
+.compliance-verify-row label.btn { cursor: pointer; }
+.compliance-profiles { padding: 1rem 1.25rem; margin-top: 1.25rem; }
+.compliance-profile-list { list-style: none; margin: 0.5rem 0 0; padding: 0; display: grid; gap: 0.5rem; }
+.compliance-profile-list li { display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; flex-wrap: wrap; padding: 0.6rem 0.75rem; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); }
+.compliance-profile-list strong { margin-right: 0.5rem; }
+.compliance-profile-list .posture-badge { margin-right: 0.35rem; }
+.compliance-rules { margin-top: 1rem; font-size: 0.8125rem; }
+.compliance-rules h4 { font-size: 0.8125rem; font-weight: 600; margin: 0 0 0.35rem; }
+.compliance-rules ul { margin: 0; padding-left: 1.1rem; color: var(--text-muted); display: grid; gap: 0.2rem; }
+.compliance-editor { display: grid; gap: 0.75rem; }
+.compliance-editor fieldset { border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 0.6rem 0.8rem; display: flex; flex-wrap: wrap; gap: 0.5rem 1.25rem; align-items: flex-end; margin: 0; }
+.compliance-editor legend { font-size: 0.8125rem; font-weight: 600; padding: 0 0.25rem; }
+.compliance-check { display: inline-flex; align-items: center; gap: 0.4rem; font-size: 0.8125rem; }
+.compliance-num { max-width: 16rem; }
+@media (max-width: 640px) {
+  .compliance-controls li { grid-template-columns: 1fr 3rem; }
+  .compliance-controls li .compliance-bar, .compliance-controls li > .text-dim { grid-column: 1 / -1; }
+}

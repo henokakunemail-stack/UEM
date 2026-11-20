@@ -3,6 +3,7 @@
 package windows
 
 import (
+	"context"
 	"fmt"
 	"regexp"
 	"strings"
@@ -55,6 +56,7 @@ func (c *winCollector) Collect() (inventory.Report, error) {
 		// which are valid inventory on their own.
 		rep.Hardware.NICs = inventory.CollectNICs()
 	}
+	rep.Posture = CollectPosture(context.Background())
 	return rep, nil
 }
 
@@ -244,6 +246,7 @@ func (c *winCollector) collectOSDetail() (inventory.OSDetail, error) {
 		osd.Architecture = archName() // process bitness: accurate for a 64-bit agent
 	}
 	osd.Domain = collectDomain()
+	osd.LastBootUTC = lastBootUTC()
 	// InstallDate in this key is a Unix timestamp written by setup.
 	if ts, _, err := k.GetIntegerValue("InstallDate"); err == nil {
 		osd.InstallTimestamp = int64(ts)

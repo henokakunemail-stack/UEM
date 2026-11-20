@@ -1,0 +1,64 @@
+{
+  "id": "ojk-bank-umum-11-2022",
+  "family": "ojk-bank-umum",
+  "name": "OJK - Bank Umum: POJK 11/POJK.03/2022 (Penyelenggaraan TI)",
+  "regulation": "POJK 11/POJK.03/2022, dengan PADK 1 Tahun 2026 (berlaku 1 Maret 2026) dan SEOJK 29/SEOJK.03/2022 (ketahanan siber)",
+  "reviewed_at": "2026-11-19",
+  "source_note": "Pasal batang tubuh POJK dicek dari ojk.go.id. Ringkasan pasal adalah ringkasan buatan sendiri.",
+  "pending": [
+    "Rincian teknis (enkripsi, malware, patch) ada di PADK 1/2026 dan SEOJK 29/SEOJK.03/2022, yang belum dipetakan per butir. Pemetaan di bawah hanya ke pasal batang tubuh POJK."
+  ],
+  "default_out_of_scope_reason": "Kewajiban tata kelola, pelaporan, atau proses bank yang tidak dapat dibuktikan dari data Endpoint Manager.",
+  "controls": [
+    {
+      "ref": "Pasal 15",
+      "group": "Manajemen risiko TI",
+      "title": "Penerapan manajemen risiko dalam penggunaan TI",
+      "evidence": ["device.disk_encryption", "device.antivirus", "device.firewall", "device.patches"],
+      "coverage": "partial",
+      "note": "Bukti kontrol teknis endpoint; proses identifikasi dan pengukuran risiko di luar cakupan."
+    },
+    {
+      "ref": "Pasal 16",
+      "group": "Keamanan informasi",
+      "title": "Pengamanan informasi secara efektif",
+      "evidence": ["device.disk_encryption", "device.password_policy", "device.screen_lock", "access.rbac", "audit.chain"],
+      "coverage": "partial"
+    },
+    {
+      "ref": "Pasal 21",
+      "group": "Ketahanan dan keamanan siber",
+      "title": "Menjaga ketahanan siber",
+      "evidence": ["device.patches", "device.antivirus", "backup.recent"],
+      "coverage": "partial"
+    },
+    {
+      "ref": "Pasal 22",
+      "group": "Ketahanan dan keamanan siber",
+      "title": "Asesmen tingkat maturitas keamanan siber secara berkala (tahunan)",
+      "evidence": []
+    },
+    {
+      "ref": "Pasal 23-25",
+      "group": "Ketahanan dan keamanan siber",
+      "title": "Pengujian keamanan siber berbasis analisis kerentanan",
+      "evidence": ["device.patches", "server.security_audit"],
+      "coverage": "partial",
+      "note": "Pemindaian update OS di perangkat dan pemeriksaan keamanan server aplikasi ini; uji penetrasi dan skenario di luar cakupan."
+    },
+    {
+      "ref": "Pasal 54 ayat (2)",
+      "group": "Audit trail",
+      "title": "Menyediakan jejak audit atas penggunaan TI",
+      "evidence": ["audit.chain"],
+      "coverage": "partial",
+      "note": "Jejak audit tindakan administratif di Endpoint Manager."
+    },
+    {
+      "ref": "Pasal 60",
+      "group": "Pelaporan",
+      "title": "Laporan insiden siber kepada OJK paling lambat 24 jam",
+      "evidence": []
+    }
+  ]
+}

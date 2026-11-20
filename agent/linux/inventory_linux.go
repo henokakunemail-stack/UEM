@@ -244,6 +244,9 @@ func (c *linuxCollector) collectModel() *inventory.Model {
 func (c *linuxCollector) collectOSDetail() inventory.OSDetail {
 	var osd inventory.OSDetail
 	osd.Domain = collectDomain()
+	if stat, err := os.ReadFile("/proc/stat"); err == nil {
+		osd.LastBootUTC = inventory.ParseProcStatBtime(string(stat))
+	}
 	f, err := os.Open("/etc/os-release")
 	if err != nil {
 		return osd

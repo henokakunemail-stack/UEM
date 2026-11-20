@@ -1,0 +1,51 @@
+{
+  "id": "ojk-bpr-34-2025",
+  "family": "ojk-bpr",
+  "name": "OJK - BPR/BPRS: POJK 34 Tahun 2025 (Penyelenggaraan TI)",
+  "regulation": "POJK 34 Tahun 2025",
+  "effective_from": "2026-12-18",
+  "reviewed_at": "2026-11-19",
+  "source_note": "Pasal dicek dari ojk.go.id. Tanggal mulai berlaku dicatat sekitar 18 Desember 2026 dan perlu dipastikan kembali. Ringkasan pasal adalah ringkasan buatan sendiri.",
+  "pending": [
+    "Peraturan pelaksana (SEOJK) untuk BPR belum dipetakan per butir."
+  ],
+  "default_out_of_scope_reason": "Kewajiban tata kelola, pelaporan, atau proses BPR yang tidak dapat dibuktikan dari data Endpoint Manager.",
+  "controls": [
+    {
+      "ref": "Pasal 14",
+      "group": "Manajemen risiko TI",
+      "title": "Penerapan manajemen risiko TI",
+      "evidence": ["device.disk_encryption", "device.antivirus", "device.firewall", "device.patches"],
+      "coverage": "partial"
+    },
+    {
+      "ref": "Pasal 15",
+      "group": "Keamanan informasi",
+      "title": "Pengamanan informasi, termasuk kontrol otorisasi akses (ayat 3)",
+      "evidence": ["access.rbac", "device.password_policy", "device.screen_lock", "audit.chain"],
+      "coverage": "partial"
+    },
+    {
+      "ref": "Pasal 18",
+      "group": "Backup",
+      "title": "Backup data secara harian",
+      "evidence": [{"source": "backup.recent", "params": {"max_age_hours": 24}}],
+      "coverage": "partial",
+      "note": "Hanya backup database server Endpoint Manager, bukan sistem inti BPR."
+    },
+    {
+      "ref": "Pasal 23-25",
+      "group": "Ketahanan siber",
+      "title": "Ketahanan dan keamanan siber",
+      "evidence": ["device.patches", "device.antivirus", "server.security_audit"],
+      "coverage": "partial"
+    },
+    {
+      "ref": "Pasal 40",
+      "group": "Audit trail",
+      "title": "Jejak audit",
+      "evidence": ["audit.chain"],
+      "coverage": "partial"
+    }
+  ]
+}

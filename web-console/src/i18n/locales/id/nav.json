@@ -49,5 +49,6 @@
   "count_online": "{count} online",
   "sign_out": "Keluar",
   "footer_product": "Enterprise Endpoint Manager",
-  "footer_workspace": "Ruang kerja operasional"
+  "footer_workspace": "Ruang kerja operasional",
+  "compliance": "Kepatuhan perangkat"
 }

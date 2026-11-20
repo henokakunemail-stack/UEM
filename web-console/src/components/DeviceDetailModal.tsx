@@ -12,11 +12,13 @@ import {
   RefreshCw,
   Search,
   Server,
+  ShieldCheck,
   Trash2,
 } from 'lucide-react'
 import { api } from '../services/api'
 import { usePermission } from '../hooks/usePermission'
 import { DataTable, Modal } from './ui'
+import { DevicePosturePanel } from './DevicePosturePanel'
 import type { DeviceDTO, DeviceInventorySnapshot, SoftwareInfo } from '../types/api'
 import { useT } from '../i18n/core'
 import type { Vars } from '../i18n/core'
@@ -76,7 +78,7 @@ function formatAge(ms: number, t: (key: string, vars?: Vars) => string): string 
 export const DeviceDetailModal: React.FC<DeviceDetailModalProps> = ({ device, onClose, onUpdated }) => {
   const [inventory, setInventory] = useState<DeviceInventorySnapshot | null>(null)
   const [loading, setLoading] = useState(false)
-  const [activeTab, setActiveTab] = useState<'hardware' | 'software' | 'network'>('hardware')
+  const [activeTab, setActiveTab] = useState<'hardware' | 'software' | 'network' | 'security'>('hardware')
   const [softwareSearch, setSoftwareSearch] = useState('')
   const [actionMsg, setActionMsg] = useState<string | null>(null)
   const [uninstallTarget, setUninstallTarget] = useState<SoftwareInfo | null>(null)
@@ -550,6 +552,16 @@ export const DeviceDetailModal: React.FC<DeviceDetailModalProps> = ({ device, on
           <Network size={16} />
           <span>{t('device_detail.tab_network')}</span>
         </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === 'security'}
+          className={`tab-btn ${activeTab === 'security' ? 'active' : ''}`}
+          onClick={() => setActiveTab('security')}
+        >
+          <ShieldCheck size={16} />
+          <span>{t('posture.tab')}</span>
+        </button>
       </div>
 
       <div className="modal-content" role="tabpanel">
@@ -846,6 +858,10 @@ export const DeviceDetailModal: React.FC<DeviceDetailModalProps> = ({ device, on
                   </table>
                 </DataTable>
               </div>
+            )}
+
+            {activeTab === 'security' && (
+              <DevicePosturePanel deviceId={device.id} refreshKey={inventory.collected_at} />
             )}
 
             {activeTab === 'network' && (
