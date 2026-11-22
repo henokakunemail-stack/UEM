@@ -2298,9 +2298,9 @@
     "semantic_hash": ""
   },
   "web-console/src/components/RemoteControlModal.tsx": {
-    "mtime": 1792936639.187449,
-    "seen": 1792937391.1700172,
-    "ast_hash": "243235b9b18735e290b18a34fc482b00",
+    "mtime": 1795214152.343176,
+    "seen": 1795214336.430236,
+    "ast_hash": "8c13e4c230d836a8f3037edcb755f1b4",
     "semantic_hash": ""
   },
   "web-console/src/components/RemoteExecModal.tsx": {
@@ -4224,9 +4224,9 @@
     "semantic_hash": ""
   },
   "web-console/src/components/RemoteControlInput.test.tsx": {
-    "mtime": 1792600748.9019482,
-    "seen": 1792650332.9507205,
-    "ast_hash": "04e908421378086a019df9eb87c40da4",
+    "mtime": 1795214132.352218,
+    "seen": 1795214336.4302244,
+    "ast_hash": "370dc2aa789d1504bf099758eeb4623b",
     "semantic_hash": ""
   },
   "web-console/src/components/enrollCommands.ts": {
@@ -4650,9 +4650,9 @@
     "semantic_hash": ""
   },
   "CHANGELOG.md": {
-    "mtime": 1795162081.174551,
-    "seen": 1795162303.7202752,
-    "ast_hash": "987cf499e085714523a11ce9e691519b",
+    "mtime": 1795214274.5480175,
+    "seen": 1795214336.4309003,
+    "ast_hash": "b503eab18c7a85a3a219c281fa9b7281",
     "semantic_hash": ""
   },
   "docs/architecture/policy-resolution.md": {
