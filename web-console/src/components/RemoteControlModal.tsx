@@ -191,6 +191,13 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
   const toast = useToast()
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
+  // The canvas element as state, so effects that attach native listeners run
+  // again whenever the element itself appears or is replaced.
+  const [canvasEl, setCanvasEl] = useState<HTMLCanvasElement | null>(null)
+  const attachCanvas = useCallback((el: HTMLCanvasElement | null) => {
+    canvasRef.current = el
+    setCanvasEl(el)
+  }, [])
   const wsRef = useRef<WebSocket | null>(null)
   const viewportRef = useRef<HTMLDivElement | null>(null)
   const frameCountRef = useRef<number>(0)
@@ -860,10 +867,14 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
   // passive, so preventDefault did nothing and the console page scrolled along
   // with the endpoint. Deltas are accumulated into whole notches, vertical and
   // horizontal; horizontal scrolling used to be sent as scrolling down.
-  const canvasLive = status !== 'error' && status !== 'ended'
+  //
+  // It follows the canvas element, not the session status. The app mounts this
+  // modal with no device before any session exists; keyed on status, the
+  // listener was set up on that first render, when there was no canvas, and
+  // never again, so the wheel did nothing in every session.
   useEffect(() => {
-    const canvas = canvasRef.current
-    if (!canvas || !canvasLive) return
+    const canvas = canvasEl
+    if (!canvas) return
     const onWheel = (e: WheelEvent) => {
       e.preventDefault()
       const { x, y } = getCanvasCoords(e)
@@ -878,7 +889,7 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
     return () => canvas.removeEventListener('wheel', onWheel)
     // getCanvasCoords reads refs only.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canvasLive, send])
+  }, [canvasEl, send])
 
   // keyCode, not `key`. The agent translates a Windows virtual-key code, and
   // `key` is a layout-dependent string ("a", "A", "Dead", "Unidentified") that
@@ -1256,7 +1267,7 @@ export const RemoteControlModal: React.FC<RemoteControlModalProps> = ({
         >
           {status !== 'error' && status !== 'ended' && (
             <canvas
-              ref={canvasRef}
+              ref={attachCanvas}
               onPointerMove={handlePointerMove}
               onPointerDown={handlePointerDown}
               onPointerUp={handlePointerUp}

@@ -116,6 +116,47 @@ describe('RemoteControlModal input', () => {
     expect(mouse.some((m: { action: string; button: string }) => m.action === 'down' && m.button === 'left')).toBe(true)
     expect(mouse.some((m: { action: string; button: string }) => m.action === 'up' && m.button === 'left')).toBe(true)
   })
+
+  // One notch of a mouse wheel over the remote desktop must reach the endpoint
+  // as one Windows notch (120), downward negative, at the pointer's position.
+  it('sends a mouse wheel notch to the endpoint', async () => {
+    const { ws, viewport } = await openSession()
+    const canvas = viewport.querySelector('canvas') as HTMLCanvasElement
+    const down = new WheelEvent('wheel', { deltaY: 100, deltaMode: 0, clientX: 5, clientY: 5, bubbles: true, cancelable: true })
+    canvas.dispatchEvent(down)
+    expect(down.defaultPrevented).toBe(true)
+    canvas.dispatchEvent(new WheelEvent('wheel', { deltaY: -3, deltaMode: 1, clientX: 5, clientY: 5, bubbles: true, cancelable: true }))
+    const wheel = sentOfType(ws, 'mouse').filter((m: { action: string }) => m.action === 'wheel')
+    expect(wheel.map((m: { delta: number }) => m.delta)).toEqual([-120, 120])
+  })
+
+  // The app keeps the modal mounted with no device until a session is opened.
+  // The wheel listener used to be attached on that first render, when there
+  // was no canvas yet, and never again: clicks worked (React props) but the
+  // mouse wheel did nothing for the whole session.
+  it('scrolls in a session opened after the modal was already mounted', async () => {
+    const view = render(
+      <ToastProvider>
+        <RemoteControlModal device={null} onClose={() => {}} />
+      </ToastProvider>,
+    )
+    view.rerender(
+      <ToastProvider>
+        <RemoteControlModal device={device} onClose={() => {}} />
+      </ToastProvider>,
+    )
+    await waitFor(() => expect(FakeSocket.last).not.toBeNull())
+    const ws = FakeSocket.last!
+    act(() => {
+      ws.open()
+      ws.deliver(JSON.stringify({ type: 'hello', mode: 'full_control', capabilities: { capture: true, mouse: true, keyboard: true } }))
+      ws.deliver(emptyFrame())
+    })
+    const canvas = document.querySelector('.remote-viewport canvas') as HTMLCanvasElement
+    canvas.dispatchEvent(new WheelEvent('wheel', { deltaY: 100, clientX: 5, clientY: 5, bubbles: true, cancelable: true }))
+    const wheel = sentOfType(ws, 'mouse').filter((m: { action: string }) => m.action === 'wheel')
+    expect(wheel.map((m: { delta: number }) => m.delta)).toEqual([-120])
+  })
 })
 
 describe('remote input helpers', () => {

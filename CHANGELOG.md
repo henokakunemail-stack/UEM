@@ -102,6 +102,11 @@ Riwayat sebelum v1.5.4 ada di `git log`.
   - **Agen kini melaporkan jenis casing** (Windows, Linux, macOS) dan **tanggal BIOS di Linux**.
 
 ### Diperbaiki
+- **Scroll mouse tidak berfungsi saat remote control.** Klik dan keyboard bisa dipakai, tetapi roda mouse tidak
+  menggulir apa pun di PC yang di-remote, sehingga halaman harus digulir lewat scrollbar. Penyebabnya ada di console:
+  jendela remote sudah dimuat sebelum sesi dibuka, dan pendengar roda mouse dipasang pada saat itu, ketika layar
+  remote belum ada, lalu tidak pernah dipasang lagi. Kini pendengar dipasang begitu layar remote muncul. Cukup
+  perbarui server; agen tidak perlu diubah.
 - **Update agen dari dashboard gagal dengan `unexpected EOF` di PC yang koneksinya lambat.** Server memotong setiap
   respons yang belum selesai dalam 60 detik (`WriteTimeout`), termasuk unduhan file. Agen 15–30 MB lewat jaringan
   cabang yang lambat butuh lebih dari itu, jadi unduhannya putus di tengah dan percobaan ulang selalu putus di titik
