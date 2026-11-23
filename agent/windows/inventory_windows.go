@@ -15,6 +15,7 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"github.com/henokakunemail-stack/Endpoint-Manager/agent/shared/inventory"
+	"github.com/henokakunemail-stack/Endpoint-Manager/protocol"
 )
 
 // winCollector implements inventory.Collector for Windows.
@@ -43,6 +44,13 @@ var winUninstallSubKeys = []string{
 func (c *winCollector) Collect() (inventory.Report, error) {
 	var rep inventory.Report
 
+	// The posture script spends seconds in CIM queries of its own and shares
+	// nothing with the rest, so it runs alongside it. Run after it, a
+	// collection took the sum of both, and every on-demand "Collect" in the
+	// console waited for it.
+	posture := make(chan *protocol.Posture, 1)
+	go func() { posture <- CollectPosture(context.Background()) }()
+
 	// Software first: cheapest source and the one most likely to succeed.
 	rep.Software = inventory.DedupeSoftware(c.collectSoftware())
 
@@ -56,7 +64,7 @@ func (c *winCollector) Collect() (inventory.Report, error) {
 		// which are valid inventory on their own.
 		rep.Hardware.NICs = inventory.CollectNICs()
 	}
-	rep.Posture = CollectPosture(context.Background())
+	rep.Posture = <-posture
 	return rep, nil
 }
 

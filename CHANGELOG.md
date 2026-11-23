@@ -10,6 +10,13 @@ Riwayat sebelum v1.5.4 ada di `git log`.
 
 ## [Unreleased]
 
+- Perlu agen versi berikutnya. Server tidak berubah.
+
+### Diperbaiki
+- **Tombol "Collect" di detail device lambat sejak v1.7.0.** Agen Windows membaca postur keamanan setelah software,
+  OS, dan hardware selesai dibaca, sehingga waktunya dijumlahkan (±16 detik). Kini postur dibaca bersamaan dengan
+  inventory lainnya, dan satu koleksi selesai dalam ±7 detik di PC uji.
+
 ### Diubah
 - Pengujian otomatis (CI) disesuaikan dengan v1.7.0. Tidak ada perubahan pada server atau agen, dan rilis 1.7.0 tidak
   perlu dibuat ulang.
