@@ -762,9 +762,9 @@
     "semantic_hash": ""
   },
   "agent/windows/inventory_windows.go": {
-    "mtime": 1795090691.5252924,
-    "seen": 1795091357.4676816,
-    "ast_hash": "306e42760d3b4f80eef362fc35044111",
+    "mtime": 1795402961.7904503,
+    "seen": 1795403130.257832,
+    "ast_hash": "54a936c656806e6703a2b6836fbb29c0",
     "semantic_hash": ""
   },
   "agent/windows/inventory_windows_test.go": {
@@ -1008,9 +1008,9 @@
     "semantic_hash": ""
   },
   "scripts/e2e-inventory.ps1": {
-    "mtime": 1791290610.2738636,
-    "seen": 1792650332.94959,
-    "ast_hash": "ca6e3195ce87dd033d766fa346f4d582",
+    "mtime": 1795394232.657014,
+    "seen": 1795401899.0459576,
+    "ast_hash": "d7449b78cd327096201abef37d49fc75",
     "semantic_hash": ""
   },
   "scripts/e2e-live.ps1": {
@@ -1026,9 +1026,9 @@
     "semantic_hash": ""
   },
   "scripts/e2e-patch-management.ps1": {
-    "mtime": 1790751140.2652571,
-    "seen": 1792650332.9495966,
-    "ast_hash": "69f6a80e955b055c5242f00dc6b2b67c",
+    "mtime": 1795394282.3124747,
+    "seen": 1795401899.0459657,
+    "ast_hash": "5af89fd6478b06028cf3bf912bfdbbbf",
     "semantic_hash": ""
   },
   "scripts/e2e-remote-control.ps1": {
@@ -1434,9 +1434,9 @@
     "semantic_hash": "6951d915572a84df5b44b6c209eeb17b"
   },
   "server/modules/agentupdate/handler.go": {
-    "mtime": 1795090375.2886481,
-    "seen": 1795091357.468192,
-    "ast_hash": "fa80796cacf0e666f232a45d4b105b5e",
+    "mtime": 1795393963.6254418,
+    "seen": 1795401899.0462089,
+    "ast_hash": "61dc95ec3a5259b5b9d406d770c19a73",
     "semantic_hash": ""
   },
   "server/modules/agentupdate/release_path_test.go": {
@@ -1944,9 +1944,9 @@
     "semantic_hash": "bf2465e5e26b7a949b6950b36778e878"
   },
   "server/modules/software-deployment/handler.go": {
-    "mtime": 1795090375.2906842,
-    "seen": 1795091357.468543,
-    "ast_hash": "866299a5e9f0629b094fdcac829907ed",
+    "mtime": 1795393963.6350286,
+    "seen": 1795401899.0465236,
+    "ast_hash": "d5dd8e5a404ad3841e6a09e393a914ec",
     "semantic_hash": ""
   },
   "server/modules/software-deployment/model.go": {
@@ -3036,9 +3036,9 @@
     "semantic_hash": ""
   },
   "server/modules/systempolicy/handler.go": {
-    "mtime": 1795090375.28573,
-    "seen": 1795091357.4685764,
-    "ast_hash": "a561d9c7e0431a141d613e16154a7382",
+    "mtime": 1795393963.6400757,
+    "seen": 1795401899.0465422,
+    "ast_hash": "c05b32afa7428d80c16df98204ba10bd",
     "semantic_hash": ""
   },
   "server/modules/systempolicy/models.go": {
@@ -3084,9 +3084,9 @@
     "semantic_hash": ""
   },
   "server/modules/backup/handler.go": {
-    "mtime": 1795090375.2835674,
-    "seen": 1795091357.4682493,
-    "ast_hash": "0602329a69727407ab9919c70018ee1b",
+    "mtime": 1795393963.6254418,
+    "seen": 1795401899.0463254,
+    "ast_hash": "65e50414592d02ed52615d71572804e9",
     "semantic_hash": ""
   },
   "server/modules/backup/handler_test.go": {
@@ -4026,9 +4026,9 @@
     "semantic_hash": ""
   },
   "server/modules/agentinstall/handler.go": {
-    "mtime": 1795090375.277642,
-    "seen": 1795091357.468161,
-    "ast_hash": "1b8fce5d43c97f6060e7194c5e20cb03",
+    "mtime": 1795393963.6199255,
+    "seen": 1795401899.0461903,
+    "ast_hash": "a3031a2a8f8f70e359add4c43d559958",
     "semantic_hash": ""
   },
   "server/modules/agentinstall/handler_test.go": {
@@ -4650,9 +4650,9 @@
     "semantic_hash": ""
   },
   "CHANGELOG.md": {
-    "mtime": 1795392657.784917,
-    "seen": 1795392840.439638,
-    "ast_hash": "0de66d649454c5466557de6370f15f99",
+    "mtime": 1795403082.138808,
+    "seen": 1795403130.2588668,
+    "ast_hash": "eb929f3f3231eef5d9783a828e6ad31e",
     "semantic_hash": ""
   },
   "docs/architecture/policy-resolution.md": {
@@ -5052,9 +5052,9 @@
     "semantic_hash": ""
   },
   "server/modules/compliance/report_test.go": {
-    "mtime": 1795139266.326822,
-    "seen": 1795140017.4005878,
-    "ast_hash": "db1c328d0a116ee2fce6486e6d087aed",
+    "mtime": 1795393994.7377968,
+    "seen": 1795401899.046357,
+    "ast_hash": "28f0bc9948f18af471f44b4b7d45f6c3",
     "semantic_hash": ""
   },
   "server/modules/compliance/repository.go": {
@@ -5100,9 +5100,9 @@
     "semantic_hash": ""
   },
   "server/modules/compliance/evidence.go": {
-    "mtime": 1795139927.4581704,
-    "seen": 1795140017.4005592,
-    "ast_hash": "15a5c21d8b7af7ccd07ccea04e754bde",
+    "mtime": 1795393994.73279,
+    "seen": 1795401899.0463367,
+    "ast_hash": "edea701da2c87453d562607e3a81df57",
     "semantic_hash": ""
   },
   "server/modules/compliance/evidence_test.go": {
@@ -5124,9 +5124,9 @@
     "semantic_hash": ""
   },
   "server/modules/compliance/framework_test.go": {
-    "mtime": 1795139890.99445,
-    "seen": 1795140017.4005678,
-    "ast_hash": "48e91d54831e04f38e5b785e637636da",
+    "mtime": 1795394010.1344783,
+    "seen": 1795401899.0463426,
+    "ast_hash": "63b82e62b31a8d72d14a926200513de3",
     "semantic_hash": ""
   },
   "server/modules/compliance/frameworks/iso27001-2022.json": {
@@ -5253,6 +5253,12 @@
     "mtime": 1795160361.670387,
     "seen": 1795162303.7197409,
     "ast_hash": "50cce60f606072f3d8d4ae395d37a635",
+    "semantic_hash": ""
+  },
+  "agent/windows/inventory_parallel_test.go": {
+    "mtime": 1795402921.3728538,
+    "seen": 1795403130.2578292,
+    "ast_hash": "7fa4476dcff2691b06f346ba529dfc1a",
     "semantic_hash": ""
   }
 }
