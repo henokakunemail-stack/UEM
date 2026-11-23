@@ -10,7 +10,12 @@ Riwayat sebelum v1.5.4 ada di `git log`.
 
 ## [Unreleased]
 
-- Perlu agen versi berikutnya. Server tidak berubah.
+## [1.7.1] - 2026-11-23
+
+- Perubahan ada di agen Windows. Kode server sama dengan 1.7.0, tetapi paket server 1.7.1 membawa agen 1.7.1:
+  perbarui server dengan `update.sh`, lalu agen dari **Agent Updates → Impor dari Paket Server** dan kampanye ke
+  1.7.1. Database tidak berubah.
+- Bila server sudah 1.7.0 dan agen belum dikampanyekan, langsung kampanyekan ke 1.7.1.
 
 ### Diperbaiki
 - **Tombol "Collect" di detail device lambat sejak v1.7.0.** Agen Windows membaca postur keamanan setelah software,
