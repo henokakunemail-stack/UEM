@@ -10,8 +10,15 @@ Riwayat sebelum v1.5.4 ada di `git log`.
 
 ## [Unreleased]
 
-- Perbaikan unduhan di sisi server langsung berlaku setelah server diperbarui. Perbaikan rename di agen baru berlaku
-  setelah agen diperbarui ke rilis berikutnya.
+## [1.7.0] - 2026-11-23
+
+- Perlu server **dan** agen v1.7.0: perbarui server dengan `update.sh`, lalu agen dari **Agent Updates → Impor dari
+  Paket Server** dan kampanye ke 1.7.0. Uji dulu di beberapa PC: setelah agennya 1.7.0, buka tab **Keamanan** di
+  detail device dan pastikan postur terisi (BitLocker terbaca karena agen berjalan sebagai SYSTEM), baru jalankan ke
+  semua PC. Database diperbarui otomatis saat server pertama kali jalan (migrasi 0030–0033).
+- Opsional: isi `ORG_NAME` di konfigurasi server supaya nama organisasi tercetak di sampul laporan PDF.
+- Perbaikan unduhan di sisi server langsung berlaku setelah server diperbarui. Perbaikan rename di agen berlaku
+  setelah agen diperbarui ke 1.7.0.
 - Postur keamanan perlu server **dan** agen versi baru. Sampai agen diperbarui, tab **Keamanan** menampilkan "Postur
   keamanan belum dilaporkan" untuk device itu. Scan patch terjadwal sudah jalan dengan agen yang ada sekarang.
 - Halaman **Kepatuhan perangkat** dan laporan PDF hanya butuh server versi baru. Device dengan agen lama tetap tampil,
