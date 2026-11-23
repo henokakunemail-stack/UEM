@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -365,7 +366,7 @@ func TestProfileRules(t *testing.T) {
 	if err != nil || !def.IsDefault {
 		t.Fatalf("default profile: %+v %v", def, err)
 	}
-	if err := g.Repo.DeleteProfile(ctx, def.ID); err != ErrDefaultProfile {
+	if err := g.Repo.DeleteProfile(ctx, def.ID); !errors.Is(err, ErrDefaultProfile) {
 		t.Fatalf("deleting the default: %v", err)
 	}
 	def.IsDefault = false

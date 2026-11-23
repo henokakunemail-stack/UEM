@@ -124,7 +124,14 @@ try {
 
     # 2. Inventory reached the DB. This is the whole module: the row exists and
     #    carries the cached columns the dashboard sorts and filters on.
-    $invRow = Query-Sqlite -Path $dbPath -Query "SELECT hw_ram_bytes, hw_cpu_model, hw_disk_free_pct, collected_at FROM device_inventory WHERE device_id='$($tok.device_id)'"
+    #    The first report now also carries the security posture, which takes
+    #    the agent several seconds of CIM queries, so it is waited for rather
+    #    than expected within the fixed startup sleep above.
+    $invRow = @()
+    for ($i = 0; $i -lt 60 -and $invRow.Count -eq 0; $i++) {
+        $invRow = Query-Sqlite -Path $dbPath -Query "SELECT hw_ram_bytes, hw_cpu_model, hw_disk_free_pct, collected_at FROM device_inventory WHERE device_id='$($tok.device_id)'"
+        if ($invRow.Count -eq 0) { Start-Sleep -Seconds 1 }
+    }
     if ($invRow.Count -eq 0) { throw 'no inventory row in DB — the report never arrived' }
     $ramGB = [math]::Round($invRow[0].hw_ram_bytes / 1073741824)
     Write-Host "OK   inventory stored: RAM=${ramGB}GB CPU='$($invRow[0].hw_cpu_model)' disk_free=$([math]::Round($invRow[0].hw_disk_free_pct,1))%"
@@ -158,9 +165,12 @@ try {
     $collect = Invoke-RestMethod -Method Post -Uri "$base/api/devices/$($tok.device_id)/inventory/collect" `
         -Headers @{Authorization = "Bearer $token"}
     if ($collect.status -ne 'sent') { throw "collect to an online device must be sent, got $($collect.status)" }
-    Start-Sleep -Seconds 4
-
-    $invRow2 = Query-Sqlite -Path $dbPath -Query "SELECT collected_at FROM device_inventory WHERE device_id='$($tok.device_id)'"
+    # A collection includes the posture script, so it takes seconds, not one.
+    for ($i = 0; $i -lt 60; $i++) {
+        Start-Sleep -Seconds 1
+        $invRow2 = Query-Sqlite -Path $dbPath -Query "SELECT collected_at FROM device_inventory WHERE device_id='$($tok.device_id)'"
+        if ($invRow2[0].collected_at -gt $before) { break }
+    }
     if ($invRow2[0].collected_at -le $before) {
         throw 'on-demand collection did not refresh the stored snapshot'
     }

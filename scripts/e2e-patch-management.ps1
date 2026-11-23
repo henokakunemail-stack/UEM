@@ -266,8 +266,21 @@ func main() {
 
     # Verify job status
     $jobFinal = Invoke-RestMethod -Uri "$base/api/devices/$deviceId/patches/jobs/$jobId" -Headers $techHeaders
-    if ($jobFinal.status -ne "completed") { throw "Expected job status completed, got $($jobFinal.status)" }
-    Write-Host "  [PASS] Job status: $($jobFinal.status), completed_at: $($jobFinal.completed_at)" -ForegroundColor Green
+    # The agent's own result must have closed the job. Whether Windows Update
+    # still offers the injected KB on this runner is outside the code under
+    # test: a real install either completes or fails with WUA's reason. What
+    # must never happen is a job closed without the agent running it -- a
+    # refusal ("rejected:"), no result ("no_report:"), or no output at all.
+    $detail = "error='$($jobFinal.error_message)' log='$($jobFinal.output_log)'"
+    if ($jobFinal.status -ne "completed" -and $jobFinal.status -ne "failed") {
+        throw "Expected the job closed by the agent's result, got $($jobFinal.status): $detail"
+    }
+    if ("$($jobFinal.error_message)" -match '^(rejected|no_report):' -or -not "$($jobFinal.output_log)".Trim()) {
+        throw "Job was not run by the agent: $detail"
+    }
+    if (-not $jobFinal.completed_at) { throw "A closed job must carry completed_at: $detail" }
+    Write-Host "  [PASS] Job closed by the agent's result: $($jobFinal.status), completed_at: $($jobFinal.completed_at)" -ForegroundColor Green
+    if ($jobFinal.status -eq "failed") { Write-Host "         Windows Update said: $(("$($jobFinal.output_log)" -split "`n")[-1])" -ForegroundColor Yellow }
 
     # 10. Test 6: List Install Jobs
     Write-Host "`n9. Verifying Patch Install Job History..."

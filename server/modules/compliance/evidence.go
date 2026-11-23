@@ -182,14 +182,18 @@ func (ec *EvidenceContext) deviceEvidence(control string, res *EvidenceResult) {
 			failing = append(failing, d.Device.Hostname+": "+c.Reason)
 		}
 	}
-	res.Details = capList(failing, 15, "perangkat lain gagal")
+	res.Details = capList(failing, "perangkat lain gagal")
 }
 
-func capList(items []string, max int, more string) []string {
-	if len(items) <= max {
+// maxListed is how many items an evidence detail list shows before it says
+// how many more there are.
+const maxListed = 15
+
+func capList(items []string, more string) []string {
+	if len(items) <= maxListed {
 		return items
 	}
-	return append(items[:max:max], fmt.Sprintf("... dan %d %s", len(items)-max, more))
+	return append(items[:maxListed:maxListed], fmt.Sprintf("... dan %d %s", len(items)-maxListed, more))
 }
 
 func (ec *EvidenceContext) activeDevices(ctx context.Context) (int, error) {
@@ -275,7 +279,7 @@ func (ec *EvidenceContext) licensesTracked(ctx context.Context, res *EvidenceRes
 	}
 	res.Status = EvidencePartial
 	res.Summary += fmt.Sprintf("; %d bermasalah.", len(problems))
-	res.Details = capList(problems, 15, "lisensi lain bermasalah")
+	res.Details = capList(problems, "lisensi lain bermasalah")
 	return nil
 }
 
@@ -342,7 +346,7 @@ func (ec *EvidenceContext) policySettings(ctx context.Context, res *EvidenceResu
 	}
 	res.Status = ratioStatus(ok, total)
 	res.Summary = fmt.Sprintf("%s diterapkan dan dikonfirmasi agen di %d dari %d perangkat aktif.", capFirst(what), ok, total)
-	res.Details = capList(notes, 15, "catatan lain")
+	res.Details = capList(notes, "catatan lain")
 	return nil
 }
 
@@ -371,7 +375,7 @@ func (ec *EvidenceContext) policyApplied(ctx context.Context, res *EvidenceResul
 	}
 	res.Status = ratioStatus(synced, total)
 	res.Summary = fmt.Sprintf("%d Kebijakan Grup aktif; diterapkan penuh di %d dari %d perangkat aktif.", policies, synced, total)
-	res.Details = capList(notes, 15, "perangkat lain")
+	res.Details = capList(notes, "perangkat lain")
 	return nil
 }
 
@@ -545,7 +549,7 @@ func (ec *EvidenceContext) serverAudit(ctx context.Context, res *EvidenceResult)
 		res.Status = EvidenceSupported
 	default:
 		res.Status = EvidencePartial
-		res.Details = capList(r.FailedTitles, 15, "pemeriksaan lain gagal")
+		res.Details = capList(r.FailedTitles, "pemeriksaan lain gagal")
 	}
 	return nil
 }

@@ -13,7 +13,6 @@ import (
 	_ "embed"
 	"encoding/hex"
 	"fmt"
-	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/httpguard"
 	"io"
 	"net/http"
 	"os"
@@ -24,6 +23,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/rs/zerolog/log"
+
+	"github.com/henokakunemail-stack/Endpoint-Manager/server/core/httpguard"
 )
 
 //go:embed install-linux.sh

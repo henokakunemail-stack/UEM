@@ -3,6 +3,7 @@ package compliance
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -150,7 +151,7 @@ func TestSelectTemplateByPeriod(t *testing.T) {
 	if got, err := SelectTemplate(ts, "ojk-bpr-75-2016", "2027-03"); err != nil || got.ID != "ojk-bpr-75-2016" {
 		t.Errorf("an explicit id must be honoured regardless of period: %s %v", got.ID, err)
 	}
-	if _, err := SelectTemplate(ts, "nope", "2026-11"); err != ErrNotFound {
+	if _, err := SelectTemplate(ts, "nope", "2026-11"); !errors.Is(err, ErrNotFound) {
 		t.Errorf("unknown framework: %v", err)
 	}
 }

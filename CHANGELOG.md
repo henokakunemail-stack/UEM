@@ -10,6 +10,15 @@ Riwayat sebelum v1.5.4 ada di `git log`.
 
 ## [Unreleased]
 
+### Diubah
+- Pengujian otomatis (CI) disesuaikan dengan v1.7.0. Tidak ada perubahan pada server atau agen, dan rilis 1.7.0 tidak
+  perlu dibuat ulang.
+  - Tes inventory kini menunggu laporan pertama sampai 60 detik, karena laporan itu sekarang juga memuat postur
+    keamanan (beberapa detik pembacaan CIM).
+  - Tes install patch tidak lagi mensyaratkan Windows Update di mesin uji menawarkan KB tertentu. Yang diperiksa
+    adalah bahwa agen benar-benar menjalankan install dan melaporkan hasilnya.
+  - Temuan lint (urutan import, perbandingan error) dirapikan.
+
 ## [1.7.0] - 2026-11-23
 
 - Perlu server **dan** agen v1.7.0: perbarui server dengan `update.sh`, lalu agen dari **Agent Updates → Impor dari
